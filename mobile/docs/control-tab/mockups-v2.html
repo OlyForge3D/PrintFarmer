@@ -1,0 +1,220 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control tab — A and B, revision 2</title>
+<style>
+  :root {
+    --page: #08101f; --surface: #0e1729; --inset: #16213a; --panel: #0c1424; --modal: #101a2e;
+    --border: #243250; --border-strong: #3d4f72; --border-subtle: #192340;
+    --text: #e8eef8; --text-2: #a0aec8; --text-3: #8090ab;
+    --accent: #14b8a6; --accent-text: #2dd4bf; --accent-deep: #0f766e;
+    --printing-bg: #082f49; --printing-text: #7dd3fc;
+    --online-bg: #052e2b; --online-text: #5eead4;
+    --idle-bg: #1c2742; --idle-text: #a0aec8;
+    --error-bg: #450a0a; --error-text: #fca5a5;
+    --r: 8px; --r-sm: 6px;
+    --sans: Inter, -apple-system, system-ui, sans-serif;
+    --display: "Space Grotesk", -apple-system, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050a14; color: var(--text); font: 14px/1.45 var(--sans); padding: 48px 32px 96px; }
+  header.doc { max-width: 1180px; margin: 0 auto 40px; }
+  header.doc h1 { font: 700 30px/1.15 var(--display); margin-bottom: 10px; }
+  header.doc p { color: var(--text-2); max-width: 74ch; }
+  header.doc ul { margin: 14px 0 0 18px; color: var(--text-2); }
+  header.doc li { margin: 4px 0; }
+  section.dir { max-width: 1180px; margin: 0 auto 72px; border-top: 1px solid var(--border); padding-top: 28px; }
+  section.dir h2 { font: 700 22px/1.2 var(--display); margin-bottom: 6px; }
+  section.dir > p { color: var(--text-2); max-width: 78ch; margin-bottom: 8px; }
+  .tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 78ch; margin: 12px 0 28px; font-size: 13px; color: var(--text-2); }
+  .tradeoffs b { color: var(--text); display: block; margin-bottom: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  figure { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  figcaption { color: var(--text-3); font-size: 12px; text-align: center; max-width: 320px; }
+
+  .phone { width: 320px; height: 690px; border-radius: 44px; background: var(--page); border: 10px solid #1a2233; position: relative; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 1px #2a3448; }
+  .sb { height: 40px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font: 600 12px var(--sans); flex: none; }
+  .island { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); width: 92px; height: 24px; background: #000; border-radius: 14px; }
+  .nav { padding: 2px 14px 8px; flex: none; }
+  .nav .back { color: var(--accent-text); font-size: 13px; }
+  .nav .title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+  .nav h3 { font: 700 18px/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 14px 0; background: var(--inset); border-radius: var(--r); padding: 2px; flex: none; }
+  .tabs span { text-align: center; font-size: 12px; font-weight: 600; padding: 6px 0; border-radius: var(--r-sm); color: var(--text-2); }
+  .tabs span.on { background: var(--border-strong); color: var(--text); }
+  .body { flex: 1; overflow: hidden; padding: 12px 14px 0; display: flex; flex-direction: column; gap: 12px; }
+  .estop { flex: none; padding: 10px 14px 20px; border-top: 1px solid var(--border-subtle); background: var(--page); }
+  .estop button { width: 100%; min-height: 44px; border-radius: var(--r); border: 1px solid #7f1d1d; background: var(--error-bg); color: var(--error-text); font: 700 14px var(--sans); }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-sm); white-space: nowrap; flex: none; }
+  .pill.idle { background: var(--online-bg); color: var(--online-text); }
+  .pill.print { background: var(--printing-bg); color: var(--printing-text); }
+  .pill.stale { background: var(--idle-bg); color: var(--idle-text); }
+  .label { font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .muted { color: var(--text-3); font-size: 12px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+  .btn { min-height: 44px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--inset); color: var(--text); font: 600 13px var(--sans); display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; }
+  .btn.sel { border-color: var(--accent); color: var(--accent-text); background: #0b2a2a; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .lock { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r); background: var(--inset); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+  .lock b { color: var(--text); font-weight: 600; }
+
+  .jog { display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 6px; }
+  .jog div { border-radius: var(--r); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font: 600 13px var(--sans); }
+  .jog .blank { background: transparent; border: none; }
+  .jog .home { color: var(--accent-text); font-size: 11px; }
+  .zcol { display: grid; grid-template-rows: repeat(3, 48px); gap: 6px; width: 56px; }
+  .zcol div { border-radius: var(--r); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font: 600 13px var(--sans); }
+  .zcol .zl { background: transparent; border: none; color: var(--text-2); font-size: 11px; }
+  .step { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--inset); border-radius: var(--r); padding: 2px; }
+  .step span { text-align: center; font: 600 12px var(--mono); padding: 8px 0; border-radius: var(--r-sm); color: var(--text-2); }
+  .step span.on { background: var(--border-strong); color: var(--text); }
+  .pos { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--text-2); }
+  .pos b { color: var(--text); font-weight: 500; }
+
+  .tune { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); }
+  .tune:last-child { border-bottom: none; }
+  .stepper { display: flex; gap: 6px; align-items: center; }
+  .stepper span { width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .stepper span.val { width: 56px; border: none; background: none; font-family: var(--mono); font-weight: 500; }
+
+  .scrim { position: absolute; inset: 0; background: rgba(2,6,14,.62); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--modal); border-top: 1px solid var(--border-strong); border-radius: 14px 14px 0 0; padding: 8px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+  .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 0 auto 4px; }
+  .tile { min-height: 64px; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; justify-content: space-between; }
+  .tile .t { font-weight: 600; font-size: 13px; }
+  .tile .s { font-size: 11px; color: var(--text-3); }
+
+  .glabel { font-size: 11px; font-weight: 600; color: var(--text-3); padding: 0 4px 6px; }
+  .glist { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+  .gi { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+  .gi:last-child { border-bottom: none; }
+  .gi .r { color: var(--text-2); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .gi.act { color: var(--accent-text); font-weight: 600; }
+  .gi.dis { color: var(--text-3); }
+  .chev { color: var(--text-3); }
+  .seg { display: flex; gap: 4px; }
+  .seg span { font: 600 11px var(--sans); padding: 6px 9px; border-radius: var(--r-sm); background: var(--inset); border: 1px solid var(--border); color: var(--text-2); }
+  .seg span.on { border-color: var(--accent); color: var(--accent-text); }
+</style>
+<style>
+  .jog .blank { background: transparent; border: none; }
+  .ic { width: 18px; height: 18px; }
+  .homebtn { flex-direction: column; gap: 1px; color: var(--accent-text) !important; }
+  .homebtn small { font: 600 9px var(--sans); letter-spacing: .02em; color: var(--accent-text); }
+  .homebtn.all { background: #0b2a2a !important; border-color: var(--accent) !important; }
+  .bs { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .bs .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .bs .big { font: 500 20px var(--mono); }
+  .bsrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .step.s3 { grid-template-columns: repeat(3, 1fr); }
+  .legend { display:flex; gap:18px; flex-wrap:wrap; margin-top:14px; font-size:12px; color:var(--text-2); }
+  .legend span { display:inline-flex; gap:6px; align-items:center; }
+  .tabs span.off { color: var(--text-3); opacity: .45; pointer-events: none; }
+  .chip { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; background:var(--inset); border:1px solid var(--border-strong); color:var(--accent-text); }
+</style>
+</head><body>
+<header class="doc">
+  <h1>Control tab: A and B, revision 3</h1>
+  <p>Changes from revision 1, per review:</p>
+  <ul>
+    <li>Removed "Calibrate Z-offset" and "Motors off".</li>
+    <li>The separate Home XY / Home Z buttons are gone. Homing lives on the jog pad, using a house icon instead of the word "Home". Each icon carries a short axis label (All, XY, Z), which is also its VoiceOver label.</li>
+    <li>Babystep has its own step selector: <span class="num">0.005</span>, <span class="num">0.01</span>, <span class="num">0.025</span> and <span class="num">0.05 mm</span> (direction B; 0.005 selected by default), with Raise / Lower buttons and the running offset in large type.</li>
+    <li>Jog distance is now <span class="num">1</span>, <span class="num">10</span> and <span class="num">50 mm</span>; the 0.1 mm step is gone.</li>
+    <li>Tune is Speed and Flow only; Part fan is removed.</li>
+    <li>B, printing: Move and Heat are disabled segments with no "locked" label.</li>
+    <li>Unchanged: no temperature section, no "Unknown", no Advanced disclosure, 8 px radius maximum, 44 pt targets, pinned E-stop.</li>
+  </ul>
+  <div class="legend">
+<span><span class="chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span> <b>All</b> — top-left corner of the pad: Home all axes</span>
+<span><span class="chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span> <b>XY</b> — pad centre: Home X and Y</span>
+<span><span class="chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span> <b>Z</b> — middle of the Z column: Home Z</span></div>
+</header>
+<section class="dir"><h2>A · State-driven</h2>
+<p>Idle shows heat and move in one scroll. Printing replaces setup with a lock note, live tuning and the Z adjust block.</p>
+<div class="row"><figure><div class="phone"><div class="island"></div>
+  <div class="sb"><span>9:41</span><span>5G</span></div>
+  <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Voron 2.4 · Bay 3</h3><span class="pill idle">● Idle</span></div></div>
+  <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+  <div class="body">
+<div><div class="label" style="margin-bottom:6px">Preheat</div>
+<div class="grid4"><div class="btn sel">PLA</div><div class="btn">PETG</div><div class="btn">ABS</div><div class="btn" aria-label="Cool down"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9 4.9 19.1"/><path d="m9 4 3 3 3-3M9 20l3-3 3 3M4 9l3 3-3 3M20 9l-3 3 3 3"/></svg></div></div>
+<div class="muted" style="margin-top:6px">Heating nozzle to <span class="num">215°</span>, bed to <span class="num">60°</span></div></div>
+<div><div class="label" style="margin-bottom:6px">Move</div><div style="display:flex; gap:14px; justify-content:center; align-items:center"><div class="jog"><div class="homebtn all" aria-label="Home All"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>All</small></div><div>Y+</div><div class="blank"></div><div>X−</div><div class="homebtn " aria-label="Home XY"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>XY</small></div><div>X+</div><div class="blank"></div><div>Y−</div><div class="blank"></div></div><div class="zcol"><div>Z+</div><div class="homebtn " aria-label="Home Z"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>Z</small></div><div>Z−</div></div></div>
+<div style="margin-top:10px"><div class="step s3"><span class="on">1</span><span>10</span><span>50</span></div></div>
+<div class="pos" style="margin-top:8px"><span>X <b>120.0</b></span><span>Y <b>118.5</b></span><span>Z <b>10.00</b></span></div></div></div>
+  <div class="estop"><button>■ Emergency stop</button></div>
+</div><figcaption>Idle: Preheat, then the jog pad with homing built in.</figcaption></figure>
+<figure><div class="phone"><div class="island"></div>
+  <div class="sb"><span>9:41</span><span>5G</span></div>
+  <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Voron 2.4 · Bay 3</h3><span class="pill print">▶ Printing 42%</span></div></div>
+  <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+  <div class="body">
+<div class="lock"><span>❚❚</span><div><b>Motion and heating are locked while printing.</b><br>Pause or stop the job on the Status tab to change them.</div></div>
+<div><div class="label" style="margin-bottom:6px">Live tuning</div><div class="panel">
+  <div class="tune"><span>Speed</span><div class="stepper"><span>−</span><span class="val">100%</span><span>+</span></div></div>
+  <div class="tune"><span>Flow</span><div class="stepper"><span>−</span><span class="val">98%</span><span>+</span></div></div>
+</div></div>
+<div><div class="label" style="margin-bottom:6px">First-layer / Z adjust</div><div class="panel bs">
+  <div class="head"><span style="font-weight:600">Z babystep</span><span class="big">+0.035 <span class="muted">mm</span></span></div>
+  <div class="step s3"><span class="on">0.01</span><span>0.05</span><span>0.10</span></div>
+  <div class="bsrow"><div class="btn">↑ Raise nozzle</div><div class="btn">↓ Lower nozzle</div></div>
+</div></div></div>
+  <div class="estop"><button>■ Emergency stop</button></div>
+</div><figcaption>Printing: babystep gets its own block with 0.01 / 0.05 / 0.10 mm steps.</figcaption></figure></div></section>
+<section class="dir"><h2>B · Instrument panel with Move, Heat and Tune segments</h2>
+<p>A fixed position readout (DRO) on top and three segments below. While printing, Move and Heat are simply disabled (dimmed, not tappable) and the panel opens on Tune.</p>
+<div class="row"><figure><div class="phone"><div class="island"></div>
+  <div class="sb"><span>9:41</span><span>5G</span></div>
+  <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Prusa MK4 · Bay 1</h3><span class="pill idle">● Idle</span></div></div>
+  <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+  <div class="body"><div class="panel" style="display:grid;grid-template-columns:repeat(3,1fr);padding:10px 0;text-align:center">
+  <div><div class="label">X</div><div class="num" style="font-size:18px">120.0</div></div>
+  <div style="border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)"><div class="label">Y</div><div class="num" style="font-size:18px">118.5</div></div>
+  <div><div class="label">Z</div><div class="num" style="font-size:18px">10.00</div></div></div>
+<div class="tabs" style="margin:0"><span class="on">Move</span><span>Heat</span><span>Tune</span></div>
+<div style="display:flex; gap:14px; justify-content:center; align-items:center"><div class="jog"><div class="homebtn all" aria-label="Home All"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>All</small></div><div>Y+</div><div class="blank"></div><div>X−</div><div class="homebtn " aria-label="Home XY"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>XY</small></div><div>X+</div><div class="blank"></div><div>Y−</div><div class="blank"></div></div><div class="zcol"><div>Z+</div><div class="homebtn " aria-label="Home Z"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg><small>Z</small></div><div>Z−</div></div></div>
+<div><div class="label" style="margin-bottom:6px">Jog distance (mm)</div><div class="step s3"><span class="on">1</span><span>10</span><span>50</span></div></div></div>
+  <div class="estop"><button>■ Emergency stop</button></div>
+</div><figcaption>Move segment: the pad is the whole instrument. No separate home row.</figcaption></figure>
+<figure><div class="phone"><div class="island"></div>
+  <div class="sb"><span>9:41</span><span>5G</span></div>
+  <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Prusa MK4 · Bay 1</h3><span class="pill idle">● Idle</span></div></div>
+  <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+  <div class="body"><div class="panel" style="display:grid;grid-template-columns:repeat(3,1fr);padding:10px 0;text-align:center">
+  <div><div class="label">X</div><div class="num" style="font-size:18px">120.0</div></div>
+  <div style="border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)"><div class="label">Y</div><div class="num" style="font-size:18px">118.5</div></div>
+  <div><div class="label">Z</div><div class="num" style="font-size:18px">10.00</div></div></div>
+<div class="tabs" style="margin:0"><span>Move</span><span class="on">Heat</span><span>Tune</span></div>
+<div class="panel">
+  <div class="grid4"><div class="btn">PLA</div><div class="btn">PETG</div><div class="btn">ABS</div><div class="btn" aria-label="Cool down"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9 4.9 19.1"/><path d="m9 4 3 3 3-3M9 20l3-3 3 3M4 9l3 3-3 3M20 9l-3 3 3 3"/></svg></div></div>
+  <div class="tune"><span>Nozzle<br><span class="muted">now <span class="num">24°</span></span></span><div class="stepper"><span aria-label="Lower nozzle target">−</span><span class="val">215</span><span aria-label="Raise nozzle target">+</span></div></div>
+  <div class="tune"><span>Bed<br><span class="muted">now <span class="num">23°</span></span></span><div class="stepper"><span aria-label="Lower bed target">−</span><span class="val">60</span><span aria-label="Raise bed target">+</span></div></div>
+</div></div>
+  <div class="estop"><button>■ Emergency stop</button></div>
+</div><figcaption>Heat segment: presets fill the row as four equal buttons (❄︎ turns heaters off), then nozzle and bed targets.</figcaption></figure>
+<figure><div class="phone"><div class="island"></div>
+  <div class="sb"><span>9:41</span><span>5G</span></div>
+  <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Prusa MK4 · Bay 1</h3><span class="pill print">▶ Printing 42%</span></div></div>
+  <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+  <div class="body"><div class="panel" style="display:grid;grid-template-columns:repeat(3,1fr);padding:10px 0;text-align:center">
+  <div><div class="label">X</div><div class="num" style="font-size:18px">84.2</div></div>
+  <div style="border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)"><div class="label">Y</div><div class="num" style="font-size:18px">131.7</div></div>
+  <div><div class="label">Z</div><div class="num" style="font-size:18px">4.20</div></div></div>
+<div class="tabs" style="margin:0"><span class="off" aria-disabled="true">Move</span><span class="off" aria-disabled="true">Heat</span><span class="on">Tune</span></div>
+<div class="panel">
+  <div class="tune"><span>Speed</span><div class="stepper"><span>−</span><span class="val">100%</span><span>+</span></div></div>
+  <div class="tune"><span>Flow</span><div class="stepper"><span>−</span><span class="val">98%</span><span>+</span></div></div>
+</div>
+<div class="panel bs">
+  <div class="head"><span style="font-weight:600">Z babystep</span><span class="big">+0.035 <span class="muted">mm</span></span></div>
+  <div class="step"><span class="on">0.005</span><span>0.01</span><span>0.025</span><span>0.05</span></div>
+  <div class="bsrow"><div class="btn">↑ Raise nozzle</div><div class="btn">↓ Lower nozzle</div></div>
+</div></div>
+  <div class="estop"><button>■ Emergency stop</button></div>
+</div><figcaption>Tune segment while printing, with fine babystep control.</figcaption></figure></div></section>
+</body></html>

@@ -59,7 +59,6 @@ struct PrinterDetailView: View {
     @State private var showsEjectConfirmation = false
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
-    @State private var showsSafetyChecks = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     @State private var directSnapshotLoadFailedFor: UUID?
@@ -831,33 +830,16 @@ struct PrinterDetailView: View {
     private func controlsPage(_ printer: Printer) -> some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
                     if !controlsAvailable(for: printer) {
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
-                        PrinterSetupControlsContent(
-                            printer: printer,
-                            viewModel: controlsViewModel,
-                            usesColumns: PrinterDetailLayout.usesColumns(
-                                width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
-                            ),
-                            showsMaterial: false,
-                            showsRuntimeAdjustments: true,
-                            usesHeaterSteppers: true,
-                            isPrinterDetailControl: true
-                        )
-                        DisclosureGroup(isExpanded: safetyChecksExpanded) {
+                        PrinterInstrumentPanelControls(printer: printer, viewModel: controlsViewModel)
+                        if controlsViewModel.safetyReadError != nil {
                             safetyRefresh(controlsViewModel)
-                        } label: {
-                            Label("Safety checks", systemImage: "checkmark.shield")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.pfTextPrimary)
-                                .frame(minHeight: 44, alignment: .leading)
+                                .padding(12)
+                                .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .padding(.horizontal, 12)
-                        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("printer.detail.safety.disclosure")
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
                         Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
@@ -917,16 +899,6 @@ struct PrinterDetailView: View {
             let task = Task { await owner.refreshSafetyEvidence() }
             activeTasks.append(task)
         }
-    }
-
-    private var safetyChecksExpanded: Binding<Bool> {
-        Binding(
-            get: {
-                showsSafetyChecks
-                    || controlsViewModel?.safetyReadError != nil
-            },
-            set: { if controlsViewModel?.safetyReadError == nil { showsSafetyChecks = $0 } }
-        )
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only
@@ -1009,14 +981,22 @@ struct PrinterDetailView: View {
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
                             statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
                             statusFact("Layer", value: viewModel.layerLabel(for: printer))
                         }
                     }
@@ -1719,14 +1699,20 @@ struct PrinterSensorsReadout: View {
     let sensors: [PrinterSensor]
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    /// Status already shows nozzle and bed in the temperature strip, so the
+    /// thermal group is omitted here rather than repeated.
+    static let groups: [PrinterSensorGroup] = PrinterSensorGroup.allCases.filter { $0 != .temperatures }
+
     private var visibleSensors: [PrinterSensor] {
-        sensors.filter { !PrinterSensorFormatting.isHidden($0) }
+        sensors.filter {
+            !PrinterSensorFormatting.isHidden($0) && Self.groups.contains(PrinterSensorGroup.group(for: $0))
+        }
     }
 
     var body: some View {
         if !visibleSensors.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(PrinterSensorGroup.allCases, id: \.self) { group in
+                ForEach(Self.groups, id: \.self) { group in
                     let items = visibleSensors.filter { PrinterSensorGroup.group(for: $0) == group }
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {

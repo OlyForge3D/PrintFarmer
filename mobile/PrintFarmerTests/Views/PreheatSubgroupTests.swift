@@ -289,8 +289,8 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     func test_individualHeaterLabels_preserveUnknownVersusZero() {
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Not reported")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Not reported")
         XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
         XCTAssertEqual(Heater.hotend.title, "Hotend")
         XCTAssertEqual(Heater.bed.title, "Bed")
@@ -573,6 +573,29 @@ final class PreheatSubgroupTests: XCTestCase {
         }
         """
         return try JSONDecoder().decode(Printer.self, from: Data(json.utf8))
+    }
+
+    func testPresetFillRowAndRadiusOverridesAreOptInSoOtherScreensKeepTheirLayout() {
+        let defaults = EnvironmentValues()
+        XCTAssertFalse(defaults.preheatPresetsFillRow)
+        XCTAssertNil(defaults.controlActionCornerRadius)
+        XCTAssertNil(defaults.controlActionSelectedFill)
+    }
+
+    func testControlTabPresetRowIsFourEqualButtonsEndingWithSnowflakeCoolDown() throws {
+        XCTAssertEqual(PreheatSubgroup.presets, [.pla, .petg, .abs, .coolDown])
+        XCTAssertEqual(PreheatSubgroup.presets.last, .coolDown)
+        XCTAssertEqual(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: true), "snowflake")
+        for preset in [PreheatPreset.pla, .petg, .abs] {
+            XCTAssertNil(PreheatSubgroup.detailPresetSymbol(preset, fillsRow: true))
+        }
+        XCTAssertNil(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: false),
+                     "Other screens keep their existing Cool down label")
+        let printer = try Self.makePrinter(state: "ready", isOnline: true)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
+        let subgroup = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(subgroup.accessibilityLabel(preset: .coolDown, isPending: false), "Cool down",
+                       "The snowflake is icon-only visually but must stay spoken")
     }
 }
 

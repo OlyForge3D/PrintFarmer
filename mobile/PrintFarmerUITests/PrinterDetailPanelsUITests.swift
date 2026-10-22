@@ -632,12 +632,10 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if panel == "Control" {
                     XCTAssertTrue(
                         app.otherElements["printer.controls.runtime"].waitForExistence(timeout: 5),
-                        "Control must expose the API-backed runtime fan and live Z-offset adjustments."
+                        "Control must open on Tune with the API-backed live Z-offset adjustment while printing."
                     )
-                    XCTAssertTrue(
-                        app.buttons["printer.controls.runtime.fan.increase"].exists,
-                        "Fan adjustments must be driven by the authenticated backend-capability response."
-                    )
+                    XCTAssertFalse(app.buttons["printer.controls.segment.move"].isEnabled, "Move is unavailable while printing.")
+                    XCTAssertFalse(app.buttons["printer.controls.segment.heat"].isEnabled, "Heat is unavailable while printing.")
                     XCTAssertTrue(
                         app.buttons["printer.controls.runtime.z-offset.increase"].exists,
                         "Live Z-offset adjustments must be driven by the authenticated backend-capability response."
@@ -743,25 +741,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
             XCTAssertTrue(selector.waitForExistence(timeout: 8))
             selector.buttons["Control"].tap()
+            let tune = app.buttons["printer.controls.segment.tune"]
+            XCTAssertTrue(tune.waitForExistence(timeout: 8))
+            tune.tap()
             XCTAssertTrue(app.otherElements["printer.controls.runtime"].waitForExistence(timeout: 8))
-
-            let fanValue = app.staticTexts["printer.controls.runtime.fan.value"]
-            XCTAssertTrue(fanValue.waitForExistence(timeout: 5))
-            XCTAssertEqual(fanValue.label, "60%")
-            app.buttons["printer.controls.runtime.fan.increase"].tap()
-            let updatedFan = app.staticTexts.matching(identifier: "printer.controls.runtime.fan.value")
-                .matching(NSPredicate(format: "label == %@", "65%")).firstMatch
-            XCTAssertTrue(
-                updatedFan.waitForExistence(timeout: 5),
-                "Fan readback must reflect the accepted API command; current=\(fanValue.label), feedback=\(app.otherElements["printer.controls.runtime.feedback"].label)"
-            )
 
             let zOffsetValue = app.staticTexts["printer.controls.runtime.z-offset.value"]
             XCTAssertTrue(zOffsetValue.waitForExistence(timeout: 5))
-            XCTAssertEqual(zOffsetValue.label, "0.025 mm")
+            XCTAssertEqual(zOffsetValue.label, "Z offset +0.025 mm")
             app.buttons["printer.controls.runtime.z-offset.increase"].tap()
             let updatedZOffset = app.staticTexts.matching(identifier: "printer.controls.runtime.z-offset.value")
-                .matching(NSPredicate(format: "label == %@", "0.075 mm")).firstMatch
+                .matching(NSPredicate(format: "label == %@", "Z offset +0.030 mm")).firstMatch
             XCTAssertTrue(updatedZOffset.waitForExistence(timeout: 5), "Live Z-offset readback must reflect the accepted API command.")
             attachScreen("control-authenticated-command-readback")
         }
@@ -1187,6 +1177,9 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
+        let heat = app.buttons["printer.controls.segment.heat"]
+        XCTAssertTrue(heat.waitForExistence(timeout: 8))
+        heat.tap()
         let increase = app.buttons["printer.controls.hotend.increase"]
         XCTAssertTrue(increase.waitForExistence(timeout: 8))
         increase.tap()
@@ -1254,19 +1247,16 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             controlPage.frame.width * 0.85,
             "Idle Emergency Stop must fill the Control page width rather than use the compact active-print placement."
         )
+        XCTAssertTrue(app.otherElements["printer.controls.position"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.otherElements["printer.controls.motion-group"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.otherElements["printer.controls.runtime"].exists)
-        XCTAssertTrue(app.staticTexts["printer.controls.hotend.measured"].exists)
-        XCTAssertEqual(app.staticTexts["printer.controls.hotend.measured"].label, "now 24°")
-        XCTAssertEqual(app.staticTexts["printer.controls.bed.measured"].label, "now 23°")
-        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].exists)
-        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
-        XCTAssertTrue(app.buttons["printer.controls.runtime.fan.increase"].isEnabled)
-        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)
+        for identifier in ["home.all", "home.xy", "home.z", "jog.step.1", "jog.step.10", "jog.step.50"] {
+            XCTAssertTrue(app.buttons["printer.controls.\(identifier)"].exists, identifier)
+        }
+        XCTAssertFalse(app.buttons["printer.controls.jog.step.0.1"].exists, "0.1 mm jogging is replaced by babystep.")
+        XCTAssertFalse(app.buttons["printer.controls.disable-motors"].exists)
+        XCTAssertFalse(app.buttons["printer.controls.calibration-start"].exists)
         let device = isIPad ? "iPad" : "iPhone"
         let size = contentSizeCategory == "UICTContentSizeCategoryL" ? "normal" : "largest"
-        attachScreen("\(device)-\(size)-printer-control-idle")
-
         let motion = app.otherElements["printer.controls.motion-group"]
         for _ in 0..<4 where !motion.isHittable {
             controlPage.swipeUp()
@@ -1274,11 +1264,22 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(motion.isHittable, "Idle motion controls must be visible in the approved Control composition.")
         attachScreen("\(device)-\(size)-printer-control-idle-motion")
 
+        app.buttons["printer.controls.segment.heat"].tap()
+        XCTAssertTrue(app.staticTexts["printer.controls.hotend.measured"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["printer.controls.hotend.measured"].label, "Current 24 degrees")
+        XCTAssertEqual(app.staticTexts["printer.controls.bed.measured"].label, "Current 23 degrees")
+        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].exists)
+        XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
+        attachScreen("\(device)-\(size)-printer-control-idle")
+
+        app.buttons["printer.controls.segment.tune"].tap()
         let runtime = app.otherElements["printer.controls.runtime"]
+        XCTAssertTrue(runtime.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)
         for _ in 0..<4 where !runtime.isHittable {
             controlPage.swipeUp()
         }
-        XCTAssertTrue(runtime.isHittable, "Fan and Z-offset controls must be visibly reachable.")
+        XCTAssertTrue(runtime.isHittable, "Z babystep controls must be visibly reachable.")
         attachScreen("\(device)-\(size)-printer-control-idle-runtime")
 
         selector.buttons["Filament"].tap()

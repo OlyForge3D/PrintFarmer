@@ -216,7 +216,7 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
 
         private var status: String {
             guard printer.isOnline else { return "Offline" }
-            guard let state = printer.state, !state.isEmpty else { return "Unknown" }
+            guard let state = printer.state, !state.isEmpty else { return "Not reported" }
             return state.capitalized
         }
 
@@ -580,7 +580,7 @@ struct PrinterDetailTemperatureReading: Equatable {
 
     var targetText: String {
         guard isOnline, let target, target.isFinite else {
-            return String(localized: "Unknown")
+            return String(localized: "Not reported")
         }
         return target == 0 ? String(localized: "Off") : target.temperatureFormatted
     }

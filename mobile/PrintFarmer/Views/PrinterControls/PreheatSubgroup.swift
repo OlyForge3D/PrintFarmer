@@ -127,6 +127,39 @@ struct ControlNumberField: UIViewRepresentable {
     }
 }
 
+private struct ControlActionCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+private struct PreheatPresetsFillRowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Overrides `ControlActionButton`'s corner radius for surfaces that follow
+    /// the DESIGN.md 8 pt ceiling without restyling every existing control host.
+    var controlActionCornerRadius: CGFloat? {
+        get { self[ControlActionCornerRadiusKey.self] }
+        set { self[ControlActionCornerRadiusKey.self] = newValue }
+    }
+
+    /// Lays detail-mode preheat presets out as one row of equal-width buttons.
+    var preheatPresetsFillRow: Bool {
+        get { self[PreheatPresetsFillRowKey.self] }
+        set { self[PreheatPresetsFillRowKey.self] = newValue }
+    }
+
+    /// Overrides the selected fill of segmented `ControlActionButton`s.
+    var controlActionSelectedFill: Color? {
+        get { self[ControlActionSelectedFillKey.self] }
+        set { self[ControlActionSelectedFillKey.self] = newValue }
+    }
+}
+
+private struct ControlActionSelectedFillKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
 struct ControlActionButton: UIViewRepresentable {
     let title: String
     var identifier = ""
@@ -149,6 +182,8 @@ struct ControlActionButton: UIViewRepresentable {
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
+    @Environment(\.controlActionSelectedFill) private var selectedFillOverride
 
     func makeUIView(context: Context) -> UIButton {
         let button = NativeControlButton(type: .system)
@@ -171,7 +206,7 @@ struct ControlActionButton: UIViewRepresentable {
             configuration.contentInsets = .init(top: 8, leading: 8, bottom: 8, trailing: 8)
         }
         if menu != nil { configuration.contentInsets.trailing = 30 }
-        configuration.background.cornerRadius = segmented ? 8 : 10
+        configuration.background.cornerRadius = cornerRadiusOverride ?? (segmented ? 8 : 10)
         configuration.baseForegroundColor = UIColor(
             !isEnabled ? Color.pfTextTertiary :
                 isDestructive ? Color.pfError : prominent ? Color.pfButtonPrimaryText :
@@ -179,7 +214,8 @@ struct ControlActionButton: UIViewRepresentable {
         )
         configuration.background.backgroundColor = UIColor(
             textOnly ? Color.clear : !isEnabled ? Color.pfBackgroundTertiary : prominent ? Color.pfButtonPrimary :
-                segmented && !selected ? Color.clear : Color.pfBackground
+                segmented && !selected ? Color.clear :
+                segmented ? (selectedFillOverride ?? Color.pfBackground) : Color.pfBackground
         )
         configuration.background.strokeColor = UIColor(Color.pfBorder)
         configuration.background.strokeWidth = segmented || prominent || textOnly ? 0 : 1
@@ -264,6 +300,14 @@ struct PreheatSubgroup: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .subheadline) private var presetFontSize: CGFloat = 14
+    @Environment(\.preheatPresetsFillRow) private var presetsFillRow
+    @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
+
+    /// The Control tab's filled preset row shows Cool down as a snowflake;
+    /// VoiceOver still speaks "Cool down" via `accessibilityLabel(preset:isPending:)`.
+    static func detailPresetSymbol(_ preset: PreheatPreset, fillsRow: Bool) -> String? {
+        fillsRow && preset == .coolDown ? "snowflake" : nil
+    }
 
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
@@ -280,17 +324,18 @@ struct PreheatSubgroup: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             if compactForDetail {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        heatHeading
-                        Spacer(minLength: 4)
-                        detailPresets
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        heatHeading
-                        detailPresets
+                // The Heat segment already names this panel, so detail mode shows only presets.
+                Group {
+                    if presetsFillRow && !dynamicTypeSize.isAccessibilitySize {
+                        filledPresetRow
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            detailPresets
+                            grid
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 8)
             } else {
                 heatHeading.padding(.bottom, 14)
@@ -334,6 +379,15 @@ struct PreheatSubgroup: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var filledPresetRow: some View {
+        HStack(spacing: 8) {
+            ForEach(Self.presets, id: \.self) { preset in
+                button(for: preset, compactForDetail: true)
+                    .frame(maxWidth: .infinity)
+            }
+        }
     }
 
     @ViewBuilder
@@ -384,7 +438,8 @@ struct PreheatSubgroup: View {
         }
         .buttonStyle(PreheatButtonStyle(
             preset: preset, isEnabled: isInteractive, isPending: isPending,
-            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize
+            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize,
+            cornerRadius: cornerRadiusOverride ?? 10
         ))
         .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
@@ -471,7 +526,7 @@ struct PreheatSubgroup: View {
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
-            guard let value, value.isFinite else { return "Unknown" }
+            guard let value, value.isFinite else { return "Not reported" }
             return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
         }
 
@@ -501,6 +556,7 @@ struct PreheatSubgroup: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(Color.pfTextSecondary)
                                 .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         stepperEditor
@@ -519,6 +575,7 @@ struct PreheatSubgroup: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.pfTextSecondary)
                                     .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
                             }
                         }
                         .frame(minHeight: 20, alignment: .leading)
@@ -576,8 +633,14 @@ struct PreheatSubgroup: View {
 
         private var measuredTemperatureLabel: String {
             let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
-            guard let value, value.isFinite else { return "now Unknown" }
+            guard let value, value.isFinite else { return "now —" }
             return "now \(value.formatted(.number.precision(.fractionLength(0...1))))°"
+        }
+
+        private var measuredTemperatureAccessibilityLabel: String {
+            let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+            guard let value, value.isFinite else { return "Current temperature not reported" }
+            return "Current \(value.formatted(.number.precision(.fractionLength(0...1)))) degrees"
         }
 
         private var targetHint: String {
@@ -609,7 +672,12 @@ struct PreheatSubgroup: View {
         compactForDetail: Bool = false
     ) -> some View {
         VStack(spacing: 3) {
-            if compactForDetail {
+            if compactForDetail, let symbol = Self.detailPresetSymbol(preset, fillsRow: presetsFillRow) {
+                Image(systemName: symbol)
+                    .font(.body.weight(.semibold))
+                    .opacity(isPending ? 0 : 1)
+                    .accessibilityHidden(true)
+            } else if compactForDetail {
                 Text(preset == .coolDown ? "Off" : preset.displayLabel)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -756,6 +824,7 @@ private struct PreheatButtonStyle: ButtonStyle {
     let isEnabled: Bool
     let isPending: Bool
     let compact: Bool
+    let cornerRadius: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -764,7 +833,7 @@ private struct PreheatButtonStyle: ButtonStyle {
             .background(background)
             .foregroundStyle(foreground)
             .overlay(border)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .opacity(configuration.isPressed && isEnabled ? 0.7 : 1.0)
             .contentShape(Rectangle())
     }
@@ -788,7 +857,7 @@ private struct PreheatButtonStyle: ButtonStyle {
 
     @ViewBuilder
     private var border: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .strokeBorder(
                 isPending ? Color.pfAssigned : Color.pfBorder,
                 lineWidth: isPending ? 1.5 : 1

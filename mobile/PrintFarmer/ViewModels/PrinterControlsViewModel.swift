@@ -177,6 +177,8 @@ enum MaterialControlInput {
     static let distances = [10.0, 25, 50, 100]
     static let speeds = [1, 5, 10]
     static let increments = [0.01, 0.05, 0.1]
+    /// Live babystep deltas offered on the Tune segment; adjustments round to 0.001 mm.
+    static let babystepIncrements = [0.005, 0.01, 0.025, 0.05]
 
     static func feedrate(distance: Double, speed: Int) throws -> Int {
         guard distance.isFinite, distances.contains(abs(distance)), speeds.contains(speed) else {
@@ -1375,7 +1377,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard capabilities?.supportsZOffsetAdjustment == true,
               capabilities?.supportsZOffsetReadback == true,
               deltaMm.isFinite, deltaMm != 0, abs(deltaMm) <= 0.2,
-              MaterialControlInput.increments.contains(abs(deltaMm)),
+              MaterialControlInput.babystepIncrements.contains(abs(deltaMm)),
               target.isFinite, target != current else {
             setError(command: command, message: "Transient Z-offset adjustment requires supported controls and a known live readback.", isRetryable: false)
             return

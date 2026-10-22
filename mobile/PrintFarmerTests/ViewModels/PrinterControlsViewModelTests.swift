@@ -2824,6 +2824,32 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(model.pendingCommand, "The matching Z-offset readback confirms the accepted command")
     }
 
+    func test_liveBabystepAcceptsHalfHundredthStepAndRejectsRetiredCoarseStep() async throws {
+        XCTAssertEqual(MaterialControlInput.babystepIncrements, [0.005, 0.01, 0.025, 0.05])
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.liveZOffsetMm = 0.02
+        var capabilities = Self.fullCaps
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        await model.adjustLiveZOffset(by: 0.1)
+        XCTAssertEqual(mockService.adjustZOffsetCallCount, 0, "0.1 mm is no longer a babystep option")
+        XCTAssertNil(mockService.adjustZOffsetCalledWith)
+
+        await model.adjustLiveZOffset(by: -0.005)
+        XCTAssertEqual(mockService.adjustZOffsetCallCount, 1)
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, -0.005)
+        XCTAssertNotNil(model.pendingCommand)
+
+        var readback = printer
+        readback.liveZOffsetMm = 0.015
+        model.handlePrinterUpdate(readback)
+        XCTAssertNil(model.pendingCommand, "A 3-decimal readback must confirm a 0.005 mm babystep")
+    }
+
     func test_runtimeEndpointFailuresRemainVisibleToTheOperator() async throws {
         var printer = try idlePrinter()
         printer.state = "printing"

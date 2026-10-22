@@ -176,3 +176,17 @@ component configuration, light appearance, default simulator locale, fixture
 data, and strict assertions remain unchanged. Only the two sensor iPad PNGs
 were recorded; neither iPhone nor Controls references were re-recorded.
 Both iPad sensor cases then passed with recording disabled and zero skips.
+
+## Status sensor readout without the Temperatures group
+
+The printer detail Status page already shows nozzle and bed in its temperature
+strip, so `PrinterSensorsReadout` no longer renders the duplicate Temperatures
+group. `test_statusSensorReadout` keeps its fixture (nozzle, bed, chamber, MCU
+and part fan) and now renders only the Fans group.
+
+Both `test_statusSensorReadout` references were replaced with the strict
+comparison's actual output, after reference and actual images were inspected:
+iPhone 15 (3x) and iPad Pro 13-inch (M5) (2x), Xcode 26.6 (17F113), iOS 26.5
+(23F77), light appearance, default locale. The only difference is the removed
+Temperatures group. `test_controlSensorRows` and every Controls reference were
+not re-recorded and pass unchanged on both families.
