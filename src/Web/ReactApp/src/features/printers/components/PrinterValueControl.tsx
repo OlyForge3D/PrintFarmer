@@ -132,12 +132,12 @@ export function PrinterValueControl({
     setMessage('');
   };
   const numeric = (
-    <label data-value-hit-area className={`relative m-0! flex min-h-11 shrink-0 items-center @[441px]/sensors:w-[5.5rem] ${mode === 'slider' ? 'w-[4.75rem]' : 'w-[4.5rem]'}`}>
+    <label data-value-field className={`relative m-0! flex h-8 shrink-0 items-center @[441px]/sensors:w-[5.5rem] ${mode === 'slider' ? 'w-[4.75rem]' : 'w-[4.5rem]'}`}>
       <Input type="number" aria-label={label} aria-describedby={`${id}-bounds ${messageId}`}
         aria-invalid={error || (draft !== null && !validValue(parsed)) || undefined}
         aria-busy={busy.current} min={min} max={max} step={step && step > 0 ? step : 'any'}
         value={shown} disabled={locked}
-        className="h-8! min-h-8! py-0! border-pf-control-boundary! text-right font-mono tabular-nums pl-1! pr-6! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-8! min-h-8! py-0! border-pf-control-boundary! text-right text-xs! font-medium text-pf-text-primary! pl-1! pr-6! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onChange={event => preview(event.target.value)}
         onBlur={() => {
           if (replaceNumberBlur.current) { replaceNumberBlur.current = false; return; }
@@ -159,11 +159,11 @@ export function PrinterValueControl({
       if (replaceNumberBlur.current) dirty.current = false;
     }} onPointerUpCapture={() => { replaceNumberBlur.current = false; }}
       onKeyDownCapture={() => { replaceNumberBlur.current = false; }}>
-      <div className="flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-x-1 gap-y-1 @[441px]/sensors:gap-x-2">
+      <div className="flex min-h-8 min-w-0 flex-wrap items-center justify-end gap-x-1 gap-y-1 @[441px]/sensors:gap-x-2">
         {children}
         {mode === 'switch' ? setting === undefined ? null : <Button type="button" variant="ghost" role="switch"
           aria-label={label} aria-checked={setting === 1} aria-describedby={messageId}
-          disabled={locked} className="min-h-11 min-w-11 p-0!"
+          disabled={locked} className="h-8! min-h-8! min-w-9 p-0!"
           onClick={() => { void send(setting === 1 ? 0 : 1); }}>
           <span data-pf-radius="full" className={`relative block h-[18px] w-8 rounded-full border border-pf-control-boundary ${setting === 1 ? 'bg-pf-accent' : 'bg-pf-bg-2'}`} aria-hidden="true">
             <span data-pf-radius="full" className={`absolute top-[3px] left-[3px] h-2.5 w-2.5 rounded-full bg-pf-text-primary ${setting === 1 ? 'translate-x-3.5' : ''}`} />
@@ -171,19 +171,19 @@ export function PrinterValueControl({
         </Button> : <>
           {mode === 'slider' && min <= 0 && (max === undefined || max >= 0) && validValue(0) &&
             <Button type="button" variant="ghost" data-value-action aria-label={`Reset ${actionLabel} to 0${unit}`}
-              title={`Reset to 0${unit}`} className="min-h-11 min-w-11 p-0!" disabled={locked}
+              title={`Reset to 0${unit}`} className="h-8! min-h-8! min-w-8 p-0!" disabled={locked}
               onClick={() => { void send(0); }}><span aria-hidden="true"><RefreshIcon /></span></Button>}
           {numeric}
         </>}
       </div>
       {mode === 'slider' && <div className="mt-1 flex min-w-0 items-center gap-1">
         {step !== undefined && step !== null && step > 0 && <Button type="button" variant="ghost" data-value-action
-          aria-label={`Decrease ${actionLabel}`} className="min-h-11 min-w-11 p-0! text-2xl! font-normal! leading-none!" disabled={locked || !validValue(parsed - step)}
+          aria-label={`Decrease ${actionLabel}`} className="h-8! min-h-8! min-w-8 p-0! text-2xl! font-normal! leading-none!" disabled={locked || !validValue(parsed - step)}
           onClick={() => { void send(parsed - step); }}>−</Button>}
         <Input type="range" data-value-action aria-label={`${label} slider`} aria-describedby={`${id}-bounds ${messageId}`}
           aria-valuetext={setting === undefined && draft === null ? 'Not reported' : `${shown}${unit}`}
           min={min} max={max} step={step && step > 0 ? step : 'any'} value={Number.isFinite(parsed) ? parsed : min}
-          disabled={locked} className="min-h-11 min-w-0 flex-1 cursor-pointer accent-pf-accent border-0! bg-transparent! p-0!"
+          disabled={locked} className="h-8! min-h-8! min-w-0 flex-1 cursor-pointer accent-pf-accent border-0! bg-transparent! p-0!"
           onPointerDown={event => { pointer.current = true; event.currentTarget.setPointerCapture?.(event.pointerId); }}
           onChange={event => preview(event.target.value)}
           onPointerUp={event => {
@@ -195,7 +195,7 @@ export function PrinterValueControl({
           onKeyDown={event => { if (event.key === 'Escape') discard(); }}
           onBlur={() => { if (dirty.current && !pointer.current) commitNumber(); }} />
         {step !== undefined && step !== null && step > 0 && <Button type="button" variant="ghost" data-value-action
-          aria-label={`Increase ${actionLabel}`} className="min-h-11 min-w-11 p-0! text-2xl! font-normal! leading-none!" disabled={locked || !validValue(parsed + step)}
+          aria-label={`Increase ${actionLabel}`} className="h-8! min-h-8! min-w-8 p-0! text-2xl! font-normal! leading-none!" disabled={locked || !validValue(parsed + step)}
           onClick={() => { void send(parsed + step); }}>+</Button>}
       </div>}
       <span id={`${id}-bounds`} className="sr-only">

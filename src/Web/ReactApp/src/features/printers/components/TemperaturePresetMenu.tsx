@@ -85,7 +85,7 @@ export function TemperaturePresetMenu({ disabled, onApplyPreset, onApplySingleHe
   return <>
     <Button ref={trigger} type="button" variant="secondary" size="sm" disabled={disabled}
       aria-label="Apply temperature preset" aria-haspopup="menu" aria-expanded={Boolean(position)}
-      aria-controls={position ? id : undefined} className="min-h-11 gap-1 text-xs"
+      aria-controls={position ? id : undefined} className="h-8! min-h-8! gap-1 py-0! text-xs!"
       iconRight={<ChevronDownIcon className="size-3.5" />}
       onClick={() => position ? close() : open()}
       onKeyDown={event => {
@@ -98,7 +98,7 @@ export function TemperaturePresetMenu({ disabled, onApplyPreset, onApplySingleHe
     </Button>
     {position && createPortal(
       <div ref={panel} id={id} role="menu" aria-label="Temperature presets" style={position}
-        className="fixed z-[100] overflow-y-auto overscroll-contain rounded-md border border-pf-border bg-pf-bg-1 p-1 text-pf-text-primary shadow-lg"
+        className="fixed z-[100] overflow-y-auto overscroll-contain rounded-md border border-pf-border bg-pf-bg-1 py-1 text-pf-text-primary shadow-lg"
         onKeyDown={event => {
           event.stopPropagation();
           if (event.key === 'Escape') { event.preventDefault(); close(); return; }
@@ -120,20 +120,20 @@ export function TemperaturePresetMenu({ disabled, onApplyPreset, onApplySingleHe
           }
         }}>
         {GROUPS.map(group => <div key={group.label} role="group" aria-label={group.label}>
-          <div aria-hidden="true" className="px-2 pt-2 pb-1 text-[10px] font-medium text-pf-text-secondary">{group.label}</div>
+          <div aria-hidden="true" className="px-3 py-1 text-xs font-normal text-pf-text-secondary">{group.label}</div>
           {materialPresets.map(preset => {
             const value = group.heater ? `${group.heater}:${preset.value}` : preset.value;
             const targets = group.heater ? `${preset[group.heater]}°C` : `${preset.hotend} / ${preset.bed}°C`;
             return <Button key={value} type="button" role="menuitem" tabIndex={-1} variant="ghost" size="sm"
               data-temperature-preset={value} data-material={preset.label} aria-label={`${group.label} ${preset.label}, ${targets}`}
-              className="min-h-11 w-full rounded-sm px-2 py-0 text-left text-xs [&>span]:flex [&>span]:w-full [&>span]:items-center [&>span]:justify-between [&>span]:gap-2"
+              className="h-7! min-h-7! w-full rounded-none px-3 py-1.5 text-left text-xs! font-normal [&>span]:flex [&>span]:w-full [&>span]:items-center [&>span]:justify-between [&>span]:gap-2"
               onClick={() => {
                 close();
                 if (disabled) return;
                 if (group.heater) onApplySingleHeaterPreset(group.heater, preset.value);
                 else onApplyPreset(preset.value);
               }}>
-              <span>{preset.label}</span><span className="font-mono tabular-nums text-pf-text-secondary">{targets}</span>
+              <span>{preset.label}</span><span className="text-pf-text-secondary">{targets}</span>
             </Button>;
           })}
         </div>)}

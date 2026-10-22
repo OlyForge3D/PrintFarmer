@@ -61,41 +61,41 @@
     .toolbar label, .width-tools { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--pf-text-secondary); }
     .toolbar select { background: var(--pf-bg-1); font-size: 12px; }
     .toolbar input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pf-accent); }
-    .toolbar label:has(input[type="checkbox"]) { min-height: 44px; cursor: pointer; }
+    .toolbar label:has(input[type="checkbox"]) { min-height: 32px; cursor: pointer; }
     .workspace { display: grid; grid-template-columns: minmax(0, 680px) minmax(220px, 280px); gap: 32px; align-items: start; }
     .preview { min-width: 0; container: sensors / inline-size; }
     .phone .preview { max-width: 360px; }
     .phone .workspace { grid-template-columns: minmax(0, 360px) minmax(220px, 360px); }
-    .panel { background: var(--pf-panel); border: 1px solid var(--pf-border); border-radius: 6px; overflow: clip; }
+    .panel { display: flex; flex-direction: column; gap: 8px; background: transparent; border: 0; border-radius: 0; }
     .panel + .panel { margin-top: 16px; }
     .panel-heading { margin: 0; }
-    .panel-heading button { width: 100%; display: flex; align-items: center; gap: 12px; border: 0; border-radius: 0; text-align: left; padding: 12px 16px; background: var(--pf-bg-1); font: 600 18px var(--pf-font-display); }
-    .panel-heading button:hover { background: var(--pf-bg-2); }
-    .panel-heading .chevron { margin-left: auto; transition: transform 120ms ease-out; }
+    .panel-heading button { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 0; min-height: 0; text-align: left; padding: 0; background: transparent; }
+    .panel-title { color: var(--pf-text-secondary); font: 700 10px/15px var(--pf-font-body); text-transform: uppercase; letter-spacing: .025em; }
+    .panel-divider { flex: 1; border-top: 1px solid var(--pf-border); }
+    .panel-heading .chevron { color: var(--pf-text-secondary); transition: transform 120ms ease-out; }
     .panel-heading button[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
     .icon { width: 20px; height: 20px; flex-shrink: 0; }
-    .panel-heading .icon { width: 24px; height: 24px; }
-    .panel-body { padding: 8px 16px 12px; }
+    .panel-heading .icon { width: 14px; height: 14px; }
+    .panel-body { padding: 0; font: 12px/16px var(--pf-font-body); }
     .connection-notice { margin-bottom: 16px; padding: 12px 16px; background: var(--pf-bg-2); border-radius: 4px; color: var(--pf-warning-fg); font-size: 12px; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     col.state-col { width: 64px; }
     col.current-col { width: 88px; }
     col.target-col { width: 104px; }
     th, td { text-align: right; vertical-align: middle; padding: 6px 4px; }
-    thead th { color: var(--pf-text-secondary); font-weight: 500; font-size: 12px; padding-top: 4px; padding-bottom: 8px; }
+    thead th { color: var(--pf-text-secondary); font-weight: 400; font-size: 12px; padding-top: 4px; padding-bottom: 8px; }
     thead th:first-child { text-align: left; }
-    tbody th { text-align: left; font-weight: 500; overflow-wrap: anywhere; }
-    tbody tr { height: 44px; }
+    tbody th { color: var(--pf-text-secondary); text-align: left; font-weight: 400; overflow-wrap: anywhere; }
+    tbody tr { height: 32px; }
     .sensor-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .sensor-name .icon { width: 18px; height: 18px; color: var(--pf-text-secondary); }
     .sensor-name > span { min-width: 0; }
     .role, .extra-reading { color: var(--pf-text-secondary); font-size: 12px; font-weight: 400; }
     .role { margin-left: 4px; white-space: nowrap; }
     .extra-reading { display: block; margin-top: 2px; }
-    .mono, .reading, input[type="number"], .rpm, .unit { font-family: var(--pf-font-mono); font-variant-numeric: tabular-nums; }
-    .reading { font-size: 14px; white-space: nowrap; }
-    .state-reading { color: var(--pf-text-secondary); }
-    .number-hit-area { display: inline-flex; align-items: center; min-height: 44px; }
+    .mono, .reading, input[type="number"], .rpm { font-family: var(--pf-font-body); font-size: 12px; font-weight: 500; color: var(--pf-text-primary); }
+    .reading { white-space: nowrap; }
+    .number-container { display: inline-flex; align-items: center; height: 32px; }
     .target-cell { padding-top: 0; padding-bottom: 0; }
     .number-field { display: inline-flex; align-items: center; width: 88px; height: 32px; min-height: 32px; border: 1px solid var(--pf-control-boundary); border-radius: 4px; background: var(--pf-bg-1); }
     .number-field:focus-within { border-color: var(--pf-accent); }
@@ -106,20 +106,20 @@
     .fan-list { list-style: none; padding: 0; margin: 0; }
     .output-row { padding: 8px 0; }
     .output-row + .output-row { margin-top: 4px; }
-    .output-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 36px; }
-    .output-name { display: flex; align-items: center; gap: 8px; flex: 1 1 150px; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+    .output-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; }
+    .output-name { display: flex; align-items: center; gap: 8px; flex: 1 1 150px; min-width: 0; color: var(--pf-text-secondary); font-weight: 400; overflow-wrap: anywhere; }
     .output-name > span { min-width: 0; }
     .output-name .icon { color: var(--pf-text-secondary); width: 18px; height: 18px; }
     .output-values { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
-    .rpm { font-size: 12px; color: var(--pf-text-secondary); white-space: nowrap; }
+    .rpm { white-space: nowrap; }
     .output-values .number-field { width: 88px; }
-    .reset-control, .step-control { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 36px; padding: 0; border: 0; flex-shrink: 0; color: var(--pf-text-secondary); }
+    .reset-control, .step-control { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; flex-shrink: 0; color: var(--pf-text-primary); }
     .reset-control:hover, .step-control:hover { color: var(--pf-text-primary); }
     .reset-control .icon { width: 20px; height: 20px; }
     .slider-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
     .step-control { font-size: 24px; line-height: 1; }
     input[type="range"] { flex: 1; width: 100%; min-width: 0; height: 32px; margin: 0; accent-color: var(--pf-accent); cursor: pointer; }
-    .toggle { border: 0; background: transparent; padding: 0; width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
+    .toggle { border: 0; background: transparent; padding: 0; width: 36px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
     .toggle-track { width: 32px; height: 18px; border: 1px solid var(--pf-control-boundary); border-radius: 9999px; background: var(--pf-bg-2); display: block; position: relative; transition: background-color 120ms ease-out; }
     .toggle-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--pf-text-primary); transition: transform 120ms ease-out; }
     .toggle[aria-checked="true"] .toggle-track { background: var(--pf-accent); border-color: var(--pf-accent); }
@@ -135,22 +135,17 @@
     .notes p { font-size: 12px; }
     .notes output { font-family: var(--pf-font-mono); color: var(--pf-accent-text); }
     details { margin-top: 24px; color: var(--pf-text-secondary); }
-    summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--pf-text-primary); }
+    summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; color: var(--pf-text-primary); }
     .command-log { font: 12px/1.5 var(--pf-font-mono); padding-left: 24px; }
     .command-log li { padding: 4px 0; overflow-wrap: anywhere; }
     footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--pf-border); font-size: 12px; color: var(--pf-text-secondary); }
     footer p { max-width: 80ch; margin-bottom: 8px; }
     .empty { padding: 24px 16px; color: var(--pf-text-secondary); }
-    .phone .preview :is(button, input[type="range"]) { min-height: 44px; }
-    .phone .preview :is(.reset-control, .step-control) { min-width: 44px; }
     @container sensors (max-width: 440px) {
-      .panel-body { padding: 4px 8px 8px; }
-      .panel-heading button { padding: 12px; }
       col.state-col { width: 40px; }
       col.current-col { width: 64px; }
       col.target-col { width: 76px; }
       .sensor-name { gap: 4px; }
-      .sensor-name, .reading, tbody th { font-size: 12px; }
       td, th { padding-left: 2px; padding-right: 2px; }
       .number-field { width: 72px; }
       input[type="number"] { padding-left: 4px; padding-right: 4px; }
@@ -159,9 +154,7 @@
       .output-name { flex-basis: 120px; }
       .output-values { gap: 4px; }
       .output-values .number-field { width: 76px; }
-      .reset-control { width: 36px; }
       .output-top { gap: 4px; }
-      .extra-reading { font-size: 10px; }
     }
     @media (max-width: 800px) {
       main { padding: 24px 16px; }
@@ -169,12 +162,6 @@
       .appbar > span { max-width: 140px; }
       .workspace, .phone .workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
       .notes { max-width: 70ch; }
-      button, select, input[type="range"] { min-height: 44px; }
-      .reset-control, .step-control { min-width: 44px; }
-    }
-    @media (pointer: coarse) {
-      button, select, input[type="range"] { min-height: 44px; }
-      .reset-control, .step-control { min-width: 44px; }
     }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
   </style>
@@ -203,7 +190,7 @@
         <div id="panels"></div>
       </div>
       <aside class="notes">
-        <div><h3>Fans: two compact lines</h3><p>Name, optional RPM, reset and percentage across the top. A full-width slider underneath. Automatic fans have readings only.</p></div>
+        <div><h3>Fans: two compact lines</h3><p>Name, optional RPM, reset and percentage across the top. A full-width slider underneath. Read-only nonthermal sensors are hidden.</p></div>
         <div><h3>Lights: a switch, not a form</h3><p>A binary light uses an on/off toggle. It sends immediately. Brightness-capable outputs would use the percentage control instead.</p></div>
         <div><h3>Temperatures: aligned columns</h3><p>Name, State, Current and Target. Sensors without a target have an empty cell. Missing readings are blank; a genuine zero remains visible.</p></div>
         <div><h3>No extra confirmation step</h3><p>Number fields send on Enter or leaving the field, including Tab. Sliders send on completed adjustment, not every pointer movement. Reset sends 0% when the allowed range includes zero.</p></div>
@@ -221,6 +208,7 @@
       <p>A request being accepted is not a physical result. The example separately simulates reported setpoints; it never invents temperature or RPM changes. “Delay telemetry” leaves acceptance visibly pending.</p>
       <p>Reset follows <a href="https://github.com/fluidd-core/fluidd/blob/ef53f5bb140be05d08fc1f00bc2d49f7d0f30d23/src/components/widgets/outputs/OutputFan.vue" target="_blank" rel="noopener noreferrer">Fluidd's zero-percent fan reset</a>. Missing RPM is omitted, but reported 0 RPM is retained.</p>
       <p>Direct submission is your chosen interaction model. Wrong-target or accidental edits would disprove its suitability and could affect operators, equipment or prints; production must retain permission, availability and range gates. The preview itself cannot operate hardware.</p>
+      <p>Miscellaneous contains only descriptor-backed controls. Filament sensors are deferred to <a href="https://github.com/OlyForge3D/PrintFarmer/issues/3461">#3461</a> for backend enable/disable support.</p>
       <p>Built with accessibility in mind; keyboard, screen-reader and real-device review are still needed before shipping. This supersedes the earlier draft-and-confirm examples, not the production UI.</p>
     </footer>
     <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
@@ -238,9 +226,7 @@
       {id:'protection',name:'Chamber Thermal Protection Sensor',kind:'thermal',icon:'temperature',current:null},
       {id:'cooling',name:'Cooling Fan',kind:'fan',icon:'fan',value:43,rpm:4708,min:0,max:100,step:1},
       {id:'filter',name:'Filter Fan',kind:'fan',icon:'fan',value:0,min:0,max:100,step:1},
-      {id:'light',name:'02run Led',kind:'light',value:1,min:0,max:1,step:1},
-      {id:'hotend-fan',name:'Hotend Fan',kind:'fan',icon:'fan',value:0,rpm:0},
-      {id:'stepper-fan',name:'Stepper Fan',kind:'fan',icon:'fan',value:75}
+      {id:'light',name:'02run Led',kind:'light',value:1,min:0,max:1,step:1}
     ];
     let sensors = structuredClone(fixtures);
     let connection = 'online';
@@ -278,7 +264,7 @@
       return `${escapeHtml(sensor.name)}${sensor.role ? ` <span class="role">${sensor.role}</span>` : ''}`;
     }
     function numericInput(sensor) {
-      return `<label class="number-hit-area" data-value-hit-area><span class="number-field"><span class="sr-only">${escapeHtml(sensor.name)} ${sensor.kind === 'thermal' ? 'target temperature' : 'percentage'}</span>
+      return `<label class="number-container" data-value-field><span class="number-field"><span class="sr-only">${escapeHtml(sensor.name)} ${sensor.kind === 'thermal' ? 'target temperature' : 'percentage'}</span>
         <input type="number" id="${sensor.id}-number" name="${sensor.id}-number" data-number="${sensor.id}" min="${sensor.min}" max="${sensor.max}" step="${sensor.step}" inputmode="decimal" autocomplete="off" aria-describedby="${sensor.id}-bounds ${sensor.id}-message">
         <span class="unit" aria-hidden="true">${unit(sensor)}</span></span></label>
         <span class="sr-only" id="${sensor.id}-bounds">${sensor.min} to ${sensor.max}${unit(sensor)}, step ${sensor.step}. Enter or Tab sends.</span>`;
@@ -313,19 +299,21 @@
         ${controllable ? `<p class="row-message" id="${sensor.id}-message"></p>` : ''}
       </li>`;
     }
-    function panel(id,title,type,content) {
-      return `<section class="panel"><h2 class="panel-heading"><button type="button" data-collapse="${id}" aria-expanded="${!collapsed.has(id)}" aria-controls="${id}">${icon(type)}<span>${title}</span>${icon('chevron','chevron')}</button></h2>
+    function panel(id,title,content) {
+      return `<section class="panel"><div class="panel-heading"><button type="button" data-collapse="${id}" aria-label="${collapsed.has(id) ? 'Expand' : 'Collapse'} ${title}" aria-expanded="${!collapsed.has(id)}" aria-controls="${id}">${icon('chevron','chevron')}${collapsed.has(id) ? `<span class="panel-title">${title}</span>` : ''}<span class="panel-divider"></span></button></div>
+        ${collapsed.has(id) ? '' : `<div class="panel-title">${title}</div>`}
         <div class="panel-body" id="${id}" ${collapsed.has(id) ? 'hidden' : ''}>${content}</div></section>`;
     }
     function render() {
       const notice = document.getElementById('connection-notice');
       notice.hidden = connection === 'online' || connection === 'empty';
       notice.textContent = connection === 'stale' ? 'Stale data — last reported readings shown; controls disabled.' : 'Read-only access — controls disabled.';
+      const outputs = sensors.filter(sensor => sensor.kind !== 'thermal' && writable(sensor));
       document.getElementById('panels').innerHTML = connection === 'empty' ? '<p class="empty">No sensors reported.</p>' :
-        panel('temperatures','Temperatures','temperature',`<table aria-label="Temperatures"><colgroup><col><col class="state-col"><col class="current-col"><col class="target-col"></colgroup>
+        panel('temperatures','Temperatures',`<table aria-label="Temperatures"><colgroup><col><col class="state-col"><col class="current-col"><col class="target-col"></colgroup>
           <thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Current</th><th scope="col">Target</th></tr></thead>
           <tbody>${sensors.filter(sensor=>sensor.kind==='thermal').map(thermalRow).join('')}</tbody></table>`) +
-        panel('miscellaneous','Miscellaneous','misc',`<ul class="fan-list">${sensors.filter(sensor=>sensor.kind!=='thermal').map(outputRow).join('')}</ul>`);
+        (outputs.length ? panel('miscellaneous','Miscellaneous',`<ul class="fan-list">${outputs.map(outputRow).join('')}</ul>`) : '');
       sensors.filter(writable).forEach(refreshControl);
       measure();
     }

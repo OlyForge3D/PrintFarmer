@@ -75,11 +75,21 @@ and ETA alignment using the real card components without contacting printers.
 
 Detailed cards and the details sidebar share a borderless
 Name / State / Current / Target temperature table and a Miscellaneous section.
-Primary and additional temperatures share one header and column grid. Panel
-headers use the approved 18px icon-led hierarchy; row glyphs remain visible at
-narrow widths. Thermal labels/readings are 12px through the 440px container
-breakpoint and 14px above it; miscellaneous labels are 14px, RPM is 12px, and
-read-only percentages follow the thermal reading scale instead of body text.
+Miscellaneous contains only descriptor-backed controllable outputs, such as fan
+sliders and binary switches, and is omitted when none exist. Read-only nonthermal
+sensors and the former Other sensors group are hidden. Humidity and pressure on
+thermal sensors remain under Temperatures. Filament sensors are hidden pending
+[enable/disable backend support in #3461](https://github.com/OlyForge3D/PrintFarmer/issues/3461);
+this UI change does not introduce backend commands.
+Primary and additional temperatures share one header and column grid. All sensor
+groups reuse the existing `CollapsibleSection` divider, chevron and uppercase
+header, without a separate border, background or inset. Expansion uses the same
+in-memory disclosure state as neighboring groups; collapsed sensor bodies stay
+mounted but hidden to retain in-flight request locks and deduplication.
+Row glyphs remain visible.
+Labels, readings, environmental measurements and input text use the same 12px
+sans-serif scale as Statistics/Version: secondary normal labels and primary
+medium-weight values, without responsive typography changes.
 Presets use a viewport-bounded, scrollable menu (maximum 240px) with all combined
 and per-heater choices, arrow/Home/End navigation and Escape focus restoration.
 Opening or dismissing the menu never applies a preset.
@@ -90,10 +100,11 @@ Numeric targets submit on Enter or blur, once per edit. Fan sliders preview
 locally and submit on release; keyboard changes submit directly. Same-row
 reset, step, slider and switch actions take precedence over an unsubmitted
 numeric draft. Failed commands show an explicit error and retry action.
-Temperature and percentage fields have a 32px visible box with unchanged text
-size and no vertical input padding. An associated outer label preserves a
-44px effective hit area, including narrow screens and coarse pointers; the
-committed HTML reference uses the same sizing.
+Temperature and percentage fields, preset/Cooldown buttons and fan actions use
+compact 32px controls with no expanded touch targets. Preset items use the
+existing menu padding at 28px height; keyboard navigation and visible focus
+remain available. The committed HTML reference uses the same group styling and
+numeric sizing. No coarse-pointer-specific enlargement is applied.
 Primary heater edits send only the edited target, not a stale companion target.
 Their fallback input precision is whole degrees to match the existing `/temps`
 adapter contract. Both surfaces fetch persisted printer capabilities for heater

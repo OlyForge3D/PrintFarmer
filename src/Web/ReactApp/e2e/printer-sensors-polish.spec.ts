@@ -3,13 +3,20 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
-test('whole sensor sections match approved hierarchy, visible glyphs, responsive type and one thermal grid at matched widths', async ({ page }) => {
+test('sensor groups match existing app disclosures and content typography at matched widths', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1200 });
   await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
     route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
   const comparisons: object[] = [];
   for (const contentWidth of [335, 560]) {
-    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
+    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online&group-parity');
+    const statisticsToggle = page.getByRole('region', { name: 'sidebar', exact: true }).getByRole('img', { name: 'Expand Statistics' }).locator('..');
+    await statisticsToggle.click();
+    const existingGroupGap = await page.getByRole('region', { name: 'sidebar', exact: true }).evaluate(node => {
+      const sectionFor = (title: string) => [...node.querySelectorAll('section')].find(section =>
+        section.querySelector(':scope > div > span[id^="section-heading-"]')?.textContent === title)!;
+      return sectionFor('Version').getBoundingClientRect().top - sectionFor('Statistics').getBoundingClientRect().bottom;
+    });
     const production = [];
     for (const surface of ['card', 'sidebar']) {
       const root = page.getByRole('region', { name: surface, exact: true });
@@ -17,23 +24,41 @@ test('whole sensor sections match approved hierarchy, visible glyphs, responsive
       await root.evaluate((node, width) => {
         (node as HTMLElement).style.width = `${width + 100}px`;
         for (const section of node.querySelectorAll<HTMLElement>('[data-printer-sensor-section]')) {
-          section.style.width = `${width + 34}px`;
-          const body = section.querySelector<HTMLElement>('[data-sensor-body]')!;
-          const style = getComputedStyle(body);
-          section.style.width = `${width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2}px`;
+          section.style.width = `${width}px`;
         }
       }, contentWidth);
       const metrics = await root.evaluate(node => {
+        const surface = node.getAttribute('aria-label')!;
         const thermal = node.querySelector('[data-printer-sensor-section="Temperatures"]')!;
         const misc = node.querySelector('[data-printer-sensor-section="Miscellaneous"]')!;
         const table = thermal.querySelector('table')!;
         const rows = [...table.querySelectorAll('[data-thermal-row]')];
         const columns = rows.map(row => [...row.children].map(cell => cell.getBoundingClientRect().left));
-        const font = (element: Element) => ({ size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight });
-        const automatic = misc.querySelector('[data-testid="sensor-automatic"]')!;
-        const headingButton = thermal.querySelector('h3 button')!;
-        const headingBounds = headingButton.getBoundingClientRect();
-        const headingIcons = headingButton.querySelectorAll('svg');
+        const font = (element: Element) => {
+          const style = getComputedStyle(element);
+          return { size: style.fontSize, weight: style.fontWeight, family: style.fontFamily, color: style.color,
+            spacing: style.letterSpacing, transform: style.textTransform, line: style.lineHeight };
+        };
+        const sectionFor = (title: string) => [...node.querySelectorAll('section')].find(section =>
+          section.querySelector(':scope > div > span[id^="section-heading-"]')?.textContent === title)!;
+        const existing = sectionFor(surface === 'sidebar' ? 'Statistics' : 'Objects');
+        const frame = (section: Element) => {
+          const style = getComputedStyle(section);
+          const toggle = section.querySelector(':scope > [role="button"]')!;
+          const title = section.querySelector('span[id^="section-heading-"]')!;
+          const body = section.querySelector(':scope > [role="region"]')!;
+          const bodyStyle = getComputedStyle(body);
+          return { border: style.borderWidth, radius: style.borderRadius, background: style.backgroundColor,
+            gap: style.gap, padding: style.padding, heading: font(title),
+            toggleHeight: toggle.getBoundingClientRect().height, chevron: toggle.querySelector('svg')!.getBoundingClientRect().width,
+            glyphCount: toggle.querySelectorAll('svg').length, bodyPadding: bodyStyle.padding, bodyBackground: bodyStyle.backgroundColor };
+        };
+        const baselineLabel = surface === 'sidebar' ? existing.querySelector('dt')!
+          : [...node.querySelectorAll('p')].find(p => p.textContent === 'Fixture maker')!;
+        const baselineValue = surface === 'sidebar' ? existing.querySelector('dd')!
+          : [...node.querySelectorAll('span')].find(span => span.textContent === 'Printing')!;
+        const fan = misc.querySelector('[data-testid="sensor-fan"]')!;
+        const heading = thermal.querySelector('span[id^="section-heading-"]')!;
         const extraReading = thermal.querySelector('[aria-label*="Humidity:"]')!.parentElement!;
         const extraName = extraReading.closest('[data-sensor-name]')!;
         const binary = misc.querySelector('[role="switch"]')!;
@@ -43,19 +68,25 @@ test('whole sensor sections match approved hierarchy, visible glyphs, responsive
           width: table.getBoundingClientRect().width,
           tables: thermal.querySelectorAll('table').length,
           headings: [...table.querySelectorAll('thead th')].map(th => th.textContent),
-          heading: font(thermal.querySelector('[data-sensor-heading]')!),
-          miscHeading: font(misc.querySelector('[data-sensor-heading]')!),
+          heading: font(heading),
+          miscHeading: font(misc.querySelector('span[id^="section-heading-"]')!),
+          existingFrame: frame(existing),
+          thermalFrame: frame(thermal.querySelector('section')!),
+          miscFrame: frame(misc.querySelector('section')!),
+          groupGap: misc.getBoundingClientRect().top - thermal.getBoundingClientRect().bottom,
+          baselineLabel: font(baselineLabel),
+          baselineValue: font(baselineValue),
           thermalLabel: font(rows[0].querySelector('th')!),
           thermalReading: font(rows[0].querySelector('td:nth-child(3)')!),
-          fanLabel: font(automatic.querySelector('[data-sensor-name]')!),
-          fanReading: font(automatic.querySelector('[aria-label*="Speed:"]')!),
-          rpm: font(automatic.querySelector('[aria-label*="RPM:"]')!),
+          fanLabel: font(fan.querySelector('[data-sensor-name]')!),
+          fanReading: font(fan.querySelector('input[type="number"]')!),
+          rpm: font(fan.querySelector('[aria-label*="RPM:"]')!),
+          humidityLabel: font(extraReading),
+          humidityValue: font(extraReading.querySelector('[aria-label]')!),
+          input: font(thermal.querySelector('input[type="number"]')!),
           thermalGlyphs: rows.map(row => row.querySelector('[data-sensor-glyph] svg')!.getBoundingClientRect().width),
           fanGlyphs: [...misc.querySelectorAll('[data-testid]')].filter(row => row.querySelector('[data-sensor-glyph="Fan"]'))
             .map(row => row.querySelector('[data-sensor-glyph] svg')!.getBoundingClientRect().width),
-          headingGlyph: thermal.querySelector('h3 svg')!.getBoundingClientRect().width,
-          headingHeight: headingBounds.height,
-          headingInset: headingBounds.right - headingIcons[1].getBoundingClientRect().right,
           extraReadingIndent: extraReading.getBoundingClientRect().left - extraName.getBoundingClientRect().left,
           binaryTrack: { width: track.getBoundingClientRect().width, height: track.getBoundingClientRect().height },
           binaryKnob: { width: knob.getBoundingClientRect().width, height: knob.getBoundingClientRect().height },
@@ -68,14 +99,46 @@ test('whole sensor sections match approved hierarchy, visible glyphs, responsive
       expect(metrics.headings).toEqual(['Name', 'State', 'Current', 'Target']);
       expect(metrics.width).toBeCloseTo(contentWidth);
       expect(metrics.thermalGlyphs.every(width => width === 18)).toBe(true);
-      expect(metrics.fanGlyphs).toEqual([18, 18, 18, 18]);
+      expect(metrics.fanGlyphs).toEqual([18, 18, 18]);
       expect(metrics.columnSpread.every(spread => spread < 1)).toBe(true);
-      expect(metrics.binaryHit.width).toBeGreaterThanOrEqual(44);
-      expect(metrics.binaryHit.height).toBeGreaterThanOrEqual(44);
-      await expect(root.getByRole('region', { name: 'Miscellaneous', exact: true })).toBeVisible();
-      await expect(root.locator('[data-printer-sensor-section]').getByRole('img', { name: /Fan|temperature/i })).toHaveCount(0);
+      expect(metrics.binaryHit.height).toBe(32);
+      expect(metrics.thermalFrame).toEqual(metrics.existingFrame);
+      expect(metrics.miscFrame).toEqual(metrics.existingFrame);
+      expect(metrics.groupGap).toBeCloseTo(existingGroupGap);
+      expect(metrics.thermalLabel).toEqual(metrics.baselineLabel);
+      expect(metrics.fanLabel).toEqual(metrics.baselineLabel);
+      expect(metrics.thermalReading).toEqual(metrics.baselineValue);
+      expect(metrics.fanReading).toEqual(metrics.baselineValue);
+      expect(metrics.rpm).toEqual(metrics.baselineValue);
+      expect(metrics.humidityLabel).toEqual(metrics.baselineLabel);
+      expect(metrics.humidityValue).toEqual(metrics.baselineValue);
+      expect(metrics.input).toEqual(metrics.baselineValue);
+      await expect(root.getByRole('region', { name: 'Miscellaneous', exact: true }).first()).toBeVisible();
+      for (const title of ['Filament', 'Other sensors']) {
+        await expect(root.locator(`[data-printer-sensor-section="${title}"]`)).toHaveCount(0);
+      }
+      for (const id of ['automatic', 'runout', 'diagnostic', 'output']) {
+        await expect(root.getByTestId(`sensor-${id}`)).toHaveCount(0);
+      }
       for (const title of ['Temperatures', 'Miscellaneous']) {
-        await root.getByRole('region', { name: title, exact: true }).screenshot({ path: test.info().outputPath(`${surface}-${title}-${contentWidth}px.png`) });
+        const section = root.locator(`[data-printer-sensor-section="${title}"]`);
+        const toggle = section.locator('section > [role="button"]');
+        await toggle.press('Space');
+        await expect(section.locator('[data-sensor-body]')).toBeHidden();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await toggle.press('Enter');
+        await expect(section.locator('[data-sensor-body]')).toBeVisible();
+      }
+      for (const title of ['Temperatures', 'Miscellaneous']) {
+        await root.locator(`[data-printer-sensor-section="${title}"]`).screenshot({ path: test.info().outputPath(`${surface}-${title}-${contentWidth}px.png`) });
+      }
+      if (contentWidth === 335) {
+        for (const title of surface === 'sidebar' ? ['Statistics', 'Version'] : ['Objects']) {
+          const existing = root.locator('section').filter({ has: page.locator(`:scope > div > span[id^="section-heading-"]`, { hasText: new RegExp(`^${title}$`) }) });
+          await expect(existing).toHaveCount(1);
+          await existing.evaluate(node => { (node as HTMLElement).style.width = '335px'; });
+          await existing.screenshot({ path: test.info().outputPath(`${surface}-existing-${title}-335px.png`) });
+        }
       }
       production.push({ surface, metrics });
     }
@@ -83,57 +146,61 @@ test('whole sensor sections match approved hierarchy, visible glyphs, responsive
     await page.goto(pathToFileURL(resolve(process.cwd(), '..', '..', '..', 'docs', 'design', 'printer-sensors-options.html')).href);
     await page.locator('.preview').evaluate((node, width) => {
       const element = node as HTMLElement;
-      element.style.width = `${width + 34}px`;
+      element.style.width = `${width}px`;
       element.style.maxWidth = 'none';
-      const style = getComputedStyle(node.querySelector('.panel-body')!);
-      element.style.width = `${width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2}px`;
     }, contentWidth);
     const reference = await page.locator('#panels').evaluate(node => {
-      const font = (element: Element) => ({ size: getComputedStyle(element).fontSize, weight: getComputedStyle(element).fontWeight });
+      const font = (element: Element) => {
+        const style = getComputedStyle(element);
+        return { size: style.fontSize, weight: style.fontWeight, family: style.fontFamily, color: style.color,
+          spacing: style.letterSpacing, transform: style.textTransform, line: style.lineHeight };
+      };
       const thermal = node.querySelector('.panel')!;
       const misc = node.querySelectorAll('.panel')[1];
-      const automatic = misc.querySelector('[data-sensor="hotend-fan"]')!;
-      const headingButton = thermal.querySelector('.panel-heading button')!;
-      const headingBounds = headingButton.getBoundingClientRect();
-      const headingIcons = headingButton.querySelectorAll('svg');
+      const fan = misc.querySelector('[data-sensor="cooling"]')!;
       const extraReading = thermal.querySelector('.extra-reading')!;
       const track = misc.querySelector('.toggle-track')!;
       const knob = getComputedStyle(track, '::after');
+      const panelStyle = getComputedStyle(thermal);
+      const bodyStyle = getComputedStyle(thermal.querySelector('.panel-body')!);
       return {
         width: thermal.querySelector('table')!.getBoundingClientRect().width,
-        heading: font(thermal.querySelector('.panel-heading button')!),
-        miscHeading: font(misc.querySelector('.panel-heading button')!),
+        heading: font(thermal.querySelector('.panel-title')!),
+        miscHeading: font(misc.querySelector('.panel-title')!),
         thermalLabel: font(thermal.querySelector('tbody th')!),
         thermalReading: font(thermal.querySelector('.current-cell')!),
-        fanLabel: font(automatic.querySelector('.output-name')!),
-        fanReading: font(automatic.querySelector('.reading')!),
-        rpm: font(automatic.querySelector('.rpm')!),
-        headingGlyph: thermal.querySelector('.panel-heading svg')!.getBoundingClientRect().width,
-        headingHeight: headingBounds.height,
-        headingInset: headingBounds.right - headingIcons[1].getBoundingClientRect().right,
+        fanLabel: font(fan.querySelector('.output-name')!),
+        fanReading: font(fan.querySelector('input[type="number"]')!),
+        rpm: font(fan.querySelector('.rpm')!),
         thermalGlyph: thermal.querySelector('.sensor-name svg')!.getBoundingClientRect().width,
-        fanGlyph: automatic.querySelector('.output-name svg')!.getBoundingClientRect().width,
+        fanGlyph: fan.querySelector('.output-name svg')!.getBoundingClientRect().width,
         extraReadingIndent: extraReading.getBoundingClientRect().left - extraReading.closest('.sensor-name')!.getBoundingClientRect().left,
         binaryTrack: { width: track.getBoundingClientRect().width, height: track.getBoundingClientRect().height },
         binaryKnob: { width: parseFloat(knob.width), height: parseFloat(knob.height) },
         stepFont: font(misc.querySelector('.step-control')!),
+        frame: {
+          border: panelStyle.borderWidth, radius: panelStyle.borderRadius, background: panelStyle.backgroundColor,
+          gap: panelStyle.gap, padding: panelStyle.padding, heading: font(thermal.querySelector('.panel-title')!),
+          toggleHeight: thermal.querySelector('.panel-heading button')!.getBoundingClientRect().height,
+          chevron: thermal.querySelector('.panel-heading svg')!.getBoundingClientRect().width,
+          glyphCount: thermal.querySelectorAll('.panel-heading svg').length,
+          bodyPadding: bodyStyle.padding, bodyBackground: bodyStyle.backgroundColor,
+        },
       };
     });
     expect(reference.width).toBeCloseTo(contentWidth);
     expect(reference.thermalGlyph).toBe(18);
     expect(reference.fanGlyph).toBe(18);
-    await expect(page.getByRole('button', { name: 'Miscellaneous', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Collapse Miscellaneous', exact: true })).toBeVisible();
     for (const { metrics } of production) {
       expect(metrics.heading).toEqual(reference.heading);
+      expect(metrics.existingFrame).toEqual(reference.frame);
       expect(metrics.miscHeading).toEqual(reference.miscHeading);
       expect(metrics.thermalLabel).toEqual(reference.thermalLabel);
       expect(metrics.thermalReading).toEqual(reference.thermalReading);
       expect(metrics.fanLabel).toEqual(reference.fanLabel);
       expect(metrics.fanReading).toEqual(reference.fanReading);
       expect(metrics.rpm).toEqual(reference.rpm);
-      expect(metrics.headingGlyph).toEqual(reference.headingGlyph);
-      expect(metrics.headingHeight).toBeCloseTo(reference.headingHeight);
-      expect(metrics.headingInset).toBeCloseTo(reference.headingInset);
       expect(metrics.extraReadingIndent).toBeCloseTo(reference.extraReadingIndent);
       expect(metrics.binaryTrack).toEqual(reference.binaryTrack);
       expect(metrics.binaryKnob).toEqual(reference.binaryKnob);
@@ -155,6 +222,12 @@ test('opened preset menu is bounded, viewport-safe and keyboard dismissible with
     for (const surface of ['card', 'sidebar']) {
       const scope = page.getByRole('region', { name: surface, exact: true });
       const trigger = scope.getByRole('button', { name: 'Apply temperature preset' });
+      const triggerStyle = await trigger.evaluate(node => ({
+        height: node.getBoundingClientRect().height, paddingTop: getComputedStyle(node).paddingTop,
+        paddingBottom: getComputedStyle(node).paddingBottom, font: getComputedStyle(node).fontSize,
+      }));
+      expect(triggerStyle).toEqual({ height: 32, paddingTop: '0px', paddingBottom: '0px', font: '12px' });
+      expect(await scope.getByRole('button', { name: 'Cooldown' }).evaluate(node => node.getBoundingClientRect().height)).toBe(32);
       await trigger.click();
       const menu = page.getByRole('menu', { name: 'Temperature presets' });
       await expect(menu).toBeVisible();
@@ -171,7 +244,7 @@ test('opened preset menu is bounded, viewport-safe and keyboard dismissible with
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(height - 8);
       expect(bounds.x).toBeGreaterThanOrEqual(8);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8);
-      expect(bounds.itemHeights.every(value => value >= 44)).toBe(true);
+      expect(bounds.itemHeights.every(value => value === 28)).toBe(true);
       await page.keyboard.press('End');
       await expect(menu.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toBeFocused();
       await page.keyboard.press('Home');
@@ -186,27 +259,26 @@ test('opened preset menu is bounded, viewport-safe and keyboard dismissible with
       await page.keyboard.press('Tab');
       await expect(menu).toHaveCount(0);
       await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
-      measurements.push({ width, height, surface, menu: bounds });
+      measurements.push({ width, height, surface, trigger: triggerStyle, menu: bounds });
     }
   }
   await test.info().attach('opened-preset-geometry.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
 });
 
-test('reference and production numeric fields match compact visual heights with full effective hit areas', async ({ browser, baseURL }) => {
+test('reference and production numeric fields use compact app sizing without expanded hit areas', async ({ browser, baseURL }) => {
   const measurements: object[] = [];
-  for (const [width, coarse] of [[1100, false], [360, false], [320, false], [1100, true]] as const) {
-    const context = await browser.newContext({ baseURL, viewport: { width, height: 1200 }, hasTouch: coarse, isMobile: coarse });
+  for (const width of [1100, 360, 320]) {
+    const context = await browser.newContext({ baseURL, viewport: { width, height: 1200 } });
     try {
       const page = await context.newPage();
       await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
         route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
       await page.goto('/src/test/fixtures/printer-sensors.html');
-      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse);
       const input = page.getByRole('region', { name: 'card', exact: true }).getByRole('spinbutton', { name: 'Hotend target temperature' });
       await expect(input).toBeVisible();
       const production = await input.evaluate(node => ({
         visible: node.getBoundingClientRect().height,
-        hit: node.closest('[data-value-hit-area]')!.getBoundingClientRect().height,
+        field: node.closest('[data-value-field]')!.getBoundingClientRect().height,
         font: getComputedStyle(node).fontSize,
         padding: getComputedStyle(node).paddingTop,
       }));
@@ -222,15 +294,15 @@ test('reference and production numeric fields match compact visual heights with 
       await page.goto(pathToFileURL(resolve(process.cwd(), '..', '..', '..', 'docs', 'design', 'printer-sensors-options.html')).href);
       const reference = await page.locator('.number-field').first().evaluate(node => ({
         visible: node.getBoundingClientRect().height,
-        hit: node.closest('[data-value-hit-area]')!.getBoundingClientRect().height,
+        field: node.closest('[data-value-field]')!.getBoundingClientRect().height,
         font: getComputedStyle(node.querySelector('input')!).fontSize,
         padding: getComputedStyle(node.querySelector('input')!).paddingTop,
       }));
       expect(production.visible).toBe(32);
       expect(reference.visible).toBe(production.visible);
-      expect(production.hit).toBeGreaterThanOrEqual(44);
-      expect(reference.hit).toBeGreaterThanOrEqual(44);
-      expect(production.font).toBe('14px');
+      expect(production.field).toBe(32);
+      expect(reference.field).toBe(32);
+      expect(production.font).toBe('12px');
       expect(reference.font).toBe(production.font);
       expect(production.padding).toBe('0px');
       expect(reference.padding).toBe(production.padding);
@@ -242,7 +314,7 @@ test('reference and production numeric fields match compact visual heights with 
       if (!referenceBounds) throw new Error('Reference numeric hit area is not visible');
       await page.mouse.click(referenceBounds.x + referenceBounds.width / 2, referenceBounds.y + 1);
       await expect(referenceInput).toBeFocused();
-      measurements.push({ width, coarse, production, reference });
+      measurements.push({ width, production, reference });
     } finally { await context.close(); }
   }
   await test.info().attach('numeric-geometry.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
@@ -409,16 +481,22 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     await expect(sidebar.getByRole('slider', { name: 'Set Part Cooling Speed slider' })).toBeDisabled();
     await expect(card.getByRole('switch', { name: 'Set Case Light Power' })).toBeEnabled();
     await expect(card.getByTestId('sensor-filter')).not.toContainText('RPM');
-    await expect(card.getByTestId('sensor-automatic')).toContainText('0 RPM');
-    await expect(card.getByTestId('sensor-automatic').getByRole('slider')).toHaveCount(0);
+    for (const root of [card, sidebar]) {
+      for (const id of ['automatic', 'runout', 'diagnostic', 'output']) {
+        await expect(root.getByTestId(`sensor-${id}`)).toHaveCount(0);
+      }
+      for (const title of ['Filament', 'Other sensors']) {
+        await expect(root.locator(`[data-printer-sensor-section="${title}"]`)).toHaveCount(0);
+      }
+    }
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const undersized = await card.locator('input[type="number"], input[type="range"], button[role="switch"], button[data-value-action]').evaluateAll(elements =>
       elements.filter(element => /^(Set |Hotend target|Bed target|Reset |Increase |Decrease )/.test(element.getAttribute('aria-label') ?? '')).filter(element => {
-        const rect = (element.closest('[data-value-hit-area]') ?? element).getBoundingClientRect();
-        return rect.height < 44 || rect.width < 44;
+        const rect = element.getBoundingClientRect();
+        return rect.height < 24 || rect.width < 24;
       }).map(element => element.getAttribute('aria-label')));
     expect(undersized).toEqual([]);
-    const numericHeights = await card.locator('[data-value-hit-area] input[type="number"]').evaluateAll(elements =>
+    const numericHeights = await card.locator('[data-value-field] input[type="number"]').evaluateAll(elements =>
       elements.map(element => element.getBoundingClientRect().height));
     expect(numericHeights.every(height => height === 32)).toBe(true);
     const clippedCells = await card.locator('table td').evaluateAll(cells =>

@@ -46,6 +46,8 @@ const sensors: PrinterSensor[] = [
     readings: [{ quantity: 'Power', value: 8, unit: 'Watt' }] },
   { id: 'runout', kind: 'FilamentRunout', displayName: 'Filament runout', available: true,
     readings: [{ quantity: 'FilamentDetected', value: true, unit: 'None' }] },
+  { id: 'diagnostic', kind: 'Other', displayName: 'Diagnostic reading', available: true,
+    readings: [{ quantity: 'Other', value: 7, unit: 'None' }] },
 ];
 
 /** Isolated real controls, no app bootstrap and no hardware requests. */
@@ -61,14 +63,15 @@ export function mountSensors(element: HTMLElement) {
   };
   apiClient.setPrinterSensor = async (printerId, sensorId, request) => record({ printerId, sensorId, ...request });
   apiClient.setTemperatures = async (printerId, request) => record({ printerId, ...request });
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false, staleTime: Infinity } } });
   const fixtureOptions = new URLSearchParams(window.location.search);
   const sidebarOnline = fixtureOptions.has('sidebar-online');
   const unknownLimits = fixtureOptions.has('unknown-limits');
+  const groupParity = fixtureOptions.has('group-parity');
   const printer: Printer = {
-    id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', backend: PrinterBackend.Moonraker,
+    id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', manufacturerName: 'Fixture maker', backend: PrinterBackend.Moonraker,
     backendUrl: 'http://invalid.local', isOnline: true, isEnabled: true, rowVersion: 'poc',
-    state: 'Idle', homedAxes: 'xyz', x: 100, y: 110, z: 5,
+    state: groupParity ? 'Printing' : 'Idle', homedAxes: 'xyz', x: 100, y: 110, z: 5,
     hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60, sensors,
   };
   const capabilities: PrinterBackendCapabilitiesDto = {
@@ -76,7 +79,7 @@ export function mountSensors(element: HTMLElement) {
     supportsCamera: false, supportsFileDownload: false, supportsFileList: false, supportsFileUpload: false,
     supportsStartPrint: false, supportsControlOperations: false, supportsFileMetadata: false,
     supportsMovement: true, supportsTemperatureControl: true, supportsPrinterInformation: false,
-    supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: false,
+    supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: groupParity,
     supportsSensorControl: true, supportsSensorTelemetry: true,
   };
   for (const id of [printer.id, 'sensor-poc-sidebar']) {
@@ -86,6 +89,14 @@ export function mountSensors(element: HTMLElement) {
       multiMaterial: false, isAvailable: true, supportsAutoLeveling: false, lastUpdated: new Date(),
     } };
     queryClient.setQueryData(queryKeys.printerDetails(id), details);
+    queryClient.setQueryData(['printerStatistics', id], {
+      totalPrintHours: 123, totalFilamentUsedGrams: 2500, totalJobsCompleted: 42, totalJobsFailed: 1,
+      lastSyncTime: '2026-10-21T12:00:00Z',
+    });
+    queryClient.setQueryData(['printerVersion', id], {
+      firmwareVersion: 'Fixture firmware', backendVersion: 'Fixture backend', apiVersion: '1', supported: true,
+    });
+    queryClient.setQueryData(queryKeys.printJobObjects(id), { objects: [] });
   }
   createRoot(element).render(
     <MemoryRouter>

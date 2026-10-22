@@ -173,9 +173,12 @@ The React sidebar and detailed printer card share functional disclosures:
 **Temperatures** combines the existing Hotend/Bed controls and presets with
 additional heater/sensor rows (Power, Actual, Target). Power is shown only when
 reported, never inferred from heater state. Mapped primary heater readings appear
-once; extra nozzles and independent temperatures are retained. **Miscellaneous**,
-**Filament**, and **Other sensors** are separate sibling sections; environmental
-measurements stay with their thermal sensor row under **Temperatures**.
+once; extra nozzles and independent temperatures are retained. **Miscellaneous**
+contains only outputs with a writable descriptor; it is hidden when none exist.
+Read-only nonthermal sensors are hidden, while environmental measurements stay
+with their thermal sensor row under **Temperatures**. Filament sensors are hidden
+pending [enable/disable support in #3461](https://github.com/OlyForge3D/PrintFarmer/issues/3461);
+the backend sensor payload is unchanged.
 
 Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
 Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and

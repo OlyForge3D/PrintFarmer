@@ -43,9 +43,9 @@ export function TemperatureControlSection({
   ];
   return <div className="min-w-0">
     {showHeading && <h4 className="mb-1 text-xs font-medium text-pf-text-secondary">Temperatures</h4>}
-    <div className="mb-1 flex items-center justify-end gap-1">
+    <div className="mb-1 flex items-center justify-end gap-1" data-temperature-toolbar>
       <Button type="button" variant="ghost" size="sm" aria-label="Cooldown" title="Cooldown"
-        disabled={busy || !canCooldown || !authorized} className="min-h-11 min-w-11 p-0!"
+        disabled={busy || !canCooldown || !authorized} className="h-8! min-h-8! w-8 p-0!"
         onClick={() => onApplyPreset('cooldown')} iconCenter={<SnowflakeIcon className="h-4 w-4" />} />
       <TemperaturePresetMenu disabled={disabled} onApplyPreset={onApplyPreset} onApplySingleHeaterPreset={onApplySingleHeaterPreset} />
     </div>
@@ -62,8 +62,8 @@ export function TemperatureControlSection({
             <PrinterSensorGlyph kind={row.heater === 'hotend' ? 'Nozzle' : 'Bed'} />
             <span>{row.name}{unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}</span>
           </span>}
-          state={<span className="font-mono tabular-nums">{power}</span>}
-          current={<span className="font-mono tabular-nums">{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
+          state={<span>{power}</span>}
+          current={<span>{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
               min={min} max={max} step={step}
               unit="°C" disabled={blocked} pending={busy} status={status}
