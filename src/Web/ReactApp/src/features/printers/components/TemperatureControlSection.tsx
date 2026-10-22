@@ -7,7 +7,7 @@ import { PrinterValueControl } from '@/features/printers/components/PrinterValue
 import { PrinterSensorGlyph, PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { TemperaturePresetMenu } from '@/features/printers/components/TemperaturePresetMenu';
 import { primaryHeater, primaryHeaterLimits, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
-import type { PrinterSensor } from '@/types/api';
+import type { PrinterSensor, PrinterTemperatures } from '@/types/api';
 
 interface TemperatureControlSectionProps {
   printerId: string;
@@ -15,6 +15,7 @@ interface TemperatureControlSectionProps {
   bedTarget?: number;
   hotendCurrent?: number;
   bedCurrent?: number;
+  reportedTemperatures?: PrinterTemperatures;
   maxHotendTemp?: number;
   maxBedTemp?: number;
   temperatureActionPending: boolean;
@@ -31,7 +32,7 @@ interface TemperatureControlSectionProps {
 export function TemperatureControlSection({
   printerId, hotendTarget, bedTarget, hotendCurrent, bedCurrent, maxHotendTemp, maxBedTemp,
   temperatureActionPending, canSetTemperatures, canCooldown, onApplyPreset, onApplySingleHeaterPreset,
-  showHeading = true, sensors, additionalRows, isOnline = true,
+  showHeading = true, sensors, additionalRows, isOnline = true, reportedTemperatures,
 }: TemperatureControlSectionProps) {
   const { hasPermission } = useAuth();
   const [sending, setSending] = useState(false);
@@ -57,11 +58,14 @@ export function TemperatureControlSection({
         const power = primaryHeaterPower(sensors, row.heater);
         const unavailable = sensor?.available === false;
         const blocked = !canSetTemperatures || !authorized || unavailable;
+        const reportedCurrent = reportedTemperatures === undefined
+          ? row.current
+          : reportedTemperatures[row.heater === 'hotend' ? 'hotendTemp' : 'bedTemp'];
         return <PrinterThermalRow key={`${printerId}-${row.heater}`}
           warning={max === undefined ? `${row.name} maximum temperature unknown. Integer commands rely on firmware limits; this endpoint does not enforce an upper bound.` : undefined}
           name={<span className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
             <PrinterSensorGlyph kind={row.heater === 'hotend' ? 'Nozzle' : 'Bed'}
-              temperature={isOnline && !unavailable ? row.current : undefined} />
+              temperature={isOnline && !unavailable ? reportedCurrent : undefined} />
             <span>{row.name}{unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}</span>
           </span>}
           state={<span>{power}</span>}

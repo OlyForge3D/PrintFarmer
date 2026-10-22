@@ -1,6 +1,7 @@
 import React from 'react';
 import { NozzleIcon, BedIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { ProgressBar } from '@/common/components/ui';
+import { isPrinterHeaterHot } from '@/features/printers/utils/printerSensorDisplay';
 
 interface PrintProgressBarProps {
   progress: number | undefined;
@@ -71,7 +72,7 @@ export function PrintProgressBar({
       {showTemperatures && (
         <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-pf-text-secondary">
           <span className="flex items-center gap-1" title="Hotend temperature">
-            <NozzleIcon className={`w-3.5 h-3.5 ${currentHotendTemp != null ? 'text-pf-error' : ''}`} isOn={(currentHotendTemp ?? 0) > 50} />
+            <NozzleIcon className={`w-3.5 h-3.5 ${currentHotendTemp != null ? 'text-pf-error' : ''}`} isOn={isPrinterHeaterHot('hotend', currentHotendTemp)} />
             <span>{currentHotendTemp != null ? `${Math.round(currentHotendTemp)}°` : '--°'}</span>
             {isOnline && hotendTarget != null && hotendTarget > 0 && (
               <>
@@ -81,7 +82,7 @@ export function PrintProgressBar({
             )}
           </span>
           <span className="flex items-center gap-1" title="Bed temperature">
-            <BedIcon className={`w-3.5 h-3.5 ${currentBedTemp != null ? 'text-pf-accent' : ''}`} isOn={(currentBedTemp ?? 0) > 35} />
+            <BedIcon className={`w-3.5 h-3.5 ${currentBedTemp != null ? 'text-pf-accent' : ''}`} isOn={isPrinterHeaterHot('bed', currentBedTemp)} />
             <span>{currentBedTemp != null ? `${Math.round(currentBedTemp)}°` : '--°'}</span>
             {isOnline && bedTarget != null && bedTarget > 0 && (
               <>

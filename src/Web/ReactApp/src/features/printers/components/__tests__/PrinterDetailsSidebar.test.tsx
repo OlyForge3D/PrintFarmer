@@ -25,6 +25,7 @@ import {
   type PrintJobObjectListDto,
 } from "@/types/api";
 import { PrinterDetailsSidebar } from "../PrinterDetailsSidebar";
+import { PrintProgressBar } from "@/features/printers/components/PrintProgressBar";
 import type { PrinterStatistics } from "@/types/maintenance";
 import { AuthContext } from "@/common/contexts/auth-context";
 import type { AuthContextType } from "@/contexts/AuthContextValue";
@@ -274,6 +275,36 @@ describe("PrinterDetailsSidebar", () => {
     ]) {
       command.mockReset().mockResolvedValue({ success: true });
     }
+  });
+
+  it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {
+    const hot = { ...printer, hotendTemp: 205, bedTemp: 60 };
+    const contents = (current: Printer) => <>
+      <div data-testid="compact-temperature-reference">
+        <PrintProgressBar progress={0} jobName={null} isActive={false} showTemperatures
+          hotendTemp={current.hotendTemp} bedTemp={current.bedTemp} isOnline={current.isOnline} />
+      </div>
+      <PrinterDetailsSidebar printerId={printer.id} printer={current}
+        backendCapabilities={capabilities()} onClose={vi.fn()} />
+    </>;
+    const { container, rerender } = render(contents(hot));
+    const thermal = () => container.querySelector('[data-printer-sensor-section="Temperatures"]')!;
+    for (const svg of thermal().querySelectorAll('[data-sensor-glyph] svg')) {
+      expect(svg).toHaveClass("opacity-100");
+    }
+    rerender(contents({ ...hot, hotendTemp: undefined, bedTemp: undefined }));
+    expect(thermal()).toHaveTextContent("205.0°C");
+    expect(thermal()).toHaveTextContent("60.0°C");
+    for (const [kind, title] of [["Nozzle", "Hotend temperature"], ["Bed", "Bed temperature"]]) {
+      const actual = thermal().querySelector(`[data-sensor-glyph="${kind}"] svg`)!;
+      const compact = within(screen.getByTestId("compact-temperature-reference")).getByTitle(title).querySelector("svg")!;
+      expect(actual).toHaveClass("opacity-40");
+      expect(actual.querySelector("path")).toHaveAttribute("d", compact.querySelector("path")!.getAttribute("d"));
+      for (const color of ["text-pf-error", "text-pf-accent"]) {
+        expect(actual.classList.contains(color)).toBe(compact.classList.contains(color));
+      }
+    }
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 
   it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])(

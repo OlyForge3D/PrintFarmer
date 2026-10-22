@@ -1205,6 +1205,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             bedTarget={displayPrinter?.bedTarget}
             hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
             bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            reportedTemperatures={displayPrinter ?? {}}
             maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
             maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
             temperatureActionPending={temperatureActionPending}

@@ -2,7 +2,7 @@ import { useId, useMemo, useState, type ReactNode } from 'react';
 import { apiClient } from '@/services/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { additionalPrinterSensors } from '@/features/printers/utils/additionalPrinterSensors';
-import { formatPrinterSensorName, isHiddenPrinterSensorId } from '@/features/printers/utils/printerSensorDisplay';
+import { formatPrinterSensorName, isHiddenPrinterSensorId, isPrinterHeaterHot } from '@/features/printers/utils/printerSensorDisplay';
 import { CollapsibleSection } from '@/common/components/ui';
 import { BedIcon, FanIcon, NozzleIcon, ThermometerIcon } from '@/common/components/icons/MdiIcons';
 import { PrinterValueControl, type PrinterValueStatus } from '@/features/printers/components/PrinterValueControl';
@@ -108,7 +108,7 @@ export function PrinterSensorGlyph({ kind, temperature }: { kind: PrinterSensor[
   const color = reported && heater ? kind === 'Nozzle' ? 'text-pf-error' : 'text-pf-accent' : '';
   return <span data-sensor-glyph={kind} aria-hidden="true" className="inline-flex shrink-0 text-pf-text-secondary">
     <Icon className={`size-[18px] shrink-0 ${color}`}
-      {...(heater ? { isOn: reported && temperature > (kind === 'Nozzle' ? 50 : 35) } : {})} />
+      {...(heater ? { isOn: isPrinterHeaterHot(kind === 'Nozzle' ? 'hotend' : 'bed', temperature) } : {})} />
   </span>;
 }
 

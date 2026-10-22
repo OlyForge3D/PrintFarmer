@@ -90,6 +90,8 @@ Row glyphs remain visible.
 Nozzle and bed glyphs use the compact card's existing icon variants and colors:
 red nozzle, teal bed, full opacity above 50°C/35°C respectively and muted off
 variants otherwise. Offline, unavailable or missing readings remain muted.
+Glyph state uses current telemetry, even when the sidebar retains the last
+known numeric readout after telemetry disappears.
 These are temperature indicators, not claims that a heater command was applied.
 Labels, readings, environmental measurements and input text use the same 12px
 sans-serif scale as Statistics/Version: secondary normal labels and primary
