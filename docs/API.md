@@ -173,7 +173,7 @@ The React sidebar and detailed printer card share functional disclosures:
 **Temperatures** combines the existing Hotend/Bed controls and presets with
 additional heater/sensor rows (Power, Actual, Target). Power is shown only when
 reported, never inferred from heater state. Mapped primary heater readings appear
-once; extra nozzles and independent temperatures are retained. **Fans & outputs**,
+once; extra nozzles and independent temperatures are retained. **Miscellaneous**,
 **Environment**, and **Filament** are separate sibling sections; mixed-quantity
 sensors retain each measurement in its appropriate section.
 
