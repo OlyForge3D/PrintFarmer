@@ -166,7 +166,7 @@ public sealed class PluginSemanticControlTests
     [InlineData("https://printer.local:9443/moonraker", 9443, "/moonraker")]
     public async Task MoonrakerControls_ConfiguredBackend_PreserveCredentialsAndTranslateCommands(string baseUrl, int port, string prefix)
     {
-        using var handler = new CaptureHandler();
+        using var handler = new CaptureHandler(includeMoonrakerSensors: true);
         using var http = new HttpClient(handler);
         var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
         var credential = new PrinterCredential { ApiKey = "test-key" };
@@ -184,24 +184,30 @@ public sealed class PluginSemanticControlTests
         Assert.True(await extrusion.ExtrudeAsync(baseUrl, -2.5, 300, credential, CancellationToken.None));
         Assert.True(await emergency.EmergencyStopAsync(baseUrl, credential, CancellationToken.None));
 
-        Assert.Equal(7, handler.Requests.Count);
+        Assert.Equal(9, handler.Requests.Count);
         Assert.All(handler.Requests, request =>
         {
             Assert.Equal(port, request.Uri.Port);
             Assert.Equal("test-key", request.ApiKey);
-            Assert.Equal(HttpMethod.Post, request.Method);
         });
+        Request list = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Get);
+        Assert.Equal(prefix + "/printer/objects/list", list.Uri.AbsolutePath);
+        Request query = Assert.Single(handler.Requests, request => request.Uri.AbsolutePath == prefix + "/printer/objects/query");
+        Assert.Equal(HttpMethod.Post, query.Method);
+        Assert.True(query.Body!.Value.GetProperty("objects").TryGetProperty("toolhead", out _));
+        Request[] scripts = handler.Requests.Where(request => request.Uri.AbsolutePath == prefix + "/printer/gcode/script").ToArray();
+        Assert.Equal(6, scripts.Length);
+        Assert.All(scripts, request => Assert.Equal(HttpMethod.Post, request.Method));
         Assert.Equal(
-            ["G28", "G28 X Y", "G28 Z", "M104 S205\nM140 S60", "M84"],
-            handler.Requests.Take(5).Select(request => request.Body!.Value.GetProperty("script").GetString()));
-        Request extrude = handler.Requests[5];
+            ["G28", "G28 X Y", "G28 Z", "SET_HEATER_TEMPERATURE HEATER=extruder3 TARGET=205\nSET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60", "M84"],
+            scripts.Take(5).Select(request => request.Body!.Value.GetProperty("script").GetString()));
+        Request extrude = scripts[5];
         Assert.Equal(
             "M83\nG1 E-2.5 F300\nM82",
             extrude.Body!.Value.GetProperty("script").GetString());
-        Assert.All(handler.Requests.Take(6), request =>
-            Assert.Equal(prefix + "/printer/gcode/script", request.Uri.AbsolutePath));
-        Assert.Equal(prefix + "/printer/emergency_stop", handler.Requests[6].Uri.AbsolutePath);
-        Assert.Null(handler.Requests[6].Body);
+        Assert.Equal(prefix + "/printer/emergency_stop", handler.Requests[8].Uri.AbsolutePath);
+        Assert.Equal(HttpMethod.Post, handler.Requests[8].Method);
+        Assert.Null(handler.Requests[8].Body);
         Assert.True(client.ControlCapabilities.SupportsDisableMotors);
         Assert.True(client.ControlCapabilities.SupportsExtrusion);
     }
@@ -368,7 +374,10 @@ public sealed class PluginSemanticControlTests
 
     private sealed record Request(Uri Uri, HttpMethod Method, string? ApiKey, JsonElement? Body);
 
-    private sealed class CaptureHandler(HttpStatusCode status = HttpStatusCode.OK, string response = "{}") : HttpMessageHandler
+    private sealed class CaptureHandler(
+        HttpStatusCode status = HttpStatusCode.OK,
+        string response = "{}",
+        bool includeMoonrakerSensors = false) : HttpMessageHandler
     {
         public List<Request> Requests { get; } = [];
 
@@ -384,7 +393,15 @@ public sealed class PluginSemanticControlTests
             Requests.Add(new Request(
                 request.RequestUri!, request.Method,
                 request.Headers.TryGetValues("X-Api-Key", out IEnumerable<string>? keys) ? keys.Single() : null, body));
-            return new HttpResponseMessage(status) { Content = new StringContent(response) };
+            string payload = includeMoonrakerSensors ? request.RequestUri!.AbsolutePath switch
+            {
+                var path when path.EndsWith("/printer/objects/list", StringComparison.Ordinal) =>
+                    """{"result":{"objects":["extruder3","heater_bed","toolhead","configfile"]}}""",
+                var path when path.EndsWith("/printer/objects/query", StringComparison.Ordinal) =>
+                    """{"result":{"status":{"toolhead":{"extruder":"extruder3"},"extruder3":{"temperature":205,"target":0},"heater_bed":{"temperature":60,"target":0},"configfile":{"settings":{"extruder3":{"min_temp":10,"max_temp":270},"heater_bed":{"min_temp":0,"max_temp":120}}}}}}""",
+                _ => response,
+            } : response;
+            return new HttpResponseMessage(status) { Content = new StringContent(payload) };
         }
     }
 }
