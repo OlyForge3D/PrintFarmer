@@ -28,10 +28,31 @@ struct PrinterInstrumentPanelControls: View {
     static let cornerRadius: CGFloat = 8
 
     static func isPrinting(state: String?) -> Bool {
-        switch state?.lowercased() {
-        case "printing", "paused", "starting": true
-        default: false
+        PrinterControlsViewModel.isPrintingOrPaused(state: state)
+    }
+
+    static let fanStepPercent = 5
+
+    /// The next part-fan target for one step, clamped to 0–100 %.
+    static func fanTarget(current: Double, increasing: Bool) -> Int {
+        let step = Double(fanStepPercent)
+        let next = increasing ? current + step : current - step
+        return Int(min(100, max(0, next.rounded())))
+    }
+
+    static func fanText(_ percent: Double?) -> String {
+        guard let percent, percent.isFinite else { return "Not reported" }
+        return "\(percent.formatted(.number.precision(.fractionLength(0...1))))%"
+    }
+
+    /// VoiceOver reads position values with their unit, e.g. "X 120.0 millimeters".
+    static func readoutAccessibilityLabel(axis: String, value: Double?, homedAxes: String?) -> String {
+        if JogSubgroup.isAxisHomed(axis, homedAxes: homedAxes) == false {
+            return "\(axis) position unavailable, axis not homed"
         }
+        guard let value, value.isFinite else { return "\(axis) position not reported" }
+        let digits = readoutFractionDigits(axis: axis)
+        return "\(axis) \(value.formatted(.number.precision(.fractionLength(digits)))) millimeters"
     }
 
     /// Move and Heat are physically unsafe during a job; Tune stays available.
@@ -173,7 +194,9 @@ struct PrinterInstrumentPanelControls: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(display.accessibilityLabel)
+        .accessibilityLabel(Self.readoutAccessibilityLabel(
+            axis: axis, value: value, homedAxes: viewModel.printer.homedAxes
+        ))
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 
@@ -374,9 +397,56 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
+            Divider()
+            fanRow
+            PrinterSensorControlRows(viewModel: viewModel, compact: true)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime")
+    }
+
+    /// Part fan stays in Tune so it remains adjustable during a print.
+    private var fanRow: some View {
+        let reason = viewModel.fanControlUnavailableReason
+        let current = viewModel.fanSpeedPercent
+        let canAdjust = reason == nil && current != nil && viewModel.canAdjustRuntimeControls
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text("Part fan").font(.subheadline.weight(.medium))
+                Spacer(minLength: 0)
+                fanButton(increasing: false, current: current).disabled(!canAdjust)
+                Text(Self.fanText(current))
+                    .font(.subheadline.monospacedDigit())
+                    .frame(minWidth: 52)
+                    .accessibilityLabel("Part fan, \(Self.fanText(current))")
+                    .accessibilityIdentifier("printer.controls.runtime.fan.value")
+                fanButton(increasing: true, current: current).disabled(!canAdjust)
+            }
+            if let reason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.runtime.fan")
+    }
+
+    private func fanButton(increasing: Bool, current: Double?) -> some View {
+        ControlActionButton(
+            title: "",
+            identifier: "printer.controls.runtime.fan.\(increasing ? "increase" : "decrease")",
+            accessibilityTitle: increasing ? "Increase part fan" : "Decrease part fan",
+            hint: "Changes the part fan by \(Self.fanStepPercent) percent.",
+            compact: true,
+            systemImage: increasing ? "plus" : "minus",
+            minimumHeight: 44
+        ) {
+            guard let current else { return }
+            Task { await viewModel.setFanSpeed(Self.fanTarget(current: current, increasing: increasing)) }
+        }
+        .frame(width: 44, height: 44)
     }
 
     private func babystepButton(raise: Bool, reason: String?) -> some View {

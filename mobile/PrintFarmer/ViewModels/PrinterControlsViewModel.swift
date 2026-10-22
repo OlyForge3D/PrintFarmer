@@ -1761,7 +1761,11 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     var isPrintingOrPaused: Bool {
-        switch printer.state?.lowercased() {
+        Self.isPrintingOrPaused(state: printer.state)
+    }
+
+    nonisolated static func isPrintingOrPaused(state: String?) -> Bool {
+        switch state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false
         }

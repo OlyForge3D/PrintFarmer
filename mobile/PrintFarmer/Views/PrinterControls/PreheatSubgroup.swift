@@ -127,12 +127,18 @@ struct ControlNumberField: UIViewRepresentable {
     }
 }
 
+// MARK: - Control tab environment overrides
+
 private struct ControlActionCornerRadiusKey: EnvironmentKey {
     static let defaultValue: CGFloat? = nil
 }
 
 private struct PreheatPresetsFillRowKey: EnvironmentKey {
     static let defaultValue = false
+}
+
+private struct ControlActionSelectedFillKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
 }
 
 extension EnvironmentValues {
@@ -154,10 +160,6 @@ extension EnvironmentValues {
         get { self[ControlActionSelectedFillKey.self] }
         set { self[ControlActionSelectedFillKey.self] = newValue }
     }
-}
-
-private struct ControlActionSelectedFillKey: EnvironmentKey {
-    static let defaultValue: Color? = nil
 }
 
 struct ControlActionButton: UIViewRepresentable {

@@ -1280,6 +1280,12 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             controlPage.swipeUp()
         }
         XCTAssertTrue(runtime.isHittable, "Z babystep controls must be visibly reachable.")
+        let fanIncrease = app.buttons["printer.controls.runtime.fan.increase"]
+        XCTAssertTrue(fanIncrease.waitForExistence(timeout: 5), "Tune must expose the part fan control.")
+        for _ in 0..<4 where !fanIncrease.isHittable {
+            controlPage.swipeUp()
+        }
+        XCTAssertTrue(fanIncrease.isHittable, "The Tune part fan control must be visibly reachable.")
         attachScreen("\(device)-\(size)-printer-control-idle-runtime")
 
         selector.buttons["Filament"].tap()
@@ -1844,6 +1850,10 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             )
         }
         selector.buttons["Control"].tap()
+        // Writable fans and sensors live in the Control tab's Tune segment.
+        let tune = app.buttons["printer.controls.segment.tune"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 12), "\(printer.name) must expose the Tune segment.")
+        tune.tap()
         let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
         XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
         attachScreenshot(named: "\(printer.name) live fan control")

@@ -379,15 +379,19 @@ struct PrinterSensorControlRows: View {
         increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
     ) -> some View {
         let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
-        return Button {
+        // Same native 44 pt stepper as the Tune part fan row it sits beside.
+        return ControlActionButton(
+            title: "",
+            identifier: identifier,
+            accessibilityTitle: label,
+            compact: true,
+            systemImage: symbol,
+            minimumHeight: 44
+        ) {
             Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
-        } label: {
-            Image(systemName: symbol).frame(minWidth: 44, minHeight: 44)
         }
-        .buttonStyle(.bordered)
+        .frame(width: 44, height: 44)
         .disabled(viewModel.pendingCommand != nil)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(identifier)
     }
 }
 

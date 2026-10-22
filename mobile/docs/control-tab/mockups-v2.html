@@ -125,7 +125,7 @@
     <li>The separate Home XY / Home Z buttons are gone. Homing lives on the jog pad, using a house icon instead of the word "Home". Each icon carries a short axis label (All, XY, Z), which is also its VoiceOver label.</li>
     <li>Babystep has its own step selector: <span class="num">0.005</span>, <span class="num">0.01</span>, <span class="num">0.025</span> and <span class="num">0.05 mm</span> (direction B; 0.005 selected by default), with Raise / Lower buttons and the running offset in large type.</li>
     <li>Jog distance is now <span class="num">1</span>, <span class="num">10</span> and <span class="num">50 mm</span>; the 0.1 mm step is gone.</li>
-    <li>Tune is Speed and Flow only; Part fan is removed.</li>
+    <li>Tune is Speed and Flow, babystep, then a compact part fan row plus any writable fan or sensor the printer reports (direction B). Chamber, MCU, host and environment sensors stay hidden on mobile.</li>
     <li>B, printing: Move and Heat are disabled segments with no "locked" label.</li>
     <li>Unchanged: no temperature section, no "Unknown", no Advanced disclosure, 8 px radius maximum, 44 pt targets, pinned E-stop.</li>
   </ul>
@@ -214,7 +214,11 @@
   <div class="head"><span style="font-weight:600">Z babystep</span><span class="big">+0.035 <span class="muted">mm</span></span></div>
   <div class="step"><span class="on">0.005</span><span>0.01</span><span>0.025</span><span>0.05</span></div>
   <div class="bsrow"><div class="btn">↑ Raise nozzle</div><div class="btn">↓ Lower nozzle</div></div>
+</div>
+<div class="panel">
+  <div class="tune"><span>Part fan</span><div class="stepper"><span aria-label="Decrease part fan">−</span><span class="val">60%</span><span aria-label="Increase part fan">+</span></div></div>
+  <div class="tune"><span>Auxiliary fan speed</span><div class="stepper"><span aria-label="Decrease auxiliary fan speed">−</span><span class="val">40%</span><span aria-label="Increase auxiliary fan speed">+</span></div></div>
 </div></div>
   <div class="estop"><button>■ Emergency stop</button></div>
-</div><figcaption>Tune segment while printing, with fine babystep control.</figcaption></figure></div></section>
+</div><figcaption>Tune segment while printing: fine babystep control, then the part fan and any writable fan or sensor the printer reports.</figcaption></figure></div></section>
 </body></html>
