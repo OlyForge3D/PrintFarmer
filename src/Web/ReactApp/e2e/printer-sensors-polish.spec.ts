@@ -129,6 +129,16 @@ test('sensor groups match existing app disclosures and content typography at mat
         await toggle.press('Enter');
         await expect(section.locator('[data-sensor-body]')).toBeVisible();
       }
+      const disclosureFocus = await root.locator('[data-printer-sensor-section="Miscellaneous"] section > [role="button"]').evaluate(toggle => {
+        const divider = toggle.querySelector('.border-t')!;
+        const before = { outline: getComputedStyle(toggle).outlineStyle, divider: getComputedStyle(divider).borderTopColor };
+        (toggle as HTMLElement).blur();
+        const after = { outline: getComputedStyle(toggle).outlineStyle, divider: getComputedStyle(divider).borderTopColor };
+        return { before, after };
+      });
+      expect(disclosureFocus.after.divider).toBe(disclosureFocus.before.divider);
+      expect(disclosureFocus.after.outline).toBe('none');
+      await test.info().attach(`${surface}-${contentWidth}px-disclosure-focus.json`, { body: JSON.stringify(disclosureFocus), contentType: 'application/json' });
       for (const title of ['Temperatures', 'Miscellaneous']) {
         await root.locator(`[data-printer-sensor-section="${title}"]`).screenshot({ path: test.info().outputPath(`${surface}-${title}-${contentWidth}px.png`) });
       }
@@ -273,7 +283,7 @@ test('reference and production numeric fields use compact app sizing without exp
       const page = await context.newPage();
       await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
         route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
-      await page.goto('/src/test/fixtures/printer-sensors.html');
+      await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
       const input = page.getByRole('region', { name: 'card', exact: true }).getByRole('spinbutton', { name: 'Hotend target temperature' });
       await expect(input).toBeVisible();
       const production = await input.evaluate(node => ({
@@ -281,7 +291,19 @@ test('reference and production numeric fields use compact app sizing without exp
         field: node.closest('[data-value-field]')!.getBoundingClientRect().height,
         font: getComputedStyle(node).fontSize,
         padding: getComputedStyle(node).paddingTop,
+        paddingLeft: getComputedStyle(node).paddingLeft,
+        paddingRight: getComputedStyle(node).paddingRight,
       }));
+      const gaps = [];
+      for (const surface of ['card', 'sidebar']) {
+        const root = page.getByRole('region', { name: surface, exact: true });
+        const hotend = await root.getByRole('spinbutton', { name: 'Hotend target temperature' }).boundingBox();
+        const bed = await root.getByRole('spinbutton', { name: 'Bed target temperature' }).boundingBox();
+        if (!hotend || !bed) throw new Error(`${surface} stacked targets are not visible`);
+        const gap = bed.y - hotend.y - hotend.height;
+        expect(gap).toBeCloseTo(4);
+        gaps.push({ surface, gap });
+      }
       const area = input.locator('..');
       await area.scrollIntoViewIfNeeded();
       const bounds = await area.boundingBox();
@@ -298,15 +320,22 @@ test('reference and production numeric fields use compact app sizing without exp
         font: getComputedStyle(node.querySelector('input')!).fontSize,
         padding: getComputedStyle(node.querySelector('input')!).paddingTop,
       }));
-      expect(production.visible).toBe(32);
+      expect(production.visible).toBe(28);
       expect(reference.visible).toBe(production.visible);
-      expect(production.field).toBe(32);
-      expect(reference.field).toBe(32);
+      expect(production.field).toBe(28);
+      expect(reference.field).toBe(28);
+      expect(production.paddingLeft).toBe('2px');
+      expect(production.paddingRight).toBe('20px');
       expect(production.font).toBe('12px');
       expect(reference.font).toBe(production.font);
       expect(production.padding).toBe('0px');
       expect(reference.padding).toBe(production.padding);
-      expect(await page.locator('.number-field').evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height === 32))).toBe(true);
+      expect(await page.locator('.number-field').evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height === 28))).toBe(true);
+      const referenceGap = await page.locator('.number-field').evaluateAll(nodes => {
+        const first = nodes[0].getBoundingClientRect();
+        return nodes[1].getBoundingClientRect().top - first.bottom;
+      });
+      expect(referenceGap).toBeCloseTo(4);
       const referenceInput = page.locator('input[type="number"]').first();
       const referenceArea = referenceInput.locator('xpath=ancestor::label');
       await referenceArea.scrollIntoViewIfNeeded();
@@ -314,7 +343,7 @@ test('reference and production numeric fields use compact app sizing without exp
       if (!referenceBounds) throw new Error('Reference numeric hit area is not visible');
       await page.mouse.click(referenceBounds.x + referenceBounds.width / 2, referenceBounds.y + 1);
       await expect(referenceInput).toBeFocused();
-      measurements.push({ width, production, reference });
+      measurements.push({ width, production, reference, gaps, referenceGap });
     } finally { await context.close(); }
   }
   await test.info().attach('numeric-geometry.json', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
@@ -498,7 +527,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     expect(undersized).toEqual([]);
     const numericHeights = await card.locator('[data-value-field] input[type="number"]').evaluateAll(elements =>
       elements.map(element => element.getBoundingClientRect().height));
-    expect(numericHeights.every(height => height === 32)).toBe(true);
+    expect(numericHeights.every(height => height === 28)).toBe(true);
     const clippedCells = await card.locator('table td').evaluateAll(cells =>
       cells.filter(cell => cell.scrollWidth > cell.clientWidth + 1).map(cell => cell.textContent));
     expect(clippedCells).toEqual([]);

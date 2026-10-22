@@ -100,8 +100,10 @@ Numeric targets submit on Enter or blur, once per edit. Fan sliders preview
 locally and submit on release; keyboard changes submit directly. Same-row
 reset, step, slider and switch actions take precedence over an unsubmitted
 numeric draft. Failed commands show an explicit error and retry action.
-Temperature and percentage fields, preset/Cooldown buttons and fan actions use
-compact 32px controls with no expanded touch targets. Preset items use the
+Temperature and percentage fields use 28px boxes with tighter horizontal insets
+and 2px vertical margins, leaving 4px between stacked temperature targets.
+Preset/Cooldown buttons and fan actions retain compact 32px controls without
+expanded touch targets. Preset items use the
 existing menu padding at 28px height; keyboard navigation and visible focus
 remain available. The committed HTML reference uses the same group styling and
 numeric sizing. No coarse-pointer-specific enlargement is applied.

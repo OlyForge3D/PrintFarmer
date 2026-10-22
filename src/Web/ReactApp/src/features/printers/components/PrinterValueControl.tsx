@@ -132,12 +132,12 @@ export function PrinterValueControl({
     setMessage('');
   };
   const numeric = (
-    <label data-value-field className={`relative m-0! flex h-8 shrink-0 items-center @[441px]/sensors:w-[5.5rem] ${mode === 'slider' ? 'w-[4.75rem]' : 'w-[4.5rem]'}`}>
+    <label data-value-field className={`relative mx-0! my-0.5! flex h-7 shrink-0 items-center @[441px]/sensors:w-[5.5rem] ${mode === 'slider' ? 'w-[4.75rem]' : 'w-[4.5rem]'}`}>
       <Input type="number" aria-label={label} aria-describedby={`${id}-bounds ${messageId}`}
         aria-invalid={error || (draft !== null && !validValue(parsed)) || undefined}
         aria-busy={busy.current} min={min} max={max} step={step && step > 0 ? step : 'any'}
         value={shown} disabled={locked}
-        className="h-8! min-h-8! py-0! border-pf-control-boundary! text-right text-xs! font-medium text-pf-text-primary! pl-1! pr-6! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-7! min-h-7! py-0! border-pf-control-boundary! text-right text-xs! font-medium text-pf-text-primary! pl-0.5! pr-5! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onChange={event => preview(event.target.value)}
         onBlur={() => {
           if (replaceNumberBlur.current) { replaceNumberBlur.current = false; return; }
