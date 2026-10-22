@@ -281,7 +281,9 @@ describe("PrinterDetailsSidebar", () => {
   });
 
   it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
-    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state, backend: PrinterBackend.Moonraker }}
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state, backend: PrinterBackend.Moonraker,
+      activeExtruderId: 'extruder', sensors: [{ id: 'extruder', displayName: 'Extruder', kind: 'Nozzle', available: true, readings: [],
+        writable: [{ quantity: 'TargetTemperature', unit: 'Celsius', min: 0, max: 300, step: null, allowZero: true }] }] }}
       backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsHeaterShutdown: true })}
       onClose={vi.fn()} />);
     expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeEnabled();
@@ -289,6 +291,12 @@ describe("PrinterDetailsSidebar", () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(mockTurnOffHeaters).toHaveBeenCalledExactlyOnceWith(printer.id));
     expect(mockSetTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, backend: PrinterBackend.Moonraker }}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />);
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
   });
 
   it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {
@@ -318,6 +326,22 @@ describe("PrinterDetailsSidebar", () => {
         expect(actual.classList.contains(color)).toBe(compact.classList.contains(color));
       }
     }
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('does not resurrect last-known numbers after an authoritative Moonraker snapshot clears them', () => {
+    const hot: Printer = { ...printer, backend: PrinterBackend.Moonraker, activeExtruderId: 'extruder3',
+      hotendTemp: 205, bedTemp: 60, sensors: [] };
+    const contents = (current: Printer) => <PrinterDetailsSidebar printerId={printer.id} printer={current}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />;
+    const { container, rerender } = render(contents(hot));
+    const thermal = () => container.querySelector('[data-printer-sensor-section="Temperatures"]')!;
+    expect(thermal()).toHaveTextContent('205.0°C');
+    expect(thermal()).toHaveTextContent('60.0°C');
+    rerender(contents({ ...hot, activeExtruderId: null, hotendTemp: undefined, bedTemp: undefined }));
+    expect(thermal()).not.toHaveTextContent('205.0°C');
+    expect(thermal()).not.toHaveTextContent('60.0°C');
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
     expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 

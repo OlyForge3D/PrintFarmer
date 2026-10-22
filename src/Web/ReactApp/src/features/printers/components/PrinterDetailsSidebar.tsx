@@ -394,7 +394,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
-  const activeExtruderId = printer?.backend === PrinterBackend.Moonraker ? printer.activeExtruderId : undefined;
+  const activeExtruderId = printer?.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
+  const hasMoonrakerSensorSnapshot = printer?.backend === PrinterBackend.Moonraker && printer.sensors !== undefined;
 
   // Authoritative reviewed revision for spool mutations. `displayPrinter`
   // (and thus the passed-in prop) can lack `rowVersion` when it was sourced from
@@ -1209,8 +1210,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             additionalRows={additionalRows}
             hotendTarget={displayPrinter?.hotendTarget}
             bedTarget={displayPrinter?.bedTarget}
-            hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
-            bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            hotendCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.hotendTemp : displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
+            bedCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.bedTemp : displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
             reportedTemperatures={displayPrinter ?? {}}
             maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
             maxBedTemp={printerDetails?.capabilities?.maxBedTemp}

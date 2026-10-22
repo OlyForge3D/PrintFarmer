@@ -223,7 +223,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const isEnabled = printer.isEnabled ?? true;
   const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
-  const activeExtruderId = printer.backend === PrinterBackend.Moonraker ? printer.activeExtruderId : undefined;
+  const activeExtruderId = printer.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
   const isShutdown = isPrinterStateShutdown(state);
   const statusLabel = getPrinterDisplayState({
     printerState: state,

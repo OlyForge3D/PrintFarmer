@@ -281,6 +281,12 @@ Unknown active identity clears primary readings and blocks the primary control.
 Omitted fields in Klipper deltas retain their previous values; explicit null or
 invalid readings clear that field. Safety timestamps belong to each measured
 field; an unrelated fan update does not refresh heater evidence.
+The JSON serializer omits null fields: a complete Moonraker `sensors` snapshot is
+authoritative for its accompanying primary heater fields, so missing primary
+numbers clear the web display rather than restoring older API/sidebar values.
+Missing active identity on a Moonraker response means unknown, not tool zero.
+Updates without a complete sensor snapshot and other backends retain their
+existing partial-update merge behavior.
 
 | Klipper object | Kind / role | Readings | Writable |
 |---|---|---|---|

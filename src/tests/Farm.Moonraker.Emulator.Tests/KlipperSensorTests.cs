@@ -4,12 +4,15 @@ using System.Text;
 using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Moonraker.Emulator.Domain;
 using FluentAssertions;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Moonraker.Emulator.Tests;
@@ -79,6 +82,21 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
             Assert.NotNull(status.Sensors);
             status.Sensors.Where(sensor => sensor.Kind == PrinterSensorKind.Nozzle)
                 .Select(sensor => sensor.Id).Should().BeEquivalentTo("extruder", "extruder1", "extruder2", "extruder3");
+
+            var breakers = new Mock<ICircuitBreakerService>();
+            breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null))
+                .Returns(new CircuitBreaker());
+            var statusClient = new MoonrakerStatusClient(
+                client, breakers.Object,
+                new ManagedSpoolProviderHelper(Mock.Of<ISpoolmanStatusCache>(), NullLogger<ManagedSpoolProviderHelper>.Instance),
+                NullLogger<MoonrakerStatusClient>.Instance);
+            PrinterStatusDto polled = await statusClient.GetPrinterStatusAsync(
+                new Printer { Id = Guid.NewGuid(), Name = "Four tool", ServerUrl = root, BackendPort = 80 },
+                CancellationToken.None);
+            polled.ActiveExtruderId.Should().Be("extruder3");
+            polled.Sensors.Should().BeEquivalentTo(status.Sensors, options => options.Excluding(sensor => sensor.LastUpdated));
+            polled.Sensors.Should().OnlyContain(sensor => sensor.LastUpdated.HasValue);
+            polled.HotendTemp.Should().BeApproximately(26.4, 0.0001);
 
             (await client.SetTempsAsync(root, 220.5, null)).Should().BeTrue();
             PrinterCompositeStatus edited = await client.GetCompositeStatusAsync(root, null);

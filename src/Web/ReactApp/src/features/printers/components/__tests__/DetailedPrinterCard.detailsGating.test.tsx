@@ -101,7 +101,7 @@ function makePrinter(overrides: Partial<Printer> = {}): Printer {
   return {
     id: 'printer-1',
     name: 'Printer 1',
-    backend: PrinterBackend.Moonraker,
+    backend: PrinterBackend.PrusaLink,
     backendUrl: 'http://printer-1.local',
     frontendUrl: 'http://printer-1.local',
     isOnline: true,
@@ -126,7 +126,10 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
   });
 
   it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
-    render(<DetailedPrinterCard printer={makePrinter({ state })} backendCapabilities={{
+    render(<DetailedPrinterCard printer={makePrinter({ state, backend: PrinterBackend.Moonraker, activeExtruderId: 'extruder',
+      sensors: [{ id: 'extruder', displayName: 'Extruder', kind: 'Nozzle', available: true, readings: [],
+        writable: [{ quantity: 'TargetTemperature', unit: 'Celsius', min: 0, max: 300, step: null, allowZero: true }] }],
+    })} backendCapabilities={{
       printerId: 'printer-1', printerName: 'Printer 1', backend: PrinterBackend.Moonraker,
       supportsCamera: false, supportsFileDownload: false, supportsFileList: false, supportsFileUpload: false,
       supportsStartPrint: false, supportsControlOperations: false, supportsFileMetadata: false,
@@ -139,6 +142,11 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(turnOffHeatersMock).toHaveBeenCalledExactlyOnceWith('printer-1'));
     expect(setTemperaturesMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
+    render(<DetailedPrinterCard printer={makePrinter({ backend: PrinterBackend.Moonraker })} />);
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
   });
 
   it.each([
