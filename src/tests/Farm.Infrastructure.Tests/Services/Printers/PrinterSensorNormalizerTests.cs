@@ -264,6 +264,46 @@ public sealed class PrinterSensorNormalizerTests
         Assert.Equal(PrinterSensorControlValidationCode.InvalidValue, result.Code);
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(5, false)]
+    [InlineData(10, true)]
+    [InlineData(65, true)]
+    [InlineData(66, false)]
+    public void ValidateControl_PositiveMinimumHeater_AllowsOnlyOffOrHeatingInterval(double target, bool accepted)
+    {
+        PrinterSensorDto heater = new("heater_generic chamber", "Chamber", PrinterSensorKind.Chamber)
+        {
+            Writable = [new(PrinterSensorQuantity.TargetTemperature, 10, 65, null, PrinterSensorUnit.Celsius) { AllowZero = true }],
+        };
+
+        Assert.Equal(accepted, PrinterSensorNormalizer.ValidateControl(
+            [heater], heater.Id, PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(target)).IsValid);
+        Assert.False(PrinterSensorNormalizer.ValidateControl(
+            [heater with { Writable = [heater.Writable[0] with { AllowZero = false }] }],
+            heater.Id, PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(0)).IsValid);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ValidateControl_Enabled_AcceptsOnlyBoolean(bool enabled)
+    {
+        PrinterSensorDto sensor = new("filament_switch_sensor runout", "Runout", PrinterSensorKind.FilamentRunout)
+        {
+            Writable = [new(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None)],
+        };
+
+        Assert.True(PrinterSensorNormalizer.ValidateControl(
+            [sensor], sensor.Id, PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)).IsValid);
+        Assert.False(PrinterSensorNormalizer.ValidateControl(
+            [sensor], sensor.Id, PrinterSensorQuantity.Enabled, PrinterSensorValue.FromNumber(enabled ? 1 : 0)).IsValid);
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(
+            new PrinterSensorSetRequest(PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)), WebJson));
+        Assert.Equal("Enabled", json.RootElement.GetProperty("quantity").GetString());
+        Assert.Equal(enabled, json.RootElement.GetProperty("value").GetBoolean());
+    }
+
     [Fact]
     public void Serialization_UsesCamelCaseStringEnumsAndBareValues()
     {

@@ -202,6 +202,7 @@ public sealed class PrinterAggregate
             ExtruderTemperature = 23.4;
             BedTemperature = 22.1;
             _sensors.Reset();
+            _sensors.SetMultipleExtruders(Mmu.Mode == MmuMode.SnapmakerU1);
             Position = [120.0, 120.0, 5.0, 0.0];
             HomedAxes = "xyz";
             AbsoluteCoordinates = true;
@@ -506,6 +507,14 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
+                if (trimmed.Equals("TURN_OFF_HEATERS", StringComparison.OrdinalIgnoreCase))
+                {
+                    ExtruderTarget = 0;
+                    BedTarget = 0;
+                    _sensors.TurnOffHeaters();
+                    continue;
+                }
+
                 if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase))
                 {
                     Dictionary<string, string> parameters = KlipperSensorFixture.ParseParameters(trimmed);
@@ -519,7 +528,7 @@ public sealed class PrinterAggregate
                     {
                         if (!double.TryParse(targetText, System.Globalization.NumberStyles.Float,
                                 System.Globalization.CultureInfo.InvariantCulture, out double target) ||
-                            !double.IsFinite(target) || target < 0)
+                            !double.IsFinite(target) || target < 0 || target > (heater == "extruder" ? 300 : 120))
                         {
                             throw new GcodeParameterException("Expected a finite, non-negative heater target.");
                         }
@@ -645,6 +654,18 @@ public sealed class PrinterAggregate
                 // ---- Qidibox gate control macros (PrintersController's mmu/gate-action) ----
                 if (Regex.IsMatch(trimmed, @"^T(\d+)$", RegexOptions.IgnoreCase))
                 {
+                    if (Mmu.Mode == MmuMode.SnapmakerU1)
+                    {
+                        if (!int.TryParse(trimmed.AsSpan(1), System.Globalization.CultureInfo.InvariantCulture, out int index) ||
+                            index is < 0 or > 3)
+                        {
+                            throw new GcodeParameterException("Expected a configured tool from T0 to T3.");
+                        }
+
+                        Mmu.SnapmakerU1ActiveToolheadIndex = index;
+                        continue;
+                    }
+
                     ApplyQidiboxLoadLocked(trimmed);
                     continue;
                 }
@@ -689,6 +710,7 @@ public sealed class PrinterAggregate
     private void ApplyFirmwareRestartLocked()
     {
         _sensors.Reset();
+        _sensors.SetMultipleExtruders(Mmu.Mode == MmuMode.SnapmakerU1);
         KlippyState = "ready";
         KlippyStateMessage = "Printer is ready and A okay!";
         PrintState = "standby";
@@ -1233,6 +1255,7 @@ public sealed class PrinterAggregate
         lock (_stateLock)
         {
             Mmu.Mode = mode;
+            _sensors.SetMultipleExtruders(mode == MmuMode.SnapmakerU1);
         }
     }
 }

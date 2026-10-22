@@ -17,6 +17,7 @@ import type {
   PrintJobObjectDto,
   PrintJobObjectListDto,
 } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
@@ -222,6 +223,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const isEnabled = printer.isEnabled ?? true;
   const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
+  const activeExtruderId = printer.backend === PrinterBackend.Moonraker ? printer.activeExtruderId : undefined;
   const isShutdown = isPrinterStateShutdown(state);
   const statusLabel = getPrinterDisplayState({
     printerState: state,
@@ -239,7 +241,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
-  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support, supportsHeaterShutdown: backendCapabilities?.supportsHeaterShutdown });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
@@ -378,7 +380,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   };
 
   const handleApplyPreset = async (preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || (preset.toLowerCase() !== 'cooldown' && (isPrinting || isPaused))) {
       return;
     }
 
@@ -392,13 +394,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
-      const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities);
+      const limitError = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? undefined : temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities, activeExtruderId);
       if (limitError) {
         toast.error(limitError);
         return;
       }
       
-      const result = await apiClient.setTemperatures(printer.id, targets);
+      const result = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? await apiClient.turnOffHeaters(printer.id)
+        : await apiClient.setTemperatures(printer.id, targets);
       
       if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
@@ -413,7 +418,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   };
 
   const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || isPrinting || isPaused) {
       return;
     }
 
@@ -424,7 +429,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     }
 
     const targets = { [heater]: presetTargets[heater] };
-    const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities);
+    const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities, activeExtruderId);
     if (limitError) {
       toast.error(limitError);
       return;
@@ -881,13 +886,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       <PrinterSensorsSection
         printerId={printer.id}
         sensors={printer.sensors}
-        temperatures={printer}
+        temperatures={{ ...printer, activeExtruderId }}
         supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
         canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
         isOnline={isOnline}
       >
       {additionalRows => <TemperatureControlSection
         printerId={printer.id}
+        activeExtruderId={activeExtruderId}
+        presetsDisabled={isPrinting || isPaused}
         isOnline={isOnline}
         showHeading={false}
         additionalRows={additionalRows}

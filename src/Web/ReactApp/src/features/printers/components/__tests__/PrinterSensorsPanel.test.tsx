@@ -80,6 +80,19 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
   });
 
+  it.each([true, false])('sends a boolean filament Enabled command and preserves detection when enabled is %s', async enabled => {
+    renderPanel([{ ...runout, readings: [...runout.readings, { quantity: 'Enabled', value: enabled, unit: 'None' }],
+      writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] }], { canControl: true });
+    const toggle = screen.getByRole('switch', { name: 'Set Runout Enabled' });
+    expect(toggle).toHaveAttribute('aria-checked', String(enabled));
+    expect(screen.getByLabelText('Runout Filament: Off')).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', 'runout', {
+      quantity: 'Enabled', value: !enabled,
+    }));
+    expect(screen.getByLabelText('Runout Filament: Off')).toBeInTheDocument();
+  });
+
   it.each([
     { kind: 'Nozzle' as const, cold: 50, hot: 50.1, offPath: mdiPrinter3dNozzle, onPath: mdiPrinter3dNozzleAlert, color: 'text-pf-error' },
     { kind: 'Bed' as const, cold: 35, hot: 35.1, offPath: mdiRadiatorDisabled, onPath: mdiRadiator, color: 'text-pf-accent' },

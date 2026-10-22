@@ -43,13 +43,17 @@ export function temperatureTargetLimitError(
   targets: Partial<TempTargets>,
   sensors: PrinterSensor[] | undefined,
   capabilities: Pick<PrinterCapabilitiesDto, 'maxHotendTemp' | 'maxBedTemp'> | undefined,
+  activeExtruderId?: string | null,
 ): string | undefined {
   for (const [heater, label, persistedMax] of [
     ['hotend', 'Hotend', capabilities?.maxHotendTemp],
     ['bed', 'Bed', capabilities?.maxBedTemp],
   ] as const) {
     const target = targets[heater];
-    const { max } = primaryHeaterLimits(sensors, heater, persistedMax);
+    const { min, max, allowZero } = primaryHeaterLimits(sensors, heater, persistedMax, activeExtruderId);
+    if (target !== undefined && !(allowZero && target === 0) && target < min) {
+      return `${label} target ${target}°C is below minimum ${min}°C. Nothing sent.`;
+    }
     if (target !== undefined && max !== undefined && target > max) {
       return `${label} target ${target}°C exceeds maximum ${max}°C. Nothing sent.`;
     }

@@ -207,6 +207,9 @@ public sealed class MoonrakerSubscriptionService(
             }
 
             IMoonrakerClient moonrakerClient = scope.ServiceProvider.GetRequiredService<IMoonrakerClient>();
+            long? originWatermark = await OriginWatermark
+                .CaptureAsync(watermarkReader, _logger, "Moonraker immediate refresh", ct)
+                .ConfigureAwait(false);
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
                 printer.BackendUrl,
                 printer.Credential,
@@ -239,11 +242,16 @@ public sealed class MoonrakerSubscriptionService(
                 null,
                 spoolInfo,
                 FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
-                ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
+                ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
+                ActiveExtruderId: compositeStatus.ActiveExtruderId);
+            statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate);
+            _statusCacheWriter.UpdateStatus(
+                statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds),
+                originWatermark);
 
             await hub!.Clients.Group(
                     Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-                .SendAsync("printerupdated", WithTrackedSensors(printerId, statusUpdate), ct);
+                .SendAsync("printerupdated", statusUpdate, ct);
             _lastHttpPollTimes[printerId] = DateTime.UtcNow;
 
             _logger.LogInformation(
@@ -1004,24 +1012,21 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
-    /// HTTP refresh paths do not read Klipper sensors. Their cache writes leave <c>Sensors</c>
-    /// unassigned (preserving cached sensors without refreshing control freshness), while the
-    /// broadcast carries the last tracked snapshot so it never blanks the client's sensor list.
+    /// Uses fresh authenticated REST sensors or explicitly unavailable last-known readings.
+    /// Cache and broadcasts receive the same complete snapshot.
     /// </summary>
-    private PrinterStatusUpdate WithTrackedSensors(Guid printerId, PrinterStatusUpdate update) =>
-        _printerStates.TryGetValue(printerId, out PrinterState? state) && state.Sensors.HasSensors
-            ? update with { Sensors = state.Sensors.Snapshot() }
-            : update;
+    private PrinterStatusUpdate WithHttpSensors(Guid printerId, PrinterCompositeStatus composite, PrinterStatusUpdate update)
+    {
+        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+        if (composite.Sensors is not null)
+        {
+            state.LastHttpSensors = composite.Sensors;
+            return update with { Sensors = composite.Sensors };
+        }
 
-    /// <summary>
-    /// HTTP polling fallback means the WebSocket is not delivering trustworthy sensor notifications,
-    /// so the broadcast reports the last tracked sensors as unavailable instead of presenting frozen
-    /// values as live. The tracker is left untouched so a recovered subscription restores it.
-    /// </summary>
-    private PrinterStatusUpdate WithStaleTrackedSensors(Guid printerId, PrinterStatusUpdate update) =>
-        _printerStates.TryGetValue(printerId, out PrinterState? state) && state.Sensors.HasSensors
-            ? update with { Sensors = [.. state.Sensors.Snapshot().Select(sensor => sensor with { Available = false })] }
-            : update;
+        IReadOnlyList<PrinterSensorDto> previous = state.Sensors.HasSensors ? state.Sensors.Snapshot() : state.LastHttpSensors;
+        return update with { Sensors = PrinterSensorNormalizer.MarkUnavailable(previous) };
+    }
 
     /// <summary>
     /// Marks the printer's tracked sensors unavailable and returns the complete snapshot, or null
@@ -1455,16 +1460,6 @@ public sealed class MoonrakerSubscriptionService(
             HandleToolheadUpdate(state, th);
         }
 
-        if (statusObj.TryGetProperty("extruder", out JsonElement ex))
-        {
-            HandleExtruderUpdate(state, ex);
-        }
-
-        if (statusObj.TryGetProperty("heater_bed", out JsonElement hb))
-        {
-            HandleHeaterBedUpdate(state, hb);
-        }
-
         if (statusObj.TryGetProperty("gcode_move", out JsonElement gcodeMove))
         {
             HandleGcodeMoveUpdate(state, gcodeMove);
@@ -1511,6 +1506,8 @@ public sealed class MoonrakerSubscriptionService(
         {
             _ = state.Sensors.MarkAllUnavailable();
         }
+
+        SyncPrimaryHeaterReadings(state);
 
         // Get spool information for consolidated update (cached; refreshed at most once per TTL)
         PrinterSpoolInfoDto? spoolInfo = await GetSpoolInfoCachedAsync(printerId, serverUrl, ct);
@@ -1727,50 +1724,16 @@ public sealed class MoonrakerSubscriptionService(
     }
 
     /// <summary>
-    /// Handles extruder temperature and target updates.
-    /// Extracts temperature and target values and updates persistent state;
-    /// the values reach clients via the consolidated "printerupdated" broadcast.
+    /// Projects primary temperatures from the same tracked objects as the sensor list.
+    /// Tool changes retain each field's real observation time; null readings never become zero.
     /// </summary>
-    /// <param name="state">The persistent printer state to update.</param>
-    /// <param name="ex">The extruder JSON element from the status update.</param>
-    private static void HandleExtruderUpdate(PrinterState state, JsonElement ex)
+    private static void SyncPrimaryHeaterReadings(PrinterState state)
     {
-        double? temperature = null, target = null;
-
-        if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-        {
-            try
-            {
-                temperature = t.GetDouble();
-            }
-            catch
-            {
-            }
-        }
-
-        if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-        {
-            try
-            {
-                target = tt.GetDouble();
-            }
-            catch
-            {
-            }
-        }
-
-        // Update persistent state
-        if (temperature.HasValue)
-        {
-            state.HotendTemp = temperature;
-            state.HotendTempObservedAtUtc = DateTime.UtcNow;
-        }
-
-        if (target.HasValue)
-        {
-            state.HotendTarget = target;
-            state.HotendTargetObservedAtUtc = DateTime.UtcNow;
-        }
+        state.ActiveExtruderId = state.Sensors.ActiveExtruderId;
+        (state.HotendTemp, state.HotendTempObservedAtUtc) = state.Sensors.ReadScalar(state.ActiveExtruderId, "temperature");
+        (state.HotendTarget, state.HotendTargetObservedAtUtc) = state.Sensors.ReadScalar(state.ActiveExtruderId, "target");
+        state.BedTemp = state.Sensors.ReadScalar(MoonrakerSensorMapper.HeaterBed, "temperature").Value;
+        state.BedTarget = state.Sensors.ReadScalar(MoonrakerSensorMapper.HeaterBed, "target").Value;
     }
 
     /// <summary>Updates the independent safety origin offset reported by G-code movement.</summary>
@@ -1876,51 +1839,6 @@ public sealed class MoonrakerSubscriptionService(
             double.IsFinite(x) &&
             double.IsFinite(y) &&
             double.IsFinite(z);
-    }
-
-    /// <summary>
-    /// Handles heated bed temperature and target updates.
-    /// Extracts temperature and target values and updates persistent state;
-    /// the values reach clients via the consolidated "printerupdated" broadcast.
-    /// </summary>
-    /// <param name="state">The persistent printer state to update.</param>
-    /// <param name="hb">The heater_bed JSON element from the status update.</param>
-    private static void HandleHeaterBedUpdate(PrinterState state, JsonElement hb)
-    {
-        double? temperature = null, target = null;
-
-        if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-        {
-            try
-            {
-                temperature = t.GetDouble();
-            }
-            catch
-            {
-            }
-        }
-
-        if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-        {
-            try
-            {
-                target = tt.GetDouble();
-            }
-            catch
-            {
-            }
-        }
-
-        // Update persistent state
-        if (temperature.HasValue)
-        {
-            state.BedTemp = temperature;
-        }
-
-        if (target.HasValue)
-        {
-            state.BedTarget = target;
-        }
     }
 
     /// <summary>
@@ -3185,12 +3103,12 @@ public sealed class MoonrakerSubscriptionService(
                     state.HotendTemp,
                     state.HotendTempObservedAtUtc,
                     PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                    "moonraker:extruder.temperature"),
+                    $"moonraker:{state.ActiveExtruderId ?? "unknown"}.temperature"),
                 new SafetyScalarTelemetryFactDto(
                     state.HotendTarget,
                     state.HotendTargetObservedAtUtc,
                     PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                    "moonraker:extruder.target"),
+                    $"moonraker:{state.ActiveExtruderId ?? "unknown"}.target"),
                 new SafetyAxesTelemetryFactDto(
                     state.HomedAxes?
                         .Where(char.IsAsciiLetter)
@@ -3231,7 +3149,8 @@ public sealed class MoonrakerSubscriptionService(
                 CurrentLayer: state.CurrentLayer,
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
-                LiveZOffsetMm: state.LiveZOffsetMm)
+                LiveZOffsetMm: state.LiveZOffsetMm,
+                ActiveExtruderId: state.ActiveExtruderId)
             {
                 Sensors = sensors,
             };
@@ -3272,7 +3191,8 @@ public sealed class MoonrakerSubscriptionService(
                 CurrentLayer: state.CurrentLayer,
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
-                LiveZOffsetMm: state.LiveZOffsetMm)
+                LiveZOffsetMm: state.LiveZOffsetMm,
+                ActiveExtruderId: state.ActiveExtruderId)
             {
                 Sensors = sensors,
             };
@@ -3825,7 +3745,9 @@ public sealed class MoonrakerSubscriptionService(
                     null, // HomedAxes - Not available in CompositeStatus
                     spoolInfo,
                     FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
-                    ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity);
+                    ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
+                    ActiveExtruderId: compositeStatus.ActiveExtruderId);
+                statusUpdate = WithHttpSensors(printer.Id, compositeStatus, statusUpdate);
 
                 try
                 {
@@ -3843,7 +3765,7 @@ public sealed class MoonrakerSubscriptionService(
 
                     await hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printer.Id))
-                        .SendAsync("printerupdated", WithStaleTrackedSensors(printer.Id, statusUpdate), ct);
+                        .SendAsync("printerupdated", statusUpdate, ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded
                     _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;

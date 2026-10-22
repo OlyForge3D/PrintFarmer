@@ -25,6 +25,8 @@ internal sealed class PrinterState
 
     public double? HotendTemp { get; set; }
 
+    public string? ActiveExtruderId { get; set; }
+
     public DateTime? HotendTempObservedAtUtc { get; set; }
 
     public double? BedTemp { get; set; }
@@ -66,6 +68,8 @@ internal sealed class PrinterState
 
     /// <summary>Backend-neutral Klipper sensor/fan telemetry (issue #3407).</summary>
     public MoonrakerSensorTracker Sensors { get; } = new();
+
+    public IReadOnlyList<PrinterSensorDto> LastHttpSensors { get; set; } = [];
 
     public void ResetLiveReadbacks()
     {

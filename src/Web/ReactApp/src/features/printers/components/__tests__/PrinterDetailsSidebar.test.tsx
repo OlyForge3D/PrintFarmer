@@ -50,6 +50,7 @@ const mockToastError = vi.fn();
 const mockMovePrinterTo = vi.fn();
 const mockGetPrinterVersionInfo = vi.fn();
 const mockSetTemperatures = vi.fn();
+const mockTurnOffHeaters = vi.fn();
 let mockPrinterDetails: Partial<PrinterDetails> | undefined;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: (printer: Printer) => ({
@@ -158,6 +159,7 @@ vi.mock("@/common/hooks/useApi", () => ({
 
 vi.mock("@/services/api", () => ({
   apiClient: {
+    turnOffHeaters: (printerId: string) => mockTurnOffHeaters(printerId),
     setTemperatures: (printerId: string, targets: object) => mockSetTemperatures(printerId, targets),
     getPrinterVersionInfo: (printerId: string, options?: { forceRefresh?: boolean }) =>
       mockGetPrinterVersionInfo(printerId, options),
@@ -251,6 +253,7 @@ describe("PrinterDetailsSidebar", () => {
     mockGetPrinterVersionInfo.mockReset();
     mockPrinterDetails = undefined;
     mockSetTemperatures.mockReset().mockResolvedValue({ success: true });
+    mockTurnOffHeaters.mockReset().mockResolvedValue({ success: true });
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -275,6 +278,17 @@ describe("PrinterDetailsSidebar", () => {
     ]) {
       command.mockReset().mockResolvedValue({ success: true });
     }
+  });
+
+  it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state, backend: PrinterBackend.Moonraker }}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsHeaterShutdown: true })}
+      onClose={vi.fn()} />);
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(mockTurnOffHeaters).toHaveBeenCalledExactlyOnceWith(printer.id));
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 
   it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {

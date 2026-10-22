@@ -17,6 +17,7 @@ const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn<() => { data: Partial<PrinterDetails> | undefined; isLoading: boolean }>(() => ({ data: undefined, isLoading: false }))
 );
 const setTemperaturesMock = vi.hoisted(() => vi.fn());
+const turnOffHeatersMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const printerHistoryModalMock = vi.hoisted(() =>
@@ -91,7 +92,7 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: setTemperaturesMock } }));
+vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: setTemperaturesMock, turnOffHeaters: turnOffHeatersMock } }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: toastErrorMock, info: vi.fn() } }));
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
@@ -120,7 +121,24 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
     printerHistoryModalMock.mockClear();
     setTemperaturesMock.mockReset().mockResolvedValue({ success: true });
+    turnOffHeatersMock.mockReset().mockResolvedValue({ success: true });
     toastErrorMock.mockClear();
+  });
+
+  it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
+    render(<DetailedPrinterCard printer={makePrinter({ state })} backendCapabilities={{
+      printerId: 'printer-1', printerName: 'Printer 1', backend: PrinterBackend.Moonraker,
+      supportsCamera: false, supportsFileDownload: false, supportsFileList: false, supportsFileUpload: false,
+      supportsStartPrint: false, supportsControlOperations: false, supportsFileMetadata: false,
+      supportsMovement: false, supportsTemperatureControl: true, supportsPrinterInformation: false,
+      supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: false,
+      supportsHeaterShutdown: true,
+    }} />);
+    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(turnOffHeatersMock).toHaveBeenCalledExactlyOnceWith('printer-1'));
+    expect(setTemperaturesMock).not.toHaveBeenCalled();
   });
 
   it.each([

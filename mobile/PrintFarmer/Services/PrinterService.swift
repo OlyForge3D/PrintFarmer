@@ -213,7 +213,8 @@ actor PrinterService: PrinterServiceProtocol {
 
     func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
         try Task.checkCancellation()
-        guard value.isFinite, quantity != .unknown else {
+        guard value.isFinite, quantity != .unknown,
+              quantity != .enabled || value == 0 || value == 1 else {
             throw PrinterControlError.invalidRequest("Sensor value is not valid.")
         }
         let result: CommandResult = try await apiClient.post(
@@ -439,6 +440,18 @@ struct SetTemperaturesRequest: Encodable {
 struct SensorControlRequest: Encodable, Sendable {
     let quantity: String
     let value: Double
+
+    private enum CodingKeys: String, CodingKey { case quantity, value }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(quantity, forKey: .quantity)
+        if quantity == SensorQuantity.enabled.rawValue {
+            try container.encode(value == 1, forKey: .value)
+        } else {
+            try container.encode(value, forKey: .value)
+        }
+    }
 }
 
 struct FanSpeedRequest: Encodable, Sendable {

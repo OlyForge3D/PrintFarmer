@@ -34,7 +34,8 @@ public record PrinterStatusUpdate(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null)
+    double? LiveZOffsetMm = null,
+    string? ActiveExtruderId = null)
 {
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
@@ -90,7 +91,8 @@ public record PrinterStatusUpdate(
             CurrentLayer: CurrentLayer,
             TotalLayers: TotalLayers,
             FanSpeedPercent: FanSpeedPercent,
-            LiveZOffsetMm: LiveZOffsetMm);
+            LiveZOffsetMm: LiveZOffsetMm,
+            ActiveExtruderId: ActiveExtruderId);
         return SensorsReported ? status with { Sensors = Sensors } : status;
     }
 }

@@ -48,6 +48,15 @@ do not gain an invented snapshot endpoint.
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
+### Moonraker temperature and sensor controls
+
+The primary Hotend follows the active physical tool; additional extruders retain
+their own bounded target controls. Manual targets remain editable during printing
+and pause, while preset menus are disabled. Cooldown explicitly turns off all
+heaters, not just the active nozzle and bed. Filament-monitor enable switches,
+raw gas resistance, measured temperature extrema and authenticated fallback
+telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
+
 ### Moonraker motion controls
 
 Homing, jogging, and absolute movement use direct POST requests to the existing

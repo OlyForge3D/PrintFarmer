@@ -5,7 +5,7 @@ using Farm.Infrastructure;
 namespace Farm.Backend.Plugin.Moonraker;
 
 /// <summary>Configured limits of one Klipper config section read from <c>configfile.settings</c>.</summary>
-internal sealed record MoonrakerSectionSettings(double? MinTemp, double? MaxTemp, string? SensorType);
+internal sealed record MoonrakerSectionSettings(double? MinTemp, double? MaxTemp, string? SensorType, bool InvalidBounds = false);
 
 /// <summary>
 /// Maps Klipper sensor and fan objects to backend-neutral <see cref="PrinterSensorDto"/> entries
@@ -27,8 +27,7 @@ internal static class MoonrakerSensorMapper
 
     private const int MaxObjectNameLength = 64;
 
-    // Generic environmental objects are only those exposing one of these fields (issue scope).
-    private static readonly string[] GenericFields = ["temperature", "humidity", "pressure"];
+    private static readonly string[] GenericFields = ["temperature", "humidity", "pressure", "gas"];
 
     // Objects that never describe a sensor even if a future Klipper adds a numeric field.
     private static readonly HashSet<string> NonSensorTypes = new(StringComparer.Ordinal)
@@ -100,7 +99,7 @@ internal static class MoonrakerSensorMapper
             }
 
             string type = Split(section.Name).Type;
-            if (type is not (TemperatureSensor or TemperatureFan or HeaterGeneric))
+            if (!IsExtruder(type) && type is not (HeaterBed or TemperatureSensor or TemperatureFan or HeaterGeneric))
             {
                 continue;
             }
@@ -112,7 +111,9 @@ internal static class MoonrakerSensorMapper
             result[section.Name] = new MoonrakerSectionSettings(
                 ReadTargetBound(section.Value, "min_temp", "target_min_temp", Math.Max),
                 ReadTargetBound(section.Value, "max_temp", "target_max_temp", Math.Min),
-                sensorTypeName);
+                sensorTypeName,
+                new[] { "min_temp", "max_temp", "target_min_temp", "target_max_temp" }.Any(field =>
+                    section.Value.TryGetProperty(field, out _) && ReadFiniteNumber(section.Value, field) is null));
         }
 
         return result;
@@ -141,9 +142,8 @@ internal static class MoonrakerSensorMapper
             : null;
 
     /// <summary>
-    /// The writable descriptors advertised for an object. Only the part fan, <c>fan_generic</c>,
-    /// and <c>temperature_fan</c>/<c>heater_generic</c> with configured finite min/max bounds are
-    /// writable, and only when the object name is safe to interpolate into G-code.
+    /// Advertises manual fans, filament enablement and heaters with configured finite bounds.
+    /// Automatic heater/controller fans remain read-only.
     /// </summary>
     internal static IReadOnlyList<PrinterSensorWritableDto> GetWritable(
         string objectName,
@@ -155,18 +155,27 @@ internal static class MoonrakerSensorMapper
         }
 
         (string type, string name) = Split(objectName);
+        if ((IsExtruder(type) && name.Length == 0) ||
+            (type == HeaterBed && name.Length == 0) ||
+            (type is TemperatureFan or HeaterGeneric && name.Length > 0))
+        {
+            return settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
+                !section.InvalidBounds &&
+                section.MinTemp is double min && section.MaxTemp is double max &&
+                double.IsFinite(min) && double.IsFinite(max) && Math.Max(0, min) <= max
+                    ? [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, Math.Max(0, min), max, null, PrinterSensorUnit.Celsius)
+                        { AllowZero = true }]
+                    : [];
+        }
+
         switch (type)
         {
             case PartFan when name.Length == 0:
                 return [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, 1, PrinterSensorUnit.Percent)];
             case FanGeneric when name.Length > 0:
                 return [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, 1, PrinterSensorUnit.Percent)];
-            case TemperatureFan or HeaterGeneric when name.Length > 0 &&
-                settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
-                section.MinTemp is double min &&
-                section.MaxTemp is double max &&
-                Math.Max(0, min) <= max:
-                return [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, Math.Max(0, min), max, null, PrinterSensorUnit.Celsius)];
+            case FilamentSwitchSensor or FilamentMotionSensor when name.Length > 0:
+                return [new PrinterSensorWritableDto(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None)];
             default:
                 return [];
         }
@@ -190,12 +199,13 @@ internal static class MoonrakerSensorMapper
         }
 
         PrinterSensorWritableDto? descriptor = GetWritable(sensorId, settings).FirstOrDefault(writable => writable.Quantity == quantity);
-        if (descriptor is null || value < descriptor.Min || value > descriptor.Max)
+        bool off = value == 0 && descriptor?.AllowZero == true && quantity == PrinterSensorQuantity.TargetTemperature;
+        if (descriptor is null || (!off && (value < descriptor.Min || value > descriptor.Max)))
         {
             return null;
         }
 
-        if (descriptor.Step is double step && Math.Abs(((value - descriptor.Min) / step) - Math.Round((value - descriptor.Min) / step)) > 1e-6)
+        if (!off && descriptor.Step is double step && Math.Abs(((value - descriptor.Min) / step) - Math.Round((value - descriptor.Min) / step)) > 1e-6)
         {
             return null;
         }
@@ -207,6 +217,9 @@ internal static class MoonrakerSensorMapper
             FanGeneric => string.Create(CultureInfo.InvariantCulture, $"SET_FAN_SPEED FAN={name} SPEED={value / 100d:0.###}"),
             TemperatureFan => string.Create(CultureInfo.InvariantCulture, $"SET_TEMPERATURE_FAN_TARGET temperature_fan={name} target={value:0.##}"),
             HeaterGeneric => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={name} TARGET={value:0.##}"),
+            HeaterBed => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
+            _ when IsExtruder(type) => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
+            FilamentSwitchSensor or FilamentMotionSensor => $"SET_FILAMENT_SENSOR SENSOR={name} ENABLE={(value is 1 ? 1 : 0)}",
             _ => null,
         };
     }
@@ -318,19 +331,19 @@ internal static class MoonrakerSensorMapper
     private static readonly FieldMapping Humidity = new("humidity", PrinterSensorQuantity.Humidity, PrinterSensorUnit.Percent);
     private static readonly FieldMapping Pressure = new("pressure", PrinterSensorQuantity.Pressure, PrinterSensorUnit.HectoPascal);
     private static readonly FieldMapping Gas = new("gas", PrinterSensorQuantity.Gas, PrinterSensorUnit.Ohm);
+    private static readonly FieldMapping MeasuredMin = new("measured_min_temp", PrinterSensorQuantity.MeasuredMinTemperature, PrinterSensorUnit.Celsius);
+    private static readonly FieldMapping MeasuredMax = new("measured_max_temp", PrinterSensorQuantity.MeasuredMaxTemperature, PrinterSensorUnit.Celsius);
 
     private static readonly FieldMapping[] HeaterFields = [Temperature, Target, Power];
-    private static readonly FieldMapping[] EnvironmentalFields = [Temperature, Humidity, Pressure, Gas];
+    private static readonly FieldMapping[] EnvironmentalFields = [Temperature, Humidity, Pressure, Gas, MeasuredMin, MeasuredMax];
     private static readonly FieldMapping[] TemperatureFanFields = [Temperature, Target, Speed, Rpm];
     private static readonly FieldMapping[] FanFields = [Speed, Rpm];
-    private static readonly FieldMapping[] GenericFieldMappings = [Temperature, Humidity, Pressure];
+    private static readonly FieldMapping[] GenericFieldMappings = [Temperature, Humidity, Pressure, Gas];
 
-    // The contract has no "enabled" quantity, so a disabled runout sensor is reported as a
-    // boolean Other reading next to filament_detected.
     private static readonly FieldMapping[] FilamentFields =
     [
         new("filament_detected", PrinterSensorQuantity.FilamentDetected, PrinterSensorUnit.None),
-        new("enabled", PrinterSensorQuantity.Other, PrinterSensorUnit.None),
+        new("enabled", PrinterSensorQuantity.Enabled, PrinterSensorUnit.None),
     ];
 }
 
@@ -346,12 +359,16 @@ internal sealed class MoonrakerSensorTracker
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private Dictionary<string, MoonrakerSectionSettings> _settings = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string>? _discovered;
+    private string? _activeExtruderId;
+    private bool _activeExtruderReported;
 
     private sealed class Entry(string objectName)
     {
         public string ObjectName { get; } = objectName;
 
         public Dictionary<string, PrinterSensorValue> Values { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, DateTime> ObservedAt { get; } = new(StringComparer.Ordinal);
 
         public bool Available { get; set; } = true;
 
@@ -380,6 +397,8 @@ internal sealed class MoonrakerSensorTracker
         lock (_gate)
         {
             _discovered = new HashSet<string>(objectNames, StringComparer.Ordinal);
+            _activeExtruderId = null;
+            _activeExtruderReported = false;
             foreach (Entry entry in _entries.Values)
             {
                 entry.Available = false;
@@ -399,6 +418,18 @@ internal sealed class MoonrakerSensorTracker
         lock (_gate)
         {
             bool changed = false;
+            if (status.TryGetProperty("toolhead", out JsonElement toolhead) &&
+                toolhead.ValueKind == JsonValueKind.Object &&
+                toolhead.TryGetProperty("extruder", out JsonElement active))
+            {
+                _activeExtruderReported = true;
+                string? id = active.ValueKind == JsonValueKind.String ? active.GetString() : null;
+                _activeExtruderId = id is not null && MoonrakerSensorMapper.IsExtruder(id) &&
+                    MoonrakerSensorMapper.IsSafeObjectName(id) && (_discovered is null || _discovered.Contains(id))
+                        ? id
+                        : null;
+            }
+
             if (status.TryGetProperty("configfile", out JsonElement configfile) &&
                 configfile.ValueKind == JsonValueKind.Object &&
                 configfile.TryGetProperty("settings", out JsonElement settings))
@@ -438,12 +469,15 @@ internal sealed class MoonrakerSensorTracker
                     {
                         case JsonValueKind.Number when value.TryGetDouble(out double number) && double.IsFinite(number):
                             entry.Values[field.Field] = PrinterSensorValue.FromNumber(number * field.Scale);
+                            entry.ObservedAt[field.Field] = nowUtc;
                             break;
                         case JsonValueKind.True or JsonValueKind.False:
                             entry.Values[field.Field] = PrinterSensorValue.FromBoolean(value.GetBoolean());
+                            entry.ObservedAt[field.Field] = nowUtc;
                             break;
                         default:
                             _ = entry.Values.Remove(field.Field);
+                            _ = entry.ObservedAt.Remove(field.Field);
                             break;
                     }
                 }
@@ -486,12 +520,104 @@ internal sealed class MoonrakerSensorTracker
         }
     }
 
+    /// <summary>Active physical heater, with a single-extruder fallback only when unambiguous.</summary>
+    public string? ActiveExtruderId
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_activeExtruderReported)
+                {
+                    return _activeExtruderId;
+                }
+
+                string[] extruders = (_discovered ?? _entries.Keys.ToHashSet(StringComparer.Ordinal))
+                    .Where(MoonrakerSensorMapper.IsExtruder).ToArray();
+                return extruders.Length == 1 ? extruders[0] : null;
+            }
+        }
+    }
+
+    /// <summary>Reads an available scalar and its own observation time, not the last unrelated object update.</summary>
+    public (double? Value, DateTime? ObservedAtUtc) ReadScalar(string? objectName, string field)
+    {
+        lock (_gate)
+        {
+            return objectName is not null && _entries.TryGetValue(objectName, out Entry? entry) && entry.Available &&
+                entry.Values.TryGetValue(field, out PrinterSensorValue value) && value.Number is double number &&
+                entry.ObservedAt.TryGetValue(field, out DateTime observedAt)
+                    ? (number, observedAt)
+                    : (null, null);
+        }
+    }
+
+    /// <summary>Builds a legacy primary-heater write without guessing a tool or ignoring known limits.</summary>
+    public string? BuildPrimaryHeaterCommand(string? objectName, double target)
+    {
+        lock (_gate)
+        {
+            if (objectName is null || _discovered?.Contains(objectName) != true ||
+                !MoonrakerSensorMapper.IsSafeObjectName(objectName) ||
+                (!MoonrakerSensorMapper.IsExtruder(objectName) && objectName != MoonrakerSensorMapper.HeaterBed) ||
+                !double.IsFinite(target) || target < 0)
+            {
+                return null;
+            }
+
+            string? bounded = MoonrakerSensorMapper.TryBuildCommand(
+                objectName, PrinterSensorQuantity.TargetTemperature, target, _discovered, _settings);
+            if (bounded is not null)
+            {
+                return bounded;
+            }
+
+            // Preserve legacy integer entry when limits are absent, never when supplied limits are invalid.
+            if (_settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
+                (section.InvalidBounds ||
+                    (section.MinTemp is double min && section.MaxTemp is double max && min > max) ||
+                    (target != 0 && section.MinTemp is double lower && target < lower) ||
+                    (section.MaxTemp is double upper && target > upper) ||
+                    (section.MinTemp.HasValue && section.MaxTemp.HasValue)))
+            {
+                return null;
+            }
+
+            return target.Equals(Math.Truncate(target))
+                ? string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={objectName} TARGET={target:0}")
+                : null;
+        }
+    }
+
     /// <summary>The complete current sensor list.</summary>
     public IReadOnlyList<PrinterSensorDto> Snapshot()
     {
         lock (_gate)
         {
-            return _entries.Values.Select(BuildDto).ToArray();
+            Dictionary<string, PrinterSensorDto> sensors = _entries.Values.ToDictionary(entry => entry.ObjectName, BuildDto, StringComparer.Ordinal);
+            foreach (Entry driver in _entries.Values.Where(entry => !MoonrakerSensorMapper.IsKnownType(MoonrakerSensorMapper.Split(entry.ObjectName).Type)))
+            {
+                (string type, string name) = MoonrakerSensorMapper.Split(driver.ObjectName);
+                string[] owners = _settings.Where(pair =>
+                    string.Equals(pair.Value.SensorType, type, StringComparison.OrdinalIgnoreCase) &&
+                    (MoonrakerSensorMapper.Split(pair.Key).Name == name || pair.Key == name) &&
+                    sensors.ContainsKey(pair.Key)).Select(pair => pair.Key).ToArray();
+                if (owners.Length != 1)
+                {
+                    continue;
+                }
+
+                PrinterSensorDto owner = sensors[owners[0]];
+                HashSet<PrinterSensorQuantity> quantities = owner.Readings.Select(reading => reading.Quantity).ToHashSet();
+                sensors[owners[0]] = owner with
+                {
+                    Readings = [.. owner.Readings, .. sensors[driver.ObjectName].Readings.Where(reading =>
+                        driver.Available && owner.Available && !quantities.Contains(reading.Quantity))],
+                };
+                _ = sensors.Remove(driver.ObjectName);
+            }
+
+            return sensors.Values.ToArray();
         }
     }
 

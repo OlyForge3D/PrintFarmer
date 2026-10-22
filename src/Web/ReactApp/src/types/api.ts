@@ -256,7 +256,10 @@ export type PrinterSensorQuantity =
   | 'FanSpeed'
   | 'FanRpm'
   | 'Power'
-  | 'FilamentDetected';
+  | 'FilamentDetected'
+  | 'Enabled'
+  | 'MeasuredMinTemperature'
+  | 'MeasuredMaxTemperature';
 
 /** Unit of a sensor reading or writable descriptor. */
 export type PrinterSensorUnit =
@@ -282,6 +285,8 @@ export interface PrinterSensorWritable {
   max: number;
   step?: number | null;
   unit: PrinterSensorUnit;
+  /** Zero is a valid off target even when below min. */
+  allowZero?: boolean;
 }
 
 export interface PrinterSensor {
@@ -301,13 +306,15 @@ export interface PrinterSensor {
 /** Body of `POST /api/printers/{id}/sensors/{sensorId}`. */
 export interface PrinterSensorSetRequest {
   quantity: PrinterSensorQuantity;
-  value: number;
+  value: number | boolean;
 }
 
 /**
  * Temperature readings from printer sensors.
  */
 export interface PrinterTemperatures {
+  /** Physical heater represented by the primary hotend row; null means unknown. */
+  activeExtruderId?: string | null;
   /** Current hotend/nozzle temperature */
   hotendTemp?: number;
   /** Current bed temperature */
@@ -563,6 +570,8 @@ export interface PrinterBackendCapabilitiesDto {
   supportsSensorTelemetry?: boolean;
   /** Backend accepts targeted writes for sensors that advertise `writable` descriptors. */
   supportsSensorControl?: boolean;
+  supportsTemperatureControlDuringPrint?: boolean;
+  supportsHeaterShutdown?: boolean;
 }
 
 /**

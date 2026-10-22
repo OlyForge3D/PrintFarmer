@@ -23,6 +23,7 @@ public static class MoonrakerRestEndpoints
 
         app.MapGet("/printer/objects/list", GetObjectsListAsync);
         app.MapGet("/printer/objects/query", GetObjectsQueryAsync);
+        app.MapPost("/printer/objects/query", PostObjectsQueryAsync);
 
         app.MapPost("/printer/gcode/script", PostGcodeScriptAsync);
         app.MapPost("/printer/emergency_stop", PostEmergencyStopAsync);
@@ -133,6 +134,34 @@ public static class MoonrakerRestEndpoints
 
     private static Task GetObjectsQueryAsync(HttpContext ctx)
     {
+        Dictionary<string, string[]?> requested = ctx.Request.Query.ToDictionary(
+            pair => pair.Key,
+            pair => string.IsNullOrEmpty(pair.Value.ToString())
+                ? null
+                : pair.Value.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries),
+            StringComparer.Ordinal);
+        return WriteObjectsQueryAsync(ctx, requested, includeAllWhenEmpty: true);
+    }
+
+    private sealed record ObjectsQueryRequest(Dictionary<string, string[]?>? Objects);
+
+    private static async Task PostObjectsQueryAsync(HttpContext ctx)
+    {
+        ObjectsQueryRequest? body = await ctx.Request.ReadFromJsonAsync<ObjectsQueryRequest>(MoonrakerJson.Options);
+        if (body?.Objects is null)
+        {
+            await MoonrakerJson.WriteWebRequestErrorAsync(ctx, StatusCodes.Status400BadRequest, "Missing objects parameter");
+            return;
+        }
+
+        await WriteObjectsQueryAsync(ctx, body.Objects, includeAllWhenEmpty: false);
+    }
+
+    private static Task WriteObjectsQueryAsync(
+        HttpContext ctx,
+        Dictionary<string, string[]?> requestedObjects,
+        bool includeAllWhenEmpty)
+    {
         PrinterAggregate p = Printer(ctx);
         p.Tick();
         if (p.KlippyState == "disconnected")
@@ -142,8 +171,9 @@ public static class MoonrakerRestEndpoints
 
         Dictionary<string, object> snapshot = p.BuildObjectsSnapshot();
         var status = new Dictionary<string, object?>(StringComparer.Ordinal);
-        IQueryCollection query = ctx.Request.Query;
-        IEnumerable<string> requested = query.Keys.Count > 0 ? query.Keys : snapshot.Keys;
+        IEnumerable<string> requested = includeAllWhenEmpty && requestedObjects.Count == 0
+            ? snapshot.Keys
+            : requestedObjects.Keys;
         foreach (string name in requested)
         {
             if (!snapshot.TryGetValue(name, out object? value))
@@ -151,16 +181,15 @@ public static class MoonrakerRestEndpoints
                 continue;
             }
 
-            string fieldFilter = query[name].ToString();
-            if (string.IsNullOrEmpty(fieldFilter) || value is not Dictionary<string, object?> fields)
+            requestedObjects.TryGetValue(name, out string[]? fieldFilter);
+            if (fieldFilter is null || value is not Dictionary<string, object?> fields)
             {
                 status[name] = value;
                 continue;
             }
 
             var filtered = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (string field in fieldFilter.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Where(fields.ContainsKey))
+            foreach (string field in fieldFilter.Where(fields.ContainsKey))
             {
                 filtered[field] = fields[field];
             }

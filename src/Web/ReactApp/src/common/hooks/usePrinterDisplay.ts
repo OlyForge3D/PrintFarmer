@@ -40,6 +40,7 @@ function mergePrinterDisplay(printer: Printer, signalRStatus: PrinterStatusUpdat
     y: signalRStatus?.y !== undefined ? signalRStatus.y : printer.y,
     z: signalRStatus?.z !== undefined ? signalRStatus.z : printer.z,
     hotendTemp: signalRStatus?.hotendTemp !== undefined ? signalRStatus.hotendTemp : printer.hotendTemp,
+    activeExtruderId: signalRStatus?.activeExtruderId !== undefined ? signalRStatus.activeExtruderId : printer.activeExtruderId,
     bedTemp: signalRStatus?.bedTemp !== undefined ? signalRStatus.bedTemp : printer.bedTemp,
     hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
     bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,

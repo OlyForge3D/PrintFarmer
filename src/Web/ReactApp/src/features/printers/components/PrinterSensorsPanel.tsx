@@ -28,6 +28,7 @@ const UNIT_SUFFIX: Record<PrinterSensorUnit, string> = {
 const QUANTITY_LABEL: Record<PrinterSensorQuantity, string> = {
   Other: 'Value', Temperature: 'Temperature', TargetTemperature: 'Target', Humidity: 'Humidity',
   Pressure: 'Pressure', Gas: 'Gas', FanSpeed: 'Speed', FanRpm: 'RPM', Power: 'Power', FilamentDetected: 'Filament',
+  Enabled: 'Enabled', MeasuredMinTemperature: 'Measured minimum', MeasuredMaxTemperature: 'Measured maximum',
 };
 
 function isThermalSensor(sensor: PrinterSensor): boolean {
@@ -41,13 +42,15 @@ function getSensorGroup(sensor: PrinterSensor): SensorGroup {
 }
 
 function isVisibleSensor(sensor: PrinterSensor): boolean {
-  return !isHiddenPrinterSensorId(sensor.id) && sensor.kind !== 'FilamentRunout' &&
-    !sensor.readings.some(reading => reading.quantity === 'FilamentDetected') &&
-    (isThermalSensor(sensor) || (sensor.writable ?? []).some(isOutputDescriptor));
+  const filament = sensor.kind === 'FilamentRunout' || sensor.readings.some(reading => reading.quantity === 'FilamentDetected');
+  return !isHiddenPrinterSensorId(sensor.id) &&
+    (filament ? (sensor.writable ?? []).some(descriptor => descriptor.quantity === 'Enabled' && isBinaryDescriptor(descriptor)) :
+      isThermalSensor(sensor) || (sensor.writable ?? []).some(isOutputDescriptor));
 }
 
 function isOutputDescriptor(descriptor: PrinterSensorWritable): boolean {
   return ['FanSpeed', 'Power'].includes(descriptor.quantity) ||
+    (descriptor.quantity === 'Enabled' && isBinaryDescriptor(descriptor)) ||
     (descriptor.quantity === 'Other' && (descriptor.unit === 'Percent' || isBinaryDescriptor(descriptor)));
 }
 
@@ -182,9 +185,12 @@ export function PrinterSensorsPanel({
     const current = typeof reading?.value === 'boolean' ? Number(reading.value) : numericReading(reading);
     return <PrinterValueControl key={`${printerId}-${sensor.id}-${descriptor.quantity}`}
       label={`Set ${formatPrinterSensorName(sensor.displayName)} ${QUANTITY_LABEL[descriptor.quantity]}`}
-      current={current} min={descriptor.min} max={descriptor.max} step={descriptor.step} unit={UNIT_SUFFIX[descriptor.unit]}
+      current={current} min={descriptor.min} max={descriptor.max} step={descriptor.step}
+      allowZero={descriptor.quantity === 'TargetTemperature' && descriptor.allowZero} unit={UNIT_SUFFIX[descriptor.unit]}
       disabled={!canControl || !isOnline || !sensor.available} mode={mode} status={status}
-      onSubmit={value => apiClient.setPrinterSensor(printerId, sensor.id, { quantity: descriptor.quantity, value })}>
+      onSubmit={value => apiClient.setPrinterSensor(printerId, sensor.id, {
+        quantity: descriptor.quantity, value: descriptor.quantity === 'Enabled' ? value === 1 : value,
+      })}>
       {children}
     </PrinterValueControl>;
   };

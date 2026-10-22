@@ -404,14 +404,16 @@ public sealed class MoonrakerDirectControlTests
                     """{"result":{"status":{"toolhead":{"position":[1,2,3,0],"homed_axes":"xyz"},"gcode_move":{"gcode_position":[1,2,3,0],"homing_origin":[0,0,0.025,0]}}}}""",
                 "/printer/objects/query?fan=speed" =>
                     """{"result":{"status":{"fan":{"speed":0.65}}}}""",
-                "/printer/objects/query?extruder&heater_bed" =>
-                    """{"result":{"status":{"extruder":{},"heater_bed":{}}}}""",
+                "/printer/objects/list" =>
+                    """{"result":{"objects":["extruder","heater_bed","toolhead"]}}""",
+                "/printer/objects/query" =>
+                    """{"result":{"status":{"extruder":{},"heater_bed":{},"toolhead":{"extruder":"extruder"}}}}""",
                 "/server/webcams/list" =>
                     """{"result":{"webcams":[]}}""",
                 _ => throw new InvalidOperationException($"Unexpected request {request.Method} {pathAndQuery}."),
             };
 
-            if (pathAndQuery.StartsWith("/printer/objects/query", StringComparison.Ordinal))
+            if (pathAndQuery.StartsWith("/printer/objects/", StringComparison.Ordinal))
             {
                 Assert.Equal("fixture-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
             }

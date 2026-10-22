@@ -176,17 +176,17 @@ reported, never inferred from heater state. Mapped primary heater readings appea
 once; extra nozzles and independent temperatures are retained. **Miscellaneous**
 contains only outputs with a writable descriptor; it is hidden when none exist.
 Read-only nonthermal sensors are hidden, while environmental measurements stay
-with their thermal sensor row under **Temperatures**. Filament sensors are hidden
-pending [enable/disable support in #3461](https://github.com/OlyForge3D/PrintFarmer/issues/3461);
-the backend sensor payload is unchanged.
+with their thermal sensor row under **Temperatures**. Filament sensors appear in
+**Miscellaneous** only when they advertise an `Enabled` switch. This changes
+runout monitoring, not filament loading or the detected-filament reading.
 
 Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
 Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and
 disabled values do not send commands. Errors roll back optimistic values and show
 an explicit notification. Sensor writes require queue/start permission,
 sensor-control capability, an enabled online printer and an available sensor with
-a writable descriptor. Output switches are not invented: the current contract
-supports numeric writes only. Empty optional sections are hidden; a telemetry-capable
+a writable descriptor. `Enabled` writes use JSON booleans, not numeric 0/1;
+other writable quantities use numbers. Empty optional sections are hidden; a telemetry-capable
 printer reporting no sensors shows “No sensors reported.”
 
 ```json
@@ -211,9 +211,13 @@ printer reporting no sensors shows “No sensors reported.”
   (`Other`, `PartCooling`, `Hotend`, `Controller`, `Chamber`, `Auxiliary`);
   `fanRole` is omitted for non-fan entries.
 - `quantity`: `Other`, `Temperature`, `TargetTemperature`, `Humidity`,
-  `Pressure`, `Gas`, `FanSpeed`, `FanRpm`, `Power`, `FilamentDetected`.
+  `Pressure`, `Gas`, `FanSpeed`, `FanRpm`, `Power`, `FilamentDetected`, `Enabled`,
+  `MeasuredMinTemperature`, `MeasuredMaxTemperature`.
 - `unit`: `None`, `Celsius`, `Percent`, `HectoPascal`, `Ohm`, `Rpm`, `Watt`.
 - `value` is a bare JSON number or boolean. All enums are strings.
+- A target-temperature descriptor can set `allowZero: true`: accepted values are
+  exactly zero (heater off) or the advertised inclusive interval and step.
+  A positive heating minimum never prevents a safe-off command.
 
 The server normalizes every list: at most 64 sensors, at most 16 readings and
 16 writable descriptors per sensor, ids of 1–128 characters, duplicates
@@ -249,7 +253,7 @@ before any command is sent:
 | Status | Reason |
 |---|---|
 | `200` | Backend confirmed the command (`CommandResult`). |
-| `400` | Missing body, non-numeric value, or a value outside `min`/`max`/`step`. |
+| `400` | Missing body, wrong value type, or a value outside the advertised range/step (including `allowZero`). |
 | `404` | Printer not found or not accessible. |
 | `409` | Unknown or unavailable sensor, read-only sensor, or quantity not writable. |
 | `501` | Backend does not support targeted sensor control. |
@@ -264,22 +268,32 @@ names (for example `temperature_sensor chamber`), so they stay stable across
 reconnects. Objects are re-enumerated on reconnect and `notify_klippy_ready`;
 removed objects and all objects during a Klippy disconnect are reported with
 `available: false`. While the WebSocket subscription is degraded to HTTP polling,
-broadcasts report the last known sensors with `available: false`, because HTTP
-polling does not read Klipper sensors. The next WebSocket status update restores
-availability.
+broadcasts report the last known sensors with `available: false` if HTTP
+polling cannot obtain a sensor snapshot. Successful fallback polls authenticate
+object-list and full status/configuration queries and publish fresh, mapped
+sensors; a failed query preserves the previous list as unavailable, not live.
+The next WebSocket status update restores its own tracked availability.
+
+`activeExtruderId` identifies the physical `extruder`/`extruderN` represented by
+the primary Hotend readings and controls. It follows `toolhead.extruder`, not
+an assumed tool zero. The other extruders remain individually addressed rows.
+Unknown active identity clears primary readings and blocks the primary control.
+Omitted fields in Klipper deltas retain their previous values; explicit null or
+invalid readings clear that field. Safety timestamps belong to each measured
+field; an unrelated fan update does not refresh heater evidence.
 
 | Klipper object | Kind / role | Readings | Writable |
 |---|---|---|---|
-| `extruder*`, `heater_bed` | `Nozzle` / `Bed` | temperature, target, power | — (use existing temperature endpoints) |
+| `extruder*`, `heater_bed` | `Nozzle` / `Bed` | temperature, target, power | named `TargetTemperature` within configured bounds; zero turns off |
 | `heater_generic <name>` | name hint, else `Other` | temperature, target, power | `TargetTemperature` within configured `min_temp`/`max_temp` |
-| `temperature_sensor <name>` | `Mcu`/`Host` from `sensor_type`, else name hint | temperature, humidity, pressure, gas | — |
+| `temperature_sensor <name>` | `Mcu`/`Host` from `sensor_type`, else name hint | temperature, measured min/max, humidity, pressure, gas | — |
 | `temperature_fan <name>` | `Fan` / `Chamber` by name hint, else `Auxiliary` | temperature, target, speed, rpm | `TargetTemperature` within configured `min_temp`/`max_temp` |
 | `fan` | `Fan` / `PartCooling` | speed, rpm | `FanSpeed` 0–100 (`M106`) |
 | `fan_generic <name>` | `Fan` / `Chamber` by name hint, else `Auxiliary` | speed, rpm | `FanSpeed` 0–100 (`SET_FAN_SPEED`) |
 | `heater_fan`, `controller_fan` | `Fan` / `Hotend`, `Controller` | speed, rpm | — (firmware-managed) |
 | Vendor-specific `*_fan` objects | `Fan` / name hint, else `Auxiliary` | speed, rpm | — |
-| `filament_switch_sensor`, `filament_motion_sensor` | `FilamentRunout` | filament detected, enabled (`Other`) | — |
-| Other objects with `temperature`/`humidity`/`pressure` | name hint, else `Other` | those fields | — |
+| `filament_switch_sensor`, `filament_motion_sensor` | `FilamentRunout` | filament detected, `Enabled` (booleans) | `Enabled` via `SET_FILAMENT_SENSOR` |
+| Other objects with `temperature`/`humidity`/`pressure`/`gas` | name hint, else `Other` | those fields | — |
 
 Name hints: `chamber`, `enclosure`, or `exhaust` map to `Chamber`; `ambient`
 maps to `Ambient`. Writes are rejected without sending G-code unless the object
@@ -289,6 +303,28 @@ Temperature controls require finite configured sensor limits, exclude negative
 targets, and intersect those limits with `target_min_temp`/`target_max_temp`
 when a Klipper fork reports separate target limits. Invalid or conflicting
 limits make the control read-only.
+Gas is raw resistance in ohms, not an air-quality score. Wrapper objects such as
+`bme280 <name>` are excluded when their `temperature_sensor <name>` wrapper
+already reports the same physical sensor.
+
+Manual target edits are available while printing or paused on backends with
+`supportsTemperatureControlDuringPrint`; material preset menus are disabled in
+those states. Permission, known-state, online/enabled and command-lease checks
+still apply. This matches Mainsail's distinction between manual temperature input
+and preset menus, not a blanket prohibition on active-print temperature changes.
+
+### `POST /api/printers/{id}/heaters/off`
+
+Requires `Queue.Start`, printer Submit access and `supportsHeaterShutdown`.
+Moonraker sends `TURN_OFF_HEATERS`, including all extruders, the bed and generic
+chamber heaters. It does not turn off automatic cooling fans or temperature fans.
+This operation is available while printing or paused, using the active command
+lease. Unsupported backends return `501`; offline or unconfirmed outcomes return
+`503`, and unknown states return `409`.
+
+This is distinct from `/temps` with zero targets: ordinary zero targets affect
+only the addressed primary heater/bed, never every heater. Successful commands
+report backend acceptance, not verified cooling or physical completion.
 
 ## API Contract and Calibration Capabilities
 

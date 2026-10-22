@@ -697,6 +697,13 @@ public interface ISupportsFanControl
     Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default);
 }
 
+/// <summary>Typed support for disabling every configured heater, independently of the active tool.</summary>
+public interface ISupportsHeaterShutdown
+{
+    /// <summary>Turns off heaters without overriding automatic cooling fans.</summary>
+    Task<bool> TurnOffHeatersAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default);
+}
+
 /// <summary>Typed support for a transient relative Z-offset adjustment during a print.</summary>
 public interface ISupportsZOffsetAdjustment
 {

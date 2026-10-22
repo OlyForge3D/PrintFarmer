@@ -2690,12 +2690,37 @@ public partial class PrintersController(
             return BadRequest("Request body is required.");
         }
 
+        if ((targets.Hotend is double hotend && (!double.IsFinite(hotend) || hotend < 0)) ||
+            (targets.Bed is double bed && (!double.IsFinite(bed) || bed < 0)))
+        {
+            return BadRequest(new CommandResult(false, "Temperature targets must be finite and nonnegative."));
+        }
+
+        bool useActiveLease = false;
+        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+        if (capabilities?.SupportsTemperatureControlDuringPrint == true)
+        {
+            if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+            {
+                return NotFound();
+            }
+
+            (bool active, _, ActionResult? stateFailure) = await ResolveFanControlLeaseAsync(id, ct);
+            if (stateFailure is not null)
+            {
+                return stateFailure;
+            }
+
+            useActiveLease = active;
+        }
+
         return await ExecuteDirectOutcomeControlAsync(
             id,
             "set_temperature",
             "set_temperature",
             token => _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, token),
-            ct);
+            ct,
+            useActiveLease: useActiveLease);
     }
 
     [HttpPost("{id:guid}/move")]
@@ -2870,7 +2895,8 @@ public partial class PrintersController(
         Func<CancellationToken, Task<Farm.Infrastructure.Services.Printers.PrinterControlOutcome>> backendCall,
         CancellationToken ct,
         PrinterSafetyOperation? safetyOperation = null,
-        PrinterSafetyMoveRequest? move = null)
+        PrinterSafetyMoveRequest? move = null,
+        bool useActiveLease = false)
     {
         CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
@@ -2878,21 +2904,17 @@ public partial class PrintersController(
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
-        PrinterActuationResult begin = await BeginPhysicalControlAsync(
-            printerId,
-            operation,
-            ct);
+        PrinterActuationResult begin = useActiveLease && _physicalActuationService is not null
+            ? await _physicalActuationService.AcquireActiveAsync(printerId, QueueActorIdentity.Resolve(User), operation, ct)
+            : await BeginPhysicalControlAsync(printerId, operation, ct);
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
         }
 
-        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
-            begin.Lease,
-            safetyOperation,
-            move,
-            ct,
-            requestCancellation);
+        ActionResult? validationFailure = useActiveLease
+            ? null
+            : await ValidateBeforeDispatchAsync(begin.Lease, safetyOperation, move, ct, requestCancellation);
         if (validationFailure is not null)
         {
             return validationFailure;

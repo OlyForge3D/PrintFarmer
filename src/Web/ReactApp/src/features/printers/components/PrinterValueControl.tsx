@@ -11,6 +11,7 @@ interface PrinterValueControlProps {
   min: number;
   max?: number;
   step?: number | null;
+  allowZero?: boolean;
   unit: string;
   disabled: boolean;
   pending?: boolean;
@@ -28,7 +29,7 @@ export interface PrinterValueStatus {
 const SLIDER_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 
 export function PrinterValueControl({
-  label, current, min, max, step, unit, disabled, pending = false, mode = 'number', children, status, onSubmit,
+  label, current, min, max, step, allowZero = false, unit, disabled, pending = false, mode = 'number', children, status, onSubmit,
 }: PrinterValueControlProps) {
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
@@ -45,8 +46,9 @@ export function PrinterValueControl({
   const setting = shownRequest?.value ?? current;
   const shown = draft ?? (setting === undefined ? '' : String(setting));
   const parsed = shown.trim() === '' ? NaN : Number(shown);
-  const validValue = (value: number) => Number.isFinite(value) && value >= min && (max === undefined || value <= max) &&
-    (!step || step <= 0 || Math.abs((value - min) / step - Math.round((value - min) / step)) <= 1e-6);
+  const validValue = (value: number) => Number.isFinite(value) && ((allowZero && value === 0) ||
+    (value >= min && (max === undefined || value <= max) &&
+      (!step || step <= 0 || Math.abs((value - min) / step - Math.round((value - min) / step)) <= 1e-6)));
   const locked = disabled || pending || sending;
   const messageId = status?.id ?? `${id}-message`;
   const actionLabel = label.startsWith('Set ') ? label.slice(4) : label;
@@ -88,7 +90,7 @@ export function PrinterValueControl({
     dirty.current = false;
     if (!validValue(value)) {
       setError(true);
-      setMessage(`Enter ${min}${max === undefined ? ' or higher' : `–${max}`}${unit}${step && step > 0 ? ` in steps of ${step}` : ''}. Nothing sent.`);
+      setMessage(`Enter ${min}${max === undefined ? ' or higher' : `–${max}`}${unit}${step && step > 0 ? ` in steps of ${step}` : ''}${allowZero ? ', or 0 to turn off' : ''}. Nothing sent.`);
       return;
     }
     if (value === setting) {
@@ -135,7 +137,7 @@ export function PrinterValueControl({
     <label data-value-field className={`relative mx-0! my-0.5! flex h-7 shrink-0 items-center @[441px]/sensors:w-[5.5rem] ${mode === 'slider' ? 'w-[4.75rem]' : 'w-[4.5rem]'}`}>
       <Input type="number" aria-label={label} aria-describedby={`${id}-bounds ${messageId}`}
         aria-invalid={error || (draft !== null && !validValue(parsed)) || undefined}
-        aria-busy={busy.current} min={min} max={max} step={step && step > 0 ? step : 'any'}
+        aria-busy={busy.current} min={allowZero ? Math.min(0, min) : min} max={max} step={step && step > 0 ? step : 'any'}
         value={shown} disabled={locked}
         className="h-7! min-h-7! py-0! border-pf-control-boundary! text-right text-xs! font-medium text-pf-text-primary! pl-0.5! pr-5! [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onChange={event => preview(event.target.value)}
@@ -199,7 +201,7 @@ export function PrinterValueControl({
           onClick={() => { void send(parsed + step); }}>+</Button>}
       </div>}
       <span id={`${id}-bounds`} className="sr-only">
-        {min}{max === undefined ? ' or higher' : ` to ${max}`}{unit}{step && step > 0 ? `, step ${step}` : ''}. Enter or Tab sends.
+        {min}{max === undefined ? ' or higher' : ` to ${max}`}{unit}{step && step > 0 ? `, step ${step}` : ''}{allowZero ? ', or 0 to turn off' : ''}. Enter or Tab sends.
       </span>
       {!status && <p id={messageId} role="status" className={`empty:hidden mt-1 break-words text-left text-xs ${error ? 'text-pf-error' : 'text-pf-text-secondary'}`}>
         {message}

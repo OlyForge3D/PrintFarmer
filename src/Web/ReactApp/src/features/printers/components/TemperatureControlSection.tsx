@@ -11,6 +11,8 @@ import type { PrinterSensor, PrinterTemperatures } from '@/types/api';
 
 interface TemperatureControlSectionProps {
   printerId: string;
+  activeExtruderId?: string | null;
+  presetsDisabled?: boolean;
   hotendTarget?: number;
   bedTarget?: number;
   hotendCurrent?: number;
@@ -32,7 +34,7 @@ interface TemperatureControlSectionProps {
 export function TemperatureControlSection({
   printerId, hotendTarget, bedTarget, hotendCurrent, bedCurrent, maxHotendTemp, maxBedTemp,
   temperatureActionPending, canSetTemperatures, canCooldown, onApplyPreset, onApplySingleHeaterPreset,
-  showHeading = true, sensors, additionalRows, isOnline = true, reportedTemperatures,
+  showHeading = true, sensors, additionalRows, isOnline = true, reportedTemperatures, activeExtruderId, presetsDisabled = false,
 }: TemperatureControlSectionProps) {
   const { hasPermission } = useAuth();
   const [sending, setSending] = useState(false);
@@ -49,19 +51,23 @@ export function TemperatureControlSection({
       <Button type="button" variant="ghost" size="sm" aria-label="Cooldown" title="Cooldown"
         disabled={busy || !canCooldown || !authorized} className="h-8! min-h-8! w-8 p-0!"
         onClick={() => onApplyPreset('cooldown')} iconCenter={<SnowflakeIcon className="h-4 w-4" />} />
-      <TemperaturePresetMenu disabled={disabled} onApplyPreset={onApplyPreset} onApplySingleHeaterPreset={onApplySingleHeaterPreset} />
+      <TemperaturePresetMenu disabled={disabled || presetsDisabled} onApplyPreset={onApplyPreset} onApplySingleHeaterPreset={onApplySingleHeaterPreset} />
     </div>
     <PrinterThermalTable>
       {rows.map(row => {
-        const sensor = sensors?.find(item => primaryHeater(item) === row.heater);
-        const { min, max, step } = primaryHeaterLimits(sensors, row.heater, row.max);
-        const power = primaryHeaterPower(sensors, row.heater);
+        const sensor = sensors?.find(item => primaryHeater(item, activeExtruderId) === row.heater);
+        const descriptor = sensor?.writable?.find(item => item.quantity === 'TargetTemperature');
+        const { min, max, step, allowZero } = primaryHeaterLimits(sensors, row.heater, row.max, activeExtruderId);
+        const power = primaryHeaterPower(sensors, row.heater, activeExtruderId);
         const unavailable = sensor?.available === false;
-        const blocked = !canSetTemperatures || !authorized || unavailable;
+        const addressed = activeExtruderId !== undefined;
+        const blocked = !canSetTemperatures || !authorized || unavailable ||
+          (row.heater === 'hotend' && activeExtruderId === null) ||
+          (activeExtruderId !== undefined && !descriptor);
         const reportedCurrent = reportedTemperatures === undefined
           ? row.current
           : reportedTemperatures[row.heater === 'hotend' ? 'hotendTemp' : 'bedTemp'];
-        return <PrinterThermalRow key={`${printerId}-${row.heater}`}
+        return <PrinterThermalRow key={`${printerId}-${row.heater}-${row.heater === 'hotend' ? activeExtruderId : ''}`}
           warning={max === undefined ? `${row.name} maximum temperature unknown. Integer commands rely on firmware limits; this endpoint does not enforce an upper bound.` : undefined}
           name={<span className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
             <PrinterSensorGlyph kind={row.heater === 'hotend' ? 'Nozzle' : 'Bed'}
@@ -71,11 +77,14 @@ export function TemperatureControlSection({
           state={<span>{power}</span>}
           current={<span>{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
           target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
-              min={min} max={max} step={step}
+              min={min} max={max} step={step} allowZero={allowZero}
               unit="°C" disabled={blocked} pending={busy} status={status}
               onSubmit={async value => {
                 setSending(true);
                 try {
+                  if (addressed && sensor && descriptor) {
+                    return await apiClient.setPrinterSensor(printerId, sensor.id, { quantity: 'TargetTemperature', value });
+                  }
                   return await apiClient.setTemperatures(printerId, { [row.heater]: value });
                 } finally { setSending(false); }
               }} />} />;

@@ -1053,6 +1053,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async turnOffHeaters(printerId: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${printerId}/heaters/off`);
+    return response.data;
+  }
+
   async movePrinter(
     printerId: string,
     move: MoveRequest

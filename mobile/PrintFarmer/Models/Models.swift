@@ -188,6 +188,7 @@ struct Printer: Codable, Identifiable, Sendable {
     var y: Double?
     var z: Double?
     var hotendTemp: Double?
+    var activeExtruderId: String? = nil
     var bedTemp: Double?
     var hotendTarget: Double?
     var bedTarget: Double?
@@ -212,7 +213,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
-        case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes
+        case x, y, z, hotendTemp, bedTemp, hotendTarget, bedTarget, homedAxes, activeExtruderId
         case spoolInfo, backendUrl, frontendUrl, location
         case obicoEnabled
     }
@@ -269,6 +270,7 @@ struct Printer: Codable, Identifiable, Sendable {
         y = try c.decodeIfPresent(Double.self, forKey: .y)
         z = try c.decodeIfPresent(Double.self, forKey: .z)
         hotendTemp = try c.decodeIfPresent(Double.self, forKey: .hotendTemp)
+        activeExtruderId = try c.decodeIfPresent(String.self, forKey: .activeExtruderId)
         bedTemp = try c.decodeIfPresent(Double.self, forKey: .bedTemp)
         hotendTarget = try c.decodeIfPresent(Double.self, forKey: .hotendTarget)
         bedTarget = try c.decodeIfPresent(Double.self, forKey: .bedTarget)
@@ -419,6 +421,7 @@ struct PrinterSpoolInfo: Codable, Sendable {
 // MARK: - Printer Status Detail (matches PrinterStatusDto)
 
 struct PrinterStatusDetail: Codable, Sendable {
+    var activeExtruderId: String? = nil
     var safetyTelemetry: PrinterSafetyTelemetryDto?
     var currentJobThumbnailUrl: String?
     let id: UUID
@@ -477,9 +480,11 @@ struct PrinterStatusDetail: Codable, Sendable {
         spoolInfo: PrinterSpoolInfo?,
         mmuStatus: MmuStatus?,
         printTimeLeftSeconds: Double? = nil,
-        currentJobThumbnailUrl: String? = nil
+        currentJobThumbnailUrl: String? = nil,
+        activeExtruderId: String? = nil
     ) {
         self.id = id
+        self.activeExtruderId = activeExtruderId
         self.isOnline = isOnline
         self.state = state
         self.progress = progress
