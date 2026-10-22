@@ -308,6 +308,8 @@ public sealed class MoonrakerSensorMapperTests
             .Should().Be($"SET_HEATER_TEMPERATURE HEATER={id} TARGET={(200 > max ? 100 : 200)}");
         MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, max + 1, objects, settings).Should().BeNull();
         MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 5, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 1e-9, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, -1e-9, objects, settings).Should().BeNull();
         MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 0, objects, settings)
             .Should().Be($"SET_HEATER_TEMPERATURE HEATER={id} TARGET=0");
     }

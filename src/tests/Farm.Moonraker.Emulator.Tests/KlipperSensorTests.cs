@@ -354,6 +354,31 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
         status["target"].Should().Be(target);
     }
 
+    [Theory]
+    [InlineData("0", true)]
+    [InlineData("-0.0", true)]
+    [InlineData("0.000000001", false)]
+    [InlineData("-0.000000001", false)]
+    public void SendGcode_PositiveMinimumHeater_OnlyExactZeroIsOff(string target, bool accepted)
+    {
+        var printer = new PrinterAggregate { Id = "target", Name = "Target" };
+        printer.SetMmuMode(MmuMode.SnapmakerU1);
+        printer.SendGcode("SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=210");
+        Action write = () => printer.SendGcode($"SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET={target}");
+
+        if (accepted)
+        {
+            write.Should().NotThrow();
+        }
+        else
+        {
+            write.Should().Throw<GcodeParameterException>();
+        }
+
+        var status = (Dictionary<string, object?>)printer.BuildObjectsSnapshot()["extruder1"];
+        status["target"].Should().Be(accepted ? 0d : 210d);
+    }
+
     [Fact]
     public async Task ObjectsQuery_ConfiguredTargets_ExposeFiniteBoundsAndHeaterInventory()
     {

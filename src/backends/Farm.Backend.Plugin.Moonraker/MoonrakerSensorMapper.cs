@@ -155,9 +155,9 @@ internal static class MoonrakerSensorMapper
         }
 
         (string type, string name) = Split(objectName);
-        if ((IsExtruder(type) && name.Length == 0) ||
-            (type == HeaterBed && name.Length == 0) ||
-            (type is TemperatureFan or HeaterGeneric && name.Length > 0))
+        bool primaryHeater = name.Length == 0 && (IsExtruder(type) || type == HeaterBed);
+        bool namedHeater = name.Length > 0 && type is TemperatureFan or HeaterGeneric;
+        if (primaryHeater || namedHeater)
         {
             return settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
                 !section.InvalidBounds &&
@@ -199,7 +199,7 @@ internal static class MoonrakerSensorMapper
         }
 
         PrinterSensorWritableDto? descriptor = GetWritable(sensorId, settings).FirstOrDefault(writable => writable.Quantity == quantity);
-        bool off = value == 0 && descriptor?.AllowZero == true && quantity == PrinterSensorQuantity.TargetTemperature;
+        bool off = value.Equals(0d) && descriptor?.AllowZero == true && quantity == PrinterSensorQuantity.TargetTemperature;
         if (descriptor is null || (!off && (value < descriptor.Min || value > descriptor.Max)))
         {
             return null;
@@ -573,14 +573,17 @@ internal sealed class MoonrakerSensorTracker
             }
 
             // Preserve legacy integer entry when limits are absent, never when supplied limits are invalid.
-            if (_settings.TryGetValue(objectName, out MoonrakerSectionSettings? section) &&
-                (section.InvalidBounds ||
-                    (section.MinTemp is double min && section.MaxTemp is double max && min > max) ||
-                    (target != 0 && section.MinTemp is double lower && target < lower) ||
-                    (section.MaxTemp is double upper && target > upper) ||
-                    (section.MinTemp.HasValue && section.MaxTemp.HasValue)))
+            if (_settings.TryGetValue(objectName, out MoonrakerSectionSettings? section))
             {
-                return null;
+                bool invalidBounds = section.InvalidBounds ||
+                    (section.MinTemp is double min && section.MaxTemp is double max && min > max);
+                bool belowMinimum = !target.Equals(0d) && section.MinTemp is double lower && target < lower;
+                bool aboveMaximum = section.MaxTemp is double upper && target > upper;
+                bool completeBounds = section.MinTemp.HasValue && section.MaxTemp.HasValue;
+                if (invalidBounds || belowMinimum || aboveMaximum || completeBounds)
+                {
+                    return null;
+                }
             }
 
             return target.Equals(Math.Truncate(target))

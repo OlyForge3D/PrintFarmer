@@ -165,7 +165,7 @@ public static class PrinterSensorNormalizer
             return new(PrinterSensorControlValidationCode.InvalidValue, $"{quantity} requires a finite numeric value.");
         }
 
-        if (number == 0 && descriptor.AllowZero && quantity == PrinterSensorQuantity.TargetTemperature)
+        if (number.Equals(0d) && descriptor.AllowZero && quantity == PrinterSensorQuantity.TargetTemperature)
         {
             return new(PrinterSensorControlValidationCode.Valid, null, sensor.Id, descriptor);
         }

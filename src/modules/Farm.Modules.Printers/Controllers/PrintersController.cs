@@ -2690,8 +2690,9 @@ public partial class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        if ((targets.Hotend is double hotend && (!double.IsFinite(hotend) || hotend < 0)) ||
-            (targets.Bed is double bed && (!double.IsFinite(bed) || bed < 0)))
+        bool invalidHotend = targets.Hotend is double hotend && (!double.IsFinite(hotend) || hotend < 0);
+        bool invalidBed = targets.Bed is double bed && (!double.IsFinite(bed) || bed < 0);
+        if (invalidHotend || invalidBed)
         {
             return BadRequest(new CommandResult(false, "Temperature targets must be finite and nonnegative."));
         }

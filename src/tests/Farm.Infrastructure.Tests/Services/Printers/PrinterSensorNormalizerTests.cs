@@ -266,6 +266,8 @@ public sealed class PrinterSensorNormalizerTests
 
     [Theory]
     [InlineData(0, true)]
+    [InlineData(1e-9, false)]
+    [InlineData(-1e-9, false)]
     [InlineData(5, false)]
     [InlineData(10, true)]
     [InlineData(65, true)]

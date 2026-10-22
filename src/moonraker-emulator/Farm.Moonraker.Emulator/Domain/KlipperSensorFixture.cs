@@ -213,7 +213,7 @@ internal sealed class KlipperSensorFixture
     {
         "speed" or "power" => value is >= 0 and <= 1,
         "rpm" => value >= 0,
-        "target" when name.StartsWith("extruder", StringComparison.Ordinal) => value == 0 || (value >= 10 && value <= ExtruderMaximum(name)),
+        "target" when name.StartsWith("extruder", StringComparison.Ordinal) => value.Equals(0d) || (value >= 10 && value <= ExtruderMaximum(name)),
         "temperature" when name.StartsWith("extruder", StringComparison.Ordinal) => value >= 10 && value <= ExtruderMaximum(name),
         "target" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
         "temperature" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
