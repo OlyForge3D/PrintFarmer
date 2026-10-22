@@ -174,8 +174,8 @@ The React sidebar and detailed printer card share functional disclosures:
 additional heater/sensor rows (Power, Actual, Target). Power is shown only when
 reported, never inferred from heater state. Mapped primary heater readings appear
 once; extra nozzles and independent temperatures are retained. **Miscellaneous**,
-**Environment**, and **Filament** are separate sibling sections; mixed-quantity
-sensors retain each measurement in its appropriate section.
+**Filament**, and **Other sensors** are separate sibling sections; environmental
+measurements stay with their thermal sensor row under **Temperatures**.
 
 Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
 Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and
