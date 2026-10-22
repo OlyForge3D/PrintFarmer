@@ -3,6 +3,51 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
+test('heater glyphs match the actual compact card paths, colors and temperature-driven brightness', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1200 });
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  const states = [
+    { name: 'hot', query: '', opacity: '1' },
+    { name: 'cold', query: '&cold-heaters', opacity: '0.4' },
+    { name: 'missing', query: '&missing-heaters', opacity: '0.4' },
+    { name: 'offline', query: '&offline-heaters', opacity: '0.4' },
+  ];
+  const cold: Record<string, { path: string | null; color: string; opacity: string }> = {};
+  for (const state of states) {
+    await page.goto(`/src/test/fixtures/printer-sensors.html?sidebar-online&glyph-parity${state.query}`);
+    const compact = page.getByRole('region', { name: 'compact', exact: true });
+    for (const [kind, title] of [['Nozzle', 'Hotend temperature'], ['Bed', 'Bed temperature']]) {
+      const expected = await compact.getByRole('img', { name: title, exact: true }).evaluate(node => ({
+        path: node.querySelector('path')!.getAttribute('d'), color: getComputedStyle(node).color, opacity: getComputedStyle(node).opacity,
+      }));
+      expect(expected.opacity).toBe(state.opacity);
+      if (state.name === 'cold') cold[kind] = expected;
+      for (const surface of ['card', 'sidebar']) {
+        const root = page.getByRole('region', { name: surface, exact: true });
+        const actual = await root.locator(`[data-printer-sensor-section="Temperatures"] [data-sensor-glyph="${kind}"] svg`).first().evaluate(node => ({
+          path: node.querySelector('path')!.getAttribute('d'), color: getComputedStyle(node).color, opacity: getComputedStyle(node).opacity,
+        }));
+        expect(actual).toEqual(expected);
+      }
+    }
+    for (const surface of ['card', 'sidebar']) {
+      const root = page.getByRole('region', { name: surface, exact: true });
+      await root.locator('[data-printer-sensor-section="Temperatures"]').screenshot({ path: test.info().outputPath(`${surface}-glyphs-${state.name}.png`) });
+    }
+    await compact.screenshot({ path: test.info().outputPath(`compact-glyphs-${state.name}.png`) });
+    await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+  }
+  await page.goto(pathToFileURL(resolve(process.cwd(), '..', '..', '..', 'docs', 'design', 'printer-sensors-options.html')).href);
+  for (const [id, kind] of [['extruder', 'Nozzle'], ['bed', 'Bed']]) {
+    const actual = await page.locator(`tr[data-sensor="${id}"] th svg`).evaluate(node => ({
+      path: node.querySelector('path')!.getAttribute('d'), color: getComputedStyle(node).color, opacity: getComputedStyle(node).opacity,
+    }));
+    expect(actual).toEqual(cold[kind]);
+  }
+  await page.locator('#panels').screenshot({ path: test.info().outputPath('reference-glyphs-cold.png') });
+});
+
 test('sensor groups match existing app disclosures and content typography at matched widths', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1200 });
   await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),

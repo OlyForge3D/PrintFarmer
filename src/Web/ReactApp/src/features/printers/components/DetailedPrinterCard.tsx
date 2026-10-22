@@ -888,6 +888,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       >
       {additionalRows => <TemperatureControlSection
         printerId={printer.id}
+        isOnline={isOnline}
         showHeading={false}
         additionalRows={additionalRows}
         sensors={printer.sensors}

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { PrinterSensorsPanel, PrinterSensorsSection, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { additionalPrinterSensors, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
+import { mdiPrinter3dNozzle, mdiPrinter3dNozzleAlert, mdiRadiator, mdiRadiatorDisabled } from '@mdi/js';
 
 const mocks = vi.hoisted(() => ({
   setPrinterSensor: vi.fn(),
@@ -77,6 +78,29 @@ describe('PrinterSensorsPanel', () => {
   it('shows an empty state when there are no sensors', () => {
     renderPanel([]);
     expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
+  });
+
+  it.each([
+    { kind: 'Nozzle' as const, cold: 50, hot: 50.1, offPath: mdiPrinter3dNozzle, onPath: mdiPrinter3dNozzleAlert, color: 'text-pf-error' },
+    { kind: 'Bed' as const, cold: 35, hot: 35.1, offPath: mdiRadiatorDisabled, onPath: mdiRadiator, color: 'text-pf-accent' },
+  ])('uses compact $kind glyph variants from actual readings, not targets or power', ({ kind, cold, hot, offPath, onPath, color }) => {
+    const heater = (value: number): PrinterSensor => ({
+      id: 'extra', displayName: 'Extra heater', kind, available: true,
+      readings: [{ quantity: 'Temperature', value, unit: 'Celsius' },
+        { quantity: 'TargetTemperature', value: 0, unit: 'Celsius' }, { quantity: 'Power', value: 0, unit: 'Percent' }],
+    });
+    const { container, rerender } = render(<PrinterSensorsPanel printerId="p1" sensors={[heater(hot)]} />);
+    const glyph = () => container.querySelector('[data-sensor-glyph] svg')!;
+    expect(glyph()).toHaveClass('opacity-100', color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', onPath);
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[heater(cold)]} />);
+    expect(glyph()).toHaveClass('opacity-40', color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', offPath);
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[heater(hot)]} isOnline={false} />);
+    expect(glyph()).toHaveClass('opacity-40');
+    expect(glyph()).not.toHaveClass(color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', offPath);
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it('renders read-only sensors in groups with formatted units and no inputs', () => {

@@ -101,10 +101,14 @@ function SensorSection({ title, children }: { title: SensorGroup; children: Reac
   </div>;
 }
 
-export function PrinterSensorGlyph({ kind }: { kind: PrinterSensor['kind'] }) {
+export function PrinterSensorGlyph({ kind, temperature }: { kind: PrinterSensor['kind']; temperature?: number }) {
   const Icon = kind === 'Nozzle' ? NozzleIcon : kind === 'Bed' ? BedIcon : kind === 'Fan' ? FanIcon : ThermometerIcon;
+  const heater = kind === 'Nozzle' || kind === 'Bed';
+  const reported = temperature !== undefined && Number.isFinite(temperature);
+  const color = reported && heater ? kind === 'Nozzle' ? 'text-pf-error' : 'text-pf-accent' : '';
   return <span data-sensor-glyph={kind} aria-hidden="true" className="inline-flex shrink-0 text-pf-text-secondary">
-    <Icon className="size-[18px] shrink-0" />
+    <Icon className={`size-[18px] shrink-0 ${color}`}
+      {...(heater ? { isOn: reported && temperature > (kind === 'Nozzle' ? 50 : 35) } : {})} />
   </span>;
 }
 
@@ -144,10 +148,11 @@ export function PrinterThermalRow({ name, state, current, target, testId, warnin
   </>;
 }
 
-function SensorName({ sensor, children }: { sensor: PrinterSensor; children?: ReactNode }) {
+function SensorName({ sensor, children, isOnline = true }: { sensor: PrinterSensor; children?: ReactNode; isOnline?: boolean }) {
   const role = sensor.id.startsWith('heater_generic ') ? 'Heater' : sensor.id.startsWith('temperature_sensor ') ? 'Sensor' : '';
   return <div className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
-    {(sensor.kind === 'Fan' || isThermalSensor(sensor)) && <PrinterSensorGlyph kind={sensor.kind} />}
+    {(sensor.kind === 'Fan' || isThermalSensor(sensor)) && <PrinterSensorGlyph kind={sensor.kind}
+      temperature={isOnline && sensor.available ? numericReading(sensor.readings.find(reading => reading.quantity === 'Temperature')) : undefined} />}
     <div className="min-w-0 break-words [overflow-wrap:anywhere]">
       {formatPrinterSensorName(sensor.displayName)}
       {role && <span className="block text-xs font-normal text-pf-text-secondary @[441px]/sensors:ml-1 @[441px]/sensors:inline">{role}</span>}
@@ -198,7 +203,7 @@ export function PrinterSensorsPanel({
   const thermalRows = (items: PrinterSensor[]) => items.map(sensor => {
     const stateQuantity = sensor.readings.some(r => r.quantity === 'Power') ? 'Power' : 'FanSpeed';
     return <PrinterThermalRow key={sensor.id} testId={`sensor-${sensor.id}`}
-      name={<SensorName sensor={sensor}>{extraReadings(sensor, new Set(['Temperature', 'TargetTemperature', stateQuantity]))}</SensorName>}
+      name={<SensorName sensor={sensor} isOnline={isOnline}>{extraReadings(sensor, new Set(['Temperature', 'TargetTemperature', stateQuantity]))}</SensorName>}
       state={quantityCell(sensor, stateQuantity)} current={quantityCell(sensor, 'Temperature')}
       target={status => quantityCell(sensor, 'TargetTemperature', status)} />;
   });

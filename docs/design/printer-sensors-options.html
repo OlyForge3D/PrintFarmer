@@ -192,6 +192,7 @@
         <div><h3>Fans: two compact lines</h3><p>Name, optional RPM, reset and percentage across the top. A full-width slider underneath. Read-only nonthermal sensors are hidden.</p></div>
         <div><h3>Lights: a switch, not a form</h3><p>A binary light uses an on/off toggle. It sends immediately. Brightness-capable outputs would use the percentage control instead.</p></div>
         <div><h3>Temperatures: aligned columns</h3><p>Name, State, Current and Target. Sensors without a target have an empty cell. Missing readings are blank; a genuine zero remains visible.</p></div>
+        <div><h3>Existing heater glyphs</h3><p>Nozzle and bed use the compact card's Material Design glyphs. Red nozzle and teal bed are bright above 50°C and 35°C respectively, muted otherwise. This indicates reported temperature, not command acceptance.</p></div>
         <div><h3>No extra confirmation step</h3><p>Number fields send on Enter or leaving the field, including Tab. Sliders send on completed adjustment, not every pointer movement. Reset sends 0% when the allowed range includes zero.</p></div>
         <div><h3>Still unmistakably PrintFarmer</h3><p>Existing Mission Control colors, teal accents, tabular figures and compact corners. No separator lines between sensor rows.</p></div>
         <p>Rendered panels: <output id="height"></output></p>
@@ -256,6 +257,20 @@
       reset:'<path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>',
       chevron:'<path d="m6 9 6 6 6-6"/>'
     };
+    const heaterPaths = {
+      nozzleOff:'M7,2H17V8H19V13H16.5L13,17H11L7.5,13H5V8H7V2M10,22H2V20H10A1,1 0 0,0 11,19V18H13V19A3,3 0 0,1 10,22Z',
+      nozzleOn:'M7 2H17V8H19V13H16.5L13 17H11L7.5 13H5V8H7V2M10 22H2V20H10C10.6 20 11 19.5 11 19V18H13V19C13 20.7 11.7 22 10 22M21 13V7H23V13H21M21 17V15H23V17H21Z',
+      bedOn:'M7.95,3L6.53,5.19L7.95,7.4H7.94L5.95,10.5L4.22,9.6L5.64,7.39L4.22,5.19L6.22,2.09L7.95,3M13.95,2.89L12.53,5.1L13.95,7.3L13.94,7.31L11.95,10.4L10.22,9.5L11.64,7.3L10.22,5.1L12.22,2L13.95,2.89M20,2.89L18.56,5.1L20,7.3V7.31L18,10.4L16.25,9.5L17.67,7.3L16.25,5.1L18.25,2L20,2.89M2,22V14A2,2 0 0,1 4,12H20A2,2 0 0,1 22,14V22H20V20H4V22H2M6,14A1,1 0 0,0 5,15V17A1,1 0 0,0 6,18A1,1 0 0,0 7,17V15A1,1 0 0,0 6,14M10,14A1,1 0 0,0 9,15V17A1,1 0 0,0 10,18A1,1 0 0,0 11,17V15A1,1 0 0,0 10,14M14,14A1,1 0 0,0 13,15V17A1,1 0 0,0 14,18A1,1 0 0,0 15,17V15A1,1 0 0,0 14,14M18,14A1,1 0 0,0 17,15V17A1,1 0 0,0 18,18A1,1 0 0,0 19,17V15A1,1 0 0,0 18,14Z',
+      bedOff:'M20,12H4A2,2 0 0,0 2,14V22H4V20H20V22H22V14A2,2 0 0,0 20,12M7,17A1,1 0 0,1 6,18A1,1 0 0,1 5,17V15A1,1 0 0,1 6,14A1,1 0 0,1 7,15V17M11,17A1,1 0 0,1 10,18A1,1 0 0,1 9,17V15A1,1 0 0,1 10,14A1,1 0 0,1 11,15V17M15,17A1,1 0 0,1 14,18A1,1 0 0,1 13,17V15A1,1 0 0,1 14,14A1,1 0 0,1 15,15V17M19,17A1,1 0 0,1 18,18A1,1 0 0,1 17,17V15A1,1 0 0,1 18,14A1,1 0 0,1 19,15V17Z'
+    };
+    function heaterIcon(sensor) {
+      const nozzle = sensor.id === 'extruder';
+      const reported = finite(sensor.current) && connection !== 'stale' && connection !== 'empty';
+      const on = reported && sensor.current > (nozzle ? 50 : 35);
+      const path = heaterPaths[`${nozzle ? 'nozzle' : 'bed'}${on ? 'On' : 'Off'}`];
+      const color = reported ? `var(--pf-${nozzle ? 'error' : 'accent'})` : 'var(--pf-text-secondary)';
+      return `<svg class="icon" viewBox="0 0 24 24" style="color:${color};opacity:${on ? 1 : 0.4}" aria-hidden="true"><path fill="currentColor" d="${path}"/></svg>`;
+    }
     function icon(type,extra='') {
       return `<svg class="icon ${extra}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[type] || icons.temperature}</svg>`;
     }
@@ -272,7 +287,7 @@
       const status = finite(sensor.power) ? sensor.power === 0 ? 'off' : `${sensor.power}%` : finite(sensor.speed) ? `${sensor.speed}%` : '';
       const current = finite(sensor.current) ? `${sensor.current.toFixed(1)}°C` : '';
       return `<tr data-sensor="${sensor.id}">
-        <th scope="row"><span class="sensor-name">${icon(sensor.icon)}<span>${sensorLabel(sensor)}${finite(sensor.humidity) ? `<span class="extra-reading">Humidity <span class="mono">${sensor.humidity}%</span></span>` : ''}</span></span></th>
+        <th scope="row"><span class="sensor-name">${sensor.id === 'extruder' || sensor.id === 'bed' ? heaterIcon(sensor) : icon(sensor.icon)}<span>${sensorLabel(sensor)}${finite(sensor.humidity) ? `<span class="extra-reading">Humidity <span class="mono">${sensor.humidity}%</span></span>` : ''}</span></span></th>
         <td class="reading state-reading">${status}</td>
         <td class="reading current-cell">${current}</td>
         <td class="target-cell">${writable(sensor) ? numericInput(sensor) : finite(sensor.target) ? `<span class="reading">${sensor.target}°C</span>` : ''}</td>

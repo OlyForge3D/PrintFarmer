@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 
 const mocks = vi.hoisted(() => ({ setTemperatures: vi.fn(), error: vi.fn(), allowed: true }));
 vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: mocks.setTemperatures } }));
@@ -44,6 +45,40 @@ describe('TemperatureControlSection', () => {
 
     render(<TemperatureControlSection {...baseProps()} showHeading={false} />);
     expect(screen.queryByText('Temperatures')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { hotend: 205, bed: 60, online: true, on: true },
+    { hotend: 50, bed: 35, online: true, on: false },
+    { hotend: 0, bed: 0, online: true, on: false },
+    { hotend: undefined, bed: undefined, online: true, on: false },
+    { hotend: 205, bed: 60, online: false, on: false },
+  ])('matches compact heater glyph paths, colors and on/off opacity for %o', ({ hotend, bed, online, on }) => {
+    const { container } = render(<>
+      <PrintProgressBar progress={0} jobName={null} isActive={false} showTemperatures isOnline={online} hotendTemp={hotend} bedTemp={bed} />
+      <TemperatureControlSection {...baseProps({ hotendCurrent: hotend, bedCurrent: bed, isOnline: online })} />
+    </>);
+    for (const [kind, title] of [['Nozzle', 'Hotend temperature'], ['Bed', 'Bed temperature']]) {
+      const detailed = container.querySelector(`[data-sensor-glyph="${kind}"] svg`)!;
+      const compact = screen.getByTitle(title).querySelector('svg')!;
+      expect(detailed.querySelector('path')).toHaveAttribute('d', compact.querySelector('path')!.getAttribute('d'));
+      expect(detailed).toHaveClass(on ? 'opacity-100' : 'opacity-40');
+      for (const color of ['text-pf-error', 'text-pf-accent']) {
+        expect(detailed.classList.contains(color)).toBe(compact.classList.contains(color));
+      }
+    }
+    expect(mocks.setTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('mutes unavailable primary heaters even when a stale reading is hot', () => {
+    const { container } = render(<TemperatureControlSection {...baseProps({ sensors: [
+      { id: 'extruder', displayName: 'Hotend', kind: 'Nozzle', available: false, readings: [] },
+      { id: 'bed', displayName: 'Bed', kind: 'Bed', available: false, readings: [] },
+    ] })} />);
+    for (const svg of container.querySelectorAll('[data-sensor-glyph] svg')) {
+      expect(svg).toHaveClass('opacity-40');
+      expect(svg).not.toHaveClass('text-pf-error', 'text-pf-accent');
+    }
   });
 
   it('applies the main material preset', async () => {

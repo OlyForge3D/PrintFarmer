@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { Toaster } from 'sonner';
 import { AuthContext } from '@/common/contexts/auth-context';
 import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrinterCard';
+import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { client } from '@/services/api/httpClient';
 import { apiClient } from '@/services/api';
@@ -70,10 +71,18 @@ export function mountSensors(element: HTMLElement) {
   const groupParity = fixtureOptions.has('group-parity');
   const printer: Printer = {
     id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', manufacturerName: 'Fixture maker', backend: PrinterBackend.Moonraker,
-    backendUrl: 'http://invalid.local', isOnline: true, isEnabled: true, rowVersion: 'poc',
+    backendUrl: 'http://invalid.local', isOnline: !fixtureOptions.has('offline-heaters'), isEnabled: true, rowVersion: 'poc',
     state: groupParity ? 'Printing' : 'Idle', homedAxes: 'xyz', x: 100, y: 110, z: 5,
     hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60, sensors,
   };
+  if (fixtureOptions.has('cold-heaters')) {
+    printer.hotendTemp = 50;
+    printer.bedTemp = 35;
+  }
+  if (fixtureOptions.has('missing-heaters')) {
+    printer.hotendTemp = undefined;
+    printer.bedTemp = undefined;
+  }
   const capabilities: PrinterBackendCapabilitiesDto = {
     printerId: printer.id, printerName: printer.name, backend: printer.backend,
     supportsCamera: false, supportsFileDownload: false, supportsFileList: false, supportsFileUpload: false,
@@ -111,10 +120,13 @@ export function mountSensors(element: HTMLElement) {
             <h2 className="text-sm mb-3">{surface === 'card' ? 'Detailed printer card' : 'Printer sidebar'}</h2>
             {surface === 'card' ? <DetailedPrinterCard printer={printer} backendCapabilities={capabilities} />
               : <PrinterDetailsSidebar printerId="sensor-poc-sidebar"
-                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: sidebarOnline, homedAxes: 'xy' }}
+                printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: sidebarOnline && printer.isOnline, homedAxes: 'xy' }}
                 backendCapabilities={capabilities} layout="content" onClose={() => {}} />}
           </section>
         ))}
+        {fixtureOptions.has('glyph-parity') && <section aria-label="compact" className="w-80">
+          <CompactPrinterCard printer={printer} backendCapabilities={capabilities} onExpand={() => {}} />
+        </section>}
         <div id="fixture-commands" className="basis-full flex flex-col text-xs" aria-label="Fixture commands" />
       </main>
       <Toaster theme="dark" />

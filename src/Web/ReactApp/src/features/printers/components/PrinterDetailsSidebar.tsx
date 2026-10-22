@@ -1197,6 +1197,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         >
           {additionalRows => <TemperatureControlSection
             printerId={printer.id}
+            isOnline={isOnline}
             sensors={displayPrinter?.sensors}
             showHeading={false}
             additionalRows={additionalRows}
