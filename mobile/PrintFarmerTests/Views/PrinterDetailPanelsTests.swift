@@ -754,7 +754,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(reading.measuredText, Double(24).temperatureFormatted)
         XCTAssertEqual(reading.targetText, Double(200).temperatureFormatted)
         let missing = PrinterDetailTemperatureReading(measured: nil, target: 200, isOnline: true)
-        XCTAssertEqual(missing.measuredText, "Unavailable")
+        XCTAssertEqual(missing.measuredText, "--")
+        XCTAssertEqual(missing.spokenMeasuredText, "not reported")
         XCTAssertEqual(missing.targetText, Double(200).temperatureFormatted)
     }
 
@@ -846,26 +847,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
     }
 
-    func testStatusSensorReadoutOmitsThermalGroupShownByTemperatureStrip() {
-        XCTAssertFalse(PrinterSensorsReadout.groups.contains(.temperatures))
-        XCTAssertEqual(PrinterSensorsReadout.groups, [.fans, .other])
-    }
-
     func testOfflineTemperaturesDoNotPresentRetainedValuesAsLive() {
         let reading = PrinterDetailTemperatureReading(measured: 210, target: 220, isOnline: false)
-        XCTAssertEqual(reading.measuredText, "Unavailable")
+        XCTAssertEqual(reading.measuredText, "--")
+        XCTAssertEqual(reading.spokenMeasuredText, "not reported")
         XCTAssertEqual(reading.targetText, "Not reported")
     }
 
     func testMissingHardwareTelemetryIsNotZeroOrInferredHardwareAbsence() {
         let reading = PrinterDetailTemperatureReading(measured: nil, target: nil, isOnline: true)
-        XCTAssertEqual(reading.measuredText, "Unavailable")
+        XCTAssertEqual(reading.measuredText, "--")
         XCTAssertEqual(reading.targetText, "Not reported")
         let heaterOff = PrinterDetailTemperatureReading(measured: 0, target: 0, isOnline: true)
         XCTAssertEqual(heaterOff.measuredText, Double(0).temperatureFormatted)
+        XCTAssertEqual(heaterOff.spokenMeasuredText, Double(0).temperatureFormatted)
         XCTAssertEqual(heaterOff.targetText, "Off")
         let invalid = PrinterDetailTemperatureReading(measured: .nan, target: .infinity, isOnline: true)
-        XCTAssertEqual(invalid.measuredText, "Unavailable")
+        XCTAssertEqual(invalid.measuredText, "--")
         XCTAssertEqual(invalid.targetText, "Not reported")
     }
 

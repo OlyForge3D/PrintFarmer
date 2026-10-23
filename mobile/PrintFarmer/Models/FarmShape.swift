@@ -174,36 +174,7 @@ struct PrinterSensor: Codable, Sendable, Equatable, Identifiable, Hashable {
     }
 }
 
-enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
-    case temperatures, fans, other
-
-    var title: String {
-        switch self {
-        case .temperatures: return "Temperatures"
-        case .fans: return "Fans"
-        case .other: return "Other sensors"
-        }
-    }
-
-    static func group(for sensor: PrinterSensor) -> PrinterSensorGroup {
-        let hasThermalReading = sensor.readings.contains {
-            [.temperature, .targetTemperature, .humidity, .pressure, .gas].contains($0.quantity)
-        }
-        let hasThermalTarget = sensor.writable.contains { $0.quantity == .targetTemperature }
-        if sensor.kind != .fan && (
-            hasThermalReading || hasThermalTarget || sensor.kind == .ambient
-        ) {
-            return .temperatures
-        }
-        switch sensor.kind {
-        case .fan: return .fans
-        case .nozzle, .bed, .chamber, .mcu, .host, .ambient: return .temperatures
-        case .filamentRunout, .other, .unknown: return .other
-        }
-    }
-}
-
-/// Pure display helpers shared by Status and Control rows.
+/// Pure display helpers for Control sensor rows.
 enum PrinterSensorFormatting {
     private static let gridEpsilon = 1e-9
 
@@ -274,21 +245,6 @@ enum PrinterSensorFormatting {
         case .filamentDetected: return "Filament"
         case .other, .unknown: return "Value"
         }
-    }
-
-    /// One-line summary of all readings, e.g. "Temperature 24.5°C · Humidity 41%".
-    static func summary(_ sensor: PrinterSensor) -> String {
-        guard sensor.available else { return "Unavailable" }
-        guard !sensor.readings.isEmpty else { return "No reading" }
-        return sensor.readings.map { "\(quantityTitle($0.quantity)) \(valueText($0))" }.joined(separator: " · ")
-    }
-
-    static func accessibilityLabel(_ sensor: PrinterSensor) -> String {
-        let name = displayName(sensor.displayName)
-        guard sensor.available else { return "\(name), unavailable" }
-        guard !sensor.readings.isEmpty else { return "\(name), no reading" }
-        let parts = sensor.readings.map { "\(quantityTitle($0.quantity)) \(spokenValue($0))" }
-        return "\(name), " + parts.joined(separator: ", ")
     }
 
     /// A reported list replaces the cache; an omitted list keeps it.

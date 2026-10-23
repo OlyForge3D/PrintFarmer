@@ -620,13 +620,6 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         XCTAssertTrue(pause.isHittable, "Large text must let users scroll to Pause.")
                         XCTAssertTrue(cancel.isHittable, "Large text must let users scroll to Cancel.")
                         attachScreen("\(device)-largest-printer-status-actions")
-
-                        let temperatures = app.otherElements["printer.detail.temperatures"]
-                        for _ in 0..<8 where !temperatures.isHittable {
-                            swipeUp(on: page)
-                        }
-                        XCTAssertTrue(temperatures.isHittable, "Large text must let users scroll to temperatures.")
-                        attachScreen("\(device)-largest-printer-status-temperatures")
                     }
                 }
                 if panel == "Control" {
@@ -769,15 +762,11 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             let expectedLayout = overview.frame.width >= 760
                 ? "printer.detail.columns" : "printer.detail.readingColumn"
             XCTAssertTrue(app.otherElements[expectedLayout].waitForExistence(timeout: 5))
-            let temperatures = app.otherElements["printer.detail.temperatures"]
             let job = app.otherElements["printer.detail.job"]
-            XCTAssertTrue(temperatures.waitForExistence(timeout: 5))
-            XCTAssertTrue(job.exists)
-            if expectedLayout == "printer.detail.columns" {
-                XCTAssertGreaterThan(temperatures.frame.minX, job.frame.minX)
-            } else {
-                XCTAssertGreaterThan(temperatures.frame.minY, job.frame.minY)
-            }
+            XCTAssertTrue(job.waitForExistence(timeout: 5))
+            // Temperatures and sensor readouts live on Control, not Status.
+            XCTAssertFalse(app.otherElements["printer.detail.temperatures"].exists)
+            XCTAssertFalse(app.descendants(matching: .any)["printer.detail.sensors"].exists)
 
             XCTAssertFalse(app.buttons["printer.detail.control.emergencyStop"].exists)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -820,13 +809,13 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(page.exists)
             XCTAssertGreaterThanOrEqual(page.frame.height, 100, "The pinned header must leave a usable page viewport")
             if title == "Status" {
-                let temperatures = app.otherElements["printer.detail.temperatures"]
-                let beforeScroll = temperatures.frame.minY
+                let job = app.otherElements["printer.detail.job"]
+                let beforeScroll = job.frame.minY
                 let statusContent = app.descendants(matching: .any)
                     .matching(identifier: "printer.detail.status.content").firstMatch
                 XCTAssertTrue(statusContent.exists)
                 app.swipeUp()
-                XCTAssertLessThan(temperatures.frame.minY, beforeScroll, "The reading column must actually scroll")
+                XCTAssertLessThan(job.frame.minY, beforeScroll, "The reading column must actually scroll")
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             if title == "Control" {
@@ -1768,7 +1757,24 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             )
         }
         card.tap()
-        let status = app.descendants(matching: .any)["printer.detail.sensor.\(sensorID)"]
+        // Status no longer renders sensors; writable ones are read back from
+        // the Control tab's Tune row. Read-only sensors are verified via SignalR only.
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        guard selector.waitForExistence(timeout: 8) else {
+            throw NSError(
+                domain: "PrinterSensorsLiveBackendUITests",
+                code: 18,
+                userInfo: [NSLocalizedDescriptionKey: "The printer detail panel selector did not appear."]
+            )
+        }
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 12), "\(printer.name) must expose the Tune segment.")
+        tune.tap()
+        let sensorIsWritable = reconnectTemperatureValue == nil
+        let status = app.descendants(matching: .any)[
+            "printer.controls.sensor.\(sensorID).\(temperatureQuantity).value"
+        ]
         let observer = try await SignalRPrinterUpdateObserver.connect(
             baseURL: credentials.apiURL,
             token: token,
@@ -1800,14 +1806,16 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
                 && Self.readingValue(sensors, sensorID: sensorID, quantity: temperatureQuantity) == baselineValue
         })
         let baselinePayload = try jsonObject(initial.payload)
-        guard status.waitForExistence(timeout: 20) else {
-            throw NSError(
-                domain: "PrinterSensorsLiveBackendUITests",
-                code: 17,
-                userInfo: [NSLocalizedDescriptionKey: "\(printer.name) must show its live \(sensorID) sensor."]
-            )
+        if sensorIsWritable {
+            guard status.waitForExistence(timeout: 20) else {
+                throw NSError(
+                    domain: "PrinterSensorsLiveBackendUITests",
+                    code: 17,
+                    userInfo: [NSLocalizedDescriptionKey: "\(printer.name) must show its live \(sensorID) sensor."]
+                )
+            }
+            assertLabelContains(status, text: baselineValue.formatted(), timeout: 20)
         }
-        assertLabelContains(status, text: baselineValue.formatted(), timeout: 20)
 
         let temperatureUpdateCount = observer.updateCount
         if reconnectTemperatureValue != nil {
@@ -1836,24 +1844,13 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(updatedPayload)),
             "A sensor-only printerupdated must not alter non-sensor printer fields."
         )
-        assertLabelContains(status, text: temperatureValue.formatted(), timeout: 20)
-        attachScreenshot(named: "\(printer.name) live Status sensor readout")
+        if sensorIsWritable {
+            assertLabelContains(status, text: temperatureValue.formatted(), timeout: 20)
+            attachScreenshot(named: "\(printer.name) live Tune sensor readout")
+        }
 
         let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])
         let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
-        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
-        guard selector.waitForExistence(timeout: 8) else {
-            throw NSError(
-                domain: "PrinterSensorsLiveBackendUITests",
-                code: 18,
-                userInfo: [NSLocalizedDescriptionKey: "The printer detail panel selector did not appear."]
-            )
-        }
-        selector.buttons["Control"].tap()
-        // Writable fans and sensors live in the Control tab's Tune segment.
-        let tune = app.buttons["printer.controls.segment.tune"]
-        XCTAssertTrue(tune.waitForExistence(timeout: 12), "\(printer.name) must expose the Tune segment.")
-        tune.tap()
         let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
         XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
         attachScreenshot(named: "\(printer.name) live fan control")
@@ -1873,9 +1870,8 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(fanPayload)),
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
-        selector.buttons["Status"].tap()
-        let fanStatus = app.descendants(matching: .any)["printer.detail.sensor.\(fanID)"]
-        assertLabelContains(fanStatus, text: expectedFanValue.formatted(), timeout: 20)
+        let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
+        assertLabelContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"
@@ -1921,8 +1917,9 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
 
         let connectionStatus = app.buttons["connection-status-bar"]
         assertLabelContains(connectionStatus, text: "Connected", timeout: 45)
-        let expectedReconnectLabel = reconnectTemperatureValue?.formatted() ?? "Target 0"
-        assertLabelContains(status, text: expectedReconnectLabel, timeout: 30)
+        if sensorIsWritable {
+            assertLabelContains(status, text: ", 0", timeout: 30)
+        }
         attachScreenshot(named: "\(printer.name) reconnect resync")
     }
 

@@ -571,11 +571,16 @@ struct PrinterDetailTemperatureReading: Equatable {
     let target: Double?
     let isOnline: Bool
 
+    var hasMeasured: Bool { isOnline && (measured?.isFinite ?? false) }
+
     var measuredText: String {
-        guard isOnline, let measured, measured.isFinite else {
-            return String(localized: "Unavailable")
-        }
+        guard hasMeasured, let measured else { return PrinterDetailViewModel.missingValuePlaceholder }
         return measured.temperatureFormatted
+    }
+
+    /// VoiceOver form of `measuredText`; never reads the placeholder aloud.
+    var spokenMeasuredText: String {
+        hasMeasured ? measuredText : String(localized: "not reported")
     }
 
     var targetText: String {
@@ -592,60 +597,15 @@ struct PrinterDetailTemperatureStrip: View {
     var showsBed = true
     var identifier = "printer.detail.temperatures"
     var essentialControls = false
-    var compact = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var essentialReadingSize: CGFloat = 24
 
     var body: some View {
-        if compact {
-            compactRow
-        } else if essentialControls {
+        if essentialControls {
             essentialStrip
         } else {
             originalStrip
         }
-    }
-
-    private var compactRow: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
-            statusReading(title: "Nozzle", value: hotend)
-            if showsBed {
-                if !dynamicTypeSize.isAccessibilitySize {
-                    Rectangle()
-                        .fill(Color.pfBorder)
-                        .frame(width: 1, height: 20)
-                        .accessibilityHidden(true)
-                }
-                statusReading(title: "Bed", value: bed)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.pfBorder, lineWidth: 1)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(identifier)
-    }
-
-    private func statusReading(title: String, value: PrinterDetailTemperatureReading) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-                .foregroundStyle(Color.pfTextSecondary)
-            Text("\(value.measuredText) / \(value.targetText)")
-                .fontWeight(.semibold)
-                .monospacedDigit()
-        }
-        .font(.caption)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
     }
 
     private var originalStrip: some View {
@@ -725,7 +685,7 @@ struct PrinterDetailTemperatureStrip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 18)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
+        .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
 
     private func compactTemperature(_ value: Double?, isOnline: Bool) -> String {
@@ -749,6 +709,6 @@ struct PrinterDetailTemperatureStrip: View {
         .padding(12)
         .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
+        .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
 }

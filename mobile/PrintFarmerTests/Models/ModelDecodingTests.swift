@@ -498,7 +498,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(PrinterSensorFormatting.displayName("heater_temp_a_box1"), "Heater Temp A Box1")
     }
 
-    func testPrinterSensorGroupingAndHiddenObjectDetection() {
+    func testPrinterSensorIdentityAndHiddenObjectDetection() {
         let humiditySensor = PrinterSensor(
             id: "temperature_sensor heater_box1",
             displayName: "heater_box1",
@@ -531,9 +531,6 @@ final class ModelDecodingTests: XCTestCase {
             displayName: "_private",
             kind: .ambient
         )
-        XCTAssertEqual(PrinterSensorGroup.group(for: humiditySensor), .temperatures)
-        XCTAssertEqual(PrinterSensorGroup.group(for: heaterTemperature), .temperatures)
-        XCTAssertEqual(PrinterSensorGroup.group(for: genericHeater), .temperatures)
         XCTAssertEqual(heaterTemperature.id, "temperature_sensor heater_box1")
         XCTAssertEqual(genericHeater.id, "heater_generic heater_box1")
         XCTAssertFalse(PrinterSensorFormatting.isHidden(humiditySensor))

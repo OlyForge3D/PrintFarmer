@@ -190,3 +190,12 @@ iPhone 15 (3x) and iPad Pro 13-inch (M5) (2x), Xcode 26.6 (17F113), iOS 26.5
 (23F77), light appearance, default locale. The only difference is the removed
 Temperatures group. `test_controlSensorRows` and every Controls reference were
 not re-recorded and pass unchanged on both families.
+
+## Status sensor readout and temperature strip removed
+
+The printer detail Status page no longer shows the sensor/fan readout or the
+nozzle/bed temperature strip. Temperatures remain on the Control tab's Heat
+section, and writable fans and sensors remain in Tune. `PrinterSensorsReadout`
+and `test_statusSensorReadout` were deleted together with both
+`test_statusSensorReadout` references (iPhone and iPad). `test_controlSensorRows`
+and every Controls reference are unchanged; no PNGs were re-recorded.

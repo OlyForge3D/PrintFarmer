@@ -2202,13 +2202,13 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 10, total: 10), "10/10")
     }
 
-    func testLayerLabelIsUnavailableForMissingOrIncoherentCounters() {
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: 10), "Unavailable")
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 3, total: nil), "Unavailable")
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: nil), "Unavailable")
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 0, total: 0), "Unavailable")
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 11, total: 10), "Unavailable")
-        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: -1, total: 10), "Unavailable")
+    func testLayerLabelIsPlaceholderForMissingOrIncoherentCounters() {
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: 10), "--")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 3, total: nil), "--")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: nil, total: nil), "--")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 0, total: 0), "--")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: 11, total: 10), "--")
+        XCTAssertEqual(PrinterDetailViewModel.layerLabel(current: -1, total: 10), "--")
     }
 
     func testLayerLabelPrefersPrinterCountersAndFallsBackPerFieldToStatusDetail() throws {
@@ -2232,7 +2232,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         printer.currentLayer = nil
         printer.totalLayers = nil
         viewModel.statusDetail = nil
-        XCTAssertEqual(viewModel.layerLabel(for: printer), "Unavailable")
+        XCTAssertEqual(viewModel.layerLabel(for: printer), "--")
     }
 
     func testConfigureSignalRAppliesLiveLayerCountersToStatusLabel() async throws {
