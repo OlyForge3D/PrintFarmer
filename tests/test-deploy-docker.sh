@@ -370,6 +370,41 @@ test_verification_uses_loopback_with_lan_server_host() {
     pass_test
 }
 
+test_nginx_preflight_uses_http_binding() {
+    start_test "nginx preflight probes the configured HTTP listener"
+
+    local bind_address output
+    for bind_address in 0.0.0.0 127.0.0.1 127.0.0.2 192.0.2.10; do
+        local expected_host="$bind_address"
+        case "$bind_address" in
+            0.0.0.0|127.0.0.1) expected_host=localhost ;;
+        esac
+        local probe_log="$TEST_TEMP_DIR/preflight-probes-$bind_address"
+        if ! output=$(
+            source "$DEPLOY_SCRIPT"
+            ARCHITECTURE=microservices
+            BIND_ADDRESS="$bind_address"
+            HTTP_PORT=18080
+            PROXY_VERIFY_RETRIES=1
+            PROXY_VERIFY_INTERVAL=0
+            curl() {
+                printf '%s\n' "$*" >> "$probe_log"
+                [[ "$*" == "-sf --max-time 3 http://$expected_host:18080/api/healthz" ]] || return 1
+                printf '%s\n' OK
+            }
+            check_nginx_proxy
+        ); then
+            fail_test "Preflight must accept the healthy configured listener ($bind_address): $output"
+        fi
+        assert_file_has_exact_line "$probe_log" "-sf --max-time 3 http://$expected_host:18080/api/healthz" \
+            "Preflight must probe the configured interface ($bind_address)"
+        assert_contains "$output" "nginx proxy appears to forward /api to API" \
+            "A reachable configured listener must pass preflight ($bind_address)"
+    done
+
+    pass_test
+}
+
 test_access_summary_honors_http_binding() {
     start_test "access summary honors HTTP binding and preserves HTTPS"
 
@@ -2397,6 +2432,7 @@ run_all_tests() {
     test_redeploy_cleanup_prunes_only_unused_images_and_build_cache
     test_verification_uses_anonymous_api_endpoint
     test_verification_uses_loopback_with_lan_server_host
+    test_nginx_preflight_uses_http_binding
     test_access_summary_honors_http_binding
     test_invalid_http_bind_address_is_not_saved
     test_installer_ca_bootstrap_guidance_is_local_only

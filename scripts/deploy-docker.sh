@@ -6499,7 +6499,8 @@ check_nginx_proxy() {
         return 0
     fi
 
-    local proxy_host="localhost"
+    local proxy_host
+    proxy_host="$(http_probe_host)"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port/api/healthz"
     print_info "Verifying nginx proxy forwards /api to API: $proxy_url"
@@ -6509,16 +6510,16 @@ check_nginx_proxy() {
     local retries=${PROXY_VERIFY_RETRIES:-6}
     local interval=${PROXY_VERIFY_INTERVAL:-5}
     local attempt=1
+    local proxy_response
 
     while [ $attempt -le $retries ]; do
-        if curl -sf --max-time 3 "$proxy_url" >/tmp/_proxy_check 2>/dev/null; then
-            if grep -q '"status"' /tmp/_proxy_check || grep -q '^OK$' /tmp/_proxy_check; then
+        if proxy_response=$(curl -sf --max-time 3 "$proxy_url" 2>/dev/null); then
+            if [[ "$proxy_response" == *'"status"'* ]] || grep -q '^OK$' <<< "$proxy_response"; then
                 print_success "✓ nginx proxy appears to forward /api to API (HTTP ${proxy_port})"
-                rm -f /tmp/_proxy_check || true
                 return 0
             else
                 print_info "  Proxy returned non-JSON/OK response (attempt ${attempt}/${retries})"
-                sed -n '1,40p' /tmp/_proxy_check || true
+                printf '%s\n' "$proxy_response" | sed -n '1,40p'
             fi
         else
             print_info "  No response from proxy (attempt ${attempt}/${retries})"
