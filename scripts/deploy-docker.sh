@@ -4220,7 +4220,7 @@ configure_networking() {
 
     echo
     echo -e "${BLUE}Configure external access:${NC}"
-    prompt_with_default "HTTP port for local-only web access:" "8080" "HTTP_PORT"
+    prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
 
     # Warn about port 80 requiring elevated privileges
     if [ "$HTTP_PORT" = "80" ] && [ "$OS" = "linux" ]; then
@@ -4228,7 +4228,7 @@ configure_networking() {
         print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
     fi
 
-    prompt_with_default "HTTPS port for secure LAN access (0 for local-only HTTP):" "8443" "HTTPS_PORT"
+    prompt_with_default "HTTPS port for secure web access (0 to disable):" "8443" "HTTPS_PORT"
 
     prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
 }
@@ -7264,7 +7264,7 @@ verify_deployment() {
         fi
     fi
 
-    # HTTP is loopback-only, regardless of the configured LAN/WebAuthn hostname.
+    # Verify locally without depending on LAN hostname resolution.
     local proxy_host="localhost"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port"
@@ -7380,15 +7380,37 @@ display_final_info() {
     fi
 
     echo -e "${GREEN}Access URLs:${NC}"
-    echo -e "${BLUE}  🌐 Local-only HTTP: http://localhost:$HTTP_PORT${NC}"
+    local http_bind_address="${BIND_ADDRESS:-0.0.0.0}"
+    if [ "${INSTALLER_LAB:-false}" = "true" ] && [ "${HTTP_ONLY:-false}" = "true" ]; then
+        http_bind_address="127.0.0.1"
+    fi
+    local http_local_only=false
+    local http_host="$http_bind_address"
+    case "$http_bind_address" in
+        127.0.0.1|localhost)
+            http_local_only=true
+            http_host="localhost"
+            echo -e "${BLUE}  🌐 Local-only HTTP: http://localhost:$HTTP_PORT${NC}"
+            ;;
+        *)
+            if [ "$http_bind_address" = "0.0.0.0" ]; then
+                http_host="$SERVER_HOST"
+            fi
+            echo -e "${BLUE}  🌐 Web Interface (HTTP): http://$http_host:$HTTP_PORT${NC}"
+            ;;
+    esac
     echo -e "${BLUE}  🔑 Passkeys: ${WebAuthn__Origin}${NC}"
 
     if [ "$tls_enabled" = true ]; then
         echo -e "${BLUE}  🔒 Web Interface (LAN, HTTPS): https://$SERVER_HOST:$HTTPS_PORT${NC}"
         echo -e "${BLUE}  ❤️  Health Check (HTTPS): https://$SERVER_HOST:$HTTPS_PORT/healthz${NC}"
-        print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it. HTTP /install-ca is host-local."
+        print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it."
     else
-        print_warning "TLS is disabled: local-only HTTP on 127.0.0.1:$HTTP_PORT; no LAN access. Enable HTTPS with a valid certificate for LAN access."
+        if [ "$http_local_only" = true ]; then
+            print_warning "TLS is disabled: local-only HTTP on 127.0.0.1:$HTTP_PORT; no LAN access."
+        else
+            print_warning "TLS is disabled: HTTP is available on $http_bind_address:$HTTP_PORT. Use HTTPS to protect credentials in transit."
+        fi
     fi
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
@@ -7478,7 +7500,12 @@ display_final_info() {
             if [ "$tls_enabled" = true ]; then
                 echo -e "${BLUE}  • Ensure firewall allows HTTPS port $HTTPS_PORT for intended clients${NC}"
             fi
-            echo -e "${BLUE}  • HTTP port $HTTP_PORT and direct API port $API_PORT are local-only; opening firewall ports does not enable LAN access${NC}"
+            if [ "$http_local_only" = false ]; then
+                echo -e "${BLUE}  • Ensure firewall allows HTTP port $HTTP_PORT for intended clients; HTTPS is recommended${NC}"
+            else
+                echo -e "${BLUE}  • HTTP port $HTTP_PORT is local-only; opening firewall ports does not enable LAN access${NC}"
+            fi
+            echo -e "${BLUE}  • Direct API port $API_PORT is local-only${NC}"
             echo -e "${BLUE}  • Test from server: curl http://localhost:$HTTP_PORT/healthz${NC}"
             echo -e "${BLUE}  • Check Docker networks: docker network ls${NC}"
         fi

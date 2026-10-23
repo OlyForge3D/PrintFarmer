@@ -183,11 +183,16 @@ chown $USER:$USER .deploy-config
 - `DB_PROVIDER` - `postgres` or `sqlserver`
 - `DB_PASSWORD` - Database password
 - `NETWORK_MODE` - `bridge` only
-- `HTTP_PORT` - Frontend HTTP port, published on `127.0.0.1` only (default: 8080); use `HTTPS_PORT` for LAN access
+- `HTTP_PORT` - Frontend HTTP port (default: 8080), available on the LAN by default
+- `BIND_ADDRESS` - HTTP listen address (default: `0.0.0.0`); set to
+  `127.0.0.1` for local-only HTTP
 - `HTTPS_PORT` - TLS port for LAN access (default: 8443); requires a valid,
-  client-trusted certificate. `0` disables TLS and leaves local-only HTTP.
+  client-trusted certificate. `0` disables TLS without changing the HTTP binding.
   `INSTALLER_LAB=true HTTP_ONLY=true` also disables TLS; it does not enable LAN HTTP.
 - `API_PORT` - API port (default: 5245, microservices only)
+
+Prefer HTTPS for authenticated traffic: HTTP does not encrypt credentials.
+The separate `install.sh` installer retains its local-only HTTP configuration.
 
 ### Network Discovery
 - `ENABLE_DISCOVERY` - `yes` or `no`

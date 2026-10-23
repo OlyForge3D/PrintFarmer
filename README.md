@@ -106,9 +106,11 @@ cd PrintFarmer
 ```
 
 Open **http://localhost:8080** on the deployment host (or your configured
-HTTP port). HTTP is local-only; LAN clients must use
-**https://SERVER_HOST:8443** with a valid, trusted certificate and the configured
-HTTPS port. `HTTPS_PORT=0` or HTTP-only lab mode leaves no LAN listener.
+HTTP port), or **http://SERVER_HOST:8080** from your LAN. The Docker deployment
+script publishes HTTP on all interfaces by default; set `BIND_ADDRESS=127.0.0.1`
+to restrict it. Prefer **https://SERVER_HOST:8443** with a valid, trusted
+certificate to protect credentials in transit. `HTTPS_PORT=0` disables only
+HTTPS; explicit HTTP-only lab mode remains local-only.
 For private-CA bootstrap, transfer the public CA through a trusted channel;
 see [iPhone / iPad HTTPS trust](./docs/DEPLOYMENT.md#iphone--ipad-https-trust).
 
