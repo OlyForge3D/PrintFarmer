@@ -3,10 +3,13 @@ using System.Threading.Channels;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Testing.Shared;
 using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
@@ -175,6 +178,80 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
         string proxyUrl = received.GetProperty("currentJobThumbnailUrl").GetString()!;
         proxyUrl.Should().StartWith($"/api/printers/{printerId:D}/current-job/thumbnail?v=");
         received.GetRawText().Should().NotContain("printer.internal");
+    }
+
+    [Fact]
+    public async Task MoonrakerPrimarySnapshot_InvalidReadingsAndUnknownTool_PreserveAuthoritativeWireShape()
+    {
+        Guid id = Guid.NewGuid();
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IPrinterStatusCacheWriter cache = scope.ServiceProvider.GetRequiredService<IPrinterStatusCacheWriter>();
+        IHubContext<PrinterHub> hub = scope.ServiceProvider.GetRequiredService<IHubContext<PrinterHub>>();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "idle"));
+        string token = await CreateFarmAdminTokenAsync();
+        Channel<JsonElement> events = Channel.CreateUnbounded<JsonElement>();
+        await using HubConnection connection = BuildHubConnection(token);
+        using IDisposable subscription = connection.On<JsonElement>(
+            "printerupdated", payload => events.Writer.TryWrite(payload));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await connection.StartAsync(timeout.Token);
+        await connection.InvokeAsync("SubscribeToPrinterAsync", id.ToString(), timeout.Token);
+        _ = await events.Reader.ReadAsync(timeout.Token);
+
+        var nozzle = new PrinterSensorDto("extruder3", "Extruder 3", PrinterSensorKind.Nozzle)
+        {
+            Readings =
+            [
+                new(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(213), PrinterSensorUnit.Celsius),
+                new(PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(220), PrinterSensorUnit.Celsius),
+            ],
+            Writable = [new(PrinterSensorQuantity.TargetTemperature, 10, 270, null, PrinterSensorUnit.Celsius) { AllowZero = true }],
+        };
+        PrinterStatusUpdate known = new(
+            id, true, "Idle", null, null, null, null, null, null, null,
+            213, 60, 220, 65, null, null, ActiveExtruderId: "extruder3")
+        {
+            Sensors = [nozzle],
+        };
+        PrinterStatusUpdate invalid = known with
+        {
+            HotendTemp = null,
+            HotendTarget = null,
+            Sensors = [nozzle with { Readings = [] }],
+        };
+        PrinterStatusUpdate unknown = invalid with { ActiveExtruderId = null, BedTemp = null, BedTarget = null };
+        foreach ((string name, PrinterStatusUpdate update) in new[] { ("known", known), ("invalid", invalid), ("unknown", unknown) })
+        {
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(id)).SendAsync("printerupdated", update, timeout.Token);
+            JsonElement received = await events.Reader.ReadAsync(timeout.Token);
+            received.GetProperty("sensors").GetArrayLength().Should().Be(1);
+            if (name == "known")
+            {
+                received.GetProperty("activeExtruderId").GetString().Should().Be("extruder3");
+                received.GetProperty("hotendTemp").GetDouble().Should().Be(213);
+            }
+            else
+            {
+                JsonContractAssertions.AssertMissingKey(received, "hotendTemp");
+                JsonContractAssertions.AssertMissingKey(received, "hotendTarget");
+            }
+
+            if (name == "unknown")
+            {
+                JsonContractAssertions.AssertMissingKey(received, "activeExtruderId");
+                JsonContractAssertions.AssertMissingKey(received, "bedTemp");
+                JsonContractAssertions.AssertMissingKey(received, "bedTarget");
+            }
+
+            await WireContractFixtureWriter.CaptureOrVerifyAsync(
+                WireContractCorpusPaths.ApiRoot,
+                $"printer-status/moonraker-primary.{name}.json",
+                endpoint: "SignalR PrinterHub \"printerupdated\" (Moonraker complete heater snapshot)",
+                producingTest: $"{nameof(PrinterStatusContractTests)}.{nameof(MoonrakerPrimarySnapshot_InvalidReadingsAndUnknownTool_PreserveAuthoritativeWireShape)}",
+                schemaVersion: "1.0",
+                actualJson: received.GetRawText(),
+                volatilePaths: new HashSet<string> { "$.id" });
+        }
     }
 
     [Fact]

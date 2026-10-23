@@ -70,4 +70,5 @@ public record CompletePrinterDto(
     double? LiveZOffsetMm = null,
 
     // Presentation-only: show the filament box external spool slot.
-    bool ShowExternalSpool = false);
+    bool ShowExternalSpool = false,
+    string? ActiveExtruderId = null);

@@ -535,10 +535,19 @@ final class PrinterDetailViewModel {
             // or end must never leave the previous job's image attached.
             p.currentJobThumbnailUrl = currentJobThumbnail
             if let cam = update.cameraStreamUrl { p.cameraStreamUrl = cam }
-            if let hotend = update.hotendTemp { p.hotendTemp = hotend }
-            if let bed = update.bedTemp { p.bedTemp = bed }
-            if let ht = update.hotendTarget { p.hotendTarget = ht }
-            if let bt = update.bedTarget { p.bedTarget = bt }
+            if p.backend == .moonraker && update.sensors != nil {
+                // Moonraker sensor events carry a complete thermal snapshot; null clears stale values.
+                p.activeExtruderId = update.activeExtruderId
+                p.hotendTemp = update.hotendTemp
+                p.bedTemp = update.bedTemp
+                p.hotendTarget = update.hotendTarget
+                p.bedTarget = update.bedTarget
+            } else {
+                if let hotend = update.hotendTemp { p.hotendTemp = hotend }
+                if let bed = update.bedTemp { p.bedTemp = bed }
+                if let ht = update.hotendTarget { p.hotendTarget = ht }
+                if let bt = update.bedTarget { p.bedTarget = bt }
+            }
             p.fanSpeedPercent = update.fanSpeedPercent
             p.liveZOffsetMm = update.liveZOffsetMm
             if let sensors = update.sensors { p.sensors = sensors }
@@ -1803,6 +1812,7 @@ final class PrinterDetailViewModel {
         current.y = detail.y
         current.z = detail.z
         current.hotendTemp = detail.hotendTemp
+        current.activeExtruderId = detail.activeExtruderId
         current.bedTemp = detail.bedTemp
         current.hotendTarget = detail.hotendTarget
         current.bedTarget = detail.bedTarget

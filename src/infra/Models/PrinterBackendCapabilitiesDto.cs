@@ -65,6 +65,12 @@ public record PrinterBackendCapabilitiesDto(
     /// </summary>
     public bool SupportsSensorControl { get; init; }
 
+    /// <summary>Whether manual temperature edits are supported during an active print or pause.</summary>
+    public bool SupportsTemperatureControlDuringPrint { get; init; }
+
+    /// <summary>Whether a distinct all-heaters-off operation is supported.</summary>
+    public bool SupportsHeaterShutdown { get; init; }
+
     /// <summary>Whether the latest printer status includes a valid live G-code Z offset.</summary>
     public bool SupportsZOffsetReadback { get; init; }
 

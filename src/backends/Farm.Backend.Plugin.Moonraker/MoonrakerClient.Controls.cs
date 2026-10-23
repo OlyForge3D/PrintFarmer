@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl
+public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl, ISupportsHeaterShutdown
 {
     public PrinterControlCapabilities ControlCapabilities { get; } = new()
     {
@@ -17,6 +17,7 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         SupportsHomingZ = true,
         SupportsHotendTemperature = true,
         SupportsBedTemperature = true,
+        SupportsTemperatureControlDuringPrint = true,
         SupportsDisableMotors = true,
         SupportsExtrusion = true,
         SupportedAxes = Array.AsReadOnly(new[] { "x", "y", "z" }),
@@ -27,6 +28,10 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
 
     public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default) =>
         SendControlScriptAsync(baseUrl, MoonrakerSensorMapper.BuildPartFanCommand(speedPercent), credential, ct);
+
+    /// <inheritdoc />
+    public Task<bool> TurnOffHeatersAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, "TURN_OFF_HEATERS", credential, ct);
 
     /// <summary>
     /// Targeted Klipper sensor/fan write (issue #3407). The printer's live object list and, for
@@ -224,23 +229,39 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         return SendControlScriptAsync(baseUrl, script, credential, ct);
     }
 
-    private Task<bool> SetControlTemperaturesAsync(string baseUrl, double? hotend, double? bed, PrinterCredential? credential, CancellationToken ct)
+    private async Task<bool> SetControlTemperaturesAsync(string baseUrl, double? hotend, double? bed, PrinterCredential? credential, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (hotend is null && bed is null)
+        {
+            return true;
+        }
+
+        MoonrakerSensorTracker? sensors = await QuerySensorStateAsync(baseUrl, credential, ct).ConfigureAwait(false);
+        if (sensors is null)
+        {
+            return false;
+        }
+
         List<string> commands = [];
-        if (hotend is not null)
+        foreach ((string? id, double? target) in new[] { (sensors.ActiveExtruderId, hotend), (MoonrakerSensorMapper.HeaterBed, bed) })
         {
-            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M104 S{hotend:0}"));
+            if (target is not double value)
+            {
+                continue;
+            }
+
+            string? command = sensors.BuildPrimaryHeaterCommand(id, value);
+            if (command is null)
+            {
+                _logger.LogWarning("Rejected Moonraker primary temperature write: heater identity or target limits are invalid");
+                return false;
+            }
+
+            commands.Add(command);
         }
 
-        if (bed is not null)
-        {
-            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M140 S{bed:0}"));
-        }
-
-        return commands.Count == 0
-            ? Task.FromResult(true)
-            : SendControlScriptAsync(baseUrl, string.Join("\n", commands), credential, ct);
+        return await SendControlScriptAsync(baseUrl, string.Join("\n", commands), credential, ct).ConfigureAwait(false);
     }
 
     private async Task<bool> SendControlScriptAsync(string baseUrl, string script, PrinterCredential? credential, CancellationToken ct)

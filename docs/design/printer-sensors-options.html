@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08101f">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <link rel="icon" href="data:,">
+  <title>PrintFarmer · Mainsail-style sensors & controls</title>
+  <style>
+    /* PrintFarmer base.css / Mission Control token snapshot for an offline preview. */
+    :root {
+      color-scheme: dark;
+      --pf-bg-0: #08101f;
+      --pf-bg-1: #0e1729;
+      --pf-bg-2: #16213a;
+      --pf-panel: #0c1424;
+      --pf-sidebar-bg: #0a1322;
+      --pf-border: #243250;
+      --pf-text-primary: #e8eef8;
+      --pf-text-secondary: #a0aec8;
+      --pf-accent: #14b8a6;
+      --pf-accent-text: #2dd4bf;
+      --pf-control-boundary: #657188;
+      --pf-error: #ef4444;
+      --pf-error-fg: #fecaca;
+      --pf-warning-fg: #fde68a;
+      --pf-info-fg: #bfdbfe;
+      --pf-font-body: 'Inter', 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --pf-font-display: 'Space Grotesk', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+      --pf-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--pf-bg-0); color: var(--pf-text-primary); font: 14px/1.45 var(--pf-font-body); }
+    button, input, select { font: inherit; }
+    button, select { cursor: pointer; }
+    button, input, select { touch-action: manipulation; }
+    button, select { border: 1px solid var(--pf-control-boundary); border-radius: 4px; background: transparent; color: var(--pf-text-primary); min-height: 36px; padding: 0 12px; }
+    button:hover { background: var(--pf-bg-2); }
+    button:disabled, input:disabled, input[readonly] { cursor: not-allowed; opacity: .5; }
+    button[aria-pressed="true"] { color: var(--pf-accent-text); border-color: var(--pf-accent); background: var(--pf-bg-2); }
+    :focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 3px; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2 { font-family: var(--pf-font-display); text-wrap: balance; }
+    h1 { font-size: 24px; line-height: 1.25; }
+    h2 { font-size: 18px; line-height: 1.4; }
+    h3 { font-size: 14px; font-weight: 600; }
+    a { color: var(--pf-accent-text); text-underline-offset: 3px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .skip { position: absolute; top: -60px; left: 16px; background: var(--pf-bg-2); padding: 12px; z-index: 5; }
+    .skip:focus { top: 8px; }
+    .appbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 32px; background: var(--pf-sidebar-bg); border-bottom: 1px solid var(--pf-border); }
+    .brand { display: flex; align-items: center; gap: 8px; font: 700 18px var(--pf-font-display); }
+    .brand svg { color: var(--pf-accent); }
+    .appbar > span { color: var(--pf-text-secondary); font-size: 12px; text-align: right; }
+    main { max-width: 1200px; margin: auto; padding: 32px; }
+    .intro { display: grid; gap: 8px; margin-bottom: 24px; }
+    .intro p { color: var(--pf-text-secondary); max-width: 70ch; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; margin-bottom: 24px; }
+    .toolbar label, .width-tools { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--pf-text-secondary); }
+    .toolbar select { background: var(--pf-bg-1); font-size: 12px; }
+    .toolbar input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pf-accent); }
+    .toolbar label:has(input[type="checkbox"]) { min-height: 32px; cursor: pointer; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 680px) minmax(220px, 280px); gap: 32px; align-items: start; }
+    .preview { min-width: 0; container: sensors / inline-size; }
+    .phone .preview { max-width: 360px; }
+    .phone .workspace { grid-template-columns: minmax(0, 360px) minmax(220px, 360px); }
+    .panel { display: flex; flex-direction: column; gap: 8px; background: transparent; border: 0; border-radius: 0; }
+    .panel + .panel { margin-top: 16px; }
+    .panel-heading { margin: 0; }
+    .panel-heading button { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 0; min-height: 0; text-align: left; padding: 0; background: transparent; }
+    .panel-title { color: var(--pf-text-secondary); font: 700 10px/15px var(--pf-font-body); text-transform: uppercase; letter-spacing: .025em; }
+    .panel-divider { flex: 1; border-top: 1px solid var(--pf-border); }
+    .panel-heading .chevron { color: var(--pf-text-secondary); transition: transform 120ms ease-out; }
+    .panel-heading button[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
+    .icon { width: 20px; height: 20px; flex-shrink: 0; }
+    .panel-heading .icon { width: 14px; height: 14px; }
+    .panel-body { padding: 0; font: 12px/16px var(--pf-font-body); }
+    .connection-notice { margin-bottom: 16px; padding: 12px 16px; background: var(--pf-bg-2); border-radius: 4px; color: var(--pf-warning-fg); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    col.state-col { width: 64px; }
+    col.current-col { width: 88px; }
+    col.target-col { width: 104px; }
+    th, td { text-align: right; vertical-align: middle; padding: 6px 4px; }
+    thead th { color: var(--pf-text-secondary); font-weight: 400; font-size: 12px; padding-top: 4px; padding-bottom: 8px; }
+    thead th:first-child { text-align: left; }
+    tbody th { color: var(--pf-text-secondary); text-align: left; font-weight: 400; overflow-wrap: anywhere; }
+    tbody tr { height: 32px; }
+    .sensor-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .sensor-name .icon { width: 18px; height: 18px; color: var(--pf-text-secondary); }
+    .sensor-name > span { min-width: 0; }
+    .role, .extra-reading { color: var(--pf-text-secondary); font-size: 12px; font-weight: 400; }
+    .role { margin-left: 4px; white-space: nowrap; }
+    .extra-reading { display: block; margin-top: 2px; }
+    .mono, .reading, input[type="number"], .rpm { font-family: var(--pf-font-body); font-size: 12px; font-weight: 500; color: var(--pf-text-primary); }
+    .reading { white-space: nowrap; }
+    .number-container { display: inline-flex; align-items: center; height: 28px; margin: 2px 0; }
+    .target-cell { padding-top: 0; padding-bottom: 0; }
+    .number-field { display: inline-flex; align-items: center; width: 88px; height: 28px; min-height: 28px; border: 1px solid var(--pf-control-boundary); border-radius: 4px; background: var(--pf-bg-1); }
+    .number-field:focus-within { border-color: var(--pf-accent); }
+    input[type="number"] { width: 100%; min-width: 0; height: 26px; min-height: 26px; padding: 0 4px 0 2px; border: 0; background: transparent; color: var(--pf-text-primary); text-align: right; appearance: textfield; -moz-appearance: textfield; }
+    input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .unit { padding-right: 4px; color: var(--pf-text-secondary); font-size: 12px; }
+    input[aria-invalid="true"] { box-shadow: inset 0 -2px var(--pf-error); }
+    .fan-list { list-style: none; padding: 0; margin: 0; }
+    .output-row { padding: 8px 0; }
+    .output-row + .output-row { margin-top: 4px; }
+    .output-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 32px; }
+    .output-name { display: flex; align-items: center; gap: 8px; flex: 1 1 150px; min-width: 0; color: var(--pf-text-secondary); font-weight: 400; overflow-wrap: anywhere; }
+    .output-name > span { min-width: 0; }
+    .output-name .icon { color: var(--pf-text-secondary); width: 18px; height: 18px; }
+    .output-values { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+    .rpm { white-space: nowrap; }
+    .output-values .number-field { width: 88px; }
+    .reset-control, .step-control { display: inline-flex; justify-content: center; align-items: center; width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; flex-shrink: 0; color: var(--pf-text-primary); }
+    .reset-control:hover, .step-control:hover { color: var(--pf-text-primary); }
+    .reset-control .icon { width: 20px; height: 20px; }
+    .slider-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    .step-control { font-size: 24px; line-height: 1; }
+    input[type="range"] { flex: 1; width: 100%; min-width: 0; height: 32px; margin: 0; accent-color: var(--pf-accent); cursor: pointer; }
+    .toggle { border: 0; background: transparent; padding: 0; width: 36px; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; margin-left: auto; }
+    .toggle-track { width: 32px; height: 18px; border: 1px solid var(--pf-control-boundary); border-radius: 9999px; background: var(--pf-bg-2); display: block; position: relative; transition: background-color 120ms ease-out; }
+    .toggle-track::after { content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--pf-text-primary); transition: transform 120ms ease-out; }
+    .toggle[aria-checked="true"] .toggle-track { background: var(--pf-accent); border-color: var(--pf-accent); }
+    .toggle[aria-checked="true"] .toggle-track::after { transform: translateX(14px); background: var(--pf-bg-0); }
+    .row-message { color: var(--pf-text-secondary); font: 12px/1.4 var(--pf-font-body); text-align: left; padding: 0 0 4px; overflow-wrap: anywhere; }
+    .row-message:empty { display: none; }
+    .row-message[data-state="error"] { color: var(--pf-error-fg); }
+    .row-message[data-state="accepted"] { color: var(--pf-info-fg); }
+    .row-message[data-state="unknown"] { color: var(--pf-warning-fg); }
+    .message-row td { padding: 0 4px; }
+    .notes { display: grid; gap: 20px; color: var(--pf-text-secondary); }
+    .notes h3 { color: var(--pf-text-primary); margin-bottom: 4px; }
+    .notes p { font-size: 12px; }
+    .notes output { font-family: var(--pf-font-mono); color: var(--pf-accent-text); }
+    details { margin-top: 24px; color: var(--pf-text-secondary); }
+    summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; color: var(--pf-text-primary); }
+    .command-log { font: 12px/1.5 var(--pf-font-mono); padding-left: 24px; }
+    .command-log li { padding: 4px 0; overflow-wrap: anywhere; }
+    footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--pf-border); font-size: 12px; color: var(--pf-text-secondary); }
+    footer p { max-width: 80ch; margin-bottom: 8px; }
+    .empty { padding: 24px 16px; color: var(--pf-text-secondary); }
+    @container sensors (max-width: 440px) {
+      col.state-col { width: 40px; }
+      col.current-col { width: 64px; }
+      col.target-col { width: 76px; }
+      .sensor-name { gap: 4px; }
+      td, th { padding-left: 2px; padding-right: 2px; }
+      .number-field { width: 72px; }
+      .unit { padding-right: 4px; }
+      .role { display: block; margin-left: 0; }
+      .output-name { flex-basis: 120px; }
+      .output-values { gap: 4px; }
+      .output-values .number-field { width: 76px; }
+      .output-top { gap: 4px; }
+    }
+    @media (max-width: 800px) {
+      main { padding: 24px 16px; }
+      .appbar { padding: 12px 16px; }
+      .appbar > span { max-width: 140px; }
+      .workspace, .phone .workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+      .notes { max-width: 70ch; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <a href="#main" class="skip">Skip to preview</a>
+  <header class="appbar">
+    <div class="brand"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 5h16v15H4zM8 5V2h8v3M8 16h8M8 19h8M12 5v5m-3 0h6l-3 4z"/></svg><span translate="no">PrintFarmer</span></div>
+    <span>Interactive preview · No printer connected</span>
+  </header>
+  <main id="main">
+    <div class="intro">
+      <h1>Sensors & controls</h1>
+      <p>Mainsail's direct controls, Fluidd's fan reset, PrintFarmer's styling. Enter or Tab sends a number. Release a slider to send its value.</p>
+    </div>
+    <div class="toolbar">
+      <div class="width-tools"><span>Panel width</span><button type="button" data-width="wide" aria-pressed="true">Wide</button><button type="button" data-width="phone" aria-pressed="false">360 px</button></div>
+      <label for="connection">Sample state<select id="connection"><option value="online">Online</option><option value="stale">Stale</option><option value="readonly">Read-only</option><option value="empty">No sensors</option></select></label>
+      <label><input type="checkbox" id="reject">Reject commands</label>
+      <label><input type="checkbox" id="hold">Delay telemetry</label>
+      <button type="button" id="restore">Restore example data</button>
+    </div>
+    <div class="workspace">
+      <div class="preview">
+        <p class="connection-notice" id="connection-notice" role="status" hidden></p>
+        <div id="panels"></div>
+      </div>
+      <aside class="notes">
+        <div><h3>Fans: two compact lines</h3><p>Name, optional RPM, reset and percentage across the top. A full-width slider underneath. Read-only nonthermal sensors are hidden.</p></div>
+        <div><h3>Lights: a switch, not a form</h3><p>A binary light uses an on/off toggle. It sends immediately. Brightness-capable outputs would use the percentage control instead.</p></div>
+        <div><h3>Temperatures: aligned columns</h3><p>Name, State, Current and Target. Sensors without a target have an empty cell. Missing readings are blank; a genuine zero remains visible.</p></div>
+        <div><h3>Existing heater glyphs</h3><p>Nozzle and bed use the compact card's Material Design glyphs. Red nozzle and teal bed are bright above 50°C and 35°C respectively, muted otherwise. This indicates reported temperature, not command acceptance.</p></div>
+        <div><h3>No extra confirmation step</h3><p>Number fields send on Enter or leaving the field, including Tab. Sliders send on completed adjustment, not every pointer movement. Reset sends 0% when the allowed range includes zero.</p></div>
+        <div><h3>Still unmistakably PrintFarmer</h3><p>Existing Mission Control colors, teal accents, tabular figures and compact corners. No separator lines between sensor rows.</p></div>
+        <p>Rendered panels: <output id="height"></output></p>
+      </aside>
+    </div>
+    <details id="commands">
+      <summary>Simulated commands <span id="command-count">&nbsp;(0)</span></summary>
+      <p>No requests have been sent to any printer. This log records only the local interaction simulation.</p>
+      <ol class="command-log" id="command-log"></ol>
+    </details>
+    <footer>
+      <p><strong>HTML preview only.</strong> No API calls or printer connection. Sample ranges and readings are illustrative. The page blocks network connections; reloading resets it.</p>
+      <p>A request being accepted is not a physical result. The example separately simulates reported setpoints; it never invents temperature or RPM changes. “Delay telemetry” leaves acceptance visibly pending.</p>
+      <p>Reset follows <a href="https://github.com/fluidd-core/fluidd/blob/ef53f5bb140be05d08fc1f00bc2d49f7d0f30d23/src/components/widgets/outputs/OutputFan.vue" target="_blank" rel="noopener noreferrer">Fluidd's zero-percent fan reset</a>. Missing RPM is omitted, but reported 0 RPM is retained.</p>
+      <p>Direct submission is your chosen interaction model. Wrong-target or accidental edits would disprove its suitability and could affect operators, equipment or prints; production must retain permission, availability and range gates. The preview itself cannot operate hardware.</p>
+      <p>Miscellaneous contains only descriptor-backed controls. Filament sensors are deferred to <a href="https://github.com/OlyForge3D/PrintFarmer/issues/3461">#3461</a> for backend enable/disable support.</p>
+      <p>Built with accessibility in mind; keyboard, screen-reader and real-device review are still needed before shipping. This supersedes the earlier draft-and-confirm examples, not the production UI.</p>
+    </footer>
+    <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+  </main>
+  <script>
+    'use strict';
+    const fixtures = [
+      {id:'extruder',name:'Extruder',kind:'thermal',icon:'heater',current:26.7,power:0,target:0,min:0,max:300,step:1},
+      {id:'bed',name:'Heater Bed',kind:'thermal',icon:'bed',current:26.3,power:0,target:0,min:0,max:110,step:1},
+      {id:'heater-box',name:'Heater Box1',role:'Heater',kind:'thermal',icon:'heater',current:42.6,power:38,target:45,min:0,max:70,step:1},
+      {id:'box-sensor',name:'Heater Box1',role:'Sensor',kind:'thermal',icon:'temperature',current:41.8,humidity:34},
+      {id:'rpi-fan',name:'Rpi Fan',kind:'thermal',icon:'fan',current:42.8,speed:0,target:50,min:0,max:80,step:1},
+      {id:'hotend-power',name:'Hotend Power',kind:'thermal',icon:'temperature',current:0},
+      {id:'mcu',name:'GD32',kind:'thermal',icon:'temperature',current:46.1},
+      {id:'protection',name:'Chamber Thermal Protection Sensor',kind:'thermal',icon:'temperature',current:null},
+      {id:'cooling',name:'Cooling Fan',kind:'fan',icon:'fan',value:43,rpm:4708,min:0,max:100,step:1},
+      {id:'filter',name:'Filter Fan',kind:'fan',icon:'fan',value:0,min:0,max:100,step:1},
+      {id:'light',name:'02run Led',kind:'light',value:1,min:0,max:1,step:1}
+    ];
+    let sensors = structuredClone(fixtures);
+    let connection = 'online';
+    let commandCount = 0;
+    let generation = 0;
+    let pointerControl = null;
+    const states = new Map();
+    const timers = new Set();
+    const collapsed = new Set();
+    const finite = value => typeof value === 'number' && Number.isFinite(value);
+    const sensorById = id => sensors.find(sensor => sensor.id === id);
+    const stateOf = id => {
+      if (!states.has(id)) states.set(id, {draft:null,pending:null,message:'',messageKind:''});
+      return states.get(id);
+    };
+    const knownSetting = sensor => sensor.kind === 'thermal' ? sensor.target : sensor.value;
+    const writable = sensor => finite(sensor.min) && finite(sensor.max) && finite(knownSetting(sensor));
+    const unit = sensor => sensor.kind === 'thermal' ? '°C' : sensor.kind === 'light' ? '' : '%';
+    const valueText = (sensor,value) => sensor.kind === 'light' ? value ? 'On' : 'Off' : `${value}${unit(sensor)}`;
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const announce = text => { document.getElementById('announcement').textContent = text; };
+    const icons = {
+      temperature:'<path d="M9 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z"/><path d="M12 9v9"/>',
+      heater:'<path d="M7 3h10v8l-5 6-5-6ZM4 21h16M12 17v2"/>',
+      bed:'<path d="M3 15h18v4H3zM7 11c-3-3 3-3 0-6m5 6c-3-3 3-3 0-6m5 6c-3-3 3-3 0-6"/>',
+      fan:'<circle cx="12" cy="12" r="2"/><path d="M10 10C3 7 7 1 11 4l1 6m2 0c3-7 9-3 6 1l-6 1m0 2c7 3 3 9-1 6l-1-6m-2 0c-3 7-9 3-6-1l6-1"/>',
+      misc:'<path d="M5 3v18M12 3v18M19 3v18M2 8h6m1 8h6m1-9h6"/>',
+      reset:'<path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>',
+      chevron:'<path d="m6 9 6 6 6-6"/>'
+    };
+    const heaterPaths = {
+      nozzleOff:'M7,2H17V8H19V13H16.5L13,17H11L7.5,13H5V8H7V2M10,22H2V20H10A1,1 0 0,0 11,19V18H13V19A3,3 0 0,1 10,22Z',
+      nozzleOn:'M7 2H17V8H19V13H16.5L13 17H11L7.5 13H5V8H7V2M10 22H2V20H10C10.6 20 11 19.5 11 19V18H13V19C13 20.7 11.7 22 10 22M21 13V7H23V13H21M21 17V15H23V17H21Z',
+      bedOn:'M7.95,3L6.53,5.19L7.95,7.4H7.94L5.95,10.5L4.22,9.6L5.64,7.39L4.22,5.19L6.22,2.09L7.95,3M13.95,2.89L12.53,5.1L13.95,7.3L13.94,7.31L11.95,10.4L10.22,9.5L11.64,7.3L10.22,5.1L12.22,2L13.95,2.89M20,2.89L18.56,5.1L20,7.3V7.31L18,10.4L16.25,9.5L17.67,7.3L16.25,5.1L18.25,2L20,2.89M2,22V14A2,2 0 0,1 4,12H20A2,2 0 0,1 22,14V22H20V20H4V22H2M6,14A1,1 0 0,0 5,15V17A1,1 0 0,0 6,18A1,1 0 0,0 7,17V15A1,1 0 0,0 6,14M10,14A1,1 0 0,0 9,15V17A1,1 0 0,0 10,18A1,1 0 0,0 11,17V15A1,1 0 0,0 10,14M14,14A1,1 0 0,0 13,15V17A1,1 0 0,0 14,18A1,1 0 0,0 15,17V15A1,1 0 0,0 14,14M18,14A1,1 0 0,0 17,15V17A1,1 0 0,0 18,18A1,1 0 0,0 19,17V15A1,1 0 0,0 18,14Z',
+      bedOff:'M20,12H4A2,2 0 0,0 2,14V22H4V20H20V22H22V14A2,2 0 0,0 20,12M7,17A1,1 0 0,1 6,18A1,1 0 0,1 5,17V15A1,1 0 0,1 6,14A1,1 0 0,1 7,15V17M11,17A1,1 0 0,1 10,18A1,1 0 0,1 9,17V15A1,1 0 0,1 10,14A1,1 0 0,1 11,15V17M15,17A1,1 0 0,1 14,18A1,1 0 0,1 13,17V15A1,1 0 0,1 14,14A1,1 0 0,1 15,15V17M19,17A1,1 0 0,1 18,18A1,1 0 0,1 17,17V15A1,1 0 0,1 18,14A1,1 0 0,1 19,15V17Z'
+    };
+    function heaterIcon(sensor) {
+      const nozzle = sensor.id === 'extruder';
+      const reported = finite(sensor.current) && connection !== 'stale' && connection !== 'empty';
+      const on = reported && sensor.current > (nozzle ? 50 : 35);
+      const path = heaterPaths[`${nozzle ? 'nozzle' : 'bed'}${on ? 'On' : 'Off'}`];
+      const color = reported ? `var(--pf-${nozzle ? 'error' : 'accent'})` : 'var(--pf-text-secondary)';
+      return `<svg class="icon" viewBox="0 0 24 24" style="color:${color};opacity:${on ? 1 : 0.4}" aria-hidden="true"><path fill="currentColor" d="${path}"/></svg>`;
+    }
+    function icon(type,extra='') {
+      return `<svg class="icon ${extra}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[type] || icons.temperature}</svg>`;
+    }
+    function sensorLabel(sensor) {
+      return `${escapeHtml(sensor.name)}${sensor.role ? ` <span class="role">${sensor.role}</span>` : ''}`;
+    }
+    function numericInput(sensor) {
+      return `<label class="number-container" data-value-field><span class="number-field"><span class="sr-only">${escapeHtml(sensor.name)} ${sensor.kind === 'thermal' ? 'target temperature' : 'percentage'}</span>
+        <input type="number" id="${sensor.id}-number" name="${sensor.id}-number" data-number="${sensor.id}" min="${sensor.min}" max="${sensor.max}" step="${sensor.step}" inputmode="decimal" autocomplete="off" aria-describedby="${sensor.id}-bounds ${sensor.id}-message">
+        <span class="unit" aria-hidden="true">${unit(sensor)}</span></span></label>
+        <span class="sr-only" id="${sensor.id}-bounds">${sensor.min} to ${sensor.max}${unit(sensor)}, step ${sensor.step}. Enter or Tab sends.</span>`;
+    }
+    function thermalRow(sensor) {
+      const status = finite(sensor.power) ? sensor.power === 0 ? 'off' : `${sensor.power}%` : finite(sensor.speed) ? `${sensor.speed}%` : '';
+      const current = finite(sensor.current) ? `${sensor.current.toFixed(1)}°C` : '';
+      return `<tr data-sensor="${sensor.id}">
+        <th scope="row"><span class="sensor-name">${sensor.id === 'extruder' || sensor.id === 'bed' ? heaterIcon(sensor) : icon(sensor.icon)}<span>${sensorLabel(sensor)}${finite(sensor.humidity) ? `<span class="extra-reading">Humidity <span class="mono">${sensor.humidity}%</span></span>` : ''}</span></span></th>
+        <td class="reading state-reading">${status}</td>
+        <td class="reading current-cell">${current}</td>
+        <td class="target-cell">${writable(sensor) ? numericInput(sensor) : finite(sensor.target) ? `<span class="reading">${sensor.target}°C</span>` : ''}</td>
+      </tr>${writable(sensor) ? `<tr class="message-row" id="${sensor.id}-message-row" hidden><td colspan="4"><p class="row-message" id="${sensor.id}-message"></p></td></tr>` : ''}`;
+    }
+    function outputRow(sensor) {
+      const controllable = writable(sensor);
+      return `<li class="output-row" data-sensor="${sensor.id}">
+        <div class="output-top">
+          <span class="output-name" id="${sensor.id}-label">${sensor.kind === 'fan' ? icon('fan') : ''}<span>${sensorLabel(sensor)}</span></span>
+          ${sensor.kind === 'light' ? `<button class="toggle" type="button" role="switch" aria-labelledby="${sensor.id}-label" aria-describedby="${sensor.id}-message" data-toggle="${sensor.id}"><span class="toggle-track" aria-hidden="true"></span></button>` :
+            `<div class="output-values">
+              ${finite(sensor.rpm) ? `<span class="rpm">${Math.round(sensor.rpm)} RPM</span>` : ''}
+              ${controllable ? `<button type="button" class="reset-control" data-reset="${sensor.id}" aria-label="Reset ${escapeHtml(sensor.name)} to 0%" title="Reset to 0%">${icon('reset')}</button>${numericInput(sensor)}` :
+                finite(sensor.value) ? `<span class="reading">${sensor.value}%</span>` : ''}
+            </div>`}
+        </div>
+        ${sensor.kind === 'fan' && controllable ? `<div class="slider-line">
+          <button type="button" class="step-control" data-step="${sensor.id}" data-direction="-1" aria-label="Decrease ${escapeHtml(sensor.name)}">−</button>
+          <input type="range" data-slider="${sensor.id}" id="${sensor.id}-slider" name="${sensor.id}-slider" min="${sensor.min}" max="${sensor.max}" step="${sensor.step}" aria-label="${escapeHtml(sensor.name)} percentage slider" aria-describedby="${sensor.id}-bounds ${sensor.id}-message">
+          <button type="button" class="step-control" data-step="${sensor.id}" data-direction="1" aria-label="Increase ${escapeHtml(sensor.name)}">+</button>
+        </div>` : ''}
+        ${controllable ? `<p class="row-message" id="${sensor.id}-message"></p>` : ''}
+      </li>`;
+    }
+    function panel(id,title,content) {
+      return `<section class="panel"><div class="panel-heading"><button type="button" data-collapse="${id}" aria-label="${collapsed.has(id) ? 'Expand' : 'Collapse'} ${title}" aria-expanded="${!collapsed.has(id)}" aria-controls="${id}">${icon('chevron','chevron')}${collapsed.has(id) ? `<span class="panel-title">${title}</span>` : ''}<span class="panel-divider"></span></button></div>
+        ${collapsed.has(id) ? '' : `<div class="panel-title">${title}</div>`}
+        <div class="panel-body" id="${id}" ${collapsed.has(id) ? 'hidden' : ''}>${content}</div></section>`;
+    }
+    function render() {
+      const notice = document.getElementById('connection-notice');
+      notice.hidden = connection === 'online' || connection === 'empty';
+      notice.textContent = connection === 'stale' ? 'Stale data — last reported readings shown; controls disabled.' : 'Read-only access — controls disabled.';
+      const outputs = sensors.filter(sensor => sensor.kind !== 'thermal' && writable(sensor));
+      document.getElementById('panels').innerHTML = connection === 'empty' ? '<p class="empty">No sensors reported.</p>' :
+        panel('temperatures','Temperatures',`<table aria-label="Temperatures"><colgroup><col><col class="state-col"><col class="current-col"><col class="target-col"></colgroup>
+          <thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Current</th><th scope="col">Target</th></tr></thead>
+          <tbody>${sensors.filter(sensor=>sensor.kind==='thermal').map(thermalRow).join('')}</tbody></table>`) +
+        (outputs.length ? panel('miscellaneous','Miscellaneous',`<ul class="fan-list">${outputs.map(outputRow).join('')}</ul>`) : '');
+      sensors.filter(writable).forEach(refreshControl);
+      measure();
+    }
+    function refreshControl(sensor) {
+      const state = stateOf(sensor.id);
+      const shown = state.draft !== null ? state.draft : state.pending ? String(state.pending.value) : String(knownSetting(sensor));
+      const offline = connection !== 'online';
+      const busy = Boolean(state.pending);
+      const number = document.getElementById(`${sensor.id}-number`);
+      if (number) {
+        number.value = shown;
+        number.disabled = offline;
+        number.readOnly = busy;
+        number.setAttribute('aria-busy', String(busy));
+      }
+      const slider = document.getElementById(`${sensor.id}-slider`);
+      if (slider) {
+        slider.value = shown.trim() !== '' && Number.isFinite(Number(shown)) ? shown : String(knownSetting(sensor));
+        slider.disabled = offline || busy;
+        slider.setAttribute('aria-valuetext', `${slider.value}%`);
+      }
+      const reset = document.querySelector(`[data-reset="${sensor.id}"]`);
+      if (reset) reset.disabled = offline || busy || sensor.min > 0 || sensor.max < 0;
+      document.querySelectorAll(`[data-step="${sensor.id}"]`).forEach(button => {
+        button.disabled = offline || busy || Number(shown) + Number(button.dataset.direction) * sensor.step < sensor.min || Number(shown) + Number(button.dataset.direction) * sensor.step > sensor.max;
+      });
+      const toggle = document.querySelector(`[data-toggle="${sensor.id}"]`);
+      if (toggle) {
+        toggle.setAttribute('aria-checked', String(Number(shown) === 1));
+        toggle.disabled = offline || busy;
+      }
+      const message = document.getElementById(`${sensor.id}-message`);
+      if (message) { message.textContent = state.message; message.dataset.state = state.messageKind; }
+      const messageRow = document.getElementById(`${sensor.id}-message-row`);
+      if (messageRow) messageRow.hidden = !state.message;
+      measure();
+    }
+    function measure() {
+      requestAnimationFrame(() => {
+        const frame = document.querySelector('.preview');
+        document.getElementById('height').value = `${Math.round(frame.getBoundingClientRect().height)} px × ${Math.round(frame.getBoundingClientRect().width)} px`;
+      });
+    }
+    function later(fn,ms) {
+      const timer = setTimeout(() => { timers.delete(timer); fn(); },ms);
+      timers.add(timer);
+    }
+    function interruptPending(sensor) {
+      const state = stateOf(sensor.id), request = state.pending;
+      if (!request) return;
+      state.pending = null; state.draft = null;
+      state.message = 'Connection interrupted; outcome unknown. Check telemetry before retrying.';
+      state.messageKind = 'unknown';
+      request.entry.textContent = `${request.logPrefix} · outcome unknown`;
+      refreshControl(sensor);
+      announce(`${sensor.name}: ${state.message}`);
+    }
+    function send(id,raw,source) {
+      const sensor = sensorById(id);
+      const state = stateOf(id);
+      if (connection !== 'online' || !writable(sensor) || state.pending) return;
+      const value = String(raw).trim() === '' ? NaN : Number(raw);
+      const steps = (value - sensor.min) / sensor.step;
+      const number = document.getElementById(`${id}-number`);
+      if (!Number.isFinite(value) || value < sensor.min || value > sensor.max || Math.abs(steps-Math.round(steps)) > 0.000001) {
+        state.draft = String(raw);
+        state.message = `Enter ${sensor.min}–${sensor.max}${unit(sensor)} in steps of ${sensor.step}. Nothing sent.`;
+        state.messageKind = 'error';
+        number?.setAttribute('aria-invalid','true');
+        refreshControl(sensor);
+        announce(`${sensor.name}: ${state.message}`);
+        return;
+      }
+      number?.removeAttribute('aria-invalid');
+      if (value === knownSetting(sensor)) {
+        state.draft = null; state.message = ''; state.messageKind = '';
+        refreshControl(sensor);
+        return;
+      }
+      const entry = document.createElement('li');
+      const ordinal = ++commandCount;
+      const logPrefix = `${ordinal}. ${sensor.name} → ${valueText(sensor,value)} · ${source}`;
+      const request = {value,stage:'sending',generation,hold:document.getElementById('hold').checked,entry,logPrefix};
+      const reject = document.getElementById('reject').checked;
+      state.draft = null;
+      state.pending = request;
+      state.message = 'Sending…';
+      state.messageKind = 'sending';
+      entry.textContent = `${logPrefix} · sending`;
+      document.getElementById('command-log').prepend(entry);
+      document.getElementById('command-count').textContent = ` (${commandCount})`;
+      refreshControl(sensor);
+      announce(`${sensor.name}: sending ${valueText(sensor,value)}.`);
+      later(() => {
+        if (request.generation !== generation || state.pending !== request) return;
+        if (connection !== 'online') { interruptPending(sensor); return; }
+        if (reject) {
+          state.pending = null;
+          state.draft = sensor.kind === 'light' ? null : String(value);
+          state.message = `Rejected. Last reported ${valueText(sensor,knownSetting(sensor))}. ${sensor.kind === 'light' ? 'Toggle again to retry.' : 'Correct the value, or press Enter to retry.'}`;
+          state.messageKind = 'error';
+          entry.textContent = `${logPrefix} · rejected`;
+          refreshControl(sensor); announce(`${sensor.name}: ${state.message}`);
+          return;
+        }
+        request.stage = 'accepted';
+        state.message = `Accepted ${valueText(sensor,value)} · awaiting telemetry`;
+        state.messageKind = 'accepted';
+        entry.textContent = `${logPrefix} · accepted, awaiting telemetry`;
+        refreshControl(sensor); announce(`${sensor.name}: ${state.message}`);
+        if (request.hold) return;
+        later(() => {
+          if (request.generation !== generation || state.pending !== request) return;
+          if (connection !== 'online') { interruptPending(sensor); return; }
+          if (sensor.kind === 'thermal') sensor.target = value; else sensor.value = value;
+          state.pending = null; state.message = ''; state.messageKind = '';
+          entry.textContent = `${logPrefix} · simulated telemetry confirmed`;
+          refreshControl(sensor); announce(`${sensor.name}: simulated telemetry reports ${valueText(sensor,value)}.`);
+        },650);
+      },350);
+    }
+    function discardUnsent(id) {
+      const sensor = sensorById(id), state = stateOf(id);
+      if (state.pending) return;
+      state.draft = null; state.message = ''; state.messageKind = '';
+      document.getElementById(`${id}-number`)?.removeAttribute('aria-invalid');
+      refreshControl(sensor);
+    }
+    document.addEventListener('input',event => {
+      const id = event.target.dataset.number || event.target.dataset.slider;
+      if (!id) return;
+      const sensor = sensorById(id), state = stateOf(id);
+      if (state.pending || connection !== 'online') return;
+      state.draft = event.target.value;
+      state.message = ''; state.messageKind = '';
+      document.getElementById(`${id}-number`)?.removeAttribute('aria-invalid');
+      refreshControl(sensor);
+    });
+    document.addEventListener('change',event => {
+      const id = event.target.dataset.slider;
+      if (id) send(id,event.target.value,'slider');
+    });
+    document.addEventListener('pointerdown',event => {
+      const id = document.activeElement?.dataset.number;
+      const control = event.target.closest('[data-reset], [data-step], [data-slider]');
+      // A same-row pointer action replaces the draft; keyboard Tab still commits it.
+      pointerControl = id && control && !control.disabled &&
+        (control.dataset.reset || control.dataset.step || control.dataset.slider) === id ? id : null;
+    });
+    document.addEventListener('pointerup',() => { pointerControl = null; });
+    document.addEventListener('focusout',event => {
+      const id = event.target.dataset.number;
+      const replacedByControl = pointerControl === id;
+      pointerControl = null;
+      if (id && stateOf(id).draft !== null && !replacedByControl) send(id,event.target.value,'field blur / Tab');
+    });
+    document.addEventListener('keydown',event => {
+      pointerControl = null;
+      const id = event.target.dataset.number;
+      if (!id) return;
+      if (event.key === 'Enter') { event.preventDefault(); send(id,event.target.value,'Enter'); }
+      if (event.key === 'Escape') { event.preventDefault(); discardUnsent(id); }
+    });
+    document.addEventListener('pointercancel',event => {
+      pointerControl = null;
+      if (event.target.dataset.slider) discardUnsent(event.target.dataset.slider);
+    });
+    document.addEventListener('click',event => {
+      const button = event.target.closest('button');
+      if (!button || button.disabled) return;
+      if (button.dataset.reset) send(button.dataset.reset,0,'reset to 0%');
+      if (button.dataset.step) {
+        const id=button.dataset.step, sensor=sensorById(id), state=stateOf(id);
+        const current=state.draft !== null && state.draft.trim() !== '' && Number.isFinite(Number(state.draft)) ? Number(state.draft) : knownSetting(sensor);
+        send(id,current+Number(button.dataset.direction)*sensor.step,'step button');
+      }
+      if (button.dataset.toggle) {
+        const id=button.dataset.toggle;
+        send(id,knownSetting(sensorById(id)) === 1 ? 0 : 1,'toggle');
+      }
+      if (button.dataset.width) {
+        document.body.classList.toggle('phone',button.dataset.width==='phone');
+        document.querySelectorAll('[data-width]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+        measure();
+      }
+      if (button.dataset.collapse) {
+        const id=button.dataset.collapse;
+        if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+        button.setAttribute('aria-expanded',String(!collapsed.has(id)));
+        document.getElementById(id).hidden=collapsed.has(id);
+        measure();
+      }
+      if (button.id==='restore') {
+        generation++; timers.forEach(clearTimeout); timers.clear(); states.clear(); collapsed.clear();
+        sensors=structuredClone(fixtures); commandCount=0; connection='online';
+        document.getElementById('connection').value='online';
+        document.getElementById('reject').checked=false; document.getElementById('hold').checked=false;
+        document.getElementById('command-count').textContent=' (0)';
+        document.getElementById('command-log').replaceChildren();
+        render(); announce('Example data restored. No printer commands sent.');
+      }
+    });
+    document.getElementById('connection').addEventListener('change',event => {
+      connection=event.target.value;
+      if (connection !== 'online') sensors.forEach(interruptPending);
+      render();
+      announce(connection==='online' ? 'Sample online. No values automatically resent.' : `Sample ${connection}. Controls disabled.`);
+    });
+    new ResizeObserver(measure).observe(document.querySelector('.preview'));
+    render();
+  </script>
+</body>
+</html>

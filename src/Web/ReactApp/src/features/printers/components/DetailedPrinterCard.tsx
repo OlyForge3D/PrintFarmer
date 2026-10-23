@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -12,12 +12,12 @@ import { queryKeys, usePrintJobObjects } from '@/common/hooks/useApi';
 import type {
   Printer,
   PrinterDetails,
-  TempTargets,
   MoveRequest,
   PrinterBackendCapabilitiesDto,
   PrintJobObjectDto,
   PrintJobObjectListDto,
 } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
@@ -80,6 +80,7 @@ import {
 import { getStatusHeaderClassName, isPrinterStateShutdown } from '@/features/printers/utils/statusColors';
 import {
   getPresetTargets,
+  temperatureTargetLimitError,
   getExtrudeMinTemp,
   DEFAULT_EXTRUDE_DISTANCE_MM,
   DEFAULT_EXTRUDE_SPEED_MMS,
@@ -123,8 +124,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const movementActionPending = localMovementActionPending || motion.blocked;
   const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
-  const [hotendTemp, setHotendTemp] = useState<number | string>('');
-  const [bedTemp, setBedTemp] = useState<number | string>('');
   const [moveX, setMoveX] = useState<number | string>('');
   const [moveY, setMoveY] = useState<number | string>('');
   const [moveZ, setMoveZ] = useState<number | string>('');
@@ -133,6 +132,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
   const [objectToSkipPrinterId, setObjectToSkipPrinterId] = useState(printer.id);
+  const support = getPrinterSupport(backendCapabilities);
 
   // This card always needs `printerDetails` once Spoolman is ready, because
   // every path it can take needs the persisted toolhead topology:
@@ -156,12 +156,13 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // Gating that fallback on `spoolmanReady` made it flaky — a user who could see
   // an eject button could not always press it. `spoolmanReady || !printer.rowVersion`
   // is a strict superset of the previous condition, so topology still resolves
-  // whenever it did before. Once the list DTO carries `rowVersion` the extra
-  // fetch stops triggering.
+  // whenever it did before.
+  // Temperature controls also require details for authoritative heater limits,
+  // independently of Spoolman and the revision token.
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled: spoolmanReady || !printer.rowVersion,
+      enabled: spoolmanReady || !printer.rowVersion || support.supportsTemperatureControl,
       staleTime: 60000,
     }
   );
@@ -216,20 +217,13 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     }
   };
 
-  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
-  useEffect(() => {
-    const hotend = printer.hotendTarget ?? 0;
-    setHotendTemp(hotend > 0 ? hotend : '');
-    const bed = printer.bedTarget ?? 0;
-    setBedTemp(bed > 0 ? bed : '');
-  }, [printer.hotendTarget, printer.bedTarget]);
-
   // Determine colors based on state
   const state = printer.state ?? 'Unknown';
   const isOnline = printer.isOnline ?? false;
   const isEnabled = printer.isEnabled ?? true;
   const isPrinting = isOnline && state === 'Printing';
   const isPaused = state === 'Paused';
+  const activeExtruderId = printer.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
   const isShutdown = isPrinterStateShutdown(state);
   const statusLabel = getPrinterDisplayState({
     printerState: state,
@@ -238,7 +232,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     isOnline,
   });
   const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus, state);
-  const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -248,7 +241,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
-  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support, supportsHeaterShutdown: backendCapabilities?.supportsHeaterShutdown });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
@@ -386,48 +379,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     setStep(newStep);
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) {
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const currentBedTarget = bedTemp === '' ? (printer.bedTarget ?? 0) : Number(bedTemp);
-      const targets: TempTargets = { hotend: Number(hotendTemp), bed: currentBedTarget };
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      if (!result.success) {
-        console.error(`Failed to set hotend temp:`, result.error);
-      }
-    } catch (error) {
-      console.error('Error setting hotend temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) {
-      return;
-    }
-
-    setTemperatureActionPending(true);
-    try {
-      const currentHotendTarget = hotendTemp === '' ? (printer.hotendTarget ?? 0) : Number(hotendTemp);
-      const targets: TempTargets = { hotend: currentHotendTarget, bed: Number(bedTemp) };
-      const result = await apiClient.setTemperatures(printer.id, targets);
-      if (!result.success) {
-        console.error(`Failed to set bed temp:`, result.error);
-      }
-    } catch (error) {
-      console.error('Error setting bed temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
   const handleApplyPreset = async (preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || (preset.toLowerCase() !== 'cooldown' && (isPrinting || isPaused))) {
       return;
     }
 
@@ -441,24 +394,31 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
+      const limitError = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? undefined : temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities, activeExtruderId);
+      if (limitError) {
+        toast.error(limitError);
+        return;
+      }
       
-      const result = await apiClient.setTemperatures(printer.id, targets);
+      const result = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? await apiClient.turnOffHeaters(printer.id)
+        : await apiClient.setTemperatures(printer.id, targets);
       
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
   };
 
   const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || isPrinting || isPaused) {
       return;
     }
 
@@ -468,23 +428,23 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       return;
     }
 
-    const currentHotend = hotendTemp === '' ? (printer.hotendTarget ?? 0) : Number(hotendTemp);
-    const currentBed = bedTemp === '' ? (printer.bedTarget ?? 0) : Number(bedTemp);
-    const targets: TempTargets = heater === 'hotend'
-      ? { hotend: presetTargets.hotend, bed: currentBed }
-      : { hotend: currentHotend, bed: presetTargets.bed };
+    const targets = { [heater]: presetTargets[heater] };
+    const limitError = temperatureTargetLimitError(targets, printer.sensors, printerDetails?.capabilities, activeExtruderId);
+    if (limitError) {
+      toast.error(limitError);
+      return;
+    }
 
     setTemperatureActionPending(true);
     try {
       const result = await apiClient.setTemperatures(printer.id, targets);
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${heater} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${heater} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -926,30 +886,31 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       <PrinterSensorsSection
         printerId={printer.id}
         sensors={printer.sensors}
-        temperatures={printer}
+        temperatures={{ ...printer, activeExtruderId }}
         supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
         canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
         isOnline={isOnline}
       >
-      <TemperatureControlSection
+      {additionalRows => <TemperatureControlSection
+        printerId={printer.id}
+        activeExtruderId={activeExtruderId}
+        presetsDisabled={isPrinting || isPaused}
+        isOnline={isOnline}
         showHeading={false}
+        additionalRows={additionalRows}
         sensors={printer.sensors}
-        hotendTemp={hotendTemp}
-        bedTemp={bedTemp}
         hotendTarget={printer.hotendTarget}
         bedTarget={printer.bedTarget}
         hotendCurrent={printer.hotendTemp}
         bedCurrent={printer.bedTemp}
+        maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
+        maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
         temperatureActionPending={temperatureActionPending}
         canSetTemperatures={canSetTemperaturesNow}
         canCooldown={canCooldownNow}
-        onHotendTempChange={setHotendTemp}
-        onBedTempChange={setBedTemp}
-        onHotendTempKeyDown={handleHotendTempKeyDown}
-        onBedTempKeyDown={handleBedTempKeyDown}
         onApplyPreset={handleApplyPreset}
         onApplySingleHeaterPreset={handleApplySingleHeaterPreset}
-      />
+      />}
 
       </PrinterSensorsSection>
 

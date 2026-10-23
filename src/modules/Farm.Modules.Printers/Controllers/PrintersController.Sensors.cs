@@ -14,6 +14,55 @@ namespace Farm.Modules.Printers.Controllers;
 
 public partial class PrintersController
 {
+    /// <summary>Turns off every heater through an explicit backend capability; automatic cooling fans are unchanged.</summary>
+    [HttpPost("{id:guid}/heaters/off")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(501)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CommandResult>> TurnOffHeatersAsync(Guid id, CancellationToken ct)
+    {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
+        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+        if (capabilities is null)
+        {
+            return NotFound();
+        }
+
+        if (!capabilities.SupportsHeaterShutdown)
+        {
+            return SensorProblem(501, "Heater shutdown not supported", "This backend does not support all-heater shutdown; no command was sent.");
+        }
+
+        (bool useActiveLease, _, ActionResult? failure) = await ResolveFanControlLeaseAsync(id, ct);
+        if (failure is not null)
+        {
+            return failure;
+        }
+
+        if (!useActiveLease)
+        {
+            return await ExecuteDirectBooleanControlAsync(
+                id, "turn_off_heaters", "turn_off_heaters", token => _printersService.TurnOffHeatersAsync(id, token), ct);
+        }
+
+        return await ExecuteActiveCommandControlAsync(
+            id,
+            "turn_off_heaters",
+            "turn_off_heaters",
+            async token => await _printersService.TurnOffHeatersAsync(id, token)
+                ? new CommandResult(true, null)
+                : new CommandResult(false, "The backend did not confirm all-heater shutdown."),
+            ct,
+            mapUnconfirmedAsUnavailable: true);
+    }
+
     /// <summary>
     /// Sets a writable quantity of one backend-neutral sensor or fan entry. The request is
     /// validated against the sensor's advertised <c>writable</c> descriptors before any backend
@@ -89,7 +138,7 @@ public partial class PrintersController
         }
 
         string targetId = validation.SensorId!;
-        double target = value.Number!.Value;
+        double target = value.Boolean is bool enabled ? enabled ? 1 : 0 : value.Number!.Value;
         if (!useActiveLease)
         {
             return await ExecuteDirectBooleanControlAsync(

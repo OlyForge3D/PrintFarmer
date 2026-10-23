@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { PrinterBackend, type Printer } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 // Keep the troubleshooting control, sidebar, and guide unmocked to exercise
 // the complete help path from both card layouts.
 vi.mock('@/common/hooks/useApi', () => ({

@@ -51,7 +51,8 @@ public record PrinterCompositeStatus(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null)
+    double? LiveZOffsetMm = null,
+    string? ActiveExtruderId = null)
 {
     /// <summary>
     /// Backend-reported sensor entries, or null when not reported. Adapters must merge

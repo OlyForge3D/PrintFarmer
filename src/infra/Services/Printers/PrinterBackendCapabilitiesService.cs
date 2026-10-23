@@ -149,6 +149,8 @@ public class PrinterBackendCapabilitiesService(
             SupportsFanSpeedReadback = supportsFanReadback,
             SupportsSensorTelemetry = controlClient is ISupportsSensorTelemetry,
             SupportsSensorControl = controlClient is ISupportsSensorControl,
+            SupportsTemperatureControlDuringPrint = temperature && controls.SupportsTemperatureControlDuringPrint,
+            SupportsHeaterShutdown = controlClient is ISupportsHeaterShutdown,
             SupportsZOffsetReadback = supportsZOffsetReadback,
 
             // SAVE_CONFIG does not persist SET_GCODE_OFFSET; M851/M500 is not universal

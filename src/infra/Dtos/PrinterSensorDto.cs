@@ -44,6 +44,9 @@ public enum PrinterSensorQuantity
     FanRpm,
     Power,
     FilamentDetected,
+    Enabled,
+    MeasuredMinTemperature,
+    MeasuredMaxTemperature,
 }
 
 /// <summary>Unit of a sensor reading or writable descriptor.</summary>
@@ -143,7 +146,11 @@ public sealed record PrinterSensorWritableDto(
     double Min,
     double Max,
     double? Step,
-    PrinterSensorUnit Unit);
+    PrinterSensorUnit Unit)
+{
+    /// <summary>Whether zero is also accepted outside the numeric interval, to turn a heater off.</summary>
+    public bool AllowZero { get; init; }
+}
 
 /// <summary>
 /// Backend-neutral sensor or fan entry. Fans are entries with <see cref="Kind"/> =
@@ -229,7 +236,7 @@ internal sealed class PrinterSensorList : IReadOnlyList<PrinterSensorDto>, IEqua
 
 /// <summary>A sensor value requested through the targeted sensor-control endpoint.</summary>
 /// <param name="Quantity">Quantity to set; must match an advertised writable descriptor.</param>
-/// <param name="Value">Requested numeric value.</param>
+/// <param name="Value">Requested numeric value, or boolean for <see cref="PrinterSensorQuantity.Enabled"/>.</param>
 public sealed record PrinterSensorSetRequest(
     PrinterSensorQuantity? Quantity,
     PrinterSensorValue? Value);

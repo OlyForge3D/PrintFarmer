@@ -556,6 +556,9 @@ public interface IPrintersService
     /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
     Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
 
+    /// <summary>Turns off all heaters through an explicitly supported backend operation.</summary>
+    Task<bool> TurnOffHeatersAsync(Guid id, CancellationToken ct);
+
     /// <summary>
     /// Gets the backend-neutral sensors from a fresh online cached status, or an empty list when
     /// the printer is offline, stale or uncached. Used to validate targeted sensor writes.

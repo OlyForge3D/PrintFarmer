@@ -69,7 +69,7 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
 
             _logger.LogInformation("[Moonraker] Status received for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
 
-            return new PrinterStatusDto(
+            PrinterStatusDto result = new(
                 Id: printer.Id,
                 IsOnline: movement.IsOnline,
                 State: movement.State,
@@ -92,7 +92,9 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 CurrentLayer: status.CurrentLayer,
                 TotalLayers: status.TotalLayers,
                 FanSpeedPercent: status.FanSpeedPercent,
-                LiveZOffsetMm: status.LiveZOffsetMm);
+                LiveZOffsetMm: status.LiveZOffsetMm,
+                ActiveExtruderId: status.ActiveExtruderId);
+            return status.Sensors is not null ? result with { Sensors = status.Sensors } : result;
         }
         catch (OperationCanceledException)
         {
