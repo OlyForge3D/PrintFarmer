@@ -34,6 +34,9 @@
 
 ### Fixes
 
+- Remove generated Sensor/Heater type subtitles from web sensor names and align
+  HeaterBox humidity in the Current column with a water-percent glyph (#3467).
+
 - Correct Moonraker active-tool temperature identity, individually bounded
   extruder/bed targets, safe-off zero values and explicit all-heater cooldown.
   Preserve sensor telemetry through authenticated fallback polling, clear invalid

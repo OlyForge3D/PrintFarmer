@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PrinterSensorsPanel, PrinterSensorsSection, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { additionalPrinterSensors, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
-import { mdiPrinter3dNozzle, mdiPrinter3dNozzleAlert, mdiRadiator, mdiRadiatorDisabled } from '@mdi/js';
+import { mdiPrinter3dNozzle, mdiPrinter3dNozzleAlert, mdiRadiator, mdiRadiatorDisabled, mdiWaterPercent } from '@mdi/js';
 
 const mocks = vi.hoisted(() => ({
   setPrinterSensor: vi.fn(),
@@ -141,6 +141,95 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveAttribute('step', '1');
     expect(input.parentElement).toHaveClass('w-[4.75rem]');
     expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toBeInTheDocument();
+  });
+
+  it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(
+    'omits generated type subtitles in the %s layout without stripping words from actual names',
+    layout => {
+      const sensors: PrinterSensor[] = [
+        { ...chamber, id: 'heater_generic chamber_heater', displayName: 'Chamber Heater' },
+        { ...chamber, id: 'temperature_sensor chamber_thermal_protection_sensor', displayName: 'Chamber Thermal Protection Sensor', available: false },
+      ];
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={sensors} layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      expect(screen.queryByText('Heater', { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('Sensor', { exact: true })).not.toBeInTheDocument();
+      expect(screen.getByText('Chamber Heater', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Chamber Thermal Protection Sensor', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Unavailable')).toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, 'thermal', 'thermal-rows'] as const)(
+    'gives mixed HeaterBox humidity a glyph and its own Current cell in the %s layout',
+    layout => {
+      const sensor: PrinterSensor = { ...chamber, id: 'temperature_sensor heater_box1', displayName: 'Heater Box1',
+        readings: [...chamber.readings, { quantity: 'Humidity', value: 29, unit: 'Percent' }] };
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={[sensor]} canControl layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      const temperatureRow = screen.getByTestId(`sensor-${sensor.id}`);
+      const humidityRow = screen.getByRole('rowheader', { name: 'Heater Box1 Humidity' }).closest('tr')!;
+      expect(within(temperatureRow).getByRole('rowheader')).toHaveTextContent(/^Heater Box1$/);
+      expect(within(temperatureRow).getAllByRole('cell')[1]).toContainElement(screen.getByLabelText('Heater Box1 Temperature: 31.2°C'));
+      const cells = within(humidityRow).getAllByRole('cell');
+      expect(cells[0]).toBeEmptyDOMElement();
+      expect(cells[1]).toContainElement(screen.getByLabelText('Heater Box1 Humidity: 29%'));
+      expect(cells[2]).toBeEmptyDOMElement();
+      const glyph = within(humidityRow).getByRole('rowheader').querySelector('[data-sensor-glyph="Humidity"]')!;
+      expect(glyph).toHaveAttribute('aria-hidden', 'true');
+      expect(glyph.querySelector('path')).toHaveAttribute('d', mdiWaterPercent);
+      expect(within(humidityRow).getByRole('rowheader')).toHaveTextContent(/^Humidity$/);
+      expect(screen.getAllByLabelText('Heater Box1 Humidity: 29%')).toHaveLength(1);
+      expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([{ value: 0, available: true }, { value: 29, available: false }])(
+    'places humidity-only values under Current without an empty temperature row ($value%, available=$available)',
+    ({ value, available }) => {
+      renderPanel([{ ...bme, displayName: 'HeaterBox Humidity', available,
+        readings: [{ quantity: 'Humidity', value, unit: 'Percent' }] }]);
+
+      const row = screen.getByTestId('sensor-bme');
+      expect(within(row).getByRole('rowheader')).toHaveTextContent(
+        available ? /^HeaterBox Humidity$/ : /^HeaterBox HumidityUnavailable$/,
+      );
+      expect(within(row).getAllByRole('cell')[1]).toHaveTextContent(`${value}%`);
+      expect(row.querySelector('[data-sensor-glyph="Humidity"] path')).toHaveAttribute('d', mdiWaterPercent);
+      expect(screen.getAllByRole('rowheader')).toHaveLength(1);
+      expect(screen.getByLabelText(`HeaterBox Humidity Humidity: ${value}%${available ? '' : ' (unavailable)'}`)).toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])('does not invent a mixed-sensor humidity value for %s', value => {
+    renderPanel([{ ...chamber, readings: [...chamber.readings, { quantity: 'Humidity', value, unit: 'Percent' }] }]);
+    expect(screen.getAllByRole('rowheader')).toHaveLength(1);
+    expect(screen.queryByLabelText(/Humidity:/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeInTheDocument();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('aligns humidity under Current on both shared card and sidebar sections', () => {
+    render(<>
+      {['card', 'sidebar'].map(surface => <div key={surface} data-testid={surface}>
+        <PrinterSensorsSection printerId={surface} temperatures={{}} sensors={[{
+          ...chamber, displayName: 'Heater Box1',
+          readings: [...chamber.readings, { quantity: 'Humidity', value: 29, unit: 'Percent' }],
+        }]} />
+      </div>)}
+    </>);
+    for (const surface of ['card', 'sidebar']) {
+      const root = within(screen.getByTestId(surface));
+      const row = root.getByRole('rowheader', { name: 'Heater Box1 Humidity' }).closest('tr')!;
+      expect(root.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['Name', 'State', 'Current', 'Target']);
+      expect(within(row).getAllByRole('cell')[1]).toContainElement(root.getByLabelText('Heater Box1 Humidity: 29%'));
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(

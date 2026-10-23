@@ -93,6 +93,7 @@ import {
   mdiArrowUpDown,
   mdiWifi,
   mdiThermometer,
+  mdiWaterPercent,
   mdiListBoxOutline,
   mdiNetwork,
   mdiCalendar,
@@ -2615,6 +2616,14 @@ export function ThermometerIcon({ className = 'w-4 h-4', ariaLabel = 'Temperatur
       role="img"
     >
       <path fill="currentColor" d={mdiThermometer} />
+    </svg>
+  );
+}
+
+export function HumidityIcon({ className = 'w-4 h-4', ariaLabel = 'Humidity' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label={ariaLabel} role="img">
+      <path fill="currentColor" d={mdiWaterPercent} />
     </svg>
   );
 }

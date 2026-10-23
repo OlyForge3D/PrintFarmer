@@ -104,7 +104,9 @@ test('sensor groups match existing app disclosures and content typography at mat
           : [...node.querySelectorAll('span')].find(span => span.textContent === 'Printing')!;
         const fan = misc.querySelector('[data-testid="sensor-fan"]')!;
         const heading = thermal.querySelector('span[id^="section-heading-"]')!;
-        const extraReading = thermal.querySelector('[aria-label*="Humidity:"]')!.parentElement!;
+        const humidity = thermal.querySelector('[aria-label*="Humidity:"]')!;
+        const humidityRow = humidity.closest('tr')!;
+        const extraReading = thermal.querySelector('[aria-label*="Pressure:"]')!.parentElement!;
         const extraName = extraReading.closest('[data-sensor-name]')!;
         const binary = misc.querySelector('[role="switch"]')!;
         const track = binary.querySelector('[aria-hidden="true"]')!;
@@ -126,8 +128,8 @@ test('sensor groups match existing app disclosures and content typography at mat
           fanLabel: font(fan.querySelector('[data-sensor-name]')!),
           fanReading: font(fan.querySelector('input[type="number"]')!),
           rpm: font(fan.querySelector('[aria-label*="RPM:"]')!),
-          humidityLabel: font(extraReading),
-          humidityValue: font(extraReading.querySelector('[aria-label]')!),
+          humidityLabel: font(humidityRow.querySelector('th')!),
+          humidityValue: font(humidity),
           input: font(thermal.querySelector('input[type="number"]')!),
           thermalGlyphs: rows.map(row => row.querySelector('[data-sensor-glyph] svg')!.getBoundingClientRect().width),
           fanGlyphs: [...misc.querySelectorAll('[data-testid]')].filter(row => row.querySelector('[data-sensor-glyph="Fan"]'))
@@ -265,6 +267,45 @@ test('sensor groups match existing app disclosures and content typography at mat
     comparisons.push({ contentWidth, production, reference });
   }
   await test.info().attach('whole-section-parity.json', { body: JSON.stringify(comparisons, null, 2), contentType: 'application/json' });
+});
+
+test('humidity glyphs and readings align with the shared Current column without type subtitles', async ({ page }) => {
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  for (const width of [1100, 360, 320]) {
+    await page.setViewportSize({ width, height: 1200 });
+    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
+    for (const surface of ['card', 'sidebar']) {
+      const root = page.getByRole('region', { name: surface, exact: true });
+      const thermal = root.locator('[data-printer-sensor-section="Temperatures"]');
+      const humidity = thermal.getByLabel('Heater Box1 Humidity: 0%', { exact: true });
+      await expect(humidity).toBeVisible();
+      const row = humidity.locator('xpath=ancestor::tr');
+      await expect(row.getByRole('rowheader', { name: 'Heater Box1 Humidity', exact: true })).toHaveText('Humidity');
+      await expect(row.locator('td').nth(0)).toBeEmpty();
+      await expect(row.locator('td').nth(1)).toHaveText('0%');
+      await expect(row.locator('td').nth(2)).toBeEmpty();
+      await expect(row.locator('[data-sensor-glyph="Humidity"] svg')).toBeVisible();
+      await expect(thermal.getByText('Sensor', { exact: true })).toHaveCount(0);
+      await expect(thermal.getByText('Heater', { exact: true })).toHaveCount(0);
+      const geometry = await row.evaluate(node => {
+        const rect = (element: Element) => element.getBoundingClientRect();
+        const value = node.querySelector('[aria-label*="Humidity:"]')!;
+        const glyph = node.querySelector('[data-sensor-glyph="Humidity"] svg')!;
+        const header = node.closest('table')!.querySelectorAll('thead th')[2];
+        return { currentX: rect(node.children[2]).left, headerX: rect(header).left,
+          glyphRight: rect(glyph).right, valueLeft: rect(value).left,
+          glyphWidth: rect(glyph).width, valueRight: rect(value).right,
+          currentRight: rect(node.children[2]).right };
+      });
+      expect(geometry.currentX).toBeCloseTo(geometry.headerX);
+      expect(geometry.glyphWidth).toBeCloseTo(18, 3);
+      expect(geometry.glyphRight).toBeLessThan(geometry.valueLeft);
+      expect(geometry.valueRight).toBeLessThanOrEqual(geometry.currentRight);
+      await thermal.screenshot({ path: test.info().outputPath(`${surface}-humidity-${width}px.png`) });
+    }
+    await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+  }
 });
 
 test('opened preset menu is bounded, viewport-safe and keyboard dismissible without applying a command', async ({ page }) => {
