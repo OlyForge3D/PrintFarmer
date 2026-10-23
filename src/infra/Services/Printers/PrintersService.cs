@@ -2186,7 +2186,8 @@ public class PrintersService(
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
                     CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
-                    ShowExternalSpool: p.ShowExternalSpool));
+                    ShowExternalSpool: p.ShowExternalSpool,
+                    ActiveExtruderId: status.ActiveExtruderId));
             }
             catch (Exception ex)
             {
@@ -3580,7 +3581,7 @@ public class PrintersService(
     /// <remarks>
     /// Requires backend to implement ITemperatureCapability interface.
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
-    /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
+    /// Backend adapters validate known configured limits; firmware remains responsible for its own heater protections.
     /// </remarks>
     public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
@@ -4042,6 +4043,13 @@ public class PrintersService(
         ExecuteBackendControlAsync<ISupportsSensorControl>(
             id,
             (client, printer, token) => client.SetSensorValueAsync(printer.BackendUrl, sensorId, quantity, value, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> TurnOffHeatersAsync(Guid id, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsHeaterShutdown>(
+            id,
+            (client, printer, token) => client.TurnOffHeatersAsync(printer.BackendUrl, printer.Credential, token),
             ct);
 
     /// <inheritdoc />

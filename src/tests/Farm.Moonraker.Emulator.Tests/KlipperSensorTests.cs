@@ -2,9 +2,17 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Settings;
 using Farm.Moonraker.Emulator.Domain;
 using FluentAssertions;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Moonraker.Emulator.Tests;
@@ -14,6 +22,114 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     private readonly ReadyPrinterFactory factory;
 
     public KlipperSensorTests(ReadyPrinterFactory factory) => this.factory = factory;
+
+    [Fact]
+    public async Task ObjectsQuery_PostBody_HonorsObjectAndFieldSelections()
+    {
+        using HttpClient client = factory.CreateClient();
+        await ResetAsync(client);
+        using HttpResponseMessage response = await client.PostAsync("/printer/objects/query", TestRequests.Json(
+            """{"objects":{"extruder":["temperature","missing"],"heater_generic chamber":null,"unknown":null,"toolhead":[]}}"""));
+        response.EnsureSuccessStatusCode();
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement status = document.RootElement.GetProperty("result").GetProperty("status");
+        status.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo("extruder", "heater_generic chamber", "toolhead");
+        status.GetProperty("extruder").EnumerateObject().Select(property => property.Name).Should().Equal("temperature");
+        AssertJson("""{"temperature":24,"target":0,"power":0}""", status.GetProperty("heater_generic chamber"));
+        AssertJson("{}", status.GetProperty("toolhead"));
+    }
+
+    [Theory]
+    [InlineData("""{"objects":{}}""", HttpStatusCode.OK)]
+    [InlineData("{}", HttpStatusCode.BadRequest)]
+    [InlineData("""{"objects":null}""", HttpStatusCode.BadRequest)]
+    public async Task ObjectsQuery_EmptyOrMissingPostSelection_DoesNotQueryAllObjects(string body, HttpStatusCode expected)
+    {
+        using HttpClient client = factory.CreateClient();
+        using HttpResponseMessage response = await client.PostAsync("/printer/objects/query", TestRequests.Json(body));
+        response.StatusCode.Should().Be(expected);
+        if (expected == HttpStatusCode.OK)
+        {
+            using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            AssertJson("{}", document.RootElement.GetProperty("result").GetProperty("status"));
+        }
+    }
+
+    [Fact]
+    public async Task FourToolPrinter_RealClientQueriesAndCommands_KeepEachHeaterIndependentAndShutdownAll()
+    {
+        using HttpClient http = factory.CreateClient();
+        await ResetAsync(http);
+        using HttpResponseMessage mode = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"SnapmakerU1"}"""));
+        mode.EnsureSuccessStatusCode();
+        try
+        {
+            var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+            string root = http.BaseAddress!.AbsoluteUri;
+            for (int index = 0; index < 4; index++)
+            {
+                string id = index == 0 ? "extruder" : $"extruder{index}";
+                (await client.SetSensorValueAsync(root, id, PrinterSensorQuantity.TargetTemperature, 210 + index, null)).Should().BeTrue();
+            }
+
+            using HttpResponseMessage select = await http.PostAsync("/printer/gcode/script", TestRequests.Json("""{"script":"T3"}"""));
+            select.EnsureSuccessStatusCode();
+            PrinterCompositeStatus status = await client.GetCompositeStatusAsync(root, null);
+            status.ActiveExtruderId.Should().Be("extruder3");
+            status.HotendTarget.Should().Be(213);
+            status.HotendTemp.Should().BeApproximately(26.4, 0.0001);
+            Assert.NotNull(status.Sensors);
+            status.Sensors.Where(sensor => sensor.Kind == PrinterSensorKind.Nozzle)
+                .Select(sensor => sensor.Id).Should().BeEquivalentTo("extruder", "extruder1", "extruder2", "extruder3");
+
+            var breakers = new Mock<ICircuitBreakerService>();
+            breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null))
+                .Returns(new CircuitBreaker());
+            var statusClient = new MoonrakerStatusClient(
+                client, breakers.Object,
+                new ManagedSpoolProviderHelper(Mock.Of<ISpoolmanStatusCache>(), NullLogger<ManagedSpoolProviderHelper>.Instance),
+                NullLogger<MoonrakerStatusClient>.Instance);
+            PrinterStatusDto polled = await statusClient.GetPrinterStatusAsync(
+                new Printer { Id = Guid.NewGuid(), Name = "Four tool", ServerUrl = root, BackendPort = 80 },
+                CancellationToken.None);
+            polled.ActiveExtruderId.Should().Be("extruder3");
+            polled.Sensors.Should().BeEquivalentTo(status.Sensors, options => options.Excluding(sensor => sensor.LastUpdated));
+            polled.Sensors.Should().OnlyContain(sensor => sensor.LastUpdated.HasValue);
+            polled.HotendTemp.Should().BeApproximately(26.4, 0.0001);
+
+            (await client.SetTempsAsync(root, 220.5, null)).Should().BeTrue();
+            PrinterCompositeStatus edited = await client.GetCompositeStatusAsync(root, null);
+            edited.HotendTarget.Should().Be(220.5);
+            Assert.NotNull(edited.Sensors);
+            edited.Sensors.Single(sensor => sensor.Id == "extruder").Readings
+                .Single(reading => reading.Quantity == PrinterSensorQuantity.TargetTemperature).Value.Number.Should().Be(210);
+            (await client.SetSensorValueAsync(root, "extruder3", PrinterSensorQuantity.TargetTemperature, 5, null)).Should().BeFalse();
+            (await client.SetSensorValueAsync(root, "extruder3", PrinterSensorQuantity.TargetTemperature, 271, null)).Should().BeFalse();
+            (await client.SetSensorValueAsync(root, "extruder3", PrinterSensorQuantity.TargetTemperature, 0, null)).Should().BeTrue();
+            (await client.SetSensorValueAsync(root, "heater_generic chamber", PrinterSensorQuantity.TargetTemperature, 40, null)).Should().BeTrue();
+            (await client.SetTempsAsync(root, 0, 0)).Should().BeTrue();
+            PrinterCompositeStatus ordinaryZeros = await client.GetCompositeStatusAsync(root, null);
+            Assert.NotNull(ordinaryZeros.Sensors);
+            ordinaryZeros.Sensors.Single(sensor => sensor.Id == "extruder1").Readings
+                .Single(reading => reading.Quantity == PrinterSensorQuantity.TargetTemperature).Value.Number.Should().Be(211);
+            ordinaryZeros.Sensors.Single(sensor => sensor.Id == "heater_generic chamber").Readings
+                .Single(reading => reading.Quantity == PrinterSensorQuantity.TargetTemperature).Value.Number.Should().Be(40);
+
+            (await client.TurnOffHeatersAsync(root, null)).Should().BeTrue();
+            PrinterCompositeStatus cooled = await client.GetCompositeStatusAsync(root, null);
+            Assert.NotNull(cooled.Sensors);
+            cooled.Sensors.Where(sensor => sensor.Kind is PrinterSensorKind.Nozzle or PrinterSensorKind.Bed or PrinterSensorKind.Chamber)
+                .SelectMany(sensor => sensor.Readings.Where(reading => reading.Quantity == PrinterSensorQuantity.TargetTemperature))
+                .Should().NotBeEmpty().And.OnlyContain(reading => reading.Value.Number == 0);
+        }
+        finally
+        {
+            using HttpResponseMessage restore = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"None"}"""));
+            restore.EnsureSuccessStatusCode();
+            await ResetAsync(http);
+        }
+    }
 
     public static TheoryData<string, string, string> SensorCases => new()
     {
@@ -236,6 +352,31 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
 
         var status = (Dictionary<string, object?>)printer.BuildObjectsSnapshot()[name];
         status["target"].Should().Be(target);
+    }
+
+    [Theory]
+    [InlineData("0", true)]
+    [InlineData("-0.0", true)]
+    [InlineData("0.000000001", false)]
+    [InlineData("-0.000000001", false)]
+    public void SendGcode_PositiveMinimumHeater_OnlyExactZeroIsOff(string target, bool accepted)
+    {
+        var printer = new PrinterAggregate { Id = "target", Name = "Target" };
+        printer.SetMmuMode(MmuMode.SnapmakerU1);
+        printer.SendGcode("SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=210");
+        Action write = () => printer.SendGcode($"SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET={target}");
+
+        if (accepted)
+        {
+            write.Should().NotThrow();
+        }
+        else
+        {
+            write.Should().Throw<GcodeParameterException>();
+        }
+
+        var status = (Dictionary<string, object?>)printer.BuildObjectsSnapshot()["extruder1"];
+        status["target"].Should().Be(accepted ? 0d : 210d);
     }
 
     [Fact]

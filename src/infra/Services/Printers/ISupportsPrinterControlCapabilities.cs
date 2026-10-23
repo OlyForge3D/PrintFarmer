@@ -22,6 +22,8 @@ public sealed record PrinterControlCapabilities
 
     public bool SupportsBedTemperature { get; init; }
 
+    public bool SupportsTemperatureControlDuringPrint { get; init; }
+
     public bool SupportsDisableMotors { get; init; }
 
     public bool SupportsExtrusion { get; init; }

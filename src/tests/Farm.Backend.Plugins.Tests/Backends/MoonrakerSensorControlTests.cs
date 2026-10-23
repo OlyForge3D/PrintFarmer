@@ -21,6 +21,65 @@ public sealed class MoonrakerSensorControlTests
     private static MoonrakerClient CreateClient(HttpClient http) =>
         new(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
 
+    [Theory]
+    [InlineData("extruder", 200.5, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200.5")]
+    [InlineData("extruder1", 201.5, "SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=201.5")]
+    [InlineData("extruder2", 202.5, "SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=202.5")]
+    [InlineData("extruder3", 0, "SET_HEATER_TEMPERATURE HEATER=extruder3 TARGET=0")]
+    [InlineData("heater_bed", 0, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0")]
+    [InlineData("filament_switch_sensor runout", 0, "SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0")]
+    [InlineData("filament_switch_sensor runout", 1, "SET_FILAMENT_SENSOR SENSOR=runout ENABLE=1")]
+    public async Task SetSensorValueAsync_PhysicalHeaterOrFilamentSwitch_SendsOnlyAddressedCommand(string id, double value, string expected)
+    {
+        using var handler = new SensorHandler { SettingsBody = FourToolSettings, Objects = FourToolObjects };
+        using var http = new HttpClient(handler);
+        PrinterSensorQuantity quantity = id.StartsWith("filament_", StringComparison.Ordinal)
+            ? PrinterSensorQuantity.Enabled : PrinterSensorQuantity.TargetTemperature;
+
+        (await CreateClient(http).SetSensorValueAsync(BaseUrl, id, quantity, value, Credential)).Should().BeTrue();
+
+        handler.Scripts.Should().Equal(expected);
+        handler.ApiKeys.Should().OnlyContain(key => key == "fixture-key");
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(5, false)]
+    [InlineData(10, true)]
+    [InlineData(280, true)]
+    [InlineData(280.5, false)]
+    public async Task SetSensorValueAsync_Extruder3_EnforcesItsOwnLiveBounds(double target, bool accepted)
+    {
+        using var handler = new SensorHandler { SettingsBody = FourToolSettings, Objects = FourToolObjects };
+        using var http = new HttpClient(handler);
+        (await CreateClient(http).SetSensorValueAsync(BaseUrl, "extruder3", PrinterSensorQuantity.TargetTemperature, target, Credential))
+            .Should().Be(accepted);
+        handler.Scripts.Should().HaveCount(accepted ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task TurnOffHeatersAsync_SendsExplicitAllHeaterShutdownWithoutChangingOrdinaryZeroTargets()
+    {
+        using var handler = new SensorHandler();
+        using var http = new HttpClient(handler);
+        (await CreateClient(http).TurnOffHeatersAsync(BaseUrl, Credential)).Should().BeTrue();
+        handler.Scripts.Should().Equal("TURN_OFF_HEATERS");
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+    }
+
+    private static readonly string[] FourToolObjects =
+        ["extruder", "extruder1", "extruder2", "extruder3", "heater_bed", "filament_switch_sensor runout"];
+    private const string FourToolSettings =
+        """
+        {"result":{"status":{"configfile":{"settings":{
+          "extruder":{"min_temp":10,"max_temp":250},
+          "extruder1":{"min_temp":10,"max_temp":260},
+          "extruder2":{"min_temp":10,"max_temp":270},
+          "extruder3":{"min_temp":10,"max_temp":280},
+          "heater_bed":{"min_temp":10,"max_temp":120}
+        }}}}}
+        """;
+
     [Fact]
     public void MoonrakerClient_ImplementsSensorControlContract()
     {

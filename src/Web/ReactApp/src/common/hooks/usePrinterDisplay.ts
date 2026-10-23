@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Printer, PrinterStatusUpdate, MmuStatus } from '@/types/api';
+import { PrinterBackend } from '@/types/api';
 import { usePrinterStatusUpdates } from '@/common/hooks/useSignalR';
 
 /**
@@ -23,6 +24,8 @@ export interface PrinterDisplay extends Printer {
 /** Merge API printer data with a real-time SignalR status, preferring the SignalR values. */
 function mergePrinterDisplay(printer: Printer, signalRStatus: PrinterStatusUpdate | undefined): PrinterDisplay {
   const isRealtimeStatus = signalRStatus !== undefined;
+  // Moonraker publishes complete heater snapshots; WhenWritingNull omits cleared fields.
+  const hasMoonrakerSnapshot = printer.backend === PrinterBackend.Moonraker && signalRStatus?.sensors !== undefined;
 
   return {
     ...printer,
@@ -39,10 +42,12 @@ function mergePrinterDisplay(printer: Printer, signalRStatus: PrinterStatusUpdat
     x: signalRStatus?.x !== undefined ? signalRStatus.x : printer.x,
     y: signalRStatus?.y !== undefined ? signalRStatus.y : printer.y,
     z: signalRStatus?.z !== undefined ? signalRStatus.z : printer.z,
-    hotendTemp: signalRStatus?.hotendTemp !== undefined ? signalRStatus.hotendTemp : printer.hotendTemp,
-    bedTemp: signalRStatus?.bedTemp !== undefined ? signalRStatus.bedTemp : printer.bedTemp,
-    hotendTarget: signalRStatus?.hotendTarget !== undefined ? signalRStatus.hotendTarget : printer.hotendTarget,
-    bedTarget: signalRStatus?.bedTarget !== undefined ? signalRStatus.bedTarget : printer.bedTarget,
+    hotendTemp: hasMoonrakerSnapshot || signalRStatus?.hotendTemp !== undefined ? signalRStatus?.hotendTemp : printer.hotendTemp,
+    activeExtruderId: hasMoonrakerSnapshot ? signalRStatus?.activeExtruderId ?? null
+      : signalRStatus?.activeExtruderId !== undefined ? signalRStatus.activeExtruderId : printer.activeExtruderId,
+    bedTemp: hasMoonrakerSnapshot || signalRStatus?.bedTemp !== undefined ? signalRStatus?.bedTemp : printer.bedTemp,
+    hotendTarget: hasMoonrakerSnapshot || signalRStatus?.hotendTarget !== undefined ? signalRStatus?.hotendTarget : printer.hotendTarget,
+    bedTarget: hasMoonrakerSnapshot || signalRStatus?.bedTarget !== undefined ? signalRStatus?.bedTarget : printer.bedTarget,
     spoolInfo: signalRStatus?.spoolInfo !== undefined ? signalRStatus.spoolInfo : printer.spoolInfo,
     // Each event carries the complete sensor list, so a reported list replaces the API one
     sensors: signalRStatus?.sensors !== undefined ? signalRStatus.sensors : printer.sensors,

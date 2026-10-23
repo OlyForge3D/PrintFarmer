@@ -4,6 +4,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 // Regression coverage for #1699: the Detailed Print Card was missing the AMS
 // (MmuControlBox) panel that PrinterDetailsSidebar renders whenever mmuStatus
 // is present, so users could not load/unload/eject filament from the card.

@@ -232,13 +232,23 @@ public class PrintersControllerControlGuardsTests
             Available = false,
             Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, null, PrinterSensorUnit.Percent)],
         },
+        new("extruder3", "Tool 3", PrinterSensorKind.Nozzle)
+        {
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 10, 280, 0.5, PrinterSensorUnit.Celsius) { AllowZero = true }],
+        },
+        new("filament_switch_sensor runout", "Runout sensor", PrinterSensorKind.FilamentRunout)
+        {
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None)],
+        },
     ];
 
     private static PrintersController CreateSensorController(
         Guid id,
         Mock<IPrintersService> printers,
         bool supportsSensorControl,
-        string state = "idle")
+        string state = "idle",
+        bool supportsTemperatureControlDuringPrint = false,
+        bool supportsHeaterShutdown = false)
     {
         PrinterStatusDto status = new(id, IsOnline: true, State: state);
         printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(status);
@@ -255,6 +265,8 @@ public class PrintersControllerControlGuardsTests
             {
                 SupportsSensorTelemetry = supportsSensorControl,
                 SupportsSensorControl = supportsSensorControl,
+                SupportsTemperatureControlDuringPrint = supportsTemperatureControlDuringPrint,
+                SupportsHeaterShutdown = supportsHeaterShutdown,
             });
         return CreateController(
             printers,
@@ -268,6 +280,98 @@ public class PrintersControllerControlGuardsTests
         printers.Verify(service => service.SetSensorValueAsync(
             It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<PrinterSensorQuantity>(), It.IsAny<double>(), It.IsAny<CancellationToken>()),
             Times.Never());
+
+    [Theory]
+    [InlineData("idle")]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    public async Task SetTempsAsync_CapableBackend_AllowsManualTargetsInKnownState(string state)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state, supportsTemperatureControlDuringPrint: true);
+        printers.Setup(service => service.SetTempsAsync(id, 215.5, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
+
+        ActionResult<CommandResult> response = await controller.SetTempsAsync(id, new TempTargets(215.5, null), default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.SetTempsAsync(id, 215.5, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("idle")]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    public async Task TurnOffHeatersAsync_CapableBackend_UsesExplicitShutdownNotOrdinaryTargets(string state)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state, supportsHeaterShutdown: true);
+        printers.Setup(service => service.TurnOffHeatersAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        ActionResult<CommandResult> response = await controller.TurnOffHeatersAsync(id, default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.TurnOffHeatersAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.SetTempsAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TurnOffHeatersAsync_UnsupportedBackend_DoesNotDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true);
+
+        ObjectResult response = Assert.IsType<ObjectResult>((await controller.TurnOffHeatersAsync(id, default)).Result);
+
+        Assert.Equal(501, response.StatusCode);
+        printers.Verify(service => service.TurnOffHeatersAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SetSensorValueAsync_FilamentEnable_AcceptsBooleanAndDispatchesBinaryBackendValue(bool enabled)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(id, "filament_switch_sensor runout",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)), default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.SetSensorValueAsync(
+            id, "filament_switch_sensor runout", PrinterSensorQuantity.Enabled, enabled ? 1 : 0, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0, 200)]
+    [InlineData(5, 400)]
+    [InlineData(280, 200)]
+    [InlineData(280.5, 400)]
+    public async Task SetSensorValueAsync_PhysicalExtruder_ValidatesItsOwnLimitsIncludingSafeOff(double target, int expectedStatus)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state: "printing");
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(id, "extruder3",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(target)), default);
+
+        if (expectedStatus == 200)
+        {
+            Assert.True(GetCommandResult(response).Success);
+            printers.Verify(service => service.SetSensorValueAsync(id, "extruder3", PrinterSensorQuantity.TargetTemperature, target, It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            Assert.Equal(expectedStatus, Assert.IsType<ObjectResult>(response.Result).StatusCode);
+            VerifyNoSensorDispatch(printers);
+        }
+    }
 
     [Theory]
     [InlineData("idle")]

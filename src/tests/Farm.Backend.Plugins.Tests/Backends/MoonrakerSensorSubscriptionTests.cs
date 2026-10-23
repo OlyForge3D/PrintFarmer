@@ -102,6 +102,71 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         """;
 
     [Fact]
+    public async Task ProcessStatusUpdateAsync_FourTools_UsesActiveIdentityAndKeepsUnrelatedUpdatesFromRefreshingHeaterEvidence()
+    {
+        await ProcessStatusAsync(
+            """
+            {
+              "webhooks":{"state":"ready"},"print_stats":{"state":"printing"},
+              "toolhead":{"extruder":"extruder3"},
+              "extruder":{"temperature":200,"target":210},
+              "extruder1":{"temperature":201,"target":211},
+              "extruder2":{"temperature":202,"target":212},
+              "extruder3":{"temperature":203,"target":213},
+              "heater_bed":{"temperature":60,"target":65}
+            }
+            """);
+        PrinterStatusDto initial = _cached[^1];
+        initial.ActiveExtruderId.Should().Be("extruder3");
+        initial.HotendTemp.Should().Be(203);
+        initial.HotendTarget.Should().Be(213);
+        DateTime? observed = initial.SafetyTelemetry!.MeasuredHotendTemperatureC.ObservedAtUtc;
+        initial.SafetyTelemetry.MeasuredHotendTemperatureC.Source.Should().Be("moonraker:extruder3.temperature");
+
+        await ProcessStatusAsync("""{"fan":{"speed":0.7}}""");
+
+        _cached[^1].HotendTemp.Should().Be(203);
+        _cached[^1].SafetyTelemetry!.MeasuredHotendTemperatureC.ObservedAtUtc.Should().Be(observed);
+        await ProcessStatusAsync("""{"toolhead":{"extruder":"extruder1"}}""");
+        PrinterStatusUpdate switched = _broadcasts.OfType<PrinterStatusUpdate>().Last();
+        switched.ActiveExtruderId.Should().Be("extruder1");
+        switched.HotendTemp.Should().Be(201);
+        switched.HotendTarget.Should().Be(211);
+
+        await ProcessStatusAsync("""{"extruder1":{"temperature":null,"target":0}}""");
+        _cached[^1].HotendTemp.Should().BeNull();
+        _cached[^1].HotendTarget.Should().Be(0);
+        _cached[^1].SafetyTelemetry!.MeasuredHotendTemperatureC.Value.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TriggerHttpPollingFallbackAsync_FreshRestSensors_ReplacesStaleUnavailableSnapshot()
+    {
+        await ProcessStatusAsync(InitialStatus);
+        DateTime now = DateTime.UtcNow;
+        PrinterSensorDto sensor = new("extruder3", "Tool 3", PrinterSensorKind.Nozzle)
+        {
+            Readings = [new PrinterSensorReadingDto(PrinterSensorQuantity.Temperature, PrinterSensorValue.FromNumber(203d), PrinterSensorUnit.Celsius)],
+            LastUpdated = now,
+        };
+        _client
+            .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(true, "printing", null, null, null, null, null,
+                HotendTemp: 203, HotendTarget: 213, ActiveExtruderId: "extruder3")
+            { Sensors = [sensor] });
+        _broadcasts.Clear();
+        _cached.Clear();
+
+        await _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
+
+        PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Should().ContainSingle().Subject;
+        update.Sensors.Should().ContainSingle().Which.Should().BeEquivalentTo(sensor);
+        update.ActiveExtruderId.Should().Be("extruder3");
+        _cached.Should().ContainSingle().Which.SensorsReported.Should().BeTrue();
+        _cached[0].Sensors.Should().BeEquivalentTo(update.Sensors);
+    }
+
+    [Fact]
     public async Task ProcessStatusUpdateAsync_SensorPayload_PublishesCompleteSnapshotToCacheAndBroadcast()
     {
         await ProcessStatusAsync(InitialStatus);
@@ -296,7 +361,8 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         PrinterStatusUpdate fallback = _broadcasts.OfType<PrinterStatusUpdate>().Should().ContainSingle().Subject;
         fallback.Sensors.Should().HaveCount(4).And.OnlyContain(s => !s.Available && s.Readings.Count > 0);
         fallback.HotendTemp.Should().Be(201);
-        _cached.Should().ContainSingle().Which.SensorsReported.Should().BeFalse();
+        _cached.Should().ContainSingle().Which.SensorsReported.Should().BeTrue();
+        _cached[0].Sensors.Should().BeEquivalentTo(fallback.Sensors);
 
         _broadcasts.Clear();
         await ProcessStatusAsync("""{ "fan": { "speed": 0.1 } }""");

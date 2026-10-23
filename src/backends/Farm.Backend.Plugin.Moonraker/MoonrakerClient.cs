@@ -78,7 +78,10 @@ public partial class MoonrakerClient(
 
     private static readonly Regex SafeUnquotedObjectNamePattern = new(@"^[A-Za-z0-9_.:+/@-]+$", RegexOptions.Compiled);
 
-    public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
+    public Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default) =>
+        GetStatusAsync(baseUrl, null, ct);
+
+    private async Task<PrinterStatus> GetStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
     {
         try
         {
@@ -87,7 +90,8 @@ public partial class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, "printer/info");
             _logger.LogDebug("[Moonraker] Querying status at: {Uri}", uri);
-            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            using HttpRequestMessage request = CreateSafetyDiscoveryRequest(uri, credential);
+            using HttpResponseMessage resp = await _http.SendAsync(request, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("[Moonraker] Status query failed with status {RespStatusCode} at {Uri}", resp.StatusCode, uri);
@@ -539,7 +543,7 @@ public partial class MoonrakerClient(
         CancellationToken ct = default)
     {
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: baseUrl={BaseUrl}", baseUrl);
-        PrinterStatus status = await GetStatusAsync(baseUrl, ct);
+        PrinterStatus status = await GetStatusAsync(baseUrl, credential, ct);
         _logger.LogDebug("[Moonraker] GetCompositeStatusAsync: status.IsOnline={StatusIsOnline}, status.State={StatusState}", status.IsOnline, status.State);
         if (!status.IsOnline)
         {
@@ -644,77 +648,12 @@ public partial class MoonrakerClient(
             state = job?.PrintState ?? status.State;
         }
 
-        // Query temps
-        double? hotend = null, bed = null, hotendT = null, bedT = null;
-        try
-        {
-            using CancellationTokenSource cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts2.CancelAfter(_timeouts.StatusPollTimeout);
-            Uri baseUri2 = new(baseUrl);
-            Uri tempsUri = new(baseUri2, "printer/objects/query?extruder&heater_bed");
-            using HttpResponseMessage resp2 = await _http.GetAsync(tempsUri, cts2.Token);
-            if (resp2.IsSuccessStatusCode)
-            {
-                await using Stream stream2 = await resp2.Content.ReadAsStreamAsync(cts2.Token);
-                using JsonDocument doc2 = await JsonDocument.ParseAsync(stream2, cancellationToken: cts2.Token);
-                JsonElement root2 = doc2.RootElement;
-                if (root2.TryGetProperty("result", out JsonElement result2) && result2.TryGetProperty("status", out JsonElement status2))
-                {
-                    if (status2.TryGetProperty("extruder", out JsonElement ex))
-                    {
-                        if (ex.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-                        {
-                            try
-                            {
-                                hotend = t.GetDouble();
-                            }
-                            catch
-                            {
-                            }
-                        }
-
-                        if (ex.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-                        {
-                            try
-                            {
-                                hotendT = tt.GetDouble();
-                            }
-                            catch
-                            {
-                            }
-                        }
-                    }
-
-                    if (status2.TryGetProperty("heater_bed", out JsonElement hb))
-                    {
-                        if (hb.TryGetProperty("temperature", out JsonElement t) && t.ValueKind is JsonValueKind.Number)
-                        {
-                            try
-                            {
-                                bed = t.GetDouble();
-                            }
-                            catch
-                            {
-                            }
-                        }
-
-                        if (hb.TryGetProperty("target", out JsonElement tt) && tt.ValueKind is JsonValueKind.Number)
-                        {
-                            try
-                            {
-                                bedT = tt.GetDouble();
-                            }
-                            catch
-                            {
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch
-        {
-        }
+        MoonrakerSensorTracker? sensors = await QuerySensorStateAsync(baseUrl, credential, ct).ConfigureAwait(false);
+        string? activeExtruderId = sensors?.ActiveExtruderId;
+        double? hotend = sensors?.ReadScalar(activeExtruderId, "temperature").Value;
+        double? hotendT = sensors?.ReadScalar(activeExtruderId, "target").Value;
+        double? bed = sensors?.ReadScalar(MoonrakerSensorMapper.HeaterBed, "temperature").Value;
+        double? bedT = sensors?.ReadScalar(MoonrakerSensorMapper.HeaterBed, "target").Value;
 
         // Query camera info when online; webcam listing may still be available via Moonraker
         (string? cam, string? snap) = await GetCameraUrlsAsync(baseUrl, ct: ct);
@@ -735,7 +674,11 @@ public partial class MoonrakerClient(
             CurrentLayer: job?.CurrentLayer,
             TotalLayers: job?.TotalLayers,
             FanSpeedPercent: fanSpeedPercent,
-            LiveZOffsetMm: liveZOffsetMm);
+            LiveZOffsetMm: liveZOffsetMm,
+            ActiveExtruderId: activeExtruderId)
+        {
+            Sensors = sensors?.Snapshot(),
+        };
     }
 
     private async Task<double?> QueryPartFanSpeedPercentAsync(
@@ -865,7 +808,8 @@ public partial class MoonrakerClient(
             CurrentLayer: status.CurrentLayer,
             TotalLayers: status.TotalLayers,
             FanSpeedPercent: status.FanSpeedPercent,
-            LiveZOffsetMm: status.LiveZOffsetMm));
+            LiveZOffsetMm: status.LiveZOffsetMm,
+            ActiveExtruderId: status.ActiveExtruderId));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
@@ -891,21 +835,8 @@ public partial class MoonrakerClient(
         return await SendControlScriptAsync(baseUrl, "G28 Z", credential, ct);
     }
 
-    public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
-    {
-        List<string> cmds = new();
-        if (hotend is not null)
-        {
-            cmds.Add($"M104 S{hotend:0}");
-        }
-
-        if (bed is not null)
-        {
-            cmds.Add($"M140 S{bed:0}");
-        }
-
-        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
-    }
+    public Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default) =>
+        SetControlTemperaturesAsync(baseUrl, hotend, bed, null, ct);
 
     public Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
         => SendMovementAsync(baseUrl, true, x, y, z, f, null, ct);

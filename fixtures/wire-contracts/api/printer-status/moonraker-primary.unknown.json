@@ -1,0 +1,23 @@
+{
+  "id": "f45aad7e-284f-46c4-b75c-fef81be0409a",
+  "isOnline": true,
+  "state": "Idle",
+  "sensors": [
+    {
+      "id": "extruder3",
+      "displayName": "Extruder 3",
+      "kind": "Nozzle",
+      "readings": [],
+      "available": true,
+      "writable": [
+        {
+          "quantity": "TargetTemperature",
+          "min": 10,
+          "max": 270,
+          "unit": "Celsius",
+          "allowZero": true
+        }
+      ]
+    }
+  ]
+}

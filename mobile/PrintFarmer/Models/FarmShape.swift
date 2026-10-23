@@ -45,6 +45,7 @@ enum SensorQuantity: String, Codable, Sendable, Equatable {
     case other = "Other", temperature = "Temperature", targetTemperature = "TargetTemperature"
     case humidity = "Humidity", pressure = "Pressure", gas = "Gas", fanSpeed = "FanSpeed"
     case fanRpm = "FanRpm", power = "Power", filamentDetected = "FilamentDetected"
+    case enabled = "Enabled", measuredMinTemperature = "MeasuredMinTemperature", measuredMaxTemperature = "MeasuredMaxTemperature"
     case unknown
 
     init(from decoder: Decoder) throws {
@@ -127,6 +128,16 @@ struct SensorWritable: Codable, Sendable, Equatable, Hashable {
     let max: Double
     let step: Double?
     let unit: SensorUnit
+    let allowZero: Bool?
+
+    init(quantity: SensorQuantity, min: Double, max: Double, step: Double?, unit: SensorUnit, allowZero: Bool? = nil) {
+        self.quantity = quantity
+        self.min = min
+        self.max = max
+        self.step = step
+        self.unit = unit
+        self.allowZero = allowZero
+    }
 }
 
 struct PrinterSensor: Codable, Sendable, Equatable, Identifiable, Hashable {
@@ -207,6 +218,7 @@ enum PrinterSensorFormatting {
     }
 
     static func isOnGrid(_ value: Double, descriptor: SensorWritable) -> Bool {
+        if value == 0 && descriptor.allowZero == true && descriptor.quantity == .targetTemperature { return true }
         guard let step = descriptor.step, step > 0 else { return true }
         let n = (value - descriptor.min) / step
         return abs(n - n.rounded()) <= 1e-6
@@ -243,6 +255,9 @@ enum PrinterSensorFormatting {
         case .fanRpm: return "RPM"
         case .power: return "Power"
         case .filamentDetected: return "Filament"
+        case .enabled: return "Enabled"
+        case .measuredMinTemperature: return "Measured minimum"
+        case .measuredMaxTemperature: return "Measured maximum"
         case .other, .unknown: return "Value"
         }
     }

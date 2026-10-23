@@ -1034,6 +1034,7 @@ generate_compose() {
     fi
 
     if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+        sed -i 's/${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80/127.0.0.1:${HTTP_PORT:-8080}:80/' "$compose_file"
         sed -i '/^[[:space:]]*- "${HTTPS_PORT:-8443}:443"[[:space:]]*$/d' "$compose_file"
         # HTTP-only lab installs never provision TLS certs, so the certs bind
         # mount on frontend/nginx-proxy would reference a directory that is
@@ -1165,8 +1166,8 @@ if start is not None:
 open(path,'w').write('\n'.join(txt) + '\n')
 PY
 
-    if [[ "${HTTPS_PORT-}" == "0" ]]; then
-        log_warning "HTTPS_PORT=0: local-only HTTP on 127.0.0.1:${HTTP_PORT:-8080}; no LAN access. Enable HTTPS with a valid certificate for LAN access."
+    if [[ "${HTTPS_PORT-}" == "0" && ! ( "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ) ]]; then
+        log_warning "HTTPS_PORT=0: TLS is disabled; HTTP uses BIND_ADDRESS (default 0.0.0.0). Use HTTPS to protect credentials in transit."
     fi
     
     return 0

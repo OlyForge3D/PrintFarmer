@@ -498,6 +498,31 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(PrinterSensorFormatting.displayName("heater_temp_a_box1"), "Heater Temp A Box1")
     }
 
+    func testMoonrakerSensorExtensionsDecodeAndBooleanEnableEncodesWithoutNumericCoercion() throws {
+        let payload = """
+        {
+          "id":"extruder3","displayName":"Tool 3","kind":"Nozzle","available":true,
+          "readings":[
+            {"quantity":"MeasuredMinTemperature","value":22.5,"unit":"Celsius"},
+            {"quantity":"MeasuredMaxTemperature","value":240,"unit":"Celsius"},
+            {"quantity":"Gas","value":32000,"unit":"Ohm"}
+          ],
+          "writable":[{"quantity":"TargetTemperature","min":10,"max":280,"step":0.5,"unit":"Celsius","allowZero":true}]
+        }
+        """
+        let sensor = try decoder.decode(PrinterSensor.self, from: Data(payload.utf8))
+        XCTAssertEqual(sensor.id, "extruder3")
+        XCTAssertEqual(sensor.readings.map(\.quantity), [.measuredMinTemperature, .measuredMaxTemperature, .gas])
+        XCTAssertEqual(sensor.readings.last?.value, .number(32000))
+        XCTAssertEqual(sensor.writable.first?.allowZero, true)
+        let request = SensorControlRequest(quantity: SensorQuantity.enabled.rawValue, value: 0)
+        let encoded = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["quantity"] as? String, "Enabled")
+        XCTAssertEqual(object["value"] as? Bool, false)
+        XCTAssertTrue(String(decoding: encoded, as: UTF8.self).contains("\"value\":false"))
+    }
+
     func testPrinterSensorIdentityAndHiddenObjectDetection() {
         let humiditySensor = PrinterSensor(
             id: "temperature_sensor heater_box1",

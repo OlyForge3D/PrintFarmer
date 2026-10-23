@@ -9,3 +9,9 @@ export function isHiddenPrinterSensorId(id: string): boolean {
   const shortName = separator < 0 ? id : id.slice(separator).trimStart();
   return shortName.startsWith('_');
 }
+
+const HEATER_HOT_THRESHOLDS = { hotend: 50, bed: 35 };
+
+export function isPrinterHeaterHot(heater: 'hotend' | 'bed', temperature: number | null | undefined): boolean {
+  return temperature != null && Number.isFinite(temperature) && temperature > HEATER_HOT_THRESHOLDS[heater];
+}

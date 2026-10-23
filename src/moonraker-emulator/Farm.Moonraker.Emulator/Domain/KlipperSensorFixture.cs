@@ -13,6 +13,39 @@ internal sealed class KlipperSensorFixture
 
     public void Reset() => objects = CreateObjects();
 
+    public void SetMultipleExtruders(bool enabled)
+    {
+        for (int index = 1; index < 4; index++)
+        {
+            string id = $"extruder{index}";
+            if (enabled)
+            {
+                objects.TryAdd(id, new Dictionary<string, object?>
+                {
+                    ["temperature"] = 23.4 + index,
+                    ["target"] = 0.0,
+                    ["power"] = 0.0,
+                });
+            }
+            else
+            {
+                objects.Remove(id);
+            }
+        }
+    }
+
+    public void TurnOffHeaters()
+    {
+        foreach ((string name, Dictionary<string, object?> fields) in objects)
+        {
+            if (name.StartsWith("extruder", StringComparison.Ordinal) || name.StartsWith("heater_generic ", StringComparison.Ordinal))
+            {
+                fields["target"] = 0.0;
+                fields["power"] = 0.0;
+            }
+        }
+    }
+
     public void AddTo(Dictionary<string, object> snapshot)
     {
         foreach ((string name, Dictionary<string, object?> fields) in objects)
@@ -20,20 +53,29 @@ internal sealed class KlipperSensorFixture
             snapshot[name] = new Dictionary<string, object?>(fields, StringComparer.Ordinal);
         }
 
+        string[] extruders = ["extruder", .. objects.Keys.Where(name => name.StartsWith("extruder", StringComparison.Ordinal))];
         snapshot["heaters"] = new Dictionary<string, object?>
         {
-            ["available_heaters"] = new[] { "extruder", "heater_bed", "heater_generic chamber" },
-            ["available_sensors"] = new[] { "extruder", "heater_bed", "heater_generic chamber", "temperature_sensor endstop", "temperature_fan chamber_heater" },
+            ["available_heaters"] = new[] { "heater_bed", "heater_generic chamber" }.Concat(extruders).ToArray(),
+            ["available_sensors"] = new[] { "heater_bed", "heater_generic chamber", "temperature_sensor endstop", "temperature_fan chamber_heater" }.Concat(extruders).ToArray(),
             ["available_monitors"] = Array.Empty<string>(),
         };
+        Dictionary<string, object?> settings = new()
+        {
+            ["extruder"] = Settings("Generic 3950", 0, 300),
+            ["heater_bed"] = Settings("Generic 3950", 0, 120),
+            ["temperature_sensor endstop"] = Settings("Generic 3950", -255, 256),
+            ["temperature_fan chamber_heater"] = Settings("ATC Semitec 104GT-2", -255, 256),
+            ["heater_generic chamber"] = Settings("Generic 3950", 0, 100),
+        };
+        foreach (string extruder in extruders.Skip(1))
+        {
+            settings[extruder] = Settings("Generic 3950", 10, ExtruderMaximum(extruder));
+        }
+
         snapshot["configfile"] = new Dictionary<string, object?>
         {
-            ["settings"] = new Dictionary<string, object?>
-            {
-                ["temperature_sensor endstop"] = Settings("Generic 3950", -255, 256),
-                ["temperature_fan chamber_heater"] = Settings("ATC Semitec 104GT-2", -255, 256),
-                ["heater_generic chamber"] = Settings("Generic 3950", 0, 100),
-            },
+            ["settings"] = settings,
         };
     }
 
@@ -113,6 +155,12 @@ internal sealed class KlipperSensorFixture
         }
 
         string objectName = spec.Prefix + name;
+        if (tokens[0].Equals("SET_HEATER_TEMPERATURE", StringComparison.OrdinalIgnoreCase) &&
+            objects.ContainsKey(name) && name.StartsWith("extruder", StringComparison.Ordinal))
+        {
+            objectName = name;
+        }
+
         if (tokens[0].Equals("SET_FILAMENT_SENSOR", StringComparison.OrdinalIgnoreCase))
         {
             objectName = new[] { "filament_switch_sensor ", "filament_motion_sensor " }
@@ -127,7 +175,8 @@ internal sealed class KlipperSensorFixture
         bool validObject = objects.TryGetValue(objectName, out Dictionary<string, object?>? status) &&
             status.ContainsKey(spec.Field) &&
             (spec.Field != "target" || objectName.StartsWith("temperature_fan ", StringComparison.Ordinal) ||
-                objectName.StartsWith("heater_generic ", StringComparison.Ordinal));
+                objectName.StartsWith("heater_generic ", StringComparison.Ordinal) ||
+                objectName.StartsWith("extruder", StringComparison.Ordinal));
         if (!validObject || !IsInRange(objectName, spec.Field, value) ||
             (spec.Field == "enabled" && value is not (0 or 1)))
         {
@@ -152,10 +201,20 @@ internal sealed class KlipperSensorFixture
         return parameters;
     }
 
+    private static double ExtruderMaximum(string name) => name switch
+    {
+        "extruder1" => 290,
+        "extruder2" => 280,
+        "extruder3" => 270,
+        _ => 300,
+    };
+
     private static bool IsInRange(string name, string field, double value) => field switch
     {
         "speed" or "power" => value is >= 0 and <= 1,
         "rpm" => value >= 0,
+        "target" when name.StartsWith("extruder", StringComparison.Ordinal) => value.Equals(0d) || (value >= 10 && value <= ExtruderMaximum(name)),
+        "temperature" when name.StartsWith("extruder", StringComparison.Ordinal) => value >= 10 && value <= ExtruderMaximum(name),
         "target" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
         "temperature" => name == "heater_generic chamber" ? value is >= 0 and <= 100 : value is >= -255 and <= 256,
         "enabled" => value is 0 or 1,

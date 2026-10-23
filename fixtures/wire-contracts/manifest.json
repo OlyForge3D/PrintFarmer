@@ -245,6 +245,27 @@
     "RefreshCommit": "4170ef47acdf8206bbf0bc53e1669326f638f93f"
   },
   {
+    "Path": "api/printer-status/moonraker-primary.invalid.json",
+    "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (Moonraker complete heater snapshot)",
+    "ProducingTest": "PrinterStatusContractTests.MoonrakerPrimarySnapshot_InvalidReadingsAndUnknownTool_PreserveAuthoritativeWireShape",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "cf3513f7b2cb80b0a5f6ce43647c89e062c8fc66"
+  },
+  {
+    "Path": "api/printer-status/moonraker-primary.known.json",
+    "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (Moonraker complete heater snapshot)",
+    "ProducingTest": "PrinterStatusContractTests.MoonrakerPrimarySnapshot_InvalidReadingsAndUnknownTool_PreserveAuthoritativeWireShape",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "cf3513f7b2cb80b0a5f6ce43647c89e062c8fc66"
+  },
+  {
+    "Path": "api/printer-status/moonraker-primary.unknown.json",
+    "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (Moonraker complete heater snapshot)",
+    "ProducingTest": "PrinterStatusContractTests.MoonrakerPrimarySnapshot_InvalidReadingsAndUnknownTool_PreserveAuthoritativeWireShape",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "cf3513f7b2cb80b0a5f6ce43647c89e062c8fc66"
+  },
+  {
     "Path": "api/printer-status/printerupdated.missing-key.json",
     "Endpoint": "SignalR PrinterHub \u0022printerupdated\u0022 (RequestPrinterStatus)",
     "ProducingTest": "PrinterStatusContractTests.RequestPrinterStatus_MinimalStatus_OmitsOptionalKeys",

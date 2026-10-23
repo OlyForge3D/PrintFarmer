@@ -48,6 +48,15 @@ do not gain an invented snapshot endpoint.
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
+### Moonraker temperature and sensor controls
+
+The primary Hotend follows the active physical tool; additional extruders retain
+their own bounded target controls. Manual targets remain editable during printing
+and pause, while preset menus are disabled. Cooldown explicitly turns off all
+heaters, not just the active nozzle and bed. Filament-monitor enable switches,
+raw gas resistance, measured temperature extrema and authenticated fallback
+telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
+
 ### Moonraker motion controls
 
 Homing, jogging, and absolute movement use direct POST requests to the existing
@@ -106,9 +115,12 @@ cd PrintFarmer
 ```
 
 Open **http://localhost:8080** on the deployment host (or your configured
-HTTP port). HTTP is local-only; LAN clients must use
-**https://SERVER_HOST:8443** with a valid, trusted certificate and the configured
-HTTPS port. `HTTPS_PORT=0` or HTTP-only lab mode leaves no LAN listener.
+HTTP port), or **http://SERVER_HOST:8080** from your LAN. The Docker deployment
+script publishes HTTP on all interfaces by default; set `BIND_ADDRESS=127.0.0.1`
+to restrict it. This IPv4 binding is saved for later redeploys. Prefer
+**https://SERVER_HOST:8443** with a valid, trusted
+certificate to protect credentials in transit. `HTTPS_PORT=0` disables only
+HTTPS; explicit HTTP-only lab mode remains local-only.
 For private-CA bootstrap, transfer the public CA through a trusted channel;
 see [iPhone / iPad HTTPS trust](./docs/DEPLOYMENT.md#iphone--ipad-https-trust).
 

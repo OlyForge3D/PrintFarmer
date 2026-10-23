@@ -14,7 +14,7 @@ import {
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
-import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
@@ -39,6 +39,7 @@ import {
 } from '@/features/printers/utils/printerSupport';
 import {
   getPresetTargets,
+  temperatureTargetLimitError,
   getExtrudeMinTemp,
   EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
@@ -180,15 +181,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // token here so the details query below can self-fetch the authoritative one
   // when it is missing (independent of Spoolman readiness).
   const propRowVersion = printerProp?.rowVersion ?? apiPrinter?.rowVersion ?? null;
+  const support = getPrinterSupport(backendCapabilities);
 
   // Fetch printer details to check for multi-toolhead configuration and to
   // recover the reviewed revision. Fetch when Spoolman is configured (spool
   // section would be shown) OR when the prop lacks a revision, so the spool
   // mutation guards below always have an authoritative token to review against.
+  // Temperature controls also need the authoritative heater limits in details.
   const { data: printerDetails } = usePrinterDetails(
     printerId ?? '', 
     { 
-      enabled: !!printerId && (spoolmanReady || !propRowVersion),
+      enabled: !!printerId && (spoolmanReady || !propRowVersion || support.supportsTemperatureControl),
       staleTime: 60000, // Cache for 1 minute since toolhead config doesn't change frequently
     }
   );
@@ -267,8 +270,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [hotendTemp, setHotendTemp] = useState<number | ''>('');
-  const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
@@ -333,15 +334,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     });
   }, [printer]);
 
-  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
-  const printerHotendTarget = printer?.hotendTarget ?? 0;
-  const printerBedTarget = printer?.bedTarget ?? 0;
-  useEffect(() => {
-    setHotendTemp(printerHotendTarget > 0 ? printerHotendTarget : '');
-    setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
-  }, [printerHotendTarget, printerBedTarget]);
-
-  const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
   const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
   // A pending skip confirmation never outlives its print or its printer.
@@ -402,6 +394,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
+  const activeExtruderId = printer?.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
+  const hasMoonrakerSensorSnapshot = printer?.backend === PrinterBackend.Moonraker && printer.sensors !== undefined;
 
   // Authoritative reviewed revision for spool mutations. `displayPrinter`
   // (and thus the passed-in prop) can lack `rowVersion` when it was sourced from
@@ -450,7 +444,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
-  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support, supportsHeaterShutdown: backendCapabilities?.supportsHeaterShutdown });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
   const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -658,50 +652,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(hotendTemp),
-        bed: Number(currentBedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set hotend temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting hotend temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(currentHotendTemp),
-        bed: Number(bedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set bed temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting bed temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
   const handleApplyPreset = async (preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || (preset.toLowerCase() !== 'cooldown' && (isPrinting || isPaused))) {
       return;
     }
 
@@ -715,24 +667,31 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
+      const limitError = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? undefined : temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
+      if (limitError) {
+        toast.error(limitError);
+        return;
+      }
 
-      const result = await apiClient.setTemperatures(printer.id, targets);
+      const result = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? await apiClient.turnOffHeaters(printer.id)
+        : await apiClient.setTemperatures(printer.id, targets);
 
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
   };
 
   const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || isPrinting || isPaused) {
       return;
     }
 
@@ -742,23 +701,23 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       return;
     }
 
-    const currentHotend = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : Number(hotendTemp);
-    const currentBed = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : Number(bedTemp);
-    const targets: TempTargets = heater === 'hotend'
-      ? { hotend: presetTargets.hotend, bed: currentBed }
-      : { hotend: currentHotend, bed: presetTargets.bed };
+    const targets = { [heater]: presetTargets[heater] };
+    const limitError = temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
+    if (limitError) {
+      toast.error(limitError);
+      return;
+    }
 
     setTemperatureActionPending(true);
     try {
       const result = await apiClient.setTemperatures(printer.id, targets);
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${heater} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${heater} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -1236,34 +1195,36 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         <PrinterSensorsSection
           printerId={printer.id}
           sensors={displayPrinter?.sensors}
-          temperatures={displayPrinter ?? {}}
+          temperatures={{ ...displayPrinter, activeExtruderId }}
           supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
           canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
           isOnline={isOnline}
         >
-          <TemperatureControlSection
+          {additionalRows => <TemperatureControlSection
+            printerId={printer.id}
+            activeExtruderId={activeExtruderId}
+            presetsDisabled={isPrinting || isPaused}
+            isOnline={isOnline}
             sensors={displayPrinter?.sensors}
             showHeading={false}
-            hotendTemp={hotendTemp}
-            bedTemp={bedTemp}
+            additionalRows={additionalRows}
             hotendTarget={displayPrinter?.hotendTarget}
             bedTarget={displayPrinter?.bedTarget}
-            hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
-            bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            hotendCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.hotendTemp : displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
+            bedCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.bedTemp : displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            reportedTemperatures={displayPrinter ?? {}}
+            maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
+            maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
             temperatureActionPending={temperatureActionPending}
             canSetTemperatures={canSetTemperaturesNow}
             canCooldown={canCooldownNow}
-            onHotendTempChange={(value) => setHotendTemp(value === '' ? '' : Number(value))}
-            onBedTempChange={(value) => setBedTemp(value === '' ? '' : Number(value))}
-            onHotendTempKeyDown={(event) => { void handleHotendTempKeyDown(event); }}
-            onBedTempKeyDown={(event) => { void handleBedTempKeyDown(event); }}
             onApplyPreset={(preset) => {
               void handleApplyPreset(preset);
             }}
             onApplySingleHeaterPreset={(heater, preset) => {
               void handleApplySingleHeaterPreset(heater, preset);
             }}
-          />
+          />}
         </PrinterSensorsSection>
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is

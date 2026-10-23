@@ -40,7 +40,8 @@ public record PrinterStatusDto(
     int? CurrentLayer = null,
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
-    double? LiveZOffsetMm = null)
+    double? LiveZOffsetMm = null,
+    string? ActiveExtruderId = null)
 {
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
