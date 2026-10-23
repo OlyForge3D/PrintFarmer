@@ -81,6 +81,18 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
     }
 
+    func testMissingTemperaturesReadAsNotReportedInVoiceOver() throws {
+        var printer = try TestData.decodePrinter()
+        printer.hotendTemp = nil
+        printer.bedTemp = nil
+        let label = PrinterCardPresentation(printer: printer, isPendingReady: false, attentionCount: nil,
+                                            failureReason: nil, printTimeLeftSeconds: nil).accessibilityLabel
+        XCTAssertTrue(label.contains("Nozzle not reported"))
+        XCTAssertTrue(label.contains("Bed not reported"))
+        XCTAssertFalse(label.contains("Nozzle unavailable"))
+        XCTAssertFalse(label.contains("Bed unavailable"))
+    }
+
     func testPendingReadyCardDoesNotPresentCompletedJobAsActiveProgress() throws {
         var printer = try TestData.decodePrinter()
         printer.state = "printing"
