@@ -314,14 +314,8 @@ struct PreheatSubgroup: View {
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
 
-    /// Cool down is hidden, not disabled, when the backend has no heater shutdown.
-    static func visiblePresets(capabilities: PrinterBackendCapabilities?) -> [PreheatPreset] {
-        capabilities?.supportsHeaterShutdown == true ? presets : presets.filter { $0 != .coolDown }
-    }
-
-    private var visiblePresets: [PreheatPreset] {
-        Self.visiblePresets(capabilities: viewModel.capabilities)
-    }
+    /// Cool down is always offered: heater shutdown when supported, else 0/0 targets while idle.
+    private var visiblePresets: [PreheatPreset] { Self.presets }
 
     /// Presets require explicit hotend-control evidence, including Cool Down.
     static func isVisible(capabilities: PrinterBackendCapabilities?) -> Bool {
@@ -422,8 +416,7 @@ struct PreheatSubgroup: View {
         } else {
             count = 4
         }
-        // Without Cool down the remaining presets still fill the row.
-        return Array(repeating: GridItem(.flexible(), spacing: 8), count: min(count, visiblePresets.count))
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
     }
 
     @ViewBuilder
@@ -770,7 +763,7 @@ struct PreheatSubgroup: View {
         if !canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return preset.a11yHint(hasBed: viewModel.supports(.bed))
+        return preset.a11yHint(hasBed: viewModel.supports(.bed), turnsOffHeaters: viewModel.supportsHeaterShutdown)
     }
 
     func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
@@ -810,11 +803,17 @@ private extension PreheatPreset {
     var temperatureLabel: String {
         "\(Int(hotend))° / \(Int(bed))°"
     }
+}
 
+extension PreheatPreset {
     /// VoiceOver idle hint per spec §4.1. Omits bed segment when printer has no heated bed.
-    func a11yHint(hasBed: Bool) -> String {
+    /// Cool down describes the path it takes: heater shutdown, or the 0° target fallback.
+    func a11yHint(hasBed: Bool, turnsOffHeaters: Bool) -> String {
         switch self {
         case .coolDown:
+            if turnsOffHeaters {
+                return String(localized: "Turns off all heaters.", comment: "VoiceOver: Cool Down hint when the backend supports heater shutdown")
+            }
             return hasBed
                 ? String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
                 : String(localized: "Sets hotend to 0 degrees.", comment: "VoiceOver: Cool Down hotend-only hint")

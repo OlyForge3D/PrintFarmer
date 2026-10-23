@@ -387,14 +387,6 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(PreheatSubgroup.presets.count, 4)
     }
 
-    func test_visiblePresets_hideCoolDownWithoutHeaterShutdown() {
-        var caps = PrinterBackendCapabilities.allControlsFixture
-        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: caps), [.pla, .petg, .abs, .coolDown])
-        caps.supportsHeaterShutdown = false
-        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: caps), [.pla, .petg, .abs])
-        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: nil), [.pla, .petg, .abs])
-    }
-
     // MARK: - isVisible(capabilities:)
 
     func test_isVisible_falseWhenCapabilitiesNil() {
@@ -518,13 +510,25 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_coolDown() async throws {
+    func test_accessibilityHint_idle_coolDown_describesHeaterShutdown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
         await vm.loadCapabilities()
+        XCTAssertTrue(vm.supportsHeaterShutdown)
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),
-            "Sets hotend and bed to 0 degrees."
+            "Turns off all heaters."
+        )
+    }
+
+    func test_coolDownHint_describesZeroTargetFallbackWithoutHeaterShutdown() {
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: false), "Sets hotend and bed to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: false, turnsOffHeaters: false), "Sets hotend to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: true), "Turns off all heaters.")
+        XCTAssertEqual(
+            PreheatPreset.pla.a11yHint(hasBed: true, turnsOffHeaters: true),
+            "Sets hotend to 200 degrees, bed to 60 degrees.",
+            "Heater shutdown only changes the Cool down hint"
         )
     }
 

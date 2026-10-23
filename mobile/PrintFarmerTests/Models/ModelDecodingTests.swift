@@ -1106,6 +1106,16 @@ final class PrinterSensorModelTests: XCTestCase {
         XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(runout, activeExtruderId: nil).isEmpty)
     }
 
+    func test_isFan_coversFanKindAndAnyFanRoleIncludingTemperatureFans() {
+        let target = SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)
+        let temperatureFan = PrinterSensor(id: "rpi_fan", displayName: "Rpi Fan", kind: .fan, fanRole: .auxiliary, writable: [target])
+        let roleOnly = PrinterSensor(id: "x", displayName: "X", kind: .other, fanRole: .controller)
+        let chamber = PrinterSensor(id: "chamber", displayName: "Chamber", kind: .chamber, writable: [target])
+        XCTAssertTrue(PrinterSensorFormatting.isFan(temperatureFan))
+        XCTAssertTrue(PrinterSensorFormatting.isFan(roleOnly))
+        XCTAssertFalse(PrinterSensorFormatting.isFan(chamber))
+    }
+
     func test_missingSensorValuesUseDashPlaceholderAndNotReportedSpeech() {
         let reading = SensorReading(quantity: .temperature, value: .number(.nan), unit: .celsius)
         XCTAssertEqual(PrinterSensorFormatting.valueText(reading), "--")

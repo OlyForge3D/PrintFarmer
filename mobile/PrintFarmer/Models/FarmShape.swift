@@ -205,6 +205,11 @@ enum PrinterSensorFormatting {
         return name.hasPrefix("_")
     }
 
+    /// Fans (including Klipper temperature_fan) have no app controls.
+    static func isFan(_ sensor: PrinterSensor) -> Bool {
+        sensor.kind == .fan || sensor.fanRole != nil
+    }
+
     // Exact backend mapper identities (mirrors React `primaryHeater`): tool1/T1/extruder1 stay independent.
     private static let primaryNozzleIds: Set<String> = ["nozzle", "extruder", "tool0", "T0", "TempOfNozzle"]
     private static let primaryBedIds: Set<String> = ["bed", "heater_bed", "TempOfHotbed"]

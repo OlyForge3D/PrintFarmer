@@ -28,11 +28,11 @@ struct JogSubgroup: View {
         fractionDigits: Int = 1
     ) -> (text: String, accessibilityLabel: String) {
         if isAxisHomed(axis, homedAxes: homedAxes) == false {
-            return ("—", "\(axis) position unavailable, axis not homed")
+            return (PrinterDetailViewModel.missingValuePlaceholder, "\(axis) position unavailable, axis not homed")
         }
         guard let value, value.isFinite else {
-            let unknown = unit.isEmpty ? "---" : "Unknown"
-            return (unknown, "\(axis) \(unknown)")
+            guard !unit.isEmpty else { return (PrinterDetailViewModel.missingValuePlaceholder, "\(axis) not reported") }
+            return ("Unknown", "\(axis) Unknown")
         }
         let formatted = value.formatted(.number.precision(.fractionLength(fractionDigits)))
         let text = unit.isEmpty ? formatted : "\(formatted) \(unit)"

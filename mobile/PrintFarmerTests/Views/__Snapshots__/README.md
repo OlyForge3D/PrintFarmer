@@ -215,3 +215,18 @@ actual images were inspected: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5
 (23F77), light appearance, default locale. The only difference is the omitted
 Cool down button and the three-column preset row. These cases have no iPad
 references.
+
+## Tune drops fans; Cool down always shown
+
+Tune no longer renders fan controls, and Cool down is shown for every printer
+with hotend control (heater shutdown when supported, otherwise a 0/0 idle
+fallback). The lockout banner no longer mentions fan adjustments. The iPhone
+references for `test_snapshot_flashForgeProfile`, `test_snapshot_sdcpProfile`,
+`test_snapshot_loadingState_capabilitiesNil` (Cool down restored, four-column
+preset row), `test_snapshot_disabledState_printerStarting`,
+`test_snapshot_lockoutBanner_printingState` (banner copy) and
+`PrinterSensorsSnapshotTests/test_controlSensorRows` (fan rows removed, chamber
+row only) were replaced with the strict comparison's actual output after
+inspection: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale. The iPad references for the banner and sensor-row
+cases were not re-recorded in this run and need an iPad pass.

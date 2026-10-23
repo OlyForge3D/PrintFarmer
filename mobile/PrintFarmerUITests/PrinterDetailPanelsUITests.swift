@@ -1269,12 +1269,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             controlPage.swipeUp()
         }
         XCTAssertTrue(runtime.isHittable, "Z babystep controls must be visibly reachable.")
-        let fanIncrease = app.buttons["printer.controls.runtime.fan.increase"]
-        XCTAssertTrue(fanIncrease.waitForExistence(timeout: 5), "Tune must expose the part fan control.")
-        for _ in 0..<4 where !fanIncrease.isHittable {
-            controlPage.swipeUp()
-        }
-        XCTAssertTrue(fanIncrease.isHittable, "The Tune part fan control must be visibly reachable.")
+        XCTAssertFalse(app.buttons["printer.controls.runtime.fan.increase"].exists, "Tune has no fan controls.")
         attachScreen("\(device)-\(size)-printer-control-idle-runtime")
 
         selector.buttons["Filament"].tap()

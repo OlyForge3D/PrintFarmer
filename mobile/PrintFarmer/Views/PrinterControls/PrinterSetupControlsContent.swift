@@ -135,7 +135,7 @@ struct PrinterSetupControlsContent: View {
     }
 
     private var lockoutBanner: some View {
-        let message = String(localized: "Heat, motion and filament setup are unavailable while a job is starting, printing or paused. Fan and Z-offset adjustments require verified capability and live readback.")
+        let message = String(localized: "Heat, motion and filament setup are unavailable while a job is starting, printing or paused. Z-offset adjustments require verified capability and live readback.")
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
@@ -325,8 +325,8 @@ struct PrinterMaterialControls: View {
     }
 }
 
-/// Inputs for sensor/fan entries the backend reports as writable. Read-only
-/// entries and descriptors never get controls.
+/// Inputs for writable non-fan sensor entries. Fans are not adjustable from the
+/// app; read-only entries and descriptors never get controls.
 struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
@@ -334,7 +334,7 @@ struct PrinterSensorControlRows: View {
     var body: some View {
         let activeExtruderId = viewModel.printer.activeExtruderId
         let sensors = viewModel.controllableSensors.filter {
-            !PrinterSensorFormatting.isHidden($0)
+            !PrinterSensorFormatting.isHidden($0) && !PrinterSensorFormatting.isFan($0)
                 && !PrinterSensorFormatting.steppableDescriptors($0, activeExtruderId: activeExtruderId).isEmpty
         }
         if !sensors.isEmpty {
@@ -383,7 +383,7 @@ struct PrinterSensorControlRows: View {
         increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
     ) -> some View {
         let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
-        // Same native 44 pt stepper as the Tune part fan row it sits beside.
+        // Native 44 pt stepper, matching the other Tune controls.
         return ControlActionButton(
             title: "",
             identifier: identifier,

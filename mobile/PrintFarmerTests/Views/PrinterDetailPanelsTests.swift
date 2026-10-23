@@ -219,42 +219,38 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
     }
 
-    func testTunePartFanControlInvokesRegisteredPrinterFanAPI() async throws {
+    func testTuneOmitsAllFanControls() async throws {
         let tune = try await hostedTunePanel()
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        let fanIncrease = "printer.controls.runtime.fan.increase"
-        try await waitForHost("Tune must render an enabled part fan control", in: tune.controller.view) {
-            tune.button(fanIncrease)?.isEnabled == true
+        let chamberIncrease = "printer.controls.sensor.chamber.TargetTemperature.increase"
+        try await waitForHost("Tune must render the non-fan writable sensor control", in: tune.controller.view) {
+            tune.button(chamberIncrease)?.isEnabled == true
         }
-        XCTAssertNotNil(tune.button("printer.controls.runtime.fan.decrease"))
-        XCTAssertNotNil(tune.button("printer.controls.sensor.aux-fan.FanSpeed.increase"),
-                        "Tune must render writable sensor controls alongside the part fan")
-        try XCTUnwrap(tune.button(fanIncrease)).sendActions(for: .touchUpInside)
-        let fanPath = "/api/printers/\(tune.printerId)/fan"
-        try await waitForHost("Part fan must reach the registered printer fan API", in: tune.controller.view) {
-            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == fanPath }
+        for identifier in [
+            "printer.controls.runtime.fan.increase", "printer.controls.runtime.fan.decrease",
+            "printer.controls.sensor.aux-fan.FanSpeed.increase", "printer.controls.sensor.aux-fan.FanSpeed.decrease",
+            "printer.controls.sensor.rpi-fan.TargetTemperature.increase"
+        ] {
+            XCTAssertNil(tune.button(identifier), "\(identifier) must not render: Tune has no fan controls")
         }
-        let fanBody = try XCTUnwrap(tune.api.capturedRequests.last { $0.url?.path == fanPath }?.capturedHTTPBody())
-        let fanJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: fanBody) as? [String: Any])
-        XCTAssertEqual(fanJSON["speedPercent"] as? Int, 30, "One step raises the reported 25% by 5%")
     }
 
     func testTuneWritableSensorControlInvokesRegisteredPrinterSensorAPI() async throws {
         let tune = try await hostedTunePanel()
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        let sensorIncrease = "printer.controls.sensor.aux-fan.FanSpeed.increase"
+        let sensorIncrease = "printer.controls.sensor.chamber.TargetTemperature.increase"
         try await waitForHost("Tune must render an enabled writable sensor control", in: tune.controller.view) {
             tune.button(sensorIncrease)?.isEnabled == true
         }
-        XCTAssertNotNil(tune.button("printer.controls.sensor.aux-fan.FanSpeed.decrease"))
+        XCTAssertNotNil(tune.button("printer.controls.sensor.chamber.TargetTemperature.decrease"))
         try XCTUnwrap(tune.button(sensorIncrease)).sendActions(for: .touchUpInside)
-        let sensorPath = "/api/printers/\(tune.printerId)/sensors/aux-fan"
+        let sensorPath = "/api/printers/\(tune.printerId)/sensors/chamber"
         try await waitForHost("Writable sensor must reach the registered sensor API", in: tune.controller.view) {
             tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == sensorPath }
         }
         XCTAssertFalse(
             tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/fan") == true },
-            "A writable sensor step must not be routed to the part fan endpoint"
+            "Tune must never reach the part fan endpoint"
         )
     }
 
@@ -266,7 +262,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let button: (String) -> UIButton?
     }
 
-    /// Hosts the detail Control tab on Tune with one writable auxiliary fan.
+    /// Hosts the detail Control tab on Tune with writable fans and a chamber heater.
     /// Callers hide the returned window when done.
     private func hostedTunePanel() async throws -> HostedTunePanel {
         let auxiliaryFan = PrinterSensor(
@@ -274,7 +270,17 @@ final class PrinterDetailPanelsTests: XCTestCase {
             readings: [SensorReading(quantity: .fanSpeed, value: .number(40), unit: .percent)],
             writable: [SensorWritable(quantity: .fanSpeed, min: 0, max: 100, step: 5, unit: .percent)]
         )
-        let fixture = try detailHostFixture(writableSensors: [auxiliaryFan])
+        let temperatureFan = PrinterSensor(
+            id: "rpi-fan", displayName: "Rpi Fan", kind: .fan, fanRole: .auxiliary,
+            readings: [SensorReading(quantity: .targetTemperature, value: .number(45), unit: .celsius)],
+            writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)]
+        )
+        let chamber = PrinterSensor(
+            id: "chamber", displayName: "Chamber", kind: .chamber,
+            readings: [SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius)],
+            writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)]
+        )
+        let fixture = try detailHostFixture(writableSensors: [auxiliaryFan, temperatureFan, chamber])
         fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
@@ -813,15 +819,17 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    func testInstrumentPanelFanStepsClampAndReadoutIsHonest() {
+    func testTuneTemperaturesExplainOnlyWhenTheBackendCannotApplyThem() {
         typealias Panel = PrinterInstrumentPanelControls
-        XCTAssertEqual(Panel.fanTarget(current: 25, increasing: true), 30)
-        XCTAssertEqual(Panel.fanTarget(current: 25, increasing: false), 20)
-        XCTAssertEqual(Panel.fanTarget(current: 98, increasing: true), 100)
-        XCTAssertEqual(Panel.fanTarget(current: 3, increasing: false), 0)
-        XCTAssertEqual(Panel.fanText(nil), "Not reported")
-        XCTAssertEqual(Panel.fanText(.nan), "Not reported")
-        XCTAssertEqual(Panel.fanText(25), "25%")
+        XCTAssertEqual(
+            Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: false, canControlHeat: false, heatBlockedReason: "Controls are locked while a print is active."),
+            "This printer can't change temperatures during a print."
+        )
+        XCTAssertNil(Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: true, canControlHeat: true, heatBlockedReason: nil))
+        XCTAssertEqual(
+            Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: true, canControlHeat: false, heatBlockedReason: "Printer is offline."),
+            "Printer is offline."
+        )
     }
 
     func testPositionReadoutSpeaksMillimeters() {
