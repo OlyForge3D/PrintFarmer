@@ -791,6 +791,69 @@ test_explicit_env_overrides_persisted_worker_disable_on_regenerate() {
     fi
 }
 
+test_http_bind_address_persistence() {
+    start_test "HTTP interface restrictions survive config reload, redeploy, and manual Compose"
+
+    local mode test_dir output failures_before=$TESTS_FAILED
+    for mode in saved legacy-env; do
+        test_dir="$TEST_TEMP_DIR/http-binding-$mode"
+        mkdir -p "$test_dir"
+        cd "$test_dir"
+        write_base_config .deploy-config
+        if [[ "$mode" == saved ]]; then
+            printf '%s\n' 'BIND_ADDRESS=127.0.0.1' >> .deploy-config
+        else
+            printf '%s\n' 'BIND_ADDRESS=127.0.0.1' > .env
+        fi
+
+        capture_output "env -u BIND_ADDRESS timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+        assert_equals "0" "$(get_output_exit_code)" "Regeneration must retain the $mode HTTP binding" || true
+        assert_file_has_exact_line .deploy-config "BIND_ADDRESS=127.0.0.1" "Config must persist the $mode HTTP binding" || true
+        assert_file_has_exact_line .env "BIND_ADDRESS=127.0.0.1" "Compose environment must persist the $mode HTTP binding" || true
+
+        capture_output "env -u BIND_ADDRESS timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --redeploy --dry-run 2>&1"
+        assert_equals "0" "$(get_output_exit_code)" "Redeploy must not require the original shell override ($mode)" || true
+        assert_file_has_exact_line .deploy-config "BIND_ADDRESS=127.0.0.1" "Redeploy must retain the saved restriction ($mode)" || true
+        assert_file_has_exact_line .env "BIND_ADDRESS=127.0.0.1" "Redeploy must retain the Compose restriction ($mode)" || true
+
+        output=$(
+            unset BIND_ADDRESS
+            source "$DEPLOY_SCRIPT"
+            source .deploy-config
+            OS=linux
+            ENV_FILE=.env
+            resolve_webauthn_configuration
+            display_final_info
+        )
+        assert_contains "$output" "Local-only HTTP: http://localhost:8080" "Reloaded summary must match the persisted restriction ($mode)" || true
+
+        if check_docker_compose_available; then
+            env -u BIND_ADDRESS docker compose --env-file .env -f docker-compose.yml config --format json > rendered.json
+            if ! python3 - rendered.json <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as source:
+    ports = json.load(source)["services"]["nginx-proxy"]["ports"]
+http = next(port for port in ports if port["target"] == 80)
+assert http["host_ip"] == "127.0.0.1", http
+PY
+            then
+                fail_test "Manual Compose must retain the restriction without the original shell variable ($mode)"
+            fi
+        fi
+
+        capture_output "BIND_ADDRESS=192.0.2.10 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+        assert_equals "0" "$(get_output_exit_code)" "Explicit caller binding must override saved configuration ($mode)" || true
+        assert_file_has_exact_line .deploy-config "BIND_ADDRESS=192.0.2.10" "Caller override must become the saved binding ($mode)" || true
+        assert_file_has_exact_line .env "BIND_ADDRESS=192.0.2.10" "Caller override must reach Compose ($mode)" || true
+    done
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -818,6 +881,7 @@ run_all_tests() {
     test_explicit_env_overrides_persisted_worker_disable_on_regenerate
     test_orcaslicer_release_is_repository_controlled
     test_regenerate_config_migrates_orcaslicer_release
+    test_http_bind_address_persistence
     
     teardown
 }
