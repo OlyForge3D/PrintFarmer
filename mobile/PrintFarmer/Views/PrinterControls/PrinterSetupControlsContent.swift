@@ -332,10 +332,14 @@ struct PrinterSensorControlRows: View {
     var compact: Bool
 
     var body: some View {
-        let sensors = viewModel.controllableSensors.filter { !PrinterSensorFormatting.isHidden($0) }
+        let activeExtruderId = viewModel.printer.activeExtruderId
+        let sensors = viewModel.controllableSensors.filter {
+            !PrinterSensorFormatting.isHidden($0)
+                && !PrinterSensorFormatting.steppableDescriptors($0, activeExtruderId: activeExtruderId).isEmpty
+        }
         if !sensors.isEmpty {
             ForEach(sensors) { sensor in
-                ForEach(sensor.writable, id: \.quantity) { descriptor in
+                ForEach(PrinterSensorFormatting.steppableDescriptors(sensor, activeExtruderId: activeExtruderId), id: \.quantity) { descriptor in
                     row(sensor: sensor, descriptor: descriptor)
                 }
             }
@@ -358,9 +362,9 @@ struct PrinterSensorControlRows: View {
                     stepButton("minus", "Decrease \(title)", id + ".decrease",
                                increasing: false, current: current, descriptor: descriptor, sensor: sensor)
                 }
-                Text(reading.map(PrinterSensorFormatting.valueText) ?? "—")
+                Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
                     .font(.subheadline.monospacedDigit())
-                    .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), unknown")
+                    .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
                     .accessibilityIdentifier(id + ".value")
                 if let current, reason == nil {
                     stepButton("plus", "Increase \(title)", id + ".increase",

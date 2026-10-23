@@ -645,7 +645,7 @@ struct PrinterDetailTemperatureStrip: View {
 
     /// Whether the heater glyph should render in its "on" color. A non-finite
     /// (NaN/Infinity) target is treated as unknown/off, matching
-    /// `compactTemperature`'s "—" rendering for the same values, rather than
+    /// `compactTemperature`'s "--" rendering for the same values, rather than
     /// incorrectly appearing to be heating.
     static func isHeatingGlyph(value: PrinterDetailTemperatureReading) -> Bool {
         value.isOnline && (value.target?.isFinite ?? false) && (value.target ?? 0) > 0
@@ -689,7 +689,7 @@ struct PrinterDetailTemperatureStrip: View {
     }
 
     private func compactTemperature(_ value: Double?, isOnline: Bool) -> String {
-        guard isOnline, let value, value.isFinite else { return "—" }
+        guard isOnline, let value, value.isFinite else { return PrinterDetailViewModel.missingValuePlaceholder }
         return "\(value.formatted(.number.precision(.fractionLength(0...1))))°"
     }
 

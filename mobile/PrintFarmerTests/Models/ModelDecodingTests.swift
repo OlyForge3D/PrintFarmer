@@ -1079,6 +1079,39 @@ final class PrinterSensorModelTests: XCTestCase {
         XCTAssertEqual(PrinterSensorFormatting.merge(cached: cached, update: []), [])
     }
 
+    func test_steppedTarget_allowZeroTargetStepsBetweenOffAndMinimum() {
+        let d = SensorWritable(quantity: .targetTemperature, min: 30, max: 60, step: 5, unit: .celsius, allowZero: true)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 30, increasing: false, descriptor: d), 0)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 0, increasing: true, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: false, descriptor: d), 30)
+        let noZero = SensorWritable(quantity: .targetTemperature, min: 30, max: 60, step: 5, unit: .celsius)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 30, increasing: false, descriptor: noZero), 30)
+    }
+
+    func test_steppableDescriptors_leavePrimaryHeaterTargetsToHeatAndSkipEnabledSwitches() {
+        let target = SensorWritable(quantity: .targetTemperature, min: 0, max: 300, step: 1, unit: .celsius, allowZero: true)
+        let enabled = SensorWritable(quantity: .enabled, min: 0, max: 1, step: 1, unit: .none)
+        let nozzle = PrinterSensor(id: "extruder", displayName: "Extruder", kind: .nozzle, writable: [target])
+        let secondNozzle = PrinterSensor(id: "extruder1", displayName: "Extruder 1", kind: .nozzle, writable: [target])
+        let bed = PrinterSensor(id: "heater_bed", displayName: "Bed", kind: .bed, writable: [target])
+        let chamber = PrinterSensor(id: "chamber", displayName: "Chamber", kind: .chamber, writable: [target])
+        let runout = PrinterSensor(id: "runout", displayName: "Runout", kind: .filamentRunout, writable: [enabled])
+
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(nozzle, activeExtruderId: nil).isEmpty)
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(bed, activeExtruderId: nil).isEmpty)
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(secondNozzle, activeExtruderId: nil), [target])
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(secondNozzle, activeExtruderId: "extruder1").isEmpty)
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(nozzle, activeExtruderId: "extruder1"), [target])
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(chamber, activeExtruderId: nil), [target])
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(runout, activeExtruderId: nil).isEmpty)
+    }
+
+    func test_missingSensorValuesUseDashPlaceholderAndNotReportedSpeech() {
+        let reading = SensorReading(quantity: .temperature, value: .number(.nan), unit: .celsius)
+        XCTAssertEqual(PrinterSensorFormatting.valueText(reading), "--")
+        XCTAssertEqual(PrinterSensorFormatting.spokenValue(reading), "not reported")
+    }
+
     func test_capabilityFlagsDefaultFalseAndDecodeTrue() throws {
         XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsSensorControl)
         XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsSensorTelemetry)

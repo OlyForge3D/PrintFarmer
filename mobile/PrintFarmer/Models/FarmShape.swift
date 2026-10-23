@@ -205,9 +205,39 @@ enum PrinterSensorFormatting {
         return name.hasPrefix("_")
     }
 
+    // Exact backend mapper identities (mirrors React `primaryHeater`): tool1/T1/extruder1 stay independent.
+    private static let primaryNozzleIds: Set<String> = ["nozzle", "extruder", "tool0", "T0", "TempOfNozzle"]
+    private static let primaryBedIds: Set<String> = ["bed", "heater_bed", "TempOfHotbed"]
+
+    /// The nozzle/bed the Heat controls already drive.
+    static func isPrimaryHeater(_ sensor: PrinterSensor, activeExtruderId: String?) -> Bool {
+        switch sensor.kind {
+        case .nozzle:
+            return activeExtruderId.map { sensor.id == $0 } ?? primaryNozzleIds.contains(sensor.id)
+        case .bed:
+            return primaryBedIds.contains(sensor.id)
+        default:
+            return false
+        }
+    }
+
+    /// Numeric stepper descriptors for Tune: primary heater targets belong to Heat,
+    /// and boolean Enabled switches are not numeric setpoints.
+    static func steppableDescriptors(_ sensor: PrinterSensor, activeExtruderId: String?) -> [SensorWritable] {
+        let primary = isPrimaryHeater(sensor, activeExtruderId: activeExtruderId)
+        return sensor.writable.filter { descriptor in
+            descriptor.quantity != .enabled && !(primary && descriptor.quantity == .targetTemperature)
+        }
+    }
+
     /// Next on-grid (min + n*step) value at least one step from `current` in the
     /// pressed direction, clamped to the largest on-grid value at or below max.
+    /// An allowZero target steps between Off (0) and its minimum.
     static func steppedTarget(current: Double, increasing: Bool, descriptor: SensorWritable) -> Double {
+        if descriptor.allowZero == true, descriptor.quantity == .targetTemperature, descriptor.min > 0 {
+            if !increasing, current <= descriptor.min + gridEpsilon { return 0 }
+            if increasing, current < descriptor.min - gridEpsilon { return descriptor.min }
+        }
         let step = (descriptor.step ?? 1) > 0 ? (descriptor.step ?? 1) : 1
         let maxIndex = ((descriptor.max - descriptor.min) / step + gridEpsilon).rounded(.down)
         let position = (current - descriptor.min) / step
@@ -229,7 +259,7 @@ enum PrinterSensorFormatting {
         case .bool(let v):
             return reading.quantity == .filamentDetected ? (v ? "Detected" : "Not detected") : (v ? "Yes" : "No")
         case .number(let v):
-            guard v.isFinite else { return "—" }
+            guard v.isFinite else { return "--" }
             return v.formatted(.number.precision(.fractionLength(0...1))) + reading.unit.symbol
         }
     }
@@ -238,7 +268,7 @@ enum PrinterSensorFormatting {
         switch reading.value {
         case .bool: return valueText(reading)
         case .number(let v):
-            guard v.isFinite else { return "unknown" }
+            guard v.isFinite else { return "not reported" }
             let unit = reading.unit.spoken
             return v.formatted(.number.precision(.fractionLength(0...1))) + (unit.isEmpty ? "" : " " + unit)
         }
