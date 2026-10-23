@@ -80,6 +80,10 @@ readings and configured control limits are unchanged.
 Sensor names omit generated Sensor/Heater type subtitles, preserving the actual
 operator-provided name. Humidity uses a water-percent glyph and its own row with
 the reading under Current, including when reported alongside a temperature.
+When a device reports both temperature and humidity, Humidity is an indented
+child row immediately beneath that device. Its accessible header retains the
+source name (for example, Heater Box1 Humidity). Grouping uses the source sensor
+ID, not matching display names; humidity-only devices keep their own named row.
 Miscellaneous contains only descriptor-backed controllable outputs, such as fan
 sliders and binary switches, and is omitted when none exist. Read-only nonthermal
 sensors and the former Other sensors group are hidden. Humidity and pressure on

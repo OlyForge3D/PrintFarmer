@@ -156,12 +156,12 @@ function SensorName({ sensor, children, isOnline = true, quantity, secondary = f
   sensor: PrinterSensor; children?: ReactNode; isOnline?: boolean; quantity?: 'Humidity'; secondary?: boolean;
 }) {
   const name = formatPrinterSensorName(sensor.displayName);
-  return <div className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
+  return <div className={`flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2 ${secondary ? 'pl-4' : ''}`}
+    data-sensor-name data-sensor-parent={secondary ? sensor.id : undefined}>
     {(sensor.kind === 'Fan' || isThermalSensor(sensor)) && <PrinterSensorGlyph kind={sensor.kind} quantity={quantity}
       temperature={isOnline && sensor.available ? numericReading(sensor.readings.find(reading => reading.quantity === 'Temperature')) : undefined} />}
     <div className="min-w-0 break-words [overflow-wrap:anywhere]">
-      {secondary ? quantity :
-        <>{name}{quantity && !/\bhumidity$/i.test(name) && ' Humidity'}</>}
+      {secondary ? quantity : <>{name}{quantity && !/\bhumidity$/i.test(name) && ' Humidity'}</>}
       {!sensor.available && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}
       {children}
     </div>

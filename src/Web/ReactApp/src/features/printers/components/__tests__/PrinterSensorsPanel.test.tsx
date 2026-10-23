@@ -182,6 +182,9 @@ describe('PrinterSensorsPanel', () => {
       expect(glyph).toHaveAttribute('aria-hidden', 'true');
       expect(glyph.querySelector('path')).toHaveAttribute('d', mdiWaterPercent);
       expect(within(humidityRow).getByRole('rowheader')).toHaveTextContent(/^Humidity$/);
+      expect(humidityRow.querySelector('[data-sensor-parent]')).toHaveAttribute('data-sensor-parent', sensor.id);
+      expect(humidityRow.querySelector('[data-sensor-parent]')).toHaveClass('pl-4');
+      expect(temperatureRow.nextElementSibling?.nextElementSibling).toBe(humidityRow);
       expect(screen.getAllByLabelText('Heater Box1 Humidity: 29%')).toHaveLength(1);
       expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
       expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
@@ -228,6 +231,24 @@ describe('PrinterSensorsPanel', () => {
       const row = root.getByRole('rowheader', { name: 'Heater Box1 Humidity' }).closest('tr')!;
       expect(root.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['Name', 'State', 'Current', 'Target']);
       expect(within(row).getAllByRole('cell')[1]).toContainElement(root.getByLabelText('Heater Box1 Humidity: 29%'));
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('keeps humidity children associated with their own parent when devices have the same display name', () => {
+    const sensors: PrinterSensor[] = ['box1', 'box2'].map((id, index) => ({
+      ...chamber, id, displayName: 'Heater Box',
+      readings: [...chamber.readings, { quantity: 'Humidity', value: index === 0 ? 29 : 60, unit: 'Percent' }],
+    }));
+    renderPanel(sensors);
+
+    for (const [index, sensor] of sensors.entries()) {
+      const parent = screen.getByTestId(`sensor-${sensor.id}`);
+      const child = screen.getByTestId(`sensor-${sensor.id}-Humidity`);
+      expect(parent.nextElementSibling?.nextElementSibling).toBe(child);
+      expect(child.querySelector('[data-sensor-parent]')).toHaveAttribute('data-sensor-parent', sensor.id);
+      expect(within(child).getByRole('rowheader', { name: 'Heater Box Humidity' })).toHaveTextContent(/^Humidity$/);
+      expect(within(child).getAllByRole('cell')[1]).toHaveTextContent(index === 0 ? '29%' : '60%');
     }
     expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });

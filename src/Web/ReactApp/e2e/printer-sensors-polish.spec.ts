@@ -292,14 +292,22 @@ test('humidity glyphs and readings align with the shared Current column without 
         const rect = (element: Element) => element.getBoundingClientRect();
         const value = node.querySelector('[aria-label*="Humidity:"]')!;
         const glyph = node.querySelector('[data-sensor-glyph="Humidity"] svg')!;
+        const parent = node.previousElementSibling!.previousElementSibling!;
+        const parentGlyph = parent.querySelector('[data-sensor-glyph] svg')!;
         const header = node.closest('table')!.querySelectorAll('thead th')[2];
         return { currentX: rect(node.children[2]).left, headerX: rect(header).left,
           glyphRight: rect(glyph).right, valueLeft: rect(value).left,
-          glyphWidth: rect(glyph).width, valueRight: rect(value).right,
+          glyphWidth: rect(glyph).width, indent: rect(glyph).left - rect(parentGlyph).left,
+          immediatelyAfterParent: parent.getAttribute('data-testid') === 'sensor-temperature_sensor box1',
+          sourceId: node.querySelector('[data-sensor-parent]')!.getAttribute('data-sensor-parent'),
+          valueRight: rect(value).right,
           currentRight: rect(node.children[2]).right };
       });
       expect(geometry.currentX).toBeCloseTo(geometry.headerX);
       expect(geometry.glyphWidth).toBeCloseTo(18, 3);
+      expect(geometry.indent).toBeCloseTo(16, 3);
+      expect(geometry.immediatelyAfterParent).toBe(true);
+      expect(geometry.sourceId).toBe('temperature_sensor box1');
       expect(geometry.glyphRight).toBeLessThan(geometry.valueLeft);
       expect(geometry.valueRight).toBeLessThanOrEqual(geometry.currentRight);
       await thermal.screenshot({ path: test.info().outputPath(`${surface}-humidity-${width}px.png`) });
