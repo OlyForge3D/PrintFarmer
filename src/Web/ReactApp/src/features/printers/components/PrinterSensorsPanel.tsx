@@ -213,7 +213,8 @@ export function PrinterSensorsPanel({
     const stateQuantity = sensor.readings.some(r => r.quantity === 'Power') ? 'Power' : 'FanSpeed';
     const humidity = sensor.readings.find(reading => reading.quantity === 'Humidity');
     const writableHumidity = sensor.writable?.some(descriptor => descriptor.quantity === 'Humidity');
-    const hasTemperature = sensor.readings.some(reading => reading.quantity === 'Temperature' || reading.quantity === 'TargetTemperature') ||
+    const hasTemperature = sensor.readings.some(reading =>
+      (reading.quantity === 'Temperature' || reading.quantity === 'TargetTemperature') && numericReading(reading) !== undefined) ||
       sensor.writable?.some(descriptor => descriptor.quantity === 'TargetTemperature');
     const humidityOnly = !hasTemperature && (humidity !== undefined || writableHumidity);
     return <Fragment key={sensor.id}>

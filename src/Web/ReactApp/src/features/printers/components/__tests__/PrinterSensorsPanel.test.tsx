@@ -253,6 +253,68 @@ describe('PrinterSensorsPanel', () => {
     expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
+  const nullTemperature: PrinterSensor['readings'][number] = JSON.parse('{"quantity":"Temperature","value":null,"unit":"Celsius"}');
+  it.each<PrinterSensor['readings'][number]>([
+    nullTemperature,
+    { ...nullTemperature, quantity: 'TargetTemperature' },
+    { quantity: 'Temperature', value: Number.NaN, unit: 'Celsius' },
+    { quantity: 'TargetTemperature', value: Number.NaN, unit: 'Celsius' },
+    { quantity: 'Temperature', value: Number.POSITIVE_INFINITY, unit: 'Celsius' },
+    { quantity: 'TargetTemperature', value: Number.NEGATIVE_INFINITY, unit: 'Celsius' },
+  ])('uses one named humidity row for an invalid $quantity=$value placeholder on both shared surfaces', reading => {
+    render(<>
+      {['card', 'sidebar'].map(surface => <div key={surface} data-testid={surface}>
+        <PrinterSensorsSection printerId={surface} temperatures={{}} sensors={[{
+          ...chamber, displayName: 'Heater Box1',
+          readings: [reading, { quantity: 'Humidity', value: 42, unit: 'Percent' }],
+        }]} />
+      </div>)}
+    </>);
+
+    for (const surface of ['card', 'sidebar']) {
+      const root = within(screen.getByTestId(surface));
+      expect(root.getAllByRole('rowheader')).toHaveLength(1);
+      const row = root.getByTestId('sensor-chamber');
+      expect(within(row).getByRole('rowheader')).toHaveTextContent(/^Heater Box1 Humidity$/);
+      expect(within(row).getAllByRole('cell')[1]).toContainElement(root.getByLabelText('Heater Box1 Humidity: 42%'));
+      expect(row.querySelector('[data-sensor-glyph="Humidity"]')).toBeInTheDocument();
+      expect(row.querySelector('[data-sensor-parent]')).not.toBeInTheDocument();
+      expect(root.queryByTestId('sensor-chamber-Humidity')).not.toBeInTheDocument();
+      expect(root.queryByLabelText(/Temperature:|Target:/)).not.toBeInTheDocument();
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it.each(['Temperature', 'TargetTemperature'] as const)('retains a zero %s as a valid parent with an indented humidity child', quantity => {
+    renderPanel([{ ...chamber, readings: [
+      { quantity, value: 0, unit: 'Celsius' }, { quantity: 'Humidity', value: 42, unit: 'Percent' },
+    ] }]);
+
+    expect(screen.getAllByRole('rowheader')).toHaveLength(2);
+    const parent = screen.getByTestId('sensor-chamber');
+    const child = screen.getByTestId('sensor-chamber-Humidity');
+    expect(within(parent).getByRole('rowheader')).toHaveTextContent(/^Chamber$/);
+    expect(within(parent).getByLabelText(`Chamber ${quantity === 'Temperature' ? 'Temperature' : 'Target'}: 0°C`)).toBeInTheDocument();
+    expect(parent.nextElementSibling?.nextElementSibling).toBe(child);
+    expect(child.querySelector('[data-sensor-parent]')).toHaveClass('pl-4');
+    expect(within(child).getAllByRole('cell')[1]).toHaveTextContent('42%');
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('retains a writable temperature parent when its observation is invalid and humidity is reported', () => {
+    renderPanel([{ ...chamber, readings: [
+      nullTemperature, { quantity: 'Humidity', value: 42, unit: 'Percent' },
+    ], writable: [{ quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' }] }], { canControl: true });
+
+    expect(screen.getAllByRole('rowheader')).toHaveLength(2);
+    const target = screen.getByRole('spinbutton', { name: 'Set Chamber Target' });
+    expect(target).toBeEnabled();
+    expect(target).toHaveValue(null);
+    expect(target).toHaveAttribute('max', '80');
+    expect(screen.getByTestId('sensor-chamber-Humidity')).toContainElement(screen.getByLabelText('Chamber Humidity: 42%'));
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(
     'omits measured temperature extrema in the %s layout while retaining current readings and control bounds',
     layout => {
