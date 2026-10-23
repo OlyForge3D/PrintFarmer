@@ -228,5 +228,8 @@ preset row), `test_snapshot_disabledState_printerStarting`,
 `PrinterSensorsSnapshotTests/test_controlSensorRows` (fan rows removed, chamber
 row only) were replaced with the strict comparison's actual output after
 inspection: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
-appearance, default locale. The iPad references for the banner and sensor-row
-cases were not re-recorded in this run and need an iPad pass.
+appearance, default locale. The iPad references for
+`test_snapshot_disabledState_printerStarting`,
+`test_snapshot_lockoutBanner_printingState` and `test_controlSensorRows` were
+replaced the same way on iPad Pro 13-inch (M5) (iOS 26.5, 23F77). The other
+iPad references already matched and were not re-recorded.
