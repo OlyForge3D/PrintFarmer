@@ -296,8 +296,8 @@ struct PrinterCardPresentation {
             }
             parts.append(etaLabel)
         }
-        parts.append("Nozzle \(printer.hotendTemp.map(\.temperatureFormatted) ?? "unavailable")")
-        parts.append("Bed \(printer.bedTemp.map(\.temperatureFormatted) ?? "unavailable")")
+        parts.append("Nozzle \(printer.hotendTemp.map(\.temperatureFormatted) ?? "not reported")")
+        parts.append("Bed \(printer.bedTemp.map(\.temperatureFormatted) ?? "not reported")")
         if let spool = printer.spoolInfo, spool.hasActiveSpool {
             parts.append("Filament \(spool.material ?? "loaded")")
         } else {

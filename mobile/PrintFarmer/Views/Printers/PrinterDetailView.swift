@@ -59,7 +59,6 @@ struct PrinterDetailView: View {
     @State private var showsEjectConfirmation = false
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
-    @State private var showsSafetyChecks = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     @State private var directSnapshotLoadFailedFor: UUID?
@@ -789,8 +788,6 @@ struct PrinterDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 8) {
                         currentJobBlock(printer)
-                        temperatureSection(printer)
-                        PrinterSensorsReadout(sensors: printer.sensors)
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(
@@ -831,33 +828,16 @@ struct PrinterDetailView: View {
     private func controlsPage(_ printer: Printer) -> some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
                     if !controlsAvailable(for: printer) {
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
-                        PrinterSetupControlsContent(
-                            printer: printer,
-                            viewModel: controlsViewModel,
-                            usesColumns: PrinterDetailLayout.usesColumns(
-                                width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
-                            ),
-                            showsMaterial: false,
-                            showsRuntimeAdjustments: true,
-                            usesHeaterSteppers: true,
-                            isPrinterDetailControl: true
-                        )
-                        DisclosureGroup(isExpanded: safetyChecksExpanded) {
+                        PrinterInstrumentPanelControls(printer: printer, viewModel: controlsViewModel)
+                        if controlsViewModel.safetyReadError != nil {
                             safetyRefresh(controlsViewModel)
-                        } label: {
-                            Label("Safety checks", systemImage: "checkmark.shield")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.pfTextPrimary)
-                                .frame(minHeight: 44, alignment: .leading)
+                                .padding(12)
+                                .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .padding(.horizontal, 12)
-                        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("printer.detail.safety.disclosure")
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
                         Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
@@ -917,16 +897,6 @@ struct PrinterDetailView: View {
             let task = Task { await owner.refreshSafetyEvidence() }
             activeTasks.append(task)
         }
-    }
-
-    private var safetyChecksExpanded: Binding<Bool> {
-        Binding(
-            get: {
-                showsSafetyChecks
-                    || controlsViewModel?.safetyReadError != nil
-            },
-            set: { if controlsViewModel?.safetyReadError == nil { showsSafetyChecks = $0 } }
-        )
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only
@@ -1009,15 +979,23 @@ struct PrinterDetailView: View {
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
+                            layerFact(printer)
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
+                            layerFact(printer)
                         }
                     }
                 }
@@ -1082,7 +1060,16 @@ struct PrinterDetailView: View {
         )
     }
 
-    private func statusFact(_ title: String, value: String) -> some View {
+    private func layerFact(_ printer: Printer) -> some View {
+        let layer = viewModel.layerLabel(for: printer)
+        return statusFact(
+            "Layer",
+            value: layer,
+            spokenValue: layer == PrinterDetailViewModel.missingValuePlaceholder ? "not reported" : nil
+        )
+    }
+
+    private func statusFact(_ title: String, value: String, spokenValue: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
@@ -1092,6 +1079,7 @@ struct PrinterDetailView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .accessibilityLabel(spokenValue ?? value)
         }
         .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1292,23 +1280,6 @@ struct PrinterDetailView: View {
         }
         .padding()
         .operatorCard()
-    }
-
-    // MARK: - Temperatures
-
-    private func temperatureSection(_ printer: Printer) -> some View {
-        // Prefer printer temps (from CompletePrinterDto), fall back to statusDetail
-        // (from /status endpoint). PrusaLink's PrinterDto omits temps but /status has them.
-        let hotend = printer.hotendTemp ?? viewModel.statusDetail?.hotendTemp
-        let hotendTgt = printer.hotendTarget ?? viewModel.statusDetail?.hotendTarget
-        let bed = printer.bedTemp ?? viewModel.statusDetail?.bedTemp
-        let bedTgt = printer.bedTarget ?? viewModel.statusDetail?.bedTarget
-
-        return PrinterDetailTemperatureStrip(
-            hotend: .init(measured: hotend, target: hotendTgt, isOnline: printer.isOnline),
-            bed: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline),
-            compact: true
-        )
     }
 
     // MARK: - Camera Snapshot
@@ -1708,60 +1679,5 @@ private extension View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
-    }
-}
-
-// MARK: - Sensors & Fans readout
-
-/// Read-only grouped sensor/fan readouts for the Status page. Renders nothing
-/// when the printer reports no sensors (older servers or unsupported backends).
-struct PrinterSensorsReadout: View {
-    let sensors: [PrinterSensor]
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var visibleSensors: [PrinterSensor] {
-        sensors.filter { !PrinterSensorFormatting.isHidden($0) }
-    }
-
-    var body: some View {
-        if !visibleSensors.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(PrinterSensorGroup.allCases, id: \.self) { group in
-                    let items = visibleSensors.filter { PrinterSensorGroup.group(for: $0) == group }
-                    if !items.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.pfTextSecondary)
-                                .accessibilityAddTraits(.isHeader)
-                            ForEach(items) { row($0) }
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .operatorCard()
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("printer.detail.sensors")
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ sensor: PrinterSensor) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        layout {
-            Text(PrinterSensorFormatting.displayName(sensor.displayName))
-                .font(.subheadline)
-            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-            Text(PrinterSensorFormatting.summary(sensor))
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(sensor.available ? Color.primary : Color.pfTextSecondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PrinterSensorFormatting.accessibilityLabel(sensor))
-        .accessibilityIdentifier("printer.detail.sensor.\(sensor.id)")
     }
 }

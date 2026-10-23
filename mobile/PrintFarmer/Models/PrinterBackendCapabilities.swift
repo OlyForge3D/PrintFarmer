@@ -25,6 +25,8 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     var supportsFilamentLoad: Bool = false
     var supportsFilamentUnload: Bool = false
     var supportsFilamentChange: Bool = false
+    var supportsTemperatureControlDuringPrint: Bool = false
+    var supportsHeaterShutdown: Bool = false
     var verifiedSafety: PrinterVerifiedSafetyDto?
     var supportsRelativeMovement: Bool { supportsMovement }
     var supportsHotendTemperature: Bool { supportsTemperatureControl }
@@ -73,6 +75,8 @@ extension PrinterBackendCapabilities {
         supportsFilamentLoad = wire.supportsFilamentLoad == true
         supportsFilamentUnload = wire.supportsFilamentUnload == true
         supportsFilamentChange = wire.supportsFilamentChange == true
+        supportsTemperatureControlDuringPrint = wire.supportsTemperatureControlDuringPrint == true
+        supportsHeaterShutdown = wire.supportsHeaterShutdown == true
         verifiedSafety = wire.verifiedSafety
     }
 }
@@ -118,6 +122,8 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsFilamentLoad: Bool?
     let supportsFilamentUnload: Bool?
     let supportsFilamentChange: Bool?
+    var supportsTemperatureControlDuringPrint: Bool?
+    var supportsHeaterShutdown: Bool?
     let supportedAxes: [String]?
     var verifiedSafety: PrinterVerifiedSafetyDto?
 }

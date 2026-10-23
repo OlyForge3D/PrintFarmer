@@ -3,12 +3,16 @@ import Foundation
 
 extension PrinterBackendCapabilities {
     /// Synthetic all-controls layout/dispatch fixture, not a backend support claim.
-    static let allControlsFixture = PrinterBackendCapabilities(
-        supportsMovement: true, supportsTemperatureControl: true,
-        supportsBedTemperature: true, supportsFanControl: true,
-        supportsHoming: true, supportedAxes: ["X", "Y", "Z"],
-        supportsHomingXY: true, supportsHomingZ: true
-    )
+    static let allControlsFixture: PrinterBackendCapabilities = {
+        var caps = PrinterBackendCapabilities(
+            supportsMovement: true, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: true,
+            supportsHoming: true, supportedAxes: ["X", "Y", "Z"],
+            supportsHomingXY: true, supportsHomingZ: true
+        )
+        caps.supportsHeaterShutdown = true
+        return caps
+    }()
 
     static let hotendOnlyFixture = PrinterBackendCapabilities(
         supportsMovement: false, supportsTemperatureControl: true,
@@ -81,6 +85,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var moveToCalledWith: (printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)?
     var extrudeCalledWith: (printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int)?
     var disableMotorsCalledWith: UUID?
+    var turnOffHeatersCallCount = 0
+    var turnOffHeatersCalledWith: UUID?
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
     var setFanSpeedCalledWith: (printerId: UUID, speedPercent: Int)?
     var adjustZOffsetCalledWith: (printerId: UUID, offsetMm: Double)?
@@ -297,6 +303,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         if let beforeExtrude { await beforeExtrude() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
+    }
+
+    func turnOffHeaters(printerId: UUID) async throws {
+        turnOffHeatersCallCount += 1
+        turnOffHeatersCalledWith = printerId
+        if let error = errorToThrow { throw error }
     }
 
     func disableMotors(printerId: UUID) async throws -> CommandResult {

@@ -185,36 +185,7 @@ struct PrinterSensor: Codable, Sendable, Equatable, Identifiable, Hashable {
     }
 }
 
-enum PrinterSensorGroup: Int, CaseIterable, Hashable, Sendable {
-    case temperatures, fans, other
-
-    var title: String {
-        switch self {
-        case .temperatures: return "Temperatures"
-        case .fans: return "Fans"
-        case .other: return "Other sensors"
-        }
-    }
-
-    static func group(for sensor: PrinterSensor) -> PrinterSensorGroup {
-        let hasThermalReading = sensor.readings.contains {
-            [.temperature, .targetTemperature, .humidity, .pressure, .gas].contains($0.quantity)
-        }
-        let hasThermalTarget = sensor.writable.contains { $0.quantity == .targetTemperature }
-        if sensor.kind != .fan && (
-            hasThermalReading || hasThermalTarget || sensor.kind == .ambient
-        ) {
-            return .temperatures
-        }
-        switch sensor.kind {
-        case .fan: return .fans
-        case .nozzle, .bed, .chamber, .mcu, .host, .ambient: return .temperatures
-        case .filamentRunout, .other, .unknown: return .other
-        }
-    }
-}
-
-/// Pure display helpers shared by Status and Control rows.
+/// Pure display helpers for Control sensor rows.
 enum PrinterSensorFormatting {
     private static let gridEpsilon = 1e-9
 
@@ -234,9 +205,44 @@ enum PrinterSensorFormatting {
         return name.hasPrefix("_")
     }
 
+    /// Fans (including Klipper temperature_fan) have no app controls.
+    static func isFan(_ sensor: PrinterSensor) -> Bool {
+        sensor.kind == .fan || sensor.fanRole != nil
+    }
+
+    // Exact backend mapper identities (mirrors React `primaryHeater`): tool1/T1/extruder1 stay independent.
+    private static let primaryNozzleIds: Set<String> = ["nozzle", "extruder", "tool0", "T0", "TempOfNozzle"]
+    private static let primaryBedIds: Set<String> = ["bed", "heater_bed", "TempOfHotbed"]
+
+    /// The nozzle/bed the Heat controls already drive.
+    static func isPrimaryHeater(_ sensor: PrinterSensor, activeExtruderId: String?) -> Bool {
+        switch sensor.kind {
+        case .nozzle:
+            return activeExtruderId.map { sensor.id == $0 } ?? primaryNozzleIds.contains(sensor.id)
+        case .bed:
+            return primaryBedIds.contains(sensor.id)
+        default:
+            return false
+        }
+    }
+
+    /// Numeric stepper descriptors for Tune: primary heater targets belong to Heat,
+    /// and boolean Enabled switches are not numeric setpoints.
+    static func steppableDescriptors(_ sensor: PrinterSensor, activeExtruderId: String?) -> [SensorWritable] {
+        let primary = isPrimaryHeater(sensor, activeExtruderId: activeExtruderId)
+        return sensor.writable.filter { descriptor in
+            descriptor.quantity != .enabled && !(primary && descriptor.quantity == .targetTemperature)
+        }
+    }
+
     /// Next on-grid (min + n*step) value at least one step from `current` in the
     /// pressed direction, clamped to the largest on-grid value at or below max.
+    /// An allowZero target steps between Off (0) and its minimum.
     static func steppedTarget(current: Double, increasing: Bool, descriptor: SensorWritable) -> Double {
+        if descriptor.allowZero == true, descriptor.quantity == .targetTemperature, descriptor.min > 0 {
+            if !increasing, current <= descriptor.min + gridEpsilon { return 0 }
+            if increasing, current < descriptor.min - gridEpsilon { return descriptor.min }
+        }
         let step = (descriptor.step ?? 1) > 0 ? (descriptor.step ?? 1) : 1
         let maxIndex = ((descriptor.max - descriptor.min) / step + gridEpsilon).rounded(.down)
         let position = (current - descriptor.min) / step
@@ -258,7 +264,7 @@ enum PrinterSensorFormatting {
         case .bool(let v):
             return reading.quantity == .filamentDetected ? (v ? "Detected" : "Not detected") : (v ? "Yes" : "No")
         case .number(let v):
-            guard v.isFinite else { return "—" }
+            guard v.isFinite else { return "--" }
             return v.formatted(.number.precision(.fractionLength(0...1))) + reading.unit.symbol
         }
     }
@@ -267,7 +273,7 @@ enum PrinterSensorFormatting {
         switch reading.value {
         case .bool: return valueText(reading)
         case .number(let v):
-            guard v.isFinite else { return "unknown" }
+            guard v.isFinite else { return "not reported" }
             let unit = reading.unit.spoken
             return v.formatted(.number.precision(.fractionLength(0...1))) + (unit.isEmpty ? "" : " " + unit)
         }
@@ -289,21 +295,6 @@ enum PrinterSensorFormatting {
         case .measuredMaxTemperature: return "Measured maximum"
         case .other, .unknown: return "Value"
         }
-    }
-
-    /// One-line summary of all readings, e.g. "Temperature 24.5°C · Humidity 41%".
-    static func summary(_ sensor: PrinterSensor) -> String {
-        guard sensor.available else { return "Unavailable" }
-        guard !sensor.readings.isEmpty else { return "No reading" }
-        return sensor.readings.map { "\(quantityTitle($0.quantity)) \(valueText($0))" }.joined(separator: " · ")
-    }
-
-    static func accessibilityLabel(_ sensor: PrinterSensor) -> String {
-        let name = displayName(sensor.displayName)
-        guard sensor.available else { return "\(name), unavailable" }
-        guard !sensor.readings.isEmpty else { return "\(name), no reading" }
-        let parts = sensor.readings.map { "\(quantityTitle($0.quantity)) \(spokenValue($0))" }
-        return "\(name), " + parts.joined(separator: ", ")
     }
 
     /// A reported list replaces the cache; an omitted list keeps it.

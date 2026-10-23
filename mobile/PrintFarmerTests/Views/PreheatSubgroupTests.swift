@@ -289,8 +289,8 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     func test_individualHeaterLabels_preserveUnknownVersusZero() {
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Not reported")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Not reported")
         XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
         XCTAssertEqual(Heater.hotend.title, "Hotend")
         XCTAssertEqual(Heater.bed.title, "Bed")
@@ -510,13 +510,25 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_coolDown() async throws {
+    func test_accessibilityHint_idle_coolDown_describesHeaterShutdown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
         await vm.loadCapabilities()
+        XCTAssertTrue(vm.supportsHeaterShutdown)
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),
-            "Sets hotend and bed to 0 degrees."
+            "Turns off all heaters."
+        )
+    }
+
+    func test_coolDownHint_describesZeroTargetFallbackWithoutHeaterShutdown() {
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: false), "Sets hotend and bed to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: false, turnsOffHeaters: false), "Sets hotend to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: true), "Turns off all heaters.")
+        XCTAssertEqual(
+            PreheatPreset.pla.a11yHint(hasBed: true, turnsOffHeaters: true),
+            "Sets hotend to 200 degrees, bed to 60 degrees.",
+            "Heater shutdown only changes the Cool down hint"
         )
     }
 
@@ -573,6 +585,29 @@ final class PreheatSubgroupTests: XCTestCase {
         }
         """
         return try JSONDecoder().decode(Printer.self, from: Data(json.utf8))
+    }
+
+    func testPresetFillRowAndRadiusOverridesAreOptInSoOtherScreensKeepTheirLayout() {
+        let defaults = EnvironmentValues()
+        XCTAssertFalse(defaults.preheatPresetsFillRow)
+        XCTAssertNil(defaults.controlActionCornerRadius)
+        XCTAssertNil(defaults.controlActionSelectedFill)
+    }
+
+    func testControlTabPresetRowIsFourEqualButtonsEndingWithSnowflakeCoolDown() throws {
+        XCTAssertEqual(PreheatSubgroup.presets, [.pla, .petg, .abs, .coolDown])
+        XCTAssertEqual(PreheatSubgroup.presets.last, .coolDown)
+        XCTAssertEqual(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: true), "snowflake")
+        for preset in [PreheatPreset.pla, .petg, .abs] {
+            XCTAssertNil(PreheatSubgroup.detailPresetSymbol(preset, fillsRow: true))
+        }
+        XCTAssertNil(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: false),
+                     "Other screens keep their existing Cool down label")
+        let printer = try Self.makePrinter(state: "ready", isOnline: true)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
+        let subgroup = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(subgroup.accessibilityLabel(preset: .coolDown, isPending: false), "Cool down",
+                       "The snowflake is icon-only visually but must stay spoken")
     }
 }
 

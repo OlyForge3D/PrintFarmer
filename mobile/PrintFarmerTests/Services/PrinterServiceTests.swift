@@ -198,6 +198,47 @@ final class PrinterServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - turnOffHeaters()
+
+    func testTurnOffHeatersPostsToHeatersOffEndpoint() async throws {
+        mockAPIClient.stubResponse(json: #"{"success":true,"message":"accepted"}"#)
+
+        try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+
+        let requests = mockAPIClient.capturedRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/printers/\(TestData.testUUID)/heaters/off")
+    }
+
+    func testTurnOffHeatersThrowsWhenBackendRejectsCommand() async {
+        mockAPIClient.stubResponse(json: #"{"success":false,"message":"Heaters are busy"}"#)
+
+        do {
+            try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+            XCTFail("Expected PrinterControlError.rejected")
+        } catch let error as PrinterControlError {
+            guard case .rejected(let message) = error else { return XCTFail("Expected .rejected, got \(error)") }
+            XCTAssertEqual(message, "Heaters are busy")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testTurnOffHeatersThrowsOnServerError() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 500)
+
+        do {
+            try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+            XCTFail("Expected NetworkError.serverError")
+        } catch let error as NetworkError {
+            if case .serverError = error { } else { XCTFail("Expected .serverError, got \(error)") }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.first?.url?.path, "/api/printers/\(TestData.testUUID)/heaters/off")
+    }
+
     // MARK: - get()
 
     func testGetPrinterCallsCorrectEndpoint() async throws {
