@@ -317,11 +317,18 @@ test_verification_uses_anonymous_api_endpoint() {
 }
 
 test_verification_uses_loopback_with_lan_server_host() {
-    start_test "verification uses loopback with a non-localhost SERVER_HOST"
+    start_test "verification probes the configured HTTP interface without LAN DNS"
 
-    local output
-    output=$(
+    local output bind_address
+    for bind_address in 0.0.0.0 127.0.0.1 127.0.0.2 192.0.2.10; do
+        local expected_host="$bind_address"
+        case "$bind_address" in
+            0.0.0.0|127.0.0.1) expected_host=localhost ;;
+        esac
+        local probe_log="$TEST_TEMP_DIR/access-probes-$bind_address"
+        output=$(
         source "$DEPLOY_SCRIPT"
+        BIND_ADDRESS="$bind_address"
         SERVER_HOST="farm.example.test"
         HTTP_PORT=18080
         HTTPS_PORT=18443
@@ -333,8 +340,8 @@ test_verification_uses_loopback_with_lan_server_host() {
         API_HEALTH_INTERVAL=0
         dc() { :; }
         curl() {
-            printf '%s\n' "$*" >> "$TEST_TEMP_DIR/access-probes"
-            [[ "$*" == *"http://localhost:18080/"* ]] || return 1
+            printf '%s\n' "$*" >> "$probe_log"
+            [[ "$*" == *"http://$expected_host:18080/"* ]] || return 1
             case "$*" in
                 *"-sI"*) printf 'Content-Type: application/json\r\n' ;;
                 *"-o /tmp/_proxy_body"*) printf '200' ;;
@@ -352,21 +359,57 @@ test_verification_uses_loopback_with_lan_server_host() {
             fi
         }
         verify_deployment
-    )
-    assert_contains "$output" "All health checks passed!" "LAN hostname must not break local verification"
-    assert_contains "$(cat "$TEST_TEMP_DIR/access-probes")" "http://localhost:18080/api/setup/status" \
-        "Proxy verification must actually probe localhost"
-    assert_not_contains "$(cat "$TEST_TEMP_DIR/access-probes")" "farm.example.test" \
-        "HTTP verification must never probe the LAN hostname"
+        )
+        assert_contains "$output" "All health checks passed!" "Verification must use a reachable HTTP interface ($bind_address)"
+        assert_contains "$(cat "$probe_log")" "http://$expected_host:18080/api/setup/status" \
+            "Proxy verification must probe the configured listener ($bind_address)"
+        assert_not_contains "$(cat "$probe_log")" "farm.example.test" \
+            "HTTP verification must not depend on LAN DNS ($bind_address)"
+    done
 
     pass_test
 }
 
-test_access_summary_requires_tls_for_lan() {
-    start_test "access summary advertises TLS for LAN and warns for local-only modes"
+test_nginx_preflight_uses_http_binding() {
+    start_test "nginx preflight probes the configured HTTP listener"
+
+    local bind_address output
+    for bind_address in 0.0.0.0 127.0.0.1 127.0.0.2 192.0.2.10; do
+        local expected_host="$bind_address"
+        case "$bind_address" in
+            0.0.0.0|127.0.0.1) expected_host=localhost ;;
+        esac
+        local probe_log="$TEST_TEMP_DIR/preflight-probes-$bind_address"
+        if ! output=$(
+            source "$DEPLOY_SCRIPT"
+            ARCHITECTURE=microservices
+            BIND_ADDRESS="$bind_address"
+            HTTP_PORT=18080
+            PROXY_VERIFY_RETRIES=1
+            PROXY_VERIFY_INTERVAL=0
+            curl() {
+                printf '%s\n' "$*" >> "$probe_log"
+                [[ "$*" == "-sf --max-time 3 http://$expected_host:18080/api/healthz" ]] || return 1
+                printf '%s\n' OK
+            }
+            check_nginx_proxy
+        ); then
+            fail_test "Preflight must accept the healthy configured listener ($bind_address): $output"
+        fi
+        assert_file_has_exact_line "$probe_log" "-sf --max-time 3 http://$expected_host:18080/api/healthz" \
+            "Preflight must probe the configured interface ($bind_address)"
+        assert_contains "$output" "nginx proxy appears to forward /api to API" \
+            "A reachable configured listener must pass preflight ($bind_address)"
+    done
+
+    pass_test
+}
+
+test_access_summary_honors_http_binding() {
+    start_test "access summary honors HTTP binding and preserves HTTPS"
 
     local mode output
-    for mode in tls disabled lab detected; do
+    for mode in tls disabled lab detected loopback loopback-alt interface; do
         output=$(
             source "$DEPLOY_SCRIPT"
             SERVER_HOST="farm.example.test"
@@ -382,33 +425,80 @@ test_access_summary_requires_tls_for_lan() {
             ENABLE_DISTRIBUTED_SLICING=false
             INSTALLER_LAB=false
             HTTP_ONLY=false
+            BIND_ADDRESS=0.0.0.0
             hostname() { printf '192.168.1.50\n'; }
             case "$mode" in
                 disabled) HTTPS_PORT=0; WebAuthn__Origin="http://localhost:18080" ;;
                 lab) INSTALLER_LAB=true; HTTP_ONLY=true; WebAuthn__Origin="http://localhost:18080" ;;
                 detected) SERVER_HOST=localhost ;;
+                loopback) BIND_ADDRESS=127.0.0.1 ;;
+                loopback-alt) BIND_ADDRESS=127.0.0.2 ;;
+                interface) BIND_ADDRESS=192.0.2.10 ;;
             esac
             display_final_info
         )
-        assert_contains "$output" "Local-only HTTP: http://localhost:18080" "HTTP must be labelled local-only ($mode)"
+        local http_host=localhost
+        [[ "$mode" != loopback-alt ]] || http_host=127.0.0.2
+        if [[ "$mode" == lab || "$mode" == loopback || "$mode" == loopback-alt ]]; then
+            assert_contains "$output" "Local-only HTTP: http://$http_host:18080" "Explicit local-only HTTP must remain local ($mode)"
+            assert_not_contains "$output" "Web Interface (HTTP)" "Local-only bindings must not advertise LAN HTTP ($mode)"
+        else
+            http_host="farm.example.test"
+            [[ "$mode" != detected ]] || http_host="192.168.1.50"
+            [[ "$mode" != interface ]] || http_host="192.0.2.10"
+            assert_contains "$output" "Web Interface (HTTP): http://$http_host:18080" "HTTP must use configured interface or server hostname ($mode)"
+            assert_contains "$output" "Ensure firewall allows HTTP port 18080" "LAN HTTP guidance must match the listener ($mode)"
+        fi
+        assert_contains "$output" "Health Check (HTTP): http://$http_host:18080/healthz" \
+            "Health URL must match the advertised HTTP interface ($mode)"
+        local probe_host=localhost
+        [[ "$mode" != interface ]] || probe_host=192.0.2.10
+        [[ "$mode" != loopback-alt ]] || probe_host=127.0.0.2
+        assert_contains "$output" "Test from server: curl http://$probe_host:18080/healthz" \
+            "Troubleshooting must use the actual listener ($mode)"
         assert_contains "$output" "Direct API (local-only): http://localhost:15245" "API must not be advertised on LAN ($mode)"
-        assert_not_contains "$output" "http://farm.example.test" "No LAN HTTP URL may be advertised ($mode)"
-        assert_not_contains "$output" "http://192.168.1.50" "Detected LAN IP must not be advertised over HTTP ($mode)"
-        assert_not_contains "$output" "Ensure firewall allows port 18080" "Opening HTTP does not enable LAN access ($mode)"
         assert_not_contains "$output" "Ensure firewall allows port 15245" "Do not advise exposing the direct API ($mode)"
-        if [[ "$mode" == tls || "$mode" == detected ]]; then
+        if [[ "$mode" != disabled && "$mode" != lab ]]; then
             local host="farm.example.test"
             [[ "$mode" != detected ]] || host="192.168.1.50"
             assert_contains "$output" "https://$host:18443" "LAN entry point must use configured/detected host and TLS ($mode)"
             assert_contains "$output" "Ensure firewall allows HTTPS port 18443" "Firewall guidance must use HTTPS ($mode)"
-            assert_contains "$output" "HTTP /install-ca is host-local" "CA bootstrap must not assume LAN HTTP ($mode)"
+            assert_contains "$output" "through a trusted channel" "CA bootstrap must retain trust guidance ($mode)"
             assert_not_contains "$output" "TLS is disabled" "Explicit TLS must remain supported ($mode)"
         else
-            assert_contains "$output" "TLS is disabled: local-only HTTP on 127.0.0.1:18080; no LAN access." \
-                "Disabled TLS must visibly warn about reachability ($mode)"
+            if [[ "$mode" == lab ]]; then
+                assert_contains "$output" "TLS is disabled: local-only HTTP on 127.0.0.1:18080; no LAN access." \
+                    "Labs must retain local-only guidance"
+            else
+                assert_contains "$output" "TLS is disabled: HTTP is available on 0.0.0.0:18080." \
+                    "Disabling TLS must not imply LAN HTTP is disabled"
+            fi
             assert_not_contains "$output" "Web Interface (LAN, HTTPS)" "Do not advertise disabled TLS ($mode)"
             assert_not_contains "$output" "Ensure firewall allows HTTPS port" "Do not advise opening disabled TLS ($mode)"
         fi
+    done
+
+    pass_test
+}
+
+test_invalid_http_bind_address_is_not_saved() {
+    start_test "invalid HTTP bindings fail before writing sourced configuration"
+
+    local invalid output
+    for invalid in "localhost" "256.1.1.1" "127.0.0.1/8" "127.0.0.1:80" \
+        "127.0.0.1;exit 0" $'127.0.0.1\nHTTP_PORT=1'; do
+        if output=$(
+            source "$DEPLOY_SCRIPT"
+            BIND_ADDRESS="$invalid"
+            CONFIG_FILE="$TEST_TEMP_DIR/invalid-http-binding.config"
+            save_deployment_config
+        ); then
+            fail_test "Invalid HTTP binding must not be accepted"
+        fi
+        assert_contains "$output" "BIND_ADDRESS must be an IPv4 address." \
+            "Invalid binding must fail with an explicit diagnostic"
+        assert_file_not_exists "$TEST_TEMP_DIR/invalid-http-binding.config" \
+            "Invalid binding must not be serialized into sourced configuration"
     done
 
     pass_test
@@ -2342,7 +2432,9 @@ run_all_tests() {
     test_redeploy_cleanup_prunes_only_unused_images_and_build_cache
     test_verification_uses_anonymous_api_endpoint
     test_verification_uses_loopback_with_lan_server_host
-    test_access_summary_requires_tls_for_lan
+    test_nginx_preflight_uses_http_binding
+    test_access_summary_honors_http_binding
+    test_invalid_http_bind_address_is_not_saved
     test_installer_ca_bootstrap_guidance_is_local_only
     test_batch_mode
     test_config_file_generation

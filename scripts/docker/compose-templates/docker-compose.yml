@@ -166,8 +166,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-nginx-proxy
     restart: unless-stopped
     ports:
-      # Cleartext HTTP is loopback-only; LAN access must use the TLS listener below (HTTPS_PORT).
-      - "127.0.0.1:${HTTP_PORT:-8080}:80"
+      - "${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80"
       - "${HTTPS_PORT:-8443}:443"
     volumes:
       - ./deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}:/etc/nginx/nginx.conf:ro
