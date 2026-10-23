@@ -211,6 +211,11 @@ actor PrinterService: PrinterServiceProtocol {
         try requireAccepted(result)
     }
 
+    func turnOffHeaters(printerId: UUID) async throws {
+        let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/heaters/off")
+        try requireAccepted(result)
+    }
+
     func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
         try Task.checkCancellation()
         guard value.isFinite, quantity != .unknown,

@@ -199,3 +199,19 @@ section, and writable fans and sensors remain in Tune. `PrinterSensorsReadout`
 and `test_statusSensorReadout` were deleted together with both
 `test_statusSensorReadout` references (iPhone and iPad). `test_controlSensorRows`
 and every Controls reference are unchanged; no PNGs were re-recorded.
+
+## Cool down follows heater-shutdown support (#3460)
+
+Cool down now calls `POST /heaters/off` and is hidden unless the backend
+reports `supportsHeaterShutdown`; the remaining PLA/PETG/ABS presets fill the
+row. The Moonraker fixture now mirrors the real backend
+(`supportsHeaterShutdown` and `supportsTemperatureControlDuringPrint` true), so
+`test_snapshot_moonrakerProfile` still shows Cool down and was not re-recorded.
+
+The iPhone references for `test_snapshot_flashForgeProfile`,
+`test_snapshot_sdcpProfile` and `test_snapshot_loadingState_capabilitiesNil`
+were replaced with the strict comparison's actual output after reference and
+actual images were inspected: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5
+(23F77), light appearance, default locale. The only difference is the omitted
+Cool down button and the three-column preset row. These cases have no iPad
+references.

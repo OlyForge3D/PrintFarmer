@@ -387,6 +387,14 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(PreheatSubgroup.presets.count, 4)
     }
 
+    func test_visiblePresets_hideCoolDownWithoutHeaterShutdown() {
+        var caps = PrinterBackendCapabilities.allControlsFixture
+        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: caps), [.pla, .petg, .abs, .coolDown])
+        caps.supportsHeaterShutdown = false
+        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: caps), [.pla, .petg, .abs])
+        XCTAssertEqual(PreheatSubgroup.visiblePresets(capabilities: nil), [.pla, .petg, .abs])
+    }
+
     // MARK: - isVisible(capabilities:)
 
     func test_isVisible_falseWhenCapabilitiesNil() {

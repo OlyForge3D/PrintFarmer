@@ -796,6 +796,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: false), .heat)
+        XCTAssertTrue(Panel.isAvailable(.heat, isPrinting: true, heatDuringPrint: true))
+        XCTAssertFalse(Panel.isAvailable(.move, isPrinting: true, heatDuringPrint: true))
+        XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true, heatDuringPrint: true), .heat)
+        XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true, heatDuringPrint: true), .tune)
         XCTAssertEqual(Panel.Segment.allCases.map(\.title), ["Move", "Heat", "Tune"])
     }
 

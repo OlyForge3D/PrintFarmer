@@ -1262,6 +1262,18 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
 
+        // Cool down is the backend's all-heaters-off command; never a dead 0/0 setpoint fallback.
+        if preset == .coolDown {
+            guard caps.supportsHeaterShutdown else {
+                setError(command: command, message: "Heater shutdown is unavailable on this printer.", isRetryable: false)
+                return
+            }
+            await perform(command) { [printerService, printer] in
+                try await printerService.turnOffHeaters(printerId: printer.id)
+            }
+            return
+        }
+
         guard validateTemperature(sentHotend, heater: .hotend, command: command),
               validateTemperature(sentBed, heater: .bed, command: command) else { return }
         await perform(command) { [printerService, printer] in
@@ -1467,6 +1479,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
     func preheatBlockedReason(_ preset: PreheatPreset) -> String? {
         guard supports(.hotend) else { return "Hotend temperature control is unavailable." }
+        if preset == .coolDown, !supportsCoolDown { return "Heater shutdown is unavailable on this printer." }
         if let reason = heaterTargetError(.hotend, target: preset.hotend) { return reason }
         if supports(.bed) { return heaterTargetError(.bed, target: preset.bed) }
         return nil
@@ -1712,6 +1725,28 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && !isPrintingOrPaused
     }
 
+    /// Heater targets stay available during a print only when the backend
+    /// confirms it can apply them under the active-print lease.
+    var supportsHeatDuringPrint: Bool {
+        capabilities?.supportsTemperatureControlDuringPrint == true
+    }
+
+    var canControlHeat: Bool {
+        guard supportsHeatDuringPrint, isPrintingOrPaused else { return canControl }
+        return commandIdentity != nil && hasConfiguredAccess && isActive && accessCheck() == nil
+            && printer.isOnline && runtimePrinterStateIsSupported
+    }
+
+    var heatBlockedReason: String? {
+        guard supportsHeatDuringPrint, isPrintingOrPaused else { return blockedReason }
+        return runtimeControlAccessReason
+    }
+
+    /// Cool down is offered only where the backend has a heater shutdown command.
+    var supportsCoolDown: Bool {
+        capabilities?.supportsHeaterShutdown == true
+    }
+
     private var runtimePrinterStateIsSupported: Bool {
         Self.runtimeStatusStateIsSupported(printer.state)
     }
@@ -1737,6 +1772,8 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .fanSpeed, .transientZOffset, .sensorControl:
             permitsActivePrint = true
+        case .preheat, .heater, .heaterTargets:
+            permitsActivePrint = supportsHeatDuringPrint
         default:
             permitsActivePrint = false
         }

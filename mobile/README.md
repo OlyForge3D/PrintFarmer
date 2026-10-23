@@ -283,9 +283,11 @@ server generation fence rejects stale in-flight responses.
 Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
 support. A failed capability read remains unknown and shows a read-only retry
 affordance; it is not cached as permanent unsupported state.
-Preheat, including Cool Down, stays hidden and refuses dispatch until hotend
-support is confirmed. Cool Down omits an unconfirmed bed just like heating
-presets; unknown support never permits a speculative 0/0 command. Missing bed
+Preheat stays hidden and refuses dispatch until hotend support is confirmed.
+**Cool down** calls `POST /heaters/off` and is shown only when the backend
+reports `supportsHeaterShutdown`. Heat stays available while printing only when
+the backend reports `supportsTemperatureControlDuringPrint`. Heating presets omit an unconfirmed bed; unknown support never permits a
+speculative command. Missing bed
 support is described as unavailable control, not physically absent hardware.
 Demo mode advertises no physical or persistence capabilities: its no-op commands
 are not backend support evidence.

@@ -55,13 +55,18 @@ struct PrinterInstrumentPanelControls: View {
         return "\(axis) \(value.formatted(.number.precision(.fractionLength(digits)))) millimeters"
     }
 
-    /// Move and Heat are physically unsafe during a job; Tune stays available.
-    static func isAvailable(_ segment: Segment, isPrinting: Bool) -> Bool {
-        segment == .tune || !isPrinting
+    /// Move is physically unsafe during a job and Heat is too unless the backend
+    /// confirms temperature control during a print; Tune stays available.
+    static func isAvailable(_ segment: Segment, isPrinting: Bool, heatDuringPrint: Bool = false) -> Bool {
+        switch segment {
+        case .tune: true
+        case .heat: !isPrinting || heatDuringPrint
+        case .move: !isPrinting
+        }
     }
 
-    static func resolvedSegment(_ selected: Segment, isPrinting: Bool) -> Segment {
-        isAvailable(selected, isPrinting: isPrinting) ? selected : .tune
+    static func resolvedSegment(_ selected: Segment, isPrinting: Bool, heatDuringPrint: Bool = false) -> Segment {
+        isAvailable(selected, isPrinting: isPrinting, heatDuringPrint: heatDuringPrint) ? selected : .tune
     }
 
     static func babystepText(_ offset: Double?) -> String {
@@ -89,7 +94,7 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private var segment: Segment {
-        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting)
+        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint)
     }
 
     var body: some View {
@@ -125,7 +130,7 @@ struct PrinterInstrumentPanelControls: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.instrument-panel")
             .onChange(of: isPrinting, initial: true) { _, printing in
-                if printing { selectedSegment = .tune }
+                if printing { selectedSegment = segment }
             }
         }
     }
@@ -205,7 +210,9 @@ struct PrinterInstrumentPanelControls: View {
     private var segmentPicker: some View {
         HStack(spacing: 2) {
             ForEach(Segment.allCases) { option in
-                let available = Self.isAvailable(option, isPrinting: isPrinting)
+                let available = Self.isAvailable(
+                    option, isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint
+                )
                 ControlActionButton(
                     title: option.title,
                     identifier: "printer.controls.segment.\(option.rawValue)",

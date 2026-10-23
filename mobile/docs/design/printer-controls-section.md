@@ -176,7 +176,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
 | Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
-| Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
+| Cool Down | `turnOffHeaters` (`POST /heaters/off`) | Shown only when `supportsHeaterShutdown`; confirms 0 on each supported heater |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
@@ -311,8 +311,10 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   command owner path. Range guidance is in the field's VoiceOver hint and
   specific validation errors, not repeated permanent range paragraphs.
 - Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
-  Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
-  explicitly bed-less hardware omits the bed, including during Cool Down.
+  Cool Down (heater shutdown, only with `supportsHeaterShutdown`). Presets
+  require proven hotend support; unsupported or explicitly bed-less hardware
+  omits the bed. Heat is usable while printing only with
+  `supportsTemperatureControlDuringPrint`.
 - The paired editors send only entered, supported heaters in one request.
   Zero explicitly turns that heater off; blank is not zero. Both requested
   targets must match before telemetry acknowledgement; measured-temperature
@@ -620,7 +622,8 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 
 #### Preheat
 
-- Four buttons, fixed order: **PLA, PETG, ABS, Cool Down**.
+- Fixed order: **PLA, PETG, ABS, Cool Down**; Cool Down is omitted without
+  `supportsHeaterShutdown` and the remaining presets fill the row.
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.

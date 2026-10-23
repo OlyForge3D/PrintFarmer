@@ -210,5 +210,20 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsFilamentUnload)
         XCTAssertFalse(caps.supportsFilamentChange)
         XCTAssertEqual(caps.supportedAxes, ["X", "Y"])
+        XCTAssertFalse(caps.supportsTemperatureControlDuringPrint, "Absent evidence stays false")
+        XCTAssertFalse(caps.supportsHeaterShutdown, "Absent evidence stays false")
+    }
+
+    func testHeatDuringPrintAndHeaterShutdownDecodeFromWire() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "supportsHotendTemperature":true,"supportsTemperatureControlDuringPrint":true,
+         "supportsHeaterShutdown":true}
+        """.utf8)
+        let caps = PrinterBackendCapabilities(
+            wire: try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        )
+        XCTAssertTrue(caps.supportsTemperatureControlDuringPrint)
+        XCTAssertTrue(caps.supportsHeaterShutdown)
     }
 }

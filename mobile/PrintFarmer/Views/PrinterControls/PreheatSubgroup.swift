@@ -314,6 +314,15 @@ struct PreheatSubgroup: View {
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
 
+    /// Cool down is hidden, not disabled, when the backend has no heater shutdown.
+    static func visiblePresets(capabilities: PrinterBackendCapabilities?) -> [PreheatPreset] {
+        capabilities?.supportsHeaterShutdown == true ? presets : presets.filter { $0 != .coolDown }
+    }
+
+    private var visiblePresets: [PreheatPreset] {
+        Self.visiblePresets(capabilities: viewModel.capabilities)
+    }
+
     /// Presets require explicit hotend-control evidence, including Cool Down.
     static func isVisible(capabilities: PrinterBackendCapabilities?) -> Bool {
         capabilities?.supportsTemperatureControl == true
@@ -376,7 +385,7 @@ struct PreheatSubgroup: View {
 
     private var detailPresets: some View {
         HStack(spacing: 4) {
-            ForEach(Self.presets, id: \.self) { preset in
+            ForEach(visiblePresets, id: \.self) { preset in
                 button(for: preset, compactForDetail: true)
             }
         }
@@ -385,7 +394,7 @@ struct PreheatSubgroup: View {
 
     private var filledPresetRow: some View {
         HStack(spacing: 8) {
-            ForEach(Self.presets, id: \.self) { preset in
+            ForEach(visiblePresets, id: \.self) { preset in
                 button(for: preset, compactForDetail: true)
                     .frame(maxWidth: .infinity)
             }
@@ -398,7 +407,7 @@ struct PreheatSubgroup: View {
         // Cool down sits in the same row as ABS (spec update): all four
         // presets share one grid so they render at identical dimensions.
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(Self.presets, id: \.self) { preset in
+            ForEach(visiblePresets, id: \.self) { preset in
                 button(for: preset)
             }
         }
@@ -413,7 +422,8 @@ struct PreheatSubgroup: View {
         } else {
             count = 4
         }
-        return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
+        // Without Cool down the remaining presets still fill the row.
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: min(count, visiblePresets.count))
     }
 
     @ViewBuilder
@@ -424,7 +434,7 @@ struct PreheatSubgroup: View {
             }
             return false
         }()
-        let canControl = viewModel.canControl
+        let canControl = viewModel.canControlHeat
         let limitsReason = viewModel.preheatBlockedReason(preset)
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
@@ -452,7 +462,7 @@ struct PreheatSubgroup: View {
         .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(limitsReason ?? viewModel.blockedReason ?? "")
+        .help(limitsReason ?? viewModel.heatBlockedReason ?? "")
     }
 
     struct IndividualHeaterControls: View {
@@ -488,7 +498,7 @@ struct PreheatSubgroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .disabled(!viewModel.canControl || viewModel.isExecuting)
+            .disabled(!viewModel.canControlHeat || viewModel.isExecuting)
         }
 
         private var setTargetsButton: some View {
@@ -635,7 +645,7 @@ struct PreheatSubgroup: View {
 
         private var measuredTemperatureLabel: String {
             let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
-            guard let value, value.isFinite else { return "now —" }
+            guard let value, value.isFinite else { return "now \(PrinterDetailViewModel.missingValuePlaceholder)" }
             return "now \(value.formatted(.number.precision(.fractionLength(0...1))))°"
         }
 
@@ -655,7 +665,7 @@ struct PreheatSubgroup: View {
 
     private var blockedReasonMessage: String? {
         if horizontalSizeClass == .regular {
-            return viewModel.blockedReason
+            return viewModel.heatBlockedReason
         }
         return disabledTapMessage
     }
@@ -718,7 +728,7 @@ struct PreheatSubgroup: View {
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.
-            let message = viewModel.blockedReason ?? "Controls are unavailable."
+            let message = viewModel.heatBlockedReason ?? "Controls are unavailable."
             withAnimation(.easeInOut(duration: 0.15)) {
                 disabledTapMessage = message
             }

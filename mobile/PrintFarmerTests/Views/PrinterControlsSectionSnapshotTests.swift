@@ -982,11 +982,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_unsupportedControlsStayDisabledInTheSamePositions() async throws {
         let printer = try makePrinter(backend: .moonraker)
-        let unsupported = PrinterBackendCapabilities(
+        var unsupported = PrinterBackendCapabilities(
             supportsMovement: false, supportsTemperatureControl: false,
             supportsBedTemperature: false, supportsFanControl: false,
             supportsHoming: false, supportedAxes: []
         )
+        // Cool down is hidden (not disabled) without heater shutdown; keep it so
+        // this test compares only controls that disable in place.
+        unsupported.supportsHeaterShutdown = Self.essentialLayoutCaps.supportsHeaterShutdown
         let identifiers = [
             "hotend.target", "bed.target", "heat.set-targets", "jog.step.10",
             "jog.x.positive", "jog.x.negative", "jog.y.positive", "jog.y.negative",
@@ -1935,6 +1938,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         "supportsHoming": true, "supportsHomingXY": true, "supportsHomingZ": true,
         "supportsHotendTemperature": true, "supportsBedTemperature": true,
         "supportsExtrusion": true, "supportsDisableMotors": true, "supportsZOffset": true,
+        "supportsTemperatureControlDuringPrint": true, "supportsHeaterShutdown": true,
         "supportedAxes": ["x", "y", "z"]
         """)
         XCTAssertFalse(caps.supportsMovement)

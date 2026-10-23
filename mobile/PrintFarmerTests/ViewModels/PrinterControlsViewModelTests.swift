@@ -276,15 +276,19 @@ final class PrinterControlsViewModelTests: XCTestCase {
         return try TestData.decoder.decode(Printer.self, from: json.data(using: .utf8)!)
     }
 
-    private static let fullCaps = PrinterBackendCapabilities(
-        supportsMovement: true,
-        supportsTemperatureControl: true,
-        supportsBedTemperature: true,
-        supportsFanControl: true,
-        supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"],
-        supportsHomingXY: true, supportsHomingZ: true
-    )
+    private static let fullCaps: PrinterBackendCapabilities = {
+        var caps = PrinterBackendCapabilities(
+            supportsMovement: true,
+            supportsTemperatureControl: true,
+            supportsBedTemperature: true,
+            supportsFanControl: true,
+            supportsHoming: true,
+            supportedAxes: ["X", "Y", "Z"],
+            supportsHomingXY: true, supportsHomingZ: true
+        )
+        caps.supportsHeaterShutdown = true
+        return caps
+    }()
 
     // Synthetic field-omission case, not a FlashForge backend profile.
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
@@ -329,6 +333,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     private func assertNoRoutineDispatch(_ service: MockPrinterService) {
         XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.turnOffHeatersCalledWith)
         XCTAssertNil(service.moveCalledWith)
         XCTAssertNil(service.homeCalledWith)
         XCTAssertNil(service.homeXYCalledWith)
@@ -1015,8 +1020,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             XCTAssertNil(vm.preheatBlockedReason(.coolDown))
             await vm.preheat(.coolDown)
             XCTAssertNil(vm.lastError)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
+            XCTAssertEqual(service.turnOffHeatersCalledWith, vm.printer.id)
         }
     }
 
@@ -1774,6 +1778,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             await vm.disableMotors()
         }
         XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.turnOffHeatersCalledWith)
         XCTAssertNil(mockService.moveCalledWith)
         XCTAssertNil(mockService.homeCalledWith)
         XCTAssertNil(mockService.homeXYCalledWith)
@@ -2102,6 +2107,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             XCTAssertNil(model.pendingCommand)
             XCTAssertNotNil(model.lastError)
             XCTAssertNil(service.setTemperaturesCalledWith)
+            XCTAssertNil(service.turnOffHeatersCalledWith)
             XCTAssertNil(service.homeCalledWith)
             XCTAssertNil(service.homeXYCalledWith)
             XCTAssertNil(service.homeZCalledWith)
@@ -2144,14 +2150,67 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastError, "Dropping the bed value must not surface as an error")
     }
 
-    func test_coolDown_omitsBedWhenSupportIsUnconfirmed() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
+    func test_coolDown_hotendOnly_usesHeaterShutdown() async throws {
+        var caps = Self.hotendOnlyCaps
+        caps.supportsHeaterShutdown = true
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
 
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
-        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 1)
+        XCTAssertNil(mockService.setTemperaturesCalledWith, "Cool down never falls back to 0/0 setpoints")
+    }
+
+    func test_coolDown_dispatchesHeaterShutdown() async throws {
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.coolDown)
+
+        XCTAssertEqual(mockService.turnOffHeatersCalledWith, vm.printer.id)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(vm.lastError)
+    }
+
+    func test_coolDown_withoutHeaterShutdown_isBlockedWithoutDispatch() async throws {
+        var caps = Self.fullCaps
+        caps.supportsHeaterShutdown = false
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+
+        XCTAssertFalse(vm.supportsCoolDown)
+        XCTAssertNotNil(vm.preheatBlockedReason(.coolDown))
+        await vm.preheat(.coolDown)
+
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(vm.lastError?.isRetryable, false)
+    }
+
+    func test_heatDuringPrint_allowedOnlyWhenBackendSupportsIt() async throws {
+        for supported in [false, true] {
+            var printer = try idlePrinter()
+            printer.state = "printing"
+            let service = MockPrinterService()
+            var caps = Self.fullCaps
+            caps.supportsTemperatureControlDuringPrint = supported
+            service.capabilitiesToReturn = caps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+
+            XCTAssertFalse(vm.canControl, "Move/setup stay locked during a print")
+            XCTAssertEqual(vm.supportsHeatDuringPrint, supported)
+            XCTAssertEqual(vm.canControlHeat, supported)
+            XCTAssertEqual(vm.heatBlockedReason == nil, supported)
+
+            await vm.setHeaterTarget(.hotend, target: 210)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, supported ? 210 : nil)
+            vm.cancelPendingCommand()
+            await vm.homeAll()
+            XCTAssertNil(service.homeCalledWith)
+        }
     }
 
     func test_allThermalPresetsRejectUnknownAndDeniedSupportWithoutDispatch() async throws {
@@ -2179,16 +2238,16 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
         await vm.preheat(.coolDown)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0)
         XCTAssertNil(vm.pendingCommand)
 
         mockService.errorToThrow = nil
         await vm.loadCapabilities()
         XCTAssertNil(vm.capabilityLoadError)
         XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
-        XCTAssertNil(mockService.setTemperaturesCalledWith, "Capability retry must not replay cooldown")
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0, "Capability retry must not replay cooldown")
         await vm.preheat(.coolDown)
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 1)
     }
 
     func test_homeAll_callsHomeWithAllAxes() async throws {
