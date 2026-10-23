@@ -143,6 +143,36 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toBeInTheDocument();
   });
 
+  it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(
+    'omits measured temperature extrema in the %s layout while retaining current readings and control bounds',
+    layout => {
+      const sensor: PrinterSensor = {
+        ...chamber,
+        readings: [
+          { quantity: 'Temperature', value: 46, unit: 'Celsius' },
+          { quantity: 'TargetTemperature', value: 60, unit: 'Celsius' },
+          { quantity: 'MeasuredMinTemperature', value: 29, unit: 'Celsius' },
+          { quantity: 'MeasuredMaxTemperature', value: 99, unit: 'Celsius' },
+          { quantity: 'Gas', value: 4321, unit: 'Ohm' },
+        ],
+        writable: [{ quantity: 'TargetTemperature', min: 10, max: 70, unit: 'Celsius', allowZero: true }],
+      };
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={[sensor]} canControl layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      expect(screen.queryByText(/Measured (minimum|maximum)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Measured (minimum|maximum)/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('29°C')).not.toBeInTheDocument();
+      expect(screen.queryByText('99°C')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Chamber Temperature: 46°C')).toBeInTheDocument();
+      expect(screen.getByLabelText('Chamber Gas: 4321 Ω')).toBeInTheDocument();
+      const target = screen.getByRole('spinbutton', { name: 'Set Chamber Target' });
+      expect(target).toHaveValue(60);
+      expect(target).toHaveAttribute('max', '70');
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
   it('marks unavailable sensors and disables their control', () => {
     renderPanel([{ ...fan, available: false }], { canControl: true });
     expect(screen.getByText('Unavailable')).toBeInTheDocument();

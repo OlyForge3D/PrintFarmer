@@ -38,7 +38,8 @@
   extruder/bed targets, safe-off zero values and explicit all-heater cooldown.
   Preserve sensor telemetry through authenticated fallback polling, clear invalid
   readings without refreshing unrelated safety evidence, and expose filament
-  monitoring switches, gas resistance and measured temperature extrema (#3462).
+  monitoring switches and gas resistance. Keep measured temperature extrema in
+  the API without cluttering the web sensor rows (#3462).
 
 - Fix the slicer 3D text tool producing empty geometry (and empty STLs) for
   every font family since #2901, and upgrade `three` to 0.186.1. The Droid

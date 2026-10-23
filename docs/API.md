@@ -312,6 +312,8 @@ limits make the control read-only.
 Gas is raw resistance in ohms, not an air-quality score. Wrapper objects such as
 `bme280 <name>` are excluded when their `temperature_sensor <name>` wrapper
 already reports the same physical sensor.
+Measured temperature extrema remain available in the API but are omitted from
+the web sensor rows to keep the controls compact.
 
 Manual target edits are available while printing or paused on backends with
 `supportsTemperatureControlDuringPrint`; material preset menus are disabled in

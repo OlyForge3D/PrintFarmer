@@ -75,6 +75,8 @@ and ETA alignment using the real card components without contacting printers.
 
 Detailed cards and the details sidebar share a borderless
 Name / State / Current / Target temperature table and a Miscellaneous section.
+Measured minimum/maximum temperatures are not displayed in sensor rows; current
+readings and configured control limits are unchanged.
 Miscellaneous contains only descriptor-backed controllable outputs, such as fan
 sliders and binary switches, and is omitted when none exist. Read-only nonthermal
 sensors and the former Other sensors group are hidden. Humidity and pressure on

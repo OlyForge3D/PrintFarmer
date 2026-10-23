@@ -22,6 +22,7 @@ interface PrinterSensorsPanelProps {
 type SensorGroup = 'Temperatures' | 'Miscellaneous';
 const GROUP_ORDER: SensorGroup[] = ['Temperatures', 'Miscellaneous'];
 const ENVIRONMENTAL_QUANTITIES = new Set<PrinterSensorQuantity>(['Humidity', 'Pressure', 'Gas']);
+const HIDDEN_QUANTITIES = new Set<PrinterSensorQuantity>(['MeasuredMinTemperature', 'MeasuredMaxTemperature']);
 const UNIT_SUFFIX: Record<PrinterSensorUnit, string> = {
   None: '', Celsius: '°C', Percent: '%', HectoPascal: 'hPa', Ohm: 'Ω', Rpm: 'RPM', Watt: 'W',
 };
@@ -200,7 +201,7 @@ export function PrinterSensorsPanel({
   };
   const extraReadings = (sensor: PrinterSensor, excluded: Set<PrinterSensorQuantity>) => {
     const quantities = new Set([...sensor.readings.map(r => r.quantity), ...(sensor.writable ?? []).map(w => w.quantity)]);
-    return [...quantities].filter(q => !excluded.has(q) &&
+    return [...quantities].filter(q => !excluded.has(q) && !HIDDEN_QUANTITIES.has(q) &&
       (sensor.writable?.some(w => w.quantity === q) || sensor.readings.some(r => r.quantity === q && formatSensorReading(r) !== ''))).map(quantity =>
       <div key={quantity} className="flex flex-wrap items-center gap-1 text-xs font-normal text-pf-text-secondary">
         <span>{QUANTITY_LABEL[quantity]}</span>{quantityCell(sensor, quantity)}
