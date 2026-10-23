@@ -184,8 +184,9 @@ chown $USER:$USER .deploy-config
 - `DB_PASSWORD` - Database password
 - `NETWORK_MODE` - `bridge` only
 - `HTTP_PORT` - Frontend HTTP port (default: 8080), available on the LAN by default
-- `BIND_ADDRESS` - HTTP listen address (default: `0.0.0.0`); set to
-  `127.0.0.1` for local-only HTTP
+- `BIND_ADDRESS` - HTTP IPv4 listen address (default: `0.0.0.0`); set to
+  `127.0.0.1` for local-only HTTP. Saved in `.deploy-config` and generated
+  `.env`; an explicit environment override takes precedence on redeployment.
 - `HTTPS_PORT` - TLS port for LAN access (default: 8443); requires a valid,
   client-trusted certificate. `0` disables TLS without changing the HTTP binding.
   `INSTALLER_LAB=true HTTP_ONLY=true` also disables TLS; it does not enable LAN HTTP.

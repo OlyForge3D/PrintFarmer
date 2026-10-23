@@ -108,7 +108,8 @@ cd PrintFarmer
 Open **http://localhost:8080** on the deployment host (or your configured
 HTTP port), or **http://SERVER_HOST:8080** from your LAN. The Docker deployment
 script publishes HTTP on all interfaces by default; set `BIND_ADDRESS=127.0.0.1`
-to restrict it. Prefer **https://SERVER_HOST:8443** with a valid, trusted
+to restrict it. This IPv4 binding is saved for later redeploys. Prefer
+**https://SERVER_HOST:8443** with a valid, trusted
 certificate to protect credentials in transit. `HTTPS_PORT=0` disables only
 HTTPS; explicit HTTP-only lab mode remains local-only.
 For private-CA bootstrap, transfer the public CA through a trusted channel;

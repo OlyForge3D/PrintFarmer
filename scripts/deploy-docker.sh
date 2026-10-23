@@ -3100,7 +3100,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -3268,11 +3268,47 @@ load_previous_config() {
     return 1
 }
 
+validate_http_bind_address() {
+    if [ "${BIND_ADDRESS+x}" != "x" ] && [ -f "${ENV_FILE:-.env}" ]; then
+        BIND_ADDRESS="$(get_kv_from_file "${ENV_FILE:-.env}" "BIND_ADDRESS" || true)"
+    fi
+    BIND_ADDRESS="${BIND_ADDRESS:-0.0.0.0}"
+
+    local ipv4_pattern='^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$'
+    if ! [[ "$BIND_ADDRESS" =~ $ipv4_pattern ]]; then
+        print_error "BIND_ADDRESS must be an IPv4 address."
+        return 1
+    fi
+
+    local -a octets
+    local octet
+    IFS=. read -r -a octets <<< "$BIND_ADDRESS"
+    for octet in "${octets[@]}"; do
+        if [ "$octet" -gt 255 ]; then
+            print_error "BIND_ADDRESS must be an IPv4 address."
+            return 1
+        fi
+    done
+    export BIND_ADDRESS
+}
+
+http_probe_host() {
+    if [ "${INSTALLER_LAB:-false}" = "true" ] && [ "${HTTP_ONLY:-false}" = "true" ]; then
+        printf '%s\n' localhost
+        return
+    fi
+    case "${BIND_ADDRESS:-0.0.0.0}" in
+        0.0.0.0|127.0.0.1) printf '%s\n' localhost ;;
+        *) printf '%s\n' "$BIND_ADDRESS" ;;
+    esac
+}
+
 # Save current configuration for future use
 save_deployment_config() {
     print_header "💾 Saving Deployment Configuration"
 
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
+    validate_http_bind_address || return 1
     resolve_webauthn_configuration || return 1
 
     local bootstrap_secret="${PFARM__Setup__BootstrapSecret:-}"
@@ -3342,6 +3378,7 @@ NETWORK_RANGES=$(printf '%q' "$NETWORK_RANGES")
 NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
+BIND_ADDRESS=$BIND_ADDRESS
 SERVER_HOST=${SERVER_HOST:-localhost}
 
 # Passkey / WebAuthn configuration is derived from the current network settings
@@ -3918,6 +3955,7 @@ find_next_free_port() {
 # Validate configuration & enforce safe constraints (ports, scaling, numeric values)
 validate_configuration() {
     print_header "🧪 Validating Configuration"
+    validate_http_bind_address || return 1
 
     : "${ENABLE_DISTRIBUTED_SLICING:=false}"
     : "${ENABLE_ORCA_WORKER:=no}"
@@ -4865,6 +4903,7 @@ generate_env_file() {
 
     # Set default env file if not already set
     ENV_FILE="${ENV_FILE:-.env}"
+    validate_http_bind_address || return 1
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
@@ -5117,6 +5156,7 @@ PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
+BIND_ADDRESS=$BIND_ADDRESS
 # API_URL for health checks (used by ComprehensiveHealthCheck to probe internal endpoints)
 # This must be a valid loopback address that can be reached from within the container
 API_URL=http://localhost:5245
@@ -7088,7 +7128,9 @@ verify_deployment() {
         return 0
     fi
 
-    local api_url="http://localhost:$HTTP_PORT"
+    local proxy_host
+    proxy_host="$(http_probe_host)"
+    local api_url="http://$proxy_host:$HTTP_PORT"
     if [ "$ARCHITECTURE" = "microservices" ]; then
         local direct_api_url="http://localhost:$API_PORT"
     fi
@@ -7264,8 +7306,6 @@ verify_deployment() {
         fi
     fi
 
-    # Verify locally without depending on LAN hostname resolution.
-    local proxy_host="localhost"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port"
 
@@ -7321,7 +7361,7 @@ verify_deployment() {
         run_api_diagnostics "🩺 API Health Diagnostics"
         print_warning "⚠️  Some health checks failed. Services may still be initializing."
         print_info "Wait a few moments and check manually:"
-        print_info "  • Health: curl http://localhost:$HTTP_PORT/health | jq"
+        print_info "  • Health: curl http://$proxy_host:$HTTP_PORT/health | jq"
         print_info "  • Logs:   docker compose --env-file $ENV_FILE logs -f"
         echo
         return 1
@@ -7387,10 +7427,10 @@ display_final_info() {
     local http_local_only=false
     local http_host="$http_bind_address"
     case "$http_bind_address" in
-        127.0.0.1|localhost)
+        127.*)
             http_local_only=true
-            http_host="localhost"
-            echo -e "${BLUE}  🌐 Local-only HTTP: http://localhost:$HTTP_PORT${NC}"
+            http_host="$(http_probe_host)"
+            echo -e "${BLUE}  🌐 Local-only HTTP: http://$http_host:$HTTP_PORT${NC}"
             ;;
         *)
             if [ "$http_bind_address" = "0.0.0.0" ]; then
@@ -7407,7 +7447,7 @@ display_final_info() {
         print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it."
     else
         if [ "$http_local_only" = true ]; then
-            print_warning "TLS is disabled: local-only HTTP on 127.0.0.1:$HTTP_PORT; no LAN access."
+            print_warning "TLS is disabled: local-only HTTP on $http_bind_address:$HTTP_PORT; no LAN access."
         else
             print_warning "TLS is disabled: HTTP is available on $http_bind_address:$HTTP_PORT. Use HTTPS to protect credentials in transit."
         fi
@@ -7417,7 +7457,7 @@ display_final_info() {
         echo -e "${BLUE}  🔧 Direct API (local-only): http://localhost:$API_PORT${NC}"
     fi
 
-    echo -e "${BLUE}  ❤️  Health Check (local-only): http://localhost:$HTTP_PORT/healthz${NC}"
+    echo -e "${BLUE}  ❤️  Health Check (HTTP): http://$http_host:$HTTP_PORT/healthz${NC}"
 
     # Show pgAdmin URL if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
@@ -7481,7 +7521,7 @@ display_final_info() {
             echo -e "${BLUE}  4. Rebuild and restart:${NC}"
             echo -e "     docker compose --env-file $ENV_FILE up -d --build api"
             echo -e "${BLUE}  5. Check health manually (wait 30s then):${NC}"
-            echo -e "     curl http://localhost:$HTTP_PORT/health | jq"
+            echo -e "     curl http://$(http_probe_host):$HTTP_PORT/health | jq"
         fi
 
         # Port 80 specific troubleshooting
@@ -7506,7 +7546,7 @@ display_final_info() {
                 echo -e "${BLUE}  • HTTP port $HTTP_PORT is local-only; opening firewall ports does not enable LAN access${NC}"
             fi
             echo -e "${BLUE}  • Direct API port $API_PORT is local-only${NC}"
-            echo -e "${BLUE}  • Test from server: curl http://localhost:$HTTP_PORT/healthz${NC}"
+            echo -e "${BLUE}  • Test from server: curl http://$(http_probe_host):$HTTP_PORT/healthz${NC}"
             echo -e "${BLUE}  • Check Docker networks: docker network ls${NC}"
         fi
         echo
