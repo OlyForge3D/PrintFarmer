@@ -31,8 +31,7 @@ struct JogSubgroup: View {
             return (PrinterDetailViewModel.missingValuePlaceholder, "\(axis) position unavailable, axis not homed")
         }
         guard let value, value.isFinite else {
-            guard !unit.isEmpty else { return (PrinterDetailViewModel.missingValuePlaceholder, "\(axis) not reported") }
-            return ("Unknown", "\(axis) Unknown")
+            return (PrinterDetailViewModel.missingValuePlaceholder, "\(axis) not reported")
         }
         let formatted = value.formatted(.number.precision(.fractionLength(fractionDigits)))
         let text = unit.isEmpty ? formatted : "\(formatted) \(unit)"

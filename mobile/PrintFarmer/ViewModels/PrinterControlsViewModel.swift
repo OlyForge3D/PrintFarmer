@@ -1695,6 +1695,29 @@ final class PrinterControlsViewModel: ObservableObject {
         return runtimeControlAccessReason
     }
 
+    /// Cool down may run mid-print through POST /heaters/off even when other
+    /// heat controls are locked; the 0/0 fallback stays idle-only.
+    func canRunPreheat(_ preset: PreheatPreset) -> Bool {
+        guard Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown),
+              isPrintingOrPaused else { return canControlHeat }
+        return runtimeControlAccessReason == nil
+    }
+
+    func preheatAccessReason(_ preset: PreheatPreset) -> String? {
+        guard Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown),
+              isPrintingOrPaused else { return heatBlockedReason }
+        return runtimeControlAccessReason
+    }
+
+    /// Turning heaters off mid-print stops the job, so the view confirms first.
+    func coolDownNeedsStopPrintConfirmation(_ preset: PreheatPreset) -> Bool {
+        preset == .coolDown && isPrintingOrPaused && supportsHeaterShutdown
+    }
+
+    nonisolated static func permitsCoolDownDuringPrint(_ preset: PreheatPreset, supportsHeaterShutdown: Bool) -> Bool {
+        preset == .coolDown && supportsHeaterShutdown
+    }
+
     /// Cool down uses POST /heaters/off when supported; otherwise it sets 0/0 targets while idle.
     var supportsHeaterShutdown: Bool {
         capabilities?.supportsHeaterShutdown == true
@@ -1727,7 +1750,10 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .transientZOffset, .sensorControl:
             permitsActivePrint = true
-        case .preheat, .heater, .heaterTargets:
+        case let .preheat(preset, _, _):
+            permitsActivePrint = supportsHeatDuringPrint
+                || Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown)
+        case .heater, .heaterTargets:
             permitsActivePrint = supportsHeatDuringPrint
         default:
             permitsActivePrint = false

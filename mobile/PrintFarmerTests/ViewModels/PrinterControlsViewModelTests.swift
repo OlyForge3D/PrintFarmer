@@ -2092,7 +2092,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
             printer.state = state
             printer.isOnline = online
             let service = MockPrinterService()
-            service.capabilitiesToReturn = Self.fullCaps
+            var caps = Self.fullCaps
+            // Cool down via heaters/off is the one mid-print heat exception; see
+            // test_coolDown_whilePrintingWithHeaterShutdown_dispatchesHeatersOff.
+            caps.supportsHeaterShutdown = false
+            service.capabilitiesToReturn = caps
             let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
             await model.loadCapabilities()
 
@@ -2188,6 +2192,62 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
         XCTAssertNil(vm.lastError)
+    }
+
+    func test_coolDown_whilePrintingWithHeaterShutdown_dispatchesHeatersOff() async throws {
+        for state in ["printing", "paused"] {
+            var printer = try idlePrinter()
+            printer.state = state
+            let service = MockPrinterService()
+            var caps = Self.fullCaps
+            caps.supportsHeaterShutdown = true
+            caps.supportsTemperatureControlDuringPrint = false
+            service.capabilitiesToReturn = caps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+
+            XCTAssertFalse(vm.canControlHeat, state)
+            XCTAssertTrue(vm.canRunPreheat(.coolDown), state)
+            XCTAssertNil(vm.preheatAccessReason(.coolDown), state)
+            XCTAssertNil(vm.preheatBlockedReason(.coolDown), state)
+            XCTAssertTrue(vm.coolDownNeedsStopPrintConfirmation(.coolDown), state)
+            XCTAssertFalse(vm.canRunPreheat(.pla), "Only Cool down is exempt from the print lock")
+            XCTAssertNotNil(vm.preheatAccessReason(.pla), state)
+
+            await vm.preheat(.coolDown)
+
+            XCTAssertNil(vm.lastError, state)
+            XCTAssertEqual(service.turnOffHeatersCalledWith, printer.id, state)
+            XCTAssertEqual(service.turnOffHeatersCallCount, 1, state)
+            XCTAssertNil(service.setTemperaturesCalledWith, "heaters/off never falls back to 0/0 mid-print")
+        }
+    }
+
+    func test_coolDown_whilePrintingWithHeaterShutdown_offlineStaysBlocked() async throws {
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.isOnline = false
+        let service = MockPrinterService()
+        var caps = Self.fullCaps
+        caps.supportsHeaterShutdown = true
+        service.capabilitiesToReturn = caps
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+
+        XCTAssertFalse(vm.canRunPreheat(.coolDown))
+        XCTAssertEqual(vm.preheatAccessReason(.coolDown), "Printer is offline.")
+        await vm.preheat(.coolDown)
+        XCTAssertEqual(service.turnOffHeatersCallCount, 0)
+    }
+
+    func test_coolDown_whileIdle_needsNoStopPrintConfirmation() async throws {
+        var caps = Self.fullCaps
+        caps.supportsHeaterShutdown = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        XCTAssertFalse(vm.coolDownNeedsStopPrintConfirmation(.coolDown))
+        XCTAssertFalse(vm.coolDownNeedsStopPrintConfirmation(.pla))
     }
 
     func test_coolDown_whilePrintingWithoutHeaterShutdown_isBlockedWithoutDispatch() async throws {

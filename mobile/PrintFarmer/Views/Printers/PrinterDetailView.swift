@@ -971,8 +971,9 @@ struct PrinterDetailView: View {
             if viewModel.isActivelyPrinting || jobName != nil {
                 currentJobHeading(printer, jobName: jobName)
 
-                if let progress = printer.progress, progress.isFinite {
-                    PrintProgressBar(progress: min(max(progress, 0), 1), height: 6)
+                // Idle jobs show no progress; the heading already carries the percent.
+                if viewModel.isActivelyPrinting, let progress = printer.progress, progress.isFinite {
+                    PrintProgressBar(progress: min(max(progress, 0), 1), showLabel: false, height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")
                 }
 
@@ -1016,7 +1017,9 @@ struct PrinterDetailView: View {
 
     @ViewBuilder
     private func currentJobHeading(_ printer: Printer, jobName: String?) -> some View {
-        let progress = printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+        let progress = viewModel.isActivelyPrinting
+            ? printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+            : nil
         let progressLabel = progress.map {
             "Print progress \(Int(($0 * 100).rounded())) percent"
         }

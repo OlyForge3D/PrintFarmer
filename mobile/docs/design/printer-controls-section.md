@@ -176,7 +176,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
 | Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
-| Cool Down | `turnOffHeaters` (`POST /heaters/off`), else `setTemperatures` 0/0 | Always shown; heater shutdown when `supportsHeaterShutdown`, otherwise 0/0 targets while idle only (blocked mid-print); confirms 0 on each supported heater |
+| Cool Down | `turnOffHeaters` (`POST /heaters/off`), else `setTemperatures` 0/0 | Always shown; heater shutdown whenever `supportsHeaterShutdown` (mid-print requires a destructive "Turn off heaters?" confirmation because it stops the print), otherwise 0/0 targets while idle only (blocked mid-print); confirms 0 on each supported heater |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
@@ -314,8 +314,10 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   Cool Down (heater shutdown with `supportsHeaterShutdown`, else a 0/0 idle
   fallback matching the web app). Presets
   require proven hotend support; unsupported or explicitly bed-less hardware
-  omits the bed. Heat is usable while printing only with
-  `supportsTemperatureControlDuringPrint`.
+  omits the bed. Heat targets are usable while printing only with
+  `supportsTemperatureControlDuringPrint` (on Tune; the instrument panel's
+  Heat segment is disabled while printing). Cool Down mid-print uses heater
+  shutdown only, after a destructive confirmation.
 - The paired editors send only entered, supported heaters in one request.
   Zero explicitly turns that heater off; blank is not zero. Both requested
   targets must match before telemetry acknowledgement; measured-temperature
@@ -362,7 +364,7 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   unchanged, including signed coordinates and zero; no firmware tolerance is
   invented. Decimal validation also rejects tiny entered fractions that would
   otherwise disappear during numeric parsing.
-- Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
+- Relative jog retains **0.1/1/10/100 mm** (default **1 mm**), XY **3000 mm/min**, Z **600 mm/min**.
   Unknown/false specific movement flags hide movement controls. The #2597
   handoff currently proves neither relative nor absolute motion on production
   backends; synthetic UI fixtures are not capability evidence.
@@ -780,7 +782,7 @@ All controls must satisfy:
 | Preheat PLA | "Preheat for PLA" | "Sets hotend to 200 degrees, bed to 60 degrees." | `.button` | "Pending" / "Failed: <reason>. Double-tap to retry." |
 | Preheat PETG | "Preheat for PETG" | "Sets hotend to 240 degrees, bed to 80 degrees." | `.button` | (same pattern) |
 | Preheat ABS | "Preheat for ABS" | "Sets hotend to 240 degrees, bed to 100 degrees." | `.button` | (same pattern) |
-| Cool Down | "Cool down" | "Turns off all heaters." with heater shutdown; otherwise "Sets hotend and bed to 0 degrees." (hotend-only: "Sets hotend to 0 degrees.") | `.button` | (same pattern) |
+| Cool Down | "Cool down" | "Turns off all heaters." with heater shutdown (mid-print: "Turns off all heaters and stops the current print. Asks for confirmation first."); otherwise "Sets hotend and bed to 0 degrees." (hotend-only: "Sets hotend to 0 degrees.") | `.button` | (same pattern) |
 | Home All | "Home all axes" | "Homes X, Y, and Z." | `.button` | (same pattern) |
 | Home XY | "Home X and Y" | "Homes X and Y axes only." | `.button` | (same pattern) |
 | Home Z | "Home Z" | "Homes Z axis only." | `.button` | (same pattern) |

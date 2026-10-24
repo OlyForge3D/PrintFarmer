@@ -280,9 +280,11 @@ final class JogSubgroupTests: XCTestCase {
         XCTAssertEqual(compact.accessibilityLabel, "Y 85.5")
     }
 
-    func test_positionDisplay_reportsUnknownForMissingOrNonFiniteCoordinates() {
+    func test_positionDisplay_reportsPlaceholderForMissingOrNonFiniteCoordinates() {
         for value in [nil, Double.nan, .infinity] as [Double?] {
-            XCTAssertEqual(JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz", unit: "mm").text, "Unknown")
+            let withUnit = JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz", unit: "mm")
+            XCTAssertEqual(withUnit.text, "--")
+            XCTAssertEqual(withUnit.accessibilityLabel, "X not reported")
             let compact = JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz")
             XCTAssertEqual(compact.text, "--")
             XCTAssertEqual(compact.accessibilityLabel, "X not reported")

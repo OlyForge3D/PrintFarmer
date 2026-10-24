@@ -7,9 +7,10 @@ struct PrinterInstrumentPanelControls: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
     @State private var selectedSegment: Segment = .move
-    @State private var jogStep: Double = 10
+    @State private var jogStep: Double = 1
     @State private var babystep: Double = 0.005
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.displayScale) private var displayScale
 
     enum Segment: String, CaseIterable, Identifiable {
         case move, heat, tune
@@ -51,28 +52,32 @@ struct PrinterInstrumentPanelControls: View {
         return "\(axis) \(value.formatted(.number.precision(.fractionLength(digits)))) millimeters"
     }
 
-    /// Move is physically unsafe during a job and Heat is too unless the backend
-    /// confirms temperature control during a print; Tune stays available.
-    static func isAvailable(_ segment: Segment, isPrinting: Bool, heatDuringPrint: Bool = false) -> Bool {
+    /// Move and Heat lock during a job (mockup B): presets would change
+    /// temperatures mid-print, and Tune already carries the hotend/bed targets.
+    static func isAvailable(_ segment: Segment, isPrinting: Bool) -> Bool {
         switch segment {
         case .tune: true
-        case .heat: !isPrinting || heatDuringPrint
-        case .move: !isPrinting
+        case .heat, .move: !isPrinting
         }
     }
 
-    static func resolvedSegment(_ selected: Segment, isPrinting: Bool, heatDuringPrint: Bool = false) -> Segment {
-        isAvailable(selected, isPrinting: isPrinting, heatDuringPrint: heatDuringPrint) ? selected : .tune
+    static func resolvedSegment(_ selected: Segment, isPrinting: Bool) -> Segment {
+        isAvailable(selected, isPrinting: isPrinting) ? selected : .tune
     }
 
     static func babystepText(_ offset: Double?) -> String {
-        guard let number = babystepNumberText(offset) else { return "Not reported" }
+        guard let number = babystepNumberText(offset) else { return PrinterDetailViewModel.missingValuePlaceholder }
         return "\(number) mm"
     }
 
     /// Step chip labels drop trailing zeros: 0.005, 0.01, 0.025, 0.05.
     static func babystepOptionLabel(_ step: Double) -> String {
         step.formatted(.number.precision(.fractionLength(0...3)))
+    }
+
+    static func babystepAccessibilityLabel(_ offset: Double?) -> String {
+        guard babystepNumberText(offset) != nil else { return "Z offset not reported" }
+        return "Z offset \(babystepText(offset))"
     }
 
     static func babystepNumberText(_ offset: Double?) -> String? {
@@ -90,7 +95,7 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private var segment: Segment {
-        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint)
+        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting)
     }
 
     var body: some View {
@@ -166,10 +171,13 @@ struct PrinterInstrumentPanelControls: View {
     private var positionReadout: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        let accessible = dynamicTypeSize.isAccessibilitySize
         return layout {
             readoutColumn("X", value: viewModel.printer.x)
+            readoutDivider(vertical: !accessible)
             readoutColumn("Y", value: viewModel.printer.y)
+            readoutDivider(vertical: !accessible)
             readoutColumn("Z", value: viewModel.printer.z)
         }
         .padding(12)
@@ -184,7 +192,7 @@ struct PrinterInstrumentPanelControls: View {
             axis: axis, value: value, homedAxes: viewModel.printer.homedAxes,
             fractionDigits: Self.readoutFractionDigits(axis: axis)
         )
-        return VStack(alignment: .leading, spacing: 2) {
+        return VStack(alignment: .center, spacing: 2) {
             Text(axis)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
@@ -193,7 +201,7 @@ struct PrinterInstrumentPanelControls: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.readoutAccessibilityLabel(
             axis: axis, value: value, homedAxes: viewModel.printer.homedAxes
@@ -201,14 +209,19 @@ struct PrinterInstrumentPanelControls: View {
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 
+    private func readoutDivider(vertical: Bool) -> some View {
+        Rectangle()
+            .fill(Color.pfBorder)
+            .frame(width: vertical ? 1 / displayScale : nil, height: vertical ? 32 : 1 / displayScale)
+            .accessibilityHidden(true)
+    }
+
     // MARK: - Segments
 
     private var segmentPicker: some View {
         HStack(spacing: 2) {
             ForEach(Segment.allCases) { option in
-                let available = Self.isAvailable(
-                    option, isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint
-                )
+                let available = Self.isAvailable(option, isPrinting: isPrinting)
                 ControlActionButton(
                     title: option.title,
                     identifier: "printer.controls.segment.\(option.rawValue)",
@@ -356,7 +369,7 @@ struct PrinterInstrumentPanelControls: View {
     private var babystepReadout: some View {
         if let number = Self.babystepNumberText(viewModel.liveZOffsetMm) {
             let value = Text(number)
-                .font(.system(.largeTitle, design: .monospaced).weight(.semibold))
+                .font(.system(.largeTitle, design: .monospaced).weight(.medium))
             let unit = Text("mm")
                 .font(.system(.title3, design: .monospaced))
                 .foregroundStyle(Color.pfTextSecondary)
@@ -364,7 +377,7 @@ struct PrinterInstrumentPanelControls: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         } else {
-            Text("Not reported")
+            Text(PrinterDetailViewModel.missingValuePlaceholder)
                 .font(.title3)
                 .foregroundStyle(Color.pfTextSecondary)
         }
@@ -377,7 +390,7 @@ struct PrinterInstrumentPanelControls: View {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .runtime)
             EssentialControlHeading(title: "Z babystep")
             babystepReadout
-                .accessibilityLabel("Z offset \(Self.babystepText(viewModel.liveZOffsetMm))")
+                .accessibilityLabel(Self.babystepAccessibilityLabel(viewModel.liveZOffsetMm))
                 .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
             if let reason {
                 Text(reason)

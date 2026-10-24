@@ -802,10 +802,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: false), .heat)
-        XCTAssertTrue(Panel.isAvailable(.heat, isPrinting: true, heatDuringPrint: true))
-        XCTAssertFalse(Panel.isAvailable(.move, isPrinting: true, heatDuringPrint: true))
-        XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true, heatDuringPrint: true), .heat)
-        XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true, heatDuringPrint: true), .tune)
         XCTAssertEqual(Panel.Segment.allCases.map(\.title), ["Move", "Heat", "Tune"])
     }
 
@@ -843,8 +839,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testInstrumentPanelBabystepReadoutIsSignedAndHonestWhenMissing() {
         typealias Panel = PrinterInstrumentPanelControls
-        XCTAssertEqual(Panel.babystepText(nil), "Not reported")
-        XCTAssertEqual(Panel.babystepText(.nan), "Not reported")
+        XCTAssertEqual(Panel.babystepText(nil), "--")
+        XCTAssertEqual(Panel.babystepText(.nan), "--")
+        XCTAssertEqual(Panel.babystepAccessibilityLabel(nil), "Z offset not reported")
+        XCTAssertEqual(Panel.babystepAccessibilityLabel(0.035), "Z offset +0.035 mm")
         XCTAssertEqual(Panel.babystepText(0.035), "+0.035 mm")
         XCTAssertEqual(Panel.babystepText(-0.05), "-0.050 mm")
         XCTAssertEqual(Panel.babystepText(0), "0.000 mm")

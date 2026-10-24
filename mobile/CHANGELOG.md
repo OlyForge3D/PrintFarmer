@@ -120,9 +120,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 ### Changed
 
 - Control tab follows the #3460 heater contract: **Cool down** is always shown;
-  it calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
-  otherwise it sets hotend/bed targets to 0 while idle (blocked mid-print).
-  Heat stays usable while printing only when the backend reports
+  it calls `POST /heaters/off` whenever the backend reports
+  `supportsHeaterShutdown` (including mid-print, after a destructive "Turn off
+  heaters?" confirmation because it stops the print), otherwise it sets
+  hotend/bed targets to 0 while idle (blocked mid-print). Heat targets stay
+  usable while printing only when the backend reports
   `supportsTemperatureControlDuringPrint`; Tune omits the `enabled` quantity,
   and `allowZero` targets step to/from 0. Missing thermal values show "--"
   (VoiceOver "not reported").
@@ -132,6 +134,13 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   temperature-fan sensor rows).
 - Move & home X/Y/Z readouts show "--" for a missing position (VoiceOver
   "not reported").
+- Instrument panel: the Heat segment is disabled while printing (Tune carries
+  the hotend/bed targets), jog distance defaults to 1 mm, the X/Y/Z readout is
+  centred with hairline dividers, the babystep readout shows "--" (VoiceOver
+  "Z offset not reported") in medium weight, and Tune temperature steppers show
+  a centred value chip.
+- Idle Status no longer shows an empty progress bar and duplicate "0%"; the
+  progress block appears only while actively printing.
 - Native control capability fallback no longer infers physical-command support
   from a backend name. Explicit per-operation server evidence is required;
   older servers without that evidence leave commands unavailable. Heater,

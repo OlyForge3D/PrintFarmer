@@ -53,6 +53,8 @@ struct ControlNumberField: UIViewRepresentable {
     /// need "-" keep full access. Temperature fields pass `.decimalPad` so
     /// iOS shows the compact numeric keypad instead of the full keyboard.
     var keyboardType: UIKeyboardType = .numbersAndPunctuation
+    /// Stepper values read as a centred value chip rather than a text field.
+    var stepperValueStyle = false
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -103,7 +105,11 @@ struct ControlNumberField: UIViewRepresentable {
         field.accessibilityIdentifier = identifier
         field.accessibilityHint = hint
         field.textColor = UIColor(Color.pfTextPrimary)
-        field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
+        field.textAlignment = stepperValueStyle ? .center : .natural
+        field.borderStyle = stepperValueStyle ? .none : .roundedRect
+        field.layer.cornerRadius = stepperValueStyle ? 8 : 0
+        field.clipsToBounds = stepperValueStyle
+        field.backgroundColor = UIColor(stepperValueStyle ? Color.pfBackgroundSecondary : Color.pfBackgroundTertiary)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
@@ -298,6 +304,7 @@ struct PreheatSubgroup: View {
     /// disabled (offline / mid-print). Cleared after a few seconds. Phone
     /// equivalent of the `.help()` tooltip that appears on iPad/Mac.
     @State private var disabledTapMessage: String?
+    @State private var confirmsStopPrintCoolDown = false
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -322,8 +329,25 @@ struct PreheatSubgroup: View {
         capabilities?.supportsTemperatureControl == true
     }
 
+    static let stopPrintCoolDownTitle = "Turn off heaters?"
+    static let stopPrintCoolDownMessage = "Turning off the heaters mid-print will stop the current print."
+    static let stopPrintCoolDownAction = "Turn off heaters"
+
     var body: some View {
         content
+            .confirmationDialog(
+                Self.stopPrintCoolDownTitle,
+                isPresented: $confirmsStopPrintCoolDown,
+                titleVisibility: .visible
+            ) {
+                Button(Self.stopPrintCoolDownAction, role: .destructive) {
+                    Task { await viewModel.preheat(.coolDown) }
+                }
+                .accessibilityIdentifier("printer.controls.preheat.cooldown.confirm")
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(Self.stopPrintCoolDownMessage)
+            }
     }
 
     private var content: some View {
@@ -427,7 +451,7 @@ struct PreheatSubgroup: View {
             }
             return false
         }()
-        let canControl = viewModel.canControlHeat
+        let canControl = viewModel.canRunPreheat(preset)
         let limitsReason = viewModel.preheatBlockedReason(preset)
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
@@ -455,7 +479,7 @@ struct PreheatSubgroup: View {
         .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(limitsReason ?? viewModel.heatBlockedReason ?? "")
+        .help(limitsReason ?? viewModel.preheatAccessReason(preset) ?? "")
     }
 
     struct IndividualHeaterControls: View {
@@ -599,10 +623,12 @@ struct PreheatSubgroup: View {
                     label: "\(heater.title) target in degrees Celsius",
                     identifier: "printer.controls.\(heater.rawValue).target",
                     hint: targetHint,
-                    keyboardType: .decimalPad
+                    keyboardType: .decimalPad,
+                    stepperValueStyle: usesStepper
                 )
                 .frame(width: compactForDetail && !dynamicTypeSize.isAccessibilitySize ? 72 : nil)
                 Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize()
                     .accessibilityHidden(true)
                 if usesStepper { stepButton(delta: 5, symbol: "plus") }
             }
@@ -721,7 +747,7 @@ struct PreheatSubgroup: View {
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.
-            let message = viewModel.heatBlockedReason ?? "Controls are unavailable."
+            let message = viewModel.preheatAccessReason(preset) ?? "Controls are unavailable."
             withAnimation(.easeInOut(duration: 0.15)) {
                 disabledTapMessage = message
             }
@@ -737,6 +763,10 @@ struct PreheatSubgroup: View {
             return
         }
         disabledTapMessage = nil
+        if viewModel.coolDownNeedsStopPrintConfirmation(preset) {
+            confirmsStopPrintCoolDown = true
+            return
+        }
         Task { await viewModel.preheat(preset) }
     }
 
@@ -762,6 +792,9 @@ struct PreheatSubgroup: View {
         }
         if !canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
+        }
+        if viewModel.coolDownNeedsStopPrintConfirmation(preset) {
+            return String(localized: "Turns off all heaters and stops the current print. Asks for confirmation first.", comment: "VoiceOver: Cool Down hint during a print")
         }
         return preset.a11yHint(hasBed: viewModel.supports(.bed), turnsOffHeaters: viewModel.supportsHeaterShutdown)
     }

@@ -209,6 +209,8 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.httpMethod, "POST")
         XCTAssertEqual(requests.first?.url?.path, "/api/printers/\(TestData.testUUID)/heaters/off")
+        let body = requests.first?.capturedHTTPBody()
+        XCTAssertTrue(body?.isEmpty ?? true, "heaters/off is a bodiless command")
     }
 
     func testTurnOffHeatersThrowsWhenBackendRejectsCommand() async {
