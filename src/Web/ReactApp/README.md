@@ -33,6 +33,19 @@ offline printers with demand show unverified coverage as "Filament unknown".
 
 ## Documentation
 
+### Browser telemetry dependencies
+
+Web auto-instrumentations 0.69 uses OpenTelemetry SDK 3 and API 1.10.
+Keep `api`, `core`, `resources`, `sdk-trace`, the OTLP exporter and
+`instrumentation` on compatible versions; do not mix the retired
+`sdk-trace-web` SDK 2 package or a core-2 override into this graph.
+The auto-instrumentation bundle supplies fetch, XHR, document-load and
+user-interaction instrumentation, so separate direct copies are unnecessary.
+SDK 3 registration explicitly preserves the stack context manager and W3C
+trace-context/baggage propagation previously installed by `WebTracerProvider`.
+Telemetry remains lazy and is enabled only when
+`VITE_OTEL_EXPORTER_OTLP_ENDPOINT` is configured.
+
 - **[UI Components Guide](./UI_COMPONENTS_GUIDE.md)** - Comprehensive guide to shared UI components (Button, Alert, FormField, Input, Select, ProgressBar) with usage examples
 - **[Color System Guide](./COLOR_SYSTEM_GUIDE.md)** - PrintFarmer design token system and accessibility guidelines
 
