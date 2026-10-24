@@ -892,6 +892,8 @@ public sealed class MoonrakerSubscriptionService(
     {
         await MarkSensorsUnavailableAsync(printer.Id, ct);
         PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
+        state.SpeedFactorPercent = null;
+        state.FlowFactorPercent = null;
         state.Sensors.Discover(objectNames);
         await LoadSensorConfigurationAsync(printer, state, ct);
         ct.ThrowIfCancellationRequested();
@@ -1082,6 +1084,11 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     private PrinterStatusUpdate WithHttpSensors(Guid printerId, PrinterCompositeStatus composite, PrinterStatusUpdate update)
     {
+        update = update with
+        {
+            SpeedFactorPercent = composite.IsOnline ? composite.SpeedFactorPercent : null,
+            FlowFactorPercent = composite.IsOnline ? composite.FlowFactorPercent : null,
+        };
         PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
         if (composite.Sensors is not null)
         {
@@ -1105,6 +1112,8 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         _ = state.Sensors.MarkAllUnavailable();
+        state.SpeedFactorPercent = null;
+        state.FlowFactorPercent = null;
         return state.Sensors.Snapshot();
     }
 
@@ -1114,13 +1123,27 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     internal async Task MarkSensorsUnavailableAsync(Guid printerId, CancellationToken ct)
     {
-        if (!_printerStates.TryGetValue(printerId, out PrinterState? state) || !state.Sensors.MarkAllUnavailable())
-        {
-            return;
-        }
-
         try
         {
+            _printerStates.TryGetValue(printerId, out PrinterState? state);
+            if (state is not null)
+            {
+                state.SpeedFactorPercent = null;
+                state.FlowFactorPercent = null;
+            }
+
+            PrinterStatusDto? invalidated = _statusCacheWriter.ClearRuntimeFactors(printerId);
+            if (invalidated is not null && hub is not null)
+            {
+                await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                    .SendAsync("printerupdated", invalidated, ct);
+            }
+
+            if (state is null || !state.Sensors.MarkAllUnavailable())
+            {
+                return;
+            }
+
             PrinterStatusDto? updated = _statusCacheWriter.UpdateSensors(printerId, state.Sensors.Snapshot(), replaceAll: true);
             if (updated is not null && hub is not null)
             {
@@ -1536,6 +1559,12 @@ public sealed class MoonrakerSubscriptionService(
             HandleFanUpdate(state, fan);
         }
 
+        if (resolvedReady == false)
+        {
+            state.SpeedFactorPercent = null;
+            state.FlowFactorPercent = null;
+        }
+
         HandlePositionUpdate(state, statusObj);
 
         // MMU (Happy Hare) status updates
@@ -1807,6 +1836,24 @@ public sealed class MoonrakerSubscriptionService(
         PrinterState state,
         JsonElement gcodeMove)
     {
+        if (gcodeMove.ValueKind != JsonValueKind.Object)
+        {
+            state.SpeedFactorPercent = null;
+            state.FlowFactorPercent = null;
+            return;
+        }
+
+        // Omission in a Moonraker delta is not a reset. Explicit invalid values are.
+        if (gcodeMove.TryGetProperty("speed_factor", out _))
+        {
+            state.SpeedFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "speed_factor");
+        }
+
+        if (gcodeMove.TryGetProperty("extrude_factor", out _))
+        {
+            state.FlowFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "extrude_factor");
+        }
+
         if (!gcodeMove.TryGetProperty("homing_origin", out JsonElement homingOrigin))
         {
             return;
@@ -1896,6 +1943,7 @@ public sealed class MoonrakerSubscriptionService(
         y = 0;
         z = 0;
         return statusObj.TryGetProperty(objectName, out JsonElement obj) &&
+            obj.ValueKind == JsonValueKind.Object &&
             obj.TryGetProperty(propertyName, out JsonElement position) &&
             position.ValueKind == JsonValueKind.Array &&
             position.GetArrayLength() >= 3 &&
@@ -3216,7 +3264,9 @@ public sealed class MoonrakerSubscriptionService(
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
                 LiveZOffsetMm: state.LiveZOffsetMm,
-                ActiveExtruderId: state.ActiveExtruderId)
+                ActiveExtruderId: state.ActiveExtruderId,
+                SpeedFactorPercent: isOnline ? state.SpeedFactorPercent : null,
+                FlowFactorPercent: isOnline ? state.FlowFactorPercent : null)
             {
                 Sensors = sensors,
             };
@@ -3258,7 +3308,9 @@ public sealed class MoonrakerSubscriptionService(
                 TotalLayers: state.TotalLayers,
                 FanSpeedPercent: state.FanSpeedPercent,
                 LiveZOffsetMm: state.LiveZOffsetMm,
-                ActiveExtruderId: state.ActiveExtruderId)
+                ActiveExtruderId: state.ActiveExtruderId,
+                SpeedFactorPercent: isOnline ? state.SpeedFactorPercent : null,
+                FlowFactorPercent: isOnline ? state.FlowFactorPercent : null)
             {
                 Sensors = sensors,
             };

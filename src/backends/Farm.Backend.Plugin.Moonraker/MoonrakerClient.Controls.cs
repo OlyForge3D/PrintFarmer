@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl, ISupportsHeaterShutdown
+public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl, ISupportsHeaterShutdown, ISupportsRuntimeFactorControl
 {
     public PrinterControlCapabilities ControlCapabilities { get; } = new()
     {
@@ -28,6 +28,24 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
 
     public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default) =>
         SendControlScriptAsync(baseUrl, MoonrakerSensorMapper.BuildPartFanCommand(speedPercent), credential, ct);
+
+    /// <inheritdoc />
+    public Task<bool> SetSpeedFactorAsync(string baseUrl, double percent, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, BuildRuntimeFactorCommand("M220", percent), credential, ct);
+
+    /// <inheritdoc />
+    public Task<bool> SetFlowFactorAsync(string baseUrl, double percent, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, BuildRuntimeFactorCommand("M221", percent), credential, ct);
+
+    private static string BuildRuntimeFactorCommand(string command, double percent)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{command} S{percent:0.##}");
+    }
 
     /// <inheritdoc />
     public Task<bool> TurnOffHeatersAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default) =>

@@ -147,6 +147,8 @@ public class PrinterBackendCapabilitiesService(
             SupportsFanControl =
                 controlClient is ISupportsFanControl && supportsFanReadback,
             SupportsFanSpeedReadback = supportsFanReadback,
+            SupportsSpeedFactorControl = controlClient is ISupportsRuntimeFactorControl,
+            SupportsFlowFactorControl = controlClient is ISupportsRuntimeFactorControl,
             SupportsSensorTelemetry = controlClient is ISupportsSensorTelemetry,
             SupportsSensorControl = controlClient is ISupportsSensorControl,
             SupportsTemperatureControlDuringPrint = temperature && controls.SupportsTemperatureControlDuringPrint,

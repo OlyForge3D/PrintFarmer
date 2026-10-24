@@ -2018,7 +2018,9 @@ public class PrintersService(
                     CurrentLayer: status.CurrentLayer,
                     TotalLayers: status.TotalLayers,
                     FanSpeedPercent: status.FanSpeedPercent,
-                    LiveZOffsetMm: status.LiveZOffsetMm));
+                    LiveZOffsetMm: status.LiveZOffsetMm,
+                    SpeedFactorPercent: status.SpeedFactorPercent,
+                    FlowFactorPercent: status.FlowFactorPercent));
             }
             catch (Exception ex)
             {
@@ -2187,7 +2189,9 @@ public class PrintersService(
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
                     CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
                     ShowExternalSpool: p.ShowExternalSpool,
-                    ActiveExtruderId: status.ActiveExtruderId));
+                    ActiveExtruderId: status.ActiveExtruderId,
+                    SpeedFactorPercent: status.SpeedFactorPercent,
+                    FlowFactorPercent: status.FlowFactorPercent));
             }
             catch (Exception ex)
             {
@@ -4028,6 +4032,34 @@ public class PrintersService(
             id,
             (client, printer, token) => client.SetFanSpeedAsync(printer.BackendUrl, speedPercent, printer.Credential, token),
             ct);
+
+    /// <inheritdoc />
+    public Task<bool> SetSpeedFactorAsync(Guid id, double percent, CancellationToken ct)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return ExecuteBackendControlAsync<ISupportsRuntimeFactorControl>(
+            id,
+            (client, printer, token) => client.SetSpeedFactorAsync(printer.BackendUrl, percent, printer.Credential, token),
+            ct);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> SetFlowFactorAsync(Guid id, double percent, CancellationToken ct)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return ExecuteBackendControlAsync<ISupportsRuntimeFactorControl>(
+            id,
+            (client, printer, token) => client.SetFlowFactorAsync(printer.BackendUrl, percent, printer.Credential, token),
+            ct);
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)

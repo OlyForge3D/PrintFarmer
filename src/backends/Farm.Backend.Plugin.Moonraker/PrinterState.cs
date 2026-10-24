@@ -66,6 +66,10 @@ internal sealed class PrinterState
 
     public double? LiveZOffsetMm { get; set; }
 
+    public double? SpeedFactorPercent { get; set; }
+
+    public double? FlowFactorPercent { get; set; }
+
     /// <summary>Backend-neutral Klipper sensor/fan telemetry (issue #3407).</summary>
     public MoonrakerSensorTracker Sensors { get; } = new();
 
@@ -77,6 +81,8 @@ internal sealed class PrinterState
         TotalLayers = null;
         FanSpeedPercent = null;
         LiveZOffsetMm = null;
+        SpeedFactorPercent = null;
+        FlowFactorPercent = null;
     }
 
     /// <summary>

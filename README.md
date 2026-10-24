@@ -59,6 +59,11 @@ telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
 
 ### Moonraker motion controls
 
+The shared API also exposes independent runtime speed and flow overrides for
+Moonraker, with bounded writes and authoritative nullable readback. Client
+controls are separate deliverables; see the
+[runtime factor API contract](./docs/API.md#runtime-speed-and-flow-overrides).
+
 Homing, jogging, and absolute movement use direct POST requests to the existing
 `/home`, `/homexy`, `/homez`, `/move`, and `/moveto` printer routes. A successful
 `CommandResult` means ordinary backend acceptance, **not physical completion**.

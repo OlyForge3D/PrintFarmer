@@ -52,6 +52,8 @@ namespace Farm.Infrastructure;
 /// <param name="TotalLayers">Total layers reported by the backend, when available.</param>
 /// <param name="FanSpeedPercent">Part-fan output percentage reported by the backend, when available.</param>
 /// <param name="LiveZOffsetMm">Live G-code Z offset in millimeters, when available.</param>
+/// <param name="SpeedFactorPercent">Observed runtime speed override percentage, or null when unknown.</param>
+/// <param name="FlowFactorPercent">Observed runtime extrusion override percentage, or null when unknown.</param>
 /// <param name="ShowExternalSpool">Presentation-only preference to show the filament box external spool slot.</param>
 /// <param name="ActiveExtruderId">Physical heater represented by primary hotend telemetry, when known.</param>
 public record PrinterDto(
@@ -101,4 +103,6 @@ public record PrinterDto(
     double? FanSpeedPercent = null,
     double? LiveZOffsetMm = null,
     bool ShowExternalSpool = false,
-    string? ActiveExtruderId = null);
+    string? ActiveExtruderId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null);

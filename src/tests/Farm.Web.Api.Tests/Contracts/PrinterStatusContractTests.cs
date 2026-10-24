@@ -36,6 +36,28 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
 
+    [Fact]
+    public async Task SubscribeToPrinter_Reconnect_ReplaysCurrentFactorsAndExplicitUnknowns()
+    {
+        Guid id = Guid.NewGuid();
+        IPrinterStatusCacheWriter writer = _factory.Services.GetRequiredService<IPrinterStatusCacheWriter>();
+        string token = await CreateFarmAdminTokenAsync();
+        foreach ((double? speed, double? flow) in new (double?, double?)[] { (125, 87.5), (80, 95), (null, null) })
+        {
+            writer.UpdateStatus(new PrinterStatusDto(id, true, "printing", SpeedFactorPercent: speed, FlowFactorPercent: flow));
+            var received = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using HubConnection connection = BuildHubConnection(token);
+            _ = connection.On<JsonElement>("printerupdated", payload => received.TrySetResult(payload));
+            await connection.StartAsync();
+            await connection.InvokeAsync("SubscribeToPrinterAsync", id.ToString());
+            JsonElement payload = await WaitForEventAsync(received);
+            Assert.Equal(speed, payload.GetProperty("speedFactorPercent").Deserialize<double?>());
+            Assert.Equal(flow, payload.GetProperty("flowFactorPercent").Deserialize<double?>());
+            Assert.False(payload.TryGetProperty("SpeedFactorPercent", out _));
+            Assert.False(payload.TryGetProperty("FlowFactorPercent", out _));
+        }
+    }
+
     /// <summary>
     /// Populated variant of the single-printer <c>"printerupdated"</c> event, produced by
     /// invoking the hub's real wire method name <c>"RequestPrinterStatus"</c> (not the C#
@@ -60,7 +82,9 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
                 BedTemp: 60.2,
                 HotendTarget: 220,
                 BedTarget: 60,
-                SpeedMultiplier: 100));
+                SpeedMultiplier: 100,
+                SpeedFactorPercent: 125,
+                FlowFactorPercent: 87.5));
         }
 
         string token = await CreateFarmAdminTokenAsync();
@@ -77,6 +101,8 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
         JsonContractAssertions.AssertProperty(received, "isOnline", JsonValueKind.True);
         JsonContractAssertions.AssertProperty(received, "state", JsonValueKind.String);
         JsonContractAssertions.AssertProperty(received, "progress", JsonValueKind.Number);
+        Assert.Equal(125, received.GetProperty("speedFactorPercent").GetDouble());
+        Assert.Equal(87.5, received.GetProperty("flowFactorPercent").GetDouble());
         JsonContractAssertions.AssertMissingKey(received, "thumbnailUrl");
         JsonContractAssertions.AssertMissingKey(received, "cameraStreamUrl");
         JsonContractAssertions.AssertMissingKey(received, "cameraSnapshotUrl");
@@ -128,6 +154,8 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
         JsonElement received = await WaitForEventAsync(receivedTcs);
 
         JsonContractAssertions.AssertProperty(received, "isOnline", JsonValueKind.False);
+        JsonContractAssertions.AssertProperty(received, "speedFactorPercent", JsonValueKind.Null);
+        JsonContractAssertions.AssertProperty(received, "flowFactorPercent", JsonValueKind.Null);
         JsonContractAssertions.AssertMissingKey(received, "state");
         JsonContractAssertions.AssertMissingKey(received, "progress");
         JsonContractAssertions.AssertMissingKey(received, "jobName");

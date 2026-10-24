@@ -44,4 +44,7 @@ public interface IPrinterStatusCacheWriter
     /// <param name="replaceAll">Whether <paramref name="sensors"/> replaces the whole list.</param>
     /// <returns>The updated status, or null when no status is cached or the sensor content is unchanged.</returns>
     PrinterStatusDto? UpdateSensors(Guid printerId, IEnumerable<PrinterSensorDto> sensors, bool replaceAll) => null;
+
+    /// <summary>Invalidates runtime factor observations without refreshing unrelated status evidence.</summary>
+    PrinterStatusDto? ClearRuntimeFactors(Guid printerId);
 }
