@@ -369,18 +369,35 @@ struct PrinterInstrumentPanelControls: View {
     private var babystepReadout: some View {
         if let number = Self.babystepNumberText(viewModel.liveZOffsetMm) {
             let value = Text(number)
-                .font(.system(.largeTitle, design: .monospaced).weight(.medium))
+                .font(.system(.title3, design: .monospaced).weight(.medium))
+                .foregroundStyle(Color.pfTextPrimary)
             let unit = Text("mm")
-                .font(.system(.title3, design: .monospaced))
+                .font(.system(.footnote, design: .monospaced))
                 .foregroundStyle(Color.pfTextSecondary)
             Text("\(value) \(unit)")
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         } else {
             Text(PrinterDetailViewModel.missingValuePlaceholder)
-                .font(.title3)
+                .font(.system(.title3, design: .monospaced).weight(.medium))
                 .foregroundStyle(Color.pfTextSecondary)
         }
+    }
+
+    /// Mockup B puts the live offset on the "Z babystep" header row.
+    private var babystepHeaderRow: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
+            Text("Z babystep").font(.headline).foregroundStyle(Color.pfTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            babystepReadout
+                .accessibilityLabel(Self.babystepAccessibilityLabel(viewModel.liveZOffsetMm))
+                .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
+        }
+        .frame(minHeight: 22)
     }
 
     private var tunePanel: some View {
@@ -388,10 +405,7 @@ struct PrinterInstrumentPanelControls: View {
         let canAdjust = reason == nil && viewModel.canAdjustRuntimeControls
         return VStack(alignment: .leading, spacing: 12) {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .runtime)
-            EssentialControlHeading(title: "Z babystep")
-            babystepReadout
-                .accessibilityLabel(Self.babystepAccessibilityLabel(viewModel.liveZOffsetMm))
-                .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
+            babystepHeaderRow
             if let reason {
                 Text(reason)
                     .font(.footnote)

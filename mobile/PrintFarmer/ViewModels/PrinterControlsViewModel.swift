@@ -1257,16 +1257,13 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
 
-        // Cool down prefers the backend's all-heaters-off command. Without it,
-        // an idle printer falls back to 0/0 setpoints (matching the web app).
+        // Cool down is idle-only (canExecute). It prefers the backend's
+        // all-heaters-off command and otherwise falls back to 0/0 setpoints,
+        // matching the web app.
         if preset == .coolDown, caps.supportsHeaterShutdown {
             await perform(command) { [printerService, printer] in
                 try await printerService.turnOffHeaters(printerId: printer.id)
             }
-            return
-        }
-        if preset == .coolDown, isPrintingOrPaused {
-            setError(command: command, message: Self.coolDownDuringPrintReason, isRetryable: false)
             return
         }
 
@@ -1437,7 +1434,6 @@ final class PrinterControlsViewModel: ObservableObject {
 
     func preheatBlockedReason(_ preset: PreheatPreset) -> String? {
         guard supports(.hotend) else { return "Hotend temperature control is unavailable." }
-        if preset == .coolDown, isPrintingOrPaused, !supportsHeaterShutdown { return Self.coolDownDuringPrintReason }
         if let reason = heaterTargetError(.hotend, target: preset.hotend) { return reason }
         if supports(.bed) { return heaterTargetError(.bed, target: preset.bed) }
         return nil
@@ -1695,35 +1691,21 @@ final class PrinterControlsViewModel: ObservableObject {
         return runtimeControlAccessReason
     }
 
-    /// Cool down may run mid-print through POST /heaters/off even when other
-    /// heat controls are locked; the 0/0 fallback stays idle-only.
+    /// Cool down is idle-only: it stays locked while a job is starting,
+    /// printing or paused, even when heat targets are writable mid-print.
+    /// Emergency Stop covers stopping an active print.
     func canRunPreheat(_ preset: PreheatPreset) -> Bool {
-        guard Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown),
-              isPrintingOrPaused else { return canControlHeat }
-        return runtimeControlAccessReason == nil
+        preset == .coolDown ? canControl : canControlHeat
     }
 
     func preheatAccessReason(_ preset: PreheatPreset) -> String? {
-        guard Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown),
-              isPrintingOrPaused else { return heatBlockedReason }
-        return runtimeControlAccessReason
-    }
-
-    /// Turning heaters off mid-print stops the job, so the view confirms first.
-    func coolDownNeedsStopPrintConfirmation(_ preset: PreheatPreset) -> Bool {
-        preset == .coolDown && isPrintingOrPaused && supportsHeaterShutdown
-    }
-
-    nonisolated static func permitsCoolDownDuringPrint(_ preset: PreheatPreset, supportsHeaterShutdown: Bool) -> Bool {
-        preset == .coolDown && supportsHeaterShutdown
+        preset == .coolDown ? blockedReason : heatBlockedReason
     }
 
     /// Cool down uses POST /heaters/off when supported; otherwise it sets 0/0 targets while idle.
     var supportsHeaterShutdown: Bool {
         capabilities?.supportsHeaterShutdown == true
     }
-
-    static let coolDownDuringPrintReason = "Cool down during a print needs heater shutdown support on this printer."
 
     private var runtimePrinterStateIsSupported: Bool {
         Self.runtimeStatusStateIsSupported(printer.state)
@@ -1751,8 +1733,7 @@ final class PrinterControlsViewModel: ObservableObject {
         case .transientZOffset, .sensorControl:
             permitsActivePrint = true
         case let .preheat(preset, _, _):
-            permitsActivePrint = supportsHeatDuringPrint
-                || Self.permitsCoolDownDuringPrint(preset, supportsHeaterShutdown: supportsHeaterShutdown)
+            permitsActivePrint = preset != .coolDown && supportsHeatDuringPrint
         case .heater, .heaterTargets:
             permitsActivePrint = supportsHeatDuringPrint
         default:

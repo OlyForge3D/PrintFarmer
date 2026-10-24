@@ -971,7 +971,8 @@ struct PrinterDetailView: View {
             if viewModel.isActivelyPrinting || jobName != nil {
                 currentJobHeading(printer, jobName: jobName)
 
-                // Idle jobs show no progress; the heading already carries the percent.
+                // Progress (bar here, percent in the heading) shows only while
+                // actively printing; an idle job shows neither.
                 if viewModel.isActivelyPrinting, let progress = printer.progress, progress.isFinite {
                     PrintProgressBar(progress: min(max(progress, 0), 1), showLabel: false, height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")

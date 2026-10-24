@@ -284,11 +284,10 @@ Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
 support. A failed capability read remains unknown and shows a read-only retry
 affordance; it is not cached as permanent unsupported state.
 Preheat stays hidden and refuses dispatch until hotend support is confirmed.
-**Cool down** is always offered. It calls `POST /heaters/off` whenever the backend
-reports `supportsHeaterShutdown`, including mid-print; because that stops the
-print, mobile first asks for destructive confirmation (the web app does not).
-Without heater shutdown an idle printer falls back to 0/0 hotend/bed targets
-(matching the web app), and a print blocks it with an explanation. Heat targets
+**Cool down** is always offered and is idle-only: it is disabled while a job is
+starting, printing or paused (Emergency stop covers stopping a print). Idle, it
+calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
+otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat targets
 stay available while printing only when the backend reports
 `supportsTemperatureControlDuringPrint`; the instrument panel's Heat segment is
 disabled while printing because Tune carries those targets. While a job is

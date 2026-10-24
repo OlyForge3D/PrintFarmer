@@ -234,12 +234,13 @@ appearance, default locale. The iPad references for
 replaced the same way on iPad Pro 13-inch (M5) (iOS 26.5, 23F77). The other
 iPad references already matched and were not re-recorded.
 
-## Cool down mid-print with heater shutdown
+## Cool down is idle-only
 
-Cool down now stays enabled during a print when the backend reports
-`supportsHeaterShutdown` (it asks for destructive confirmation before calling
-`POST /heaters/off`). `test_snapshot_lockoutBanner_printingState` was
-re-recorded on iPhone 15 (3x) and iPad Pro 13-inch (M5), Xcode 26.6 (17F113),
-iOS 26.5 (23F77), light appearance, default locale, after inspecting both
-images: the only difference is the enabled snowflake. No other references
-changed; the instrument panel and Status job block have no snapshot coverage.
+Cool down is disabled while a job is starting, printing or paused, whatever
+`supportsHeaterShutdown` reports, and no longer asks for confirmation.
+`test_snapshot_lockoutBanner_printingState` was re-recorded on iPhone 15 (3x)
+and iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale, after inspecting both images: the snowflake is
+disabled again, and both PNGs are byte-identical to the references before the
+mid-print change. The Heat stepper and babystep restyle has no snapshot
+coverage; it was checked with scratch renders only.
