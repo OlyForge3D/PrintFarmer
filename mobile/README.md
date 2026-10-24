@@ -228,10 +228,13 @@ Navigation remains Farm grid → pushed printer detail.
 Both **Overview** and **Controls** remain visible, through the segmented selector
 or a swipe, even offline or with setup controls disabled. Controls explains the
 restriction (for example, the printer is offline or the account lacks permission).
-Selection is retained when access changes; visibility does not grant permission
-or trigger capability loading while setup controls are unavailable.
+Selection is retained when access changes; visibility does not grant permission.
+Capabilities are not loaded while setup controls are unavailable, except for
+offline Moonraker printers, whose capabilities are always fetched so durable
+motion can be built (#2678).
 
-A compact labeled **Emergency Stop** stays above the selector on both pages,
+A full-width, solid red **Emergency Stop** with a white icon and label stays
+above the selector on both pages,
 with confirmation, its own pending guard, and an offline explanation. It never
 requires a timed hold and is not disabled by an unrelated pending command.
 Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
