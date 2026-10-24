@@ -11,7 +11,7 @@ describe('runtime factor HTTP contract', () => {
   ] as const)('%s posts the documented percentage unchanged', async (method, route, percent) => {
     const post = vi.spyOn(client, 'post').mockResolvedValue({ data: { success: true } });
     await expect(apiClient[method]('p1', percent)).resolves.toEqual({ success: true });
-    expect(post).toHaveBeenCalledExactlyOnceWith(`/printers/p1/${route}`, { percent });
+    expect(post).toHaveBeenCalledExactlyOnceWith(`/printers/p1/${route}`, { percent }, { allowAuthReplay: false });
   });
 
   it.each(['setPrinterSpeedFactor', 'setPrinterFlowFactor'] as const)('%s preserves unknown outcome errors without replay', async method => {

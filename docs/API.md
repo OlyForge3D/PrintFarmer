@@ -255,6 +255,10 @@ printer/server/identity changes discard old observations and drafts until fresh
 status arrives. Live external changes update the observation, not an unsent edit.
 
 Writes are not automatically retried or queued for a later connection.
+An HTTP `401` never replays a runtime override, including after successful
+token renewal or a switch to another signed-in operator. Authentication may
+renew for future requests; the failed command still requires a fresh,
+deliberate **Apply** after reviewing the printer and current value.
 For failures, especially `503`/timeouts with an unknown physical outcome, inspect
 the live readback and printer before deliberately applying another value.
 These overrides affect the current runtime, not a saved slicer profile; reverting
