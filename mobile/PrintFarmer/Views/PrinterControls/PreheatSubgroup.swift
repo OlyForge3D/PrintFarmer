@@ -432,16 +432,20 @@ struct PreheatSubgroup: View {
     private var filledPresetRow: some View {
         VStack(spacing: 8) {
             ForEach(Self.presetRows(dynamicTypeSize: dynamicTypeSize), id: \.self) { row in
+                // Every slot stretches to the tallest one, so More matches
+                // Cool down when accessibility sizes grow the row.
                 HStack(spacing: 8) {
                     ForEach(row, id: \.self) { slot in
                         switch slot {
                         case .preset(let preset):
-                            button(for: preset, compactForDetail: true).frame(maxWidth: .infinity)
+                            button(for: preset, compactForDetail: true)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         case .more:
-                            moreMenu.frame(maxWidth: .infinity)
+                            moreMenu.frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -487,7 +491,7 @@ struct PreheatSubgroup: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(isEnabled ? Color.accentColor : Color.pfTextTertiary)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .frame(maxWidth: .infinity, minHeight: 48, maxHeight: .infinity)
             .padding(.horizontal, 4)
             .background(
                 isEnabled ? Color.pfBackground : Color.pfBackgroundTertiary,
@@ -810,11 +814,16 @@ struct PreheatSubgroup: View {
                     .minimumScaleFactor(0.8)
                     .opacity(isPending ? 0 : 1)
                 if preset != .coolDown {
-                    Text(Self.compactTargetsText(preset, hasBed: viewModel.supports(.bed)))
+                    Text(Self.compactTargetsText(
+                        preset, hasBed: viewModel.supports(.bed),
+                        dynamicTypeSize: dynamicTypeSize
+                    ))
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(Color.pfTextSecondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.8)
+                        .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
                         .opacity(isPending ? 0 : 1)
                         .accessibilityHidden(true)
                 }
@@ -840,7 +849,7 @@ struct PreheatSubgroup: View {
             ? (dynamicTypeSize.isAccessibilitySize ? nil : 48)
             : max(54, presetFontSize * 2 + 14))
         .frame(minHeight: compactForDetail ? 48 : nil)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: compactForDetail && presetsFillRow ? .infinity : nil)
         .overlay {
             if isPending {
                 ProgressView()
@@ -851,8 +860,16 @@ struct PreheatSubgroup: View {
     }
 
     /// Compact preset caption, e.g. "200/60" (nozzle only without a heated bed).
-    static func compactTargetsText(_ preset: PreheatPreset, hasBed: Bool) -> String {
-        hasBed ? "\(Int(preset.hotend))/\(Int(preset.bed))" : "\(Int(preset.hotend))"
+    /// Accessibility sizes stack the targets ("200°" over "60°") so the bed
+    /// target wraps instead of truncating.
+    static func compactTargetsText(
+        _ preset: PreheatPreset, hasBed: Bool,
+        dynamicTypeSize: DynamicTypeSize = .large
+    ) -> String {
+        if dynamicTypeSize.isAccessibilitySize {
+            return hasBed ? "\(Int(preset.hotend))°\n\(Int(preset.bed))°" : "\(Int(preset.hotend))°"
+        }
+        return hasBed ? "\(Int(preset.hotend))/\(Int(preset.bed))" : "\(Int(preset.hotend))"
     }
 
     private func handleTap(preset: PreheatPreset, canControl: Bool) {

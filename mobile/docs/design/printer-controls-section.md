@@ -162,7 +162,8 @@ online/offline content, so hiding controls cannot strand an acknowledgement.
 `PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
 `PrinterControlsAccess.isEntryVisible` gates command content and owner
 construction, not destination existence. An offline/disabled visit explains
-the restriction without loading capabilities or dispatching commands. There is
+the restriction without dispatching commands, and loads capabilities only for
+Moonraker printers (the detail view always builds their owner for durable motion, #2678). There is
 no per-server opt-in setting.
 
 For embedding, retain one owner above page visibility, scoped by registered server
@@ -423,7 +424,7 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   Cancellation proven to precede dispatch releases safely without sending
   anything. After an HTTP response has already returned, Stop waiting may end
   telemetry observation, but cannot undo printer execution. Nothing is replayed.
-  Disabled editors expose the preference/permission reason in the
+  Disabled editors expose the readiness/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
   success/acceptance notices. Offline controls remain hidden, with the
   explanation supplied by the detail host.

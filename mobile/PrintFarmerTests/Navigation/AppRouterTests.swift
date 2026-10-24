@@ -460,6 +460,27 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNil(legacyDefaults.object(forKey: ExternalScanRequestStore.pendingKey))
     }
 
+    // MARK: - Unauthenticated root route (R3464-H21)
+
+    func testUnauthenticatedRootRouteResolvesEveryGateCombination() {
+        let cases: [(seenOnboarding: Bool, networkDone: Bool, expected: UnauthenticatedRootRoute)] = [
+            (false, false, .onboarding),
+            (false, true, .onboarding),
+            (true, false, .localNetworkPermission),
+            (true, true, .login)
+        ]
+        for row in cases {
+            XCTAssertEqual(
+                UnauthenticatedRootRoute.resolve(
+                    hasSeenOnboarding: row.seenOnboarding,
+                    hasCompletedNetworkPermission: row.networkDone
+                ),
+                row.expected,
+                "onboarding seen=\(row.seenOnboarding), network done=\(row.networkDone)"
+            )
+        }
+    }
+
     // MARK: - RootView lifecycle wiring (#2480)
 
     /// Drives the shared lifecycle entry point `RootView` delegates every scan

@@ -1095,6 +1095,11 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             XCTAssertTrue(slot.isEnabled, key)
             XCTAssertGreaterThanOrEqual(slot.frame.height, 44, key)
         }
+        // N-AX2: More shares its row with Cool down and must match its height.
+        XCTAssertEqual(
+            app.buttons["printer.controls.preheat.more"].frame.height,
+            app.buttons["Cool down"].frame.height, accuracy: 1
+        )
         let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
         attachScreen("\(device)-heat-presets-idle")
 

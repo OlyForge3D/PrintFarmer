@@ -9,10 +9,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the
   unreachable Advanced printer controls screen and its navigation destination,
   the per-server **Settings → Printer Safety → Advanced printer controls**
-  toggle, and the onboarding prompt that offered it. The Control tab now shows
-  whenever the printer is online, the backend reports the capability, and the
-  account has server-side permission; every existing capability, connectivity
-  and permission check still applies. Stored opt-in values from older installs
+  toggle, and the onboarding prompt that offered it. The Control tab stays
+  visible; its controls are blocked with a reason when the printer is offline,
+  lacks control support, or the account lacks Queue.Start. Every existing
+  capability, connectivity and permission check still applies. Stored opt-in values from older installs
   are ignored.
 - **APNs registration from the v1 mobile client** — Removed remote-notification
   registration callbacks, device-token persistence/upload, the in-app push

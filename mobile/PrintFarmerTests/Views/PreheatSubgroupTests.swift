@@ -510,6 +510,28 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
+    /// N-AX1: accessibility sizes stack nozzle over bed so the bed target
+    /// wraps onto a second line instead of truncating.
+    func test_compactTargetsText_stacksTargetsAtAccessibilitySizes() {
+        for preset in PreheatPreset.rowMaterials {
+            let hotend = Int(preset.definition.hotend), bed = Int(preset.definition.bed)
+            for size in [DynamicTypeSize.accessibility1, .accessibility3, .accessibility5] {
+                XCTAssertEqual(
+                    PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: size),
+                    "\(hotend)°\n\(bed)°"
+                )
+                XCTAssertEqual(
+                    PreheatSubgroup.compactTargetsText(preset, hasBed: false, dynamicTypeSize: size),
+                    "\(hotend)°"
+                )
+            }
+            XCTAssertEqual(
+                PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: .xxxLarge),
+                "\(hotend)/\(bed)"
+            )
+        }
+    }
+
     /// Row captions and More-menu subtitles read from the preset definition.
     func test_presetTargetText_readsFromDefinition() {
         for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {

@@ -18,7 +18,9 @@ import XCTest
 final class LoginFlowUITests: PrintFarmerUITestCase {
 
     override var navigationAlertDismissals: [String: String] {
-        ["Save Password?": "Not Now"]
+        // A simulator with a stored credential shows "Update Password?"
+        // instead of "Save Password?"; both decline with "Not Now".
+        ["Save Password?": "Not Now", "Update Password?": "Not Now"]
     }
     override var retryUnchangedNavigationAlertDismissal: Bool { true }
 
@@ -98,6 +100,10 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             ShellNode(.button, label: "Not Now"),
             ShellNode(.button, label: "Save")
         ])
+        let update = ShellNode(.sheet, label: "Update Password?", children: [
+            ShellNode(.button, label: "Not Now"),
+            ShellNode(.button, label: "Update Password")
+        ])
         let unknown = ShellNode(.alert, label: "Allow access?", children: [
             ShellNode(.button, label: "Not Now")
         ])
@@ -119,6 +125,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             ("separate sheet root", [sheet, nil], [loading, ready], true, "none", 1),
             ("late sheet", [nil, sheet, nil], [loading, loading, ready], true, "none", 1),
             ("application-only sheet", [nil, nil], [embeddedSheet, ready], true, "none", 1),
+            ("update password sheet", [update, nil], [loading, ready], true, "none", 1),
             ("unknown alert", [nil], [embeddedUnknown], true, "interruption rejected by dismissal allowlist", 0),
             ("non-hittable dismissal", [alert], [ready], false, "interruption dismissal is not hittable", 0),
             ("unchanged retry", [alert, alert, nil], [loading, loading, ready], true, "none", 2),
@@ -134,7 +141,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             var taps: [String] = []
             let driver = ShellNavigationDriver(
                 observeInterruption: { titles in
-                    XCTAssertEqual(titles, ["Save Password?"], name)
+                    XCTAssertEqual(titles, ["Save Password?", "Update Password?"], name)
                     index = min(index + 1, interruptions.count - 1)
                     let interruption = interruptions[index]
                     XCTAssertTrue(interruption == nil || titles.contains(interruption!.label), name)

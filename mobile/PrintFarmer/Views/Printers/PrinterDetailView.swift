@@ -668,7 +668,8 @@ struct PrinterDetailView: View {
         PrinterControlsAccess.isEntryVisible(for: printer)
     }
 
-    /// A read-only/offline visit never fetches setup capabilities. Once built,
+    /// An offline visit fetches setup capabilities only for Moonraker printers,
+    /// which always build the owner for durable motion (#2678). Once built,
     /// retain the owner through tab, connectivity and preference transitions.
     @MainActor
     private func ensureControlsOwnerIfAvailable(for printer: Printer) async {
@@ -862,15 +863,10 @@ struct PrinterDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Controls unavailable")
                     .font(.subheadline.weight(.semibold))
-                if !printer.isOnline {
-                    Text("Reconnect to use setup controls.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                } else {
-                    Text("Setup controls are unavailable for this printer.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                }
+                // Controls are hidden only while the printer is offline.
+                Text("Reconnect to use setup controls.")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
         }
         .padding(.vertical, 4)

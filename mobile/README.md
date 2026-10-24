@@ -383,10 +383,10 @@ See the [guarded controls design and availability matrix](docs/design/printer-co
 
 Jog, preheat, home, z-offset and disable-motors controls live on the Control
 page of printer detail. There is no per-server opt-in and no separate
-"Advanced" screen: the Control page shows whenever the printer is online, the
-backend reports the capability, and the signed-in account has the server-side
-permission (Queue.Start). When any of those checks fails, an open Control page
-keeps its selection and explains the restriction. Misuse may damage a printer
+"Advanced" screen. The Control page is always visible; its controls are
+blocked with a reason when the printer is offline, lacks control support, or
+the signed-in account lacks the server-side permission (Queue.Start). An open
+Control page keeps its selection when a check fails. Misuse may damage a printer
 or ruin a print.
 
 ### Post-Login Connection Check

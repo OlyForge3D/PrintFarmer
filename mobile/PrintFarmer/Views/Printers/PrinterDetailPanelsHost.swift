@@ -492,7 +492,9 @@ enum PrinterDetailFilamentCoverageStateMapping {
 ///
 /// Construction is gated on `controlsAvailable` so an Overview-only visit to a
 /// printer whose controls are hidden never dispatches a capability request
-/// nobody can reach. Once an owner exists
+/// nobody can reach. The exception is Moonraker: `PrinterDetailView` passes
+/// `true` for every Moonraker printer, so an offline Moonraker visit still
+/// builds the owner and fetches capabilities. Once an owner exists
 /// for the CURRENT printer, this always says "no" again even if
 /// `controlsAvailable` is (still or again) `true` — an owner already built
 /// must be retained across a later transition back to unavailable (for
