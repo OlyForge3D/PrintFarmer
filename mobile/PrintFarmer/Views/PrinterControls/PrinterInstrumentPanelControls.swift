@@ -386,18 +386,11 @@ struct PrinterInstrumentPanelControls: View {
 
     /// Mockup B puts the live offset on the "Z babystep" header row.
     private var babystepHeaderRow: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        return layout {
-            Text("Z babystep").font(.headline).foregroundStyle(Color.pfTextPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
+        EssentialControlHeading(title: "Z babystep") {
             babystepReadout
                 .accessibilityLabel(Self.babystepAccessibilityLabel(viewModel.liveZOffsetMm))
                 .accessibilityIdentifier("printer.controls.runtime.z-offset.value")
         }
-        .frame(minHeight: 22)
     }
 
     private var tunePanel: some View {

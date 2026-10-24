@@ -11,9 +11,10 @@ enum EssentialControlsStyle {
     }
 }
 
-struct EssentialControlHeading: View {
+struct EssentialControlHeading<Trailing: View>: View {
     let title: String
     var detail: String? = nil
+    @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -28,8 +29,15 @@ struct EssentialControlHeading: View {
                 Text(detail).font(.caption).foregroundStyle(Color.pfTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            trailing
         }
         .frame(minHeight: 22)
+    }
+}
+
+extension EssentialControlHeading where Trailing == EmptyView {
+    init(title: String, detail: String? = nil) {
+        self.init(title: title, detail: detail) { EmptyView() }
     }
 }
 
