@@ -43,8 +43,9 @@ The auto-instrumentation bundle supplies fetch, XHR, document-load and
 user-interaction instrumentation, so separate direct copies are unnecessary.
 SDK 3 registration explicitly preserves the stack context manager and W3C
 trace-context/baggage propagation previously installed by `WebTracerProvider`.
-Telemetry remains lazy and is enabled only when
-`VITE_OTEL_EXPORTER_OTLP_ENDPOINT` is configured.
+Telemetry remains lazy: development mode enables the console exporter, while
+production enables telemetry only when `VITE_OTEL_EXPORTER_OTLP_ENDPOINT`
+is configured.
 
 - **[UI Components Guide](./UI_COMPONENTS_GUIDE.md)** - Comprehensive guide to shared UI components (Button, Alert, FormField, Input, Select, ProgressBar) with usage examples
 - **[Color System Guide](./COLOR_SYSTEM_GUIDE.md)** - PrintFarmer design token system and accessibility guidelines
