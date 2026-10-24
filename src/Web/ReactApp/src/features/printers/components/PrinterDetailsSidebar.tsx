@@ -1,7 +1,7 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
