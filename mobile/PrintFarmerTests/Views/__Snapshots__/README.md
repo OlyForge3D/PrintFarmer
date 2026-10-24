@@ -255,6 +255,14 @@ PETG and ABS presets changed to 230/80 and 245/100 (nozzle/bed °C), read from
 and `test_snapshot_sdcpProfile`. All six were re-recorded on iPhone 15 (3x) and
 iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
 appearance, default locale, after inspecting the images. These snapshots
-render the Advanced screen, which keeps PLA/PETG/ABS + Cool down; the Control
+render the standalone `PrinterSetupControlsContent` (formerly hosted by the
+removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
 tab's five-slot row with More has no snapshot coverage and is exercised by
 `Issue3259ControlIdleUITests.testHeatPresetRowOffersMoreMenuWhileIdle`.
+
+### Advanced printer controls opt-in removed
+
+The Advanced printer controls screen, its Settings toggle and the onboarding
+prompt were removed. No reference image changed: the blocked-editor evidence
+test now covers the readiness gate instead of the retired Settings opt-in, and
+it attaches screenshots without comparing reference images.
