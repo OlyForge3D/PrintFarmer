@@ -21,6 +21,8 @@ import { DetailedPrinterCard } from "@/features/printers/components/DetailedPrin
 import { PrinterDetailsSidebar } from "@/features/printers/components/PrinterDetailsSidebar";
 
 const mockExecute = vi.fn();
+const mockSpeedFactor = vi.fn();
+const mockFlowFactor = vi.fn();
 const mockToastError = vi.fn();
 let mockBlocked = false;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
@@ -31,6 +33,12 @@ vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
 }));
 vi.mock("@/common/hooks/usePrinterDisplay", () => ({
   usePrinterDisplay: (printer: Printer) => printer,
+}));
+vi.mock("@/features/printers/hooks/use-runtime-factors", () => ({
+  useRuntimeFactors: () => ({
+    speedFactorPercent: 125, flowFactorPercent: 87.5, connected: true,
+    epoch: 0, error: '', refresh: vi.fn(), status: { isOnline: true, state: 'Idle' },
+  }),
 }));
 vi.mock("@/common/hooks/useApi", () => ({
   usePrinter: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
@@ -122,6 +130,8 @@ vi.mock("@/features/printers/components/PrinterCameraPreview", () => ({
 }));
 vi.mock("@/services/api", () => ({
   apiClient: {
+    setPrinterSpeedFactor: (...args: unknown[]) => mockSpeedFactor(...args),
+    setPrinterFlowFactor: (...args: unknown[]) => mockFlowFactor(...args),
     put: async (_url: string, body: unknown) => ({
       data: { userId: "motion-user", rowVersion: "v2", ...(body as object) },
     }),
@@ -152,6 +162,7 @@ const printer: Printer = {
   bedTemp: 23,
 };
 const capabilities = {
+  printerId: printer.id,
   supportsMovement: true,
   supportsControlOperations: true,
   supportsTemperatureControl: true,
@@ -159,9 +170,9 @@ const capabilities = {
   supportsObjectExclusion: false,
 } as PrinterBackendCapabilitiesDto;
 type Surface = "detail" | "sidebar";
-function Controls({ surface, overrides = {}, movement = true }: { surface: Surface; overrides?: Partial<Printer>; movement?: boolean }) {
+function Controls({ surface, overrides = {}, movement = true, factors = false }: { surface: Surface; overrides?: Partial<Printer>; movement?: boolean; factors?: boolean }) {
   const current = { ...printer, ...overrides };
-  const support = { ...capabilities, supportsMovement: movement };
+  const support = { ...capabilities, supportsMovement: movement, supportsSpeedFactorControl: factors, supportsFlowFactorControl: factors };
   return surface === "detail" ? (
     <DetailedPrinterCard printer={current} backendCapabilities={support} />
   ) : (
@@ -208,12 +219,42 @@ beforeEach(() => {
   accountMode = "Guided";
   mockBlocked = false;
   mockExecute.mockReset();
+  mockSpeedFactor.mockReset().mockResolvedValue({ success: true });
+  mockFlowFactor.mockReset().mockResolvedValue({ success: true });
   mockToastError.mockReset();
 });
 
 describe.each<Surface>(["detail", "sidebar"])(
   "%s initiating motion controls",
   (surface) => {
+    it('renders real runtime controls and sends the independent wire percentage on this surface', async () => {
+      render(<Controls surface={surface} factors />);
+      expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
+      expect(screen.getByLabelText('Observed flow')).toHaveTextContent('87.5%');
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Speed %' }), { target: { value: '130.25' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Apply speed percentage' }));
+      await waitFor(() => expect(mockSpeedFactor).toHaveBeenCalledExactlyOnceWith(printer.id, 130.25));
+      expect(mockFlowFactor).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
+    });
+
+    it('keeps runtime controls hidden without operation capability on this surface', () => {
+      render(<Controls surface={surface} />);
+      expect(screen.queryByRole('spinbutton', { name: 'Speed %' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('spinbutton', { name: 'Flow %' })).not.toBeInTheDocument();
+      expect(mockSpeedFactor).not.toHaveBeenCalled();
+      expect(mockFlowFactor).not.toHaveBeenCalled();
+    });
+
+    it('preserves Queue.Start authorization for runtime controls on this surface', () => {
+      allowed = false;
+      render(<Controls surface={surface} factors />);
+      expect(screen.getByRole('spinbutton', { name: 'Speed %' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Apply flow percentage' })).toBeDisabled();
+      expect(mockSpeedFactor).not.toHaveBeenCalled();
+      expect(mockFlowFactor).not.toHaveBeenCalled();
+    });
+
     it.each([
       { isOnline: false }, { isEnabled: false }, { homedAxes: undefined }, { homedAxes: '' },
       { homedAxes: 'xy' }, { homedAxes: 'x' }, { homedAxes: 'unknown' },

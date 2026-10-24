@@ -29,6 +29,7 @@ import { TemperatureControlSection } from '@/features/printers/components/Temper
 import { PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
+import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
@@ -913,6 +914,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       />}
 
       </PrinterSensorsSection>
+
+      <RuntimeFactorControls printer={printer} backendCapabilities={backendCapabilities} />
 
       {/* AMS control box — mirrors PrinterDetailsSidebar's placement immediately
           before the materials module, so gate select/load/unload/eject controls

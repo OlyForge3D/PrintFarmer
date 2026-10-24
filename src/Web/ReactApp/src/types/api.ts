@@ -208,6 +208,9 @@ export interface PrinterCameraInfo {
  * Live status information for a printer.
  */
 export interface PrinterLiveStatus {
+  /** Observed runtime percentages; null/initial absence means unknown, never 100. */
+  speedFactorPercent?: number | null;
+  flowFactorPercent?: number | null;
   /** Whether the printer is currently online/reachable */
   isOnline: boolean;
   /** Current printer state (e.g., "Idle", "Printing", "Paused") */
@@ -572,6 +575,9 @@ export interface PrinterBackendCapabilitiesDto {
   supportsSensorControl?: boolean;
   supportsTemperatureControlDuringPrint?: boolean;
   supportsHeaterShutdown?: boolean;
+  /** Independent opt-in operation flags; absent on older servers. */
+  supportsSpeedFactorControl?: boolean;
+  supportsFlowFactorControl?: boolean;
 }
 
 /**
