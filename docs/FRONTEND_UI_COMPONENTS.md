@@ -75,6 +75,10 @@ and ETA alignment using the real card components without contacting printers.
 
 Detailed cards and the details sidebar share a borderless
 Name / State / Current / Target temperature table and a Miscellaneous section.
+Primary heaters are labelled Extruder and Heater Bed, matching Mainsail/Fluidd.
+Accessible control names, preset groups, compact readouts and limit messages use
+the same terminology. These display labels do not change the active tool,
+additional extruder identities, API heater keys or control limits.
 Measured minimum/maximum temperatures are not displayed in sensor rows; current
 readings and configured control limits are unchanged.
 Sensor names omit generated Sensor/Heater type subtitles, preserving the actual

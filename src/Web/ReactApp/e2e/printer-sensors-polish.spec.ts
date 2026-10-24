@@ -17,7 +17,7 @@ test('heater glyphs match the actual compact card paths, colors and temperature-
   for (const state of states) {
     await page.goto(`/src/test/fixtures/printer-sensors.html?sidebar-online&glyph-parity${state.query}`);
     const compact = page.getByRole('region', { name: 'compact', exact: true });
-    for (const [kind, title] of [['Nozzle', 'Hotend temperature'], ['Bed', 'Bed temperature']]) {
+    for (const [kind, title] of [['Nozzle', 'Extruder temperature'], ['Bed', 'Heater Bed temperature']]) {
       const expected = await compact.getByRole('img', { name: title, exact: true }).evaluate(node => ({
         path: node.querySelector('path')!.getAttribute('d'), color: getComputedStyle(node).color, opacity: getComputedStyle(node).opacity,
       }));
@@ -65,7 +65,7 @@ test('sensor groups match existing app disclosures and content typography at mat
     const production = [];
     for (const surface of ['card', 'sidebar']) {
       const root = page.getByRole('region', { name: surface, exact: true });
-      await expect(root.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeVisible();
+      await expect(root.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeVisible();
       await root.evaluate((node, width) => {
         (node as HTMLElement).style.width = `${width + 100}px`;
         for (const section of node.querySelectorAll<HTMLElement>('[data-printer-sensor-section]')) {
@@ -350,7 +350,7 @@ test('opened preset menu is bounded, viewport-safe and keyboard dismissible with
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8);
       expect(bounds.itemHeights.every(value => value === 28)).toBe(true);
       await page.keyboard.press('End');
-      await expect(menu.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toBeFocused();
+      await expect(menu.getByRole('menuitem', { name: /^Heater Bed Cooldown,/ })).toBeFocused();
       await page.keyboard.press('Home');
       await expect(menu.getByRole('menuitem', { name: /^Both heaters ABS,/ })).toBeFocused();
       await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
@@ -359,7 +359,7 @@ test('opened preset menu is bounded, viewport-safe and keyboard dismissible with
       await expect(menu).toHaveCount(0);
       await expect(trigger).toBeFocused();
       await trigger.press('ArrowUp');
-      await expect(page.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toBeFocused();
+      await expect(page.getByRole('menuitem', { name: /^Heater Bed Cooldown,/ })).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(menu).toHaveCount(0);
       await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
@@ -378,7 +378,7 @@ test('reference and production numeric fields use compact app sizing without exp
       await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
         route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
       await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online');
-      const input = page.getByRole('region', { name: 'card', exact: true }).getByRole('spinbutton', { name: 'Hotend target temperature' });
+      const input = page.getByRole('region', { name: 'card', exact: true }).getByRole('spinbutton', { name: 'Extruder target temperature' });
       await expect(input).toBeVisible();
       const production = await input.evaluate(node => ({
         visible: node.getBoundingClientRect().height,
@@ -391,8 +391,8 @@ test('reference and production numeric fields use compact app sizing without exp
       const gaps = [];
       for (const surface of ['card', 'sidebar']) {
         const root = page.getByRole('region', { name: surface, exact: true });
-        const hotend = await root.getByRole('spinbutton', { name: 'Hotend target temperature' }).boundingBox();
-        const bed = await root.getByRole('spinbutton', { name: 'Bed target temperature' }).boundingBox();
+        const hotend = await root.getByRole('spinbutton', { name: 'Extruder target temperature' }).boundingBox();
+        const bed = await root.getByRole('spinbutton', { name: 'Heater Bed target temperature' }).boundingBox();
         if (!hotend || !bed) throw new Error(`${surface} stacked targets are not visible`);
         const gap = bed.y - hotend.y - hotend.height;
         expect(gap).toBeCloseTo(4);
@@ -489,7 +489,7 @@ test('unknown heater limits warn accessibly while allowing integer entry on both
   for (const surface of ['card', 'sidebar']) {
     const scope = page.getByRole('region', { name: surface, exact: true });
     await expect(scope.getByRole('button', { name: 'Cooldown' })).toBeEnabled();
-    for (const [name, heater] of [['Hotend', 'hotend'], ['Bed', 'bed']] as const) {
+    for (const [name, heater] of [['Extruder', 'hotend'], ['Heater Bed', 'bed']] as const) {
       const input = scope.getByRole('spinbutton', { name: `${name} target temperature` });
       await expect(input).toBeEnabled();
       await expect(input).not.toHaveAttribute('max');
@@ -520,8 +520,8 @@ test('both production surfaces enforce persisted heater limits and integer comma
   for (const surface of ['card', 'sidebar']) {
     const scope = page.getByRole('region', { name: surface, exact: true });
     for (const [name, maximum, fractional, integer, heater] of [
-      ['Hotend', 250, '210.5', '220', 'hotend'],
-      ['Bed', 100, '60.5', '65', 'bed'],
+      ['Extruder', 250, '210.5', '220', 'hotend'],
+      ['Heater Bed', 100, '60.5', '65', 'bed'],
     ] as const) {
       const input = scope.getByRole('spinbutton', { name: `${name} target temperature` });
       await expect(input).toBeEnabled();
@@ -614,7 +614,7 @@ test('sensor controls fit card and sidebar widths on desktop and mobile without 
     }
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const undersized = await card.locator('input[type="number"], input[type="range"], button[role="switch"], button[data-value-action]').evaluateAll(elements =>
-      elements.filter(element => /^(Set |Hotend target|Bed target|Reset |Increase |Decrease )/.test(element.getAttribute('aria-label') ?? '')).filter(element => {
+      elements.filter(element => /^(Set |Extruder target|Heater Bed target|Reset |Increase |Decrease )/.test(element.getAttribute('aria-label') ?? '')).filter(element => {
         const rect = element.getBoundingClientRect();
         return rect.height < 24 || rect.width < 24;
       }).map(element => element.getAttribute('aria-label')));
@@ -689,7 +689,7 @@ test('real sensor controls submit direct actions once and never send stale same-
   await slider.press('ArrowRight');
   await expect(commands).toHaveCount(6);
 
-  const target = card.getByRole('spinbutton', { name: 'Hotend target temperature' });
+  const target = card.getByRole('spinbutton', { name: 'Extruder target temperature' });
   await target.fill('220');
   await target.press('Enter');
   await target.press('Tab');

@@ -109,8 +109,10 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         var hubContext = new Mock<IHubContext<PrinterHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(hubClients.Object);
 
+        var configurationQueries = new ConcurrentQueue<Uri>();
         var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
+            .Returns(() => new HttpClient(new ConfigurationQueryHandler(configurationQueries)));
 
         var observedUpdates = new ConcurrentQueue<PrinterStatusDto>();
         var firstUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -142,6 +144,8 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         ]);
         initial.Sensors.Single(sensor => sensor.Id == "heater_generic chamber").Writable
             .Should().ContainSingle(writable => writable.Quantity == PrinterSensorQuantity.TargetTemperature && writable.Max == 100);
+        configurationQueries.Should().ContainSingle()
+            .Which.PathAndQuery.Should().Be("/printer/objects/query?configfile=settings");
         initial.Sensors.Where(sensor => sensor.Id is "heater_fan hotend" or "controller_fan electronics")
             .Should().OnlyContain(sensor => sensor.Writable.Count == 0);
 
@@ -207,6 +211,9 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
                 reading.Unit == PrinterSensorUnit.Celsius && reading.Value.Number == 31.5);
         sensorSignal.Sensors.Single(sensor => sensor.Id == "temperature_sensor endstop").Readings
             .Should().ContainSingle(reading => reading.Quantity == PrinterSensorQuantity.Temperature && reading.Value.Number == 31.5);
+        sensorSignal.Sensors.Single(sensor => sensor.Id == "heater_generic chamber").Writable
+            .Should().BeEquivalentTo(initial.Sensors.Single(sensor => sensor.Id == "heater_generic chamber").Writable);
+        configurationQueries.Should().ContainSingle("ordinary telemetry updates must not reload static configuration");
 
         var shutdownUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         statusCacheWriter
@@ -229,6 +236,7 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
             "Moonraker remains reachable when only Klippy has entered shutdown");
 
         var recoveredUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reconfiguredUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         statusCacheWriter
             .Setup(w => w.UpdateStatus(
                 It.Is<PrinterStatusDto>(dto => dto.State == "Idle" && dto.IsOnline),
@@ -237,6 +245,12 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
             {
                 observedUpdates.Enqueue(dto);
                 recoveredUpdate.TrySetResult(dto);
+                if (configurationQueries.Count >= 2 &&
+                    dto.Sensors.Any(sensor => sensor.Id == "heater_generic chamber" && sensor.Available &&
+                        sensor.Writable.Any(writable => writable.Max == 100)))
+                {
+                    reconfiguredUpdate.TrySetResult(dto);
+                }
             });
 
         using HttpResponseMessage firmwareRestart = await _host.ControlClient.PostAsync(
@@ -246,11 +260,26 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         PrinterStatusDto recovered = await recoveredUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
         recovered.Id.Should().Be(printer.Id);
+        await reconfiguredUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        configurationQueries.Should().HaveCount(2, "Klippy rediscovery must reload configuration before re-subscribing");
         observedUpdates
             .Where(dto => dto.State is "Shutdown" or "Error")
             .Should()
             .OnlyContain(dto => dto.IsOnline);
         observedUpdates.Should().NotContain(dto => dto.State == "Error");
+    }
+
+    private sealed class ConfigurationQueryHandler(ConcurrentQueue<Uri> queries) : DelegatingHandler(new HttpClientHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri is { PathAndQuery: "/printer/objects/query?configfile=settings" } uri)
+            {
+                queries.Enqueue(uri);
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 
     [Fact]

@@ -1059,7 +1059,7 @@ public partial class MoonrakerClient(
         }
     }
 
-    private static HttpRequestMessage CreateSafetyDiscoveryRequest(
+    internal static HttpRequestMessage CreateSafetyDiscoveryRequest(
         Uri uri,
         PrinterCredential? credential)
     {

@@ -8,6 +8,11 @@ export interface MaterialTemperaturePreset {
   bed: number;
 }
 
+export const HEATER_LABELS = {
+  hotend: 'Extruder',
+  bed: 'Heater Bed',
+} as const;
+
 export const materialPresets: MaterialTemperaturePreset[] = [
   { label: 'ABS', value: 'ABS', hotend: 250, bed: 100 },
   { label: 'PLA', value: 'PLA', hotend: 210, bed: 60 },
@@ -46,8 +51,8 @@ export function temperatureTargetLimitError(
   activeExtruderId?: string | null,
 ): string | undefined {
   for (const [heater, label, persistedMax] of [
-    ['hotend', 'Hotend', capabilities?.maxHotendTemp],
-    ['bed', 'Bed', capabilities?.maxBedTemp],
+    ['hotend', HEATER_LABELS.hotend, capabilities?.maxHotendTemp],
+    ['bed', HEATER_LABELS.bed, capabilities?.maxBedTemp],
   ] as const) {
     const target = targets[heater];
     const { min, max, allowZero } = primaryHeaterLimits(sensors, heater, persistedMax, activeExtruderId);

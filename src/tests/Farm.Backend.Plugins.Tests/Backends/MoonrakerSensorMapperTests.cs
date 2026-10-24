@@ -416,6 +416,33 @@ public sealed class MoonrakerSensorMapperTests
     }
 
     [Fact]
+    public void Discover_ConfigurationWasLoaded_RevokesLimitsUntilNewSettingsArrive()
+    {
+        MoonrakerSensorTracker tracker = DiscoverAndApply();
+        ById(tracker)["heater_generic chamber_heater"].Writable.Should().NotBeEmpty();
+
+        tracker.Discover(AllObjects);
+        Apply(tracker, """{"heater_generic chamber_heater":{"temperature":30,"target":0}}""", T0.AddSeconds(1));
+
+        PrinterSensorDto sensor = ById(tracker)["heater_generic chamber_heater"];
+        sensor.Available.Should().BeTrue();
+        sensor.Writable.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MarkAllUnavailable_ConfigurationWasLoaded_DoesNotRestoreLimitsOnReadingOnlyUpdate()
+    {
+        MoonrakerSensorTracker tracker = DiscoverAndApply();
+        tracker.MarkAllUnavailable().Should().BeTrue();
+        tracker.MarkAllUnavailable().Should().BeFalse();
+        Apply(tracker, """{"heater_generic chamber_heater":{"temperature":30,"target":0}}""", T0.AddSeconds(1));
+
+        PrinterSensorDto sensor = ById(tracker)["heater_generic chamber_heater"];
+        sensor.Available.Should().BeTrue();
+        sensor.Writable.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Discover_ObjectRemovedOnRestart_StaysUnavailableWithLastValues()
     {
         MoonrakerSensorTracker tracker = DiscoverAndApply();

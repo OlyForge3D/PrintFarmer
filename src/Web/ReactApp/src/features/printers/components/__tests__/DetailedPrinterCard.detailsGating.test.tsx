@@ -6,7 +6,7 @@ import { PrinterBackend, type MmuStatus, type Printer, type PrinterDetails } fro
 
 function chooseTemperaturePreset(value: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Apply temperature preset' }));
-  const label = value.includes(':') ? value.replace('hotend:', 'Hotend ').replace('bed:', 'Bed ') : `Both heaters ${value}`;
+  const label = value.includes(':') ? value.replace('hotend:', 'Extruder ').replace('bed:', 'Heater Bed ') : `Both heaters ${value}`;
   fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${label},`) }));
 }
 
@@ -137,7 +137,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
       supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: false,
       supportsHeaterShutdown: true,
     }} />);
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeEnabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(turnOffHeatersMock).toHaveBeenCalledExactlyOnceWith('printer-1'));
@@ -146,7 +146,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
 
   it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
     render(<DetailedPrinterCard printer={makePrinter({ backend: PrinterBackend.Moonraker })} />);
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
   });
 
   it.each([
@@ -186,7 +186,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeInTheDocument();
     expect(screen.getAllByText('Temperatures')).toHaveLength(1);
-    const primaryTarget = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const primaryTarget = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(primaryTarget).toHaveProperty('disabled', !(allowed && enabled && online));
     expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(primaryTarget);
     expect(screen.getAllByRole('region', { name: 'Temperatures' })[0]).toContainElement(screen.getByTestId('sensor-extruder1'));
@@ -194,8 +194,8 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
   });
 
   it.each([
-    ['Hotend', 250, 'hotend', '210.5', '220'],
-    ['Bed', 100, 'bed', '60.5', '65'],
+    ['Extruder', 250, 'hotend', '210.5', '220'],
+    ['Heater Bed', 100, 'bed', '60.5', '65'],
   ] as const)('enforces persisted %s limits and integer precision without writable descriptors', async (name, max, heater, fractional, accepted) => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: false });
     usePrinterDetailsMock.mockReturnValue({ isLoading: false, data: { capabilities: {
@@ -221,7 +221,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledExactlyOnceWith('printer-1', { [heater]: Number(accepted) }));
   });
 
-  it.each(['Hotend', 'Bed'] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async name => {
+  it.each([['Extruder', 'hotend'], ['Heater Bed', 'bed']] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async (name, heater) => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
     const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
     expect(input).toBeEnabled();
@@ -233,7 +233,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     expect(setTemperaturesMock).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '65' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledExactlyOnceWith('printer-1', { [name.toLowerCase()]: 65 }));
+    await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledExactlyOnceWith('printer-1', { [heater]: 65 }));
     expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
   });
 
@@ -295,7 +295,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
       expect(setTemperaturesMock).toHaveBeenCalledTimes(++count);
       expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', targets);
     }
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(setTemperaturesMock).toHaveBeenCalledTimes(4));
     expect(setTemperaturesMock).toHaveBeenLastCalledWith('printer-1', { hotend: 0, bed: 0 });
