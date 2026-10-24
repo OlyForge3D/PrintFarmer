@@ -40,8 +40,7 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
 - Heat: side-by-side Hotend/Bed target fields with **one compact Go button**
   on the same row (stacked at accessibility text sizes), compact
   PLA · PETG · ABS · **More** · **Cool down** row (More is a native menu, with
-  no section title, listing ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field; the
-  Advanced screen keeps PLA/PETG/ABS + Cool down). Actual/target values appear only in the
+  no section title, listing ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field). Actual/target values appear only in the
   strip above, not repeated around each editor. Accessibility text stacks the
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
   native controls; do not import the browser wrapper's styling.
@@ -161,16 +160,16 @@ online/offline content, so hiding controls cannot strand an acknowledgement.
 
 **Essential integration (#2594):** `PrinterDetailView` embeds the presentation-only
 `PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
-`AdvancedPrinterControlsAccess.isEntryVisible` gates command content and owner
+`PrinterControlsAccess.isEntryVisible` gates command content and owner
 construction, not destination existence. An offline/disabled visit explains
-the restriction without loading capabilities, enabling a setting or dispatching
-commands. The settings link uses the existing `AppDestination.settings` route.
+the restriction without loading capabilities or dispatching commands. There is
+no per-server opt-in setting.
 
 For embedding, retain one owner above page visibility, scoped by registered server
 and printer UUID. The host supplies the scoped service, loads capabilities once,
 and forwards meaningful updates while the Controls page is hidden. Do not use
 the test-only wrapper initializer or create an owner per page. Apply
-`AdvancedPrinterControlsAccess` before exposing command content; this observer does not
+`PrinterControlsAccess` before exposing command content; this observer does not
 read feature flags. Replace the owner when the real server/printer target changes.
 
 ### Effective native operations and gates

@@ -665,10 +665,7 @@ struct PrinterDetailView: View {
     // MARK: - Main Content
 
     private func controlsAvailable(for printer: Printer) -> Bool {
-        AdvancedPrinterControlsAccess.isEntryVisible(
-            isEnabled: serverRegistry.advancedPrinterControlsEnabled,
-            for: printer
-        )
+        PrinterControlsAccess.isEntryVisible(for: printer)
     }
 
     /// A read-only/offline visit never fetches setup capabilities. Once built,
@@ -682,7 +679,7 @@ struct PrinterDetailView: View {
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
-                || (printer.backend == .moonraker && serverRegistry.advancedPrinterControlsEnabled)
+                || printer.backend == .moonraker
         ) else { return }
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
@@ -869,17 +866,6 @@ struct PrinterDetailView: View {
                     Text("Reconnect to use setup controls.")
                         .font(.caption)
                         .foregroundStyle(Color.pfTextSecondary)
-                } else if !serverRegistry.advancedPrinterControlsEnabled {
-                    HStack(spacing: 4) {
-                        Text("Printer controls are off.")
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
-                        NavigationLink(value: AppDestination.settings) {
-                            Text("Settings")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .accessibilityIdentifier("printer.detail.control.settings")
-                    }
                 } else {
                     Text("Setup controls are unavailable for this printer.")
                         .font(.caption)

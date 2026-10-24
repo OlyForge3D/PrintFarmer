@@ -490,13 +490,13 @@ enum PrinterDetailFilamentCoverageStateMapping {
 /// (`PrinterControlsViewModel`, hoisted above the pager in
 /// `PrinterDetailView` per finding 10) should be built or replaced.
 ///
-/// Construction is gated on `controlsAvailable` so a Overview-only visit — the
-/// common case, since Advanced Printer Controls defaults off — never
-/// dispatches a capability request nobody can reach. Once an owner exists
+/// Construction is gated on `controlsAvailable` so an Overview-only visit to a
+/// printer whose controls are hidden never dispatches a capability request
+/// nobody can reach. Once an owner exists
 /// for the CURRENT printer, this always says "no" again even if
 /// `controlsAvailable` is (still or again) `true` — an owner already built
-/// must be retained across a later transition back to unavailable (offline,
-/// or the safety toggle revoked) and forward again once more; this function
+/// must be retained across a later transition back to unavailable (for
+/// example, offline) and forward again once more; this function
 /// only ever authorizes a fresh build, never a teardown.
 enum PrinterDetailControlsOwnerMapping {
     static func shouldBuildOwner(

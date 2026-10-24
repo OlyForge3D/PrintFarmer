@@ -33,7 +33,6 @@ final class ServerRegistry {
     static let storageKey = "pf_server_registry"
     static let corruptBackupKey = "pf_server_registry_corrupt_backup"
     static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
-    private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
     static let navigationCleanupCompletedKey = "pf_navigation_distill_cleanup_completed"
 
     private struct PersistedRegistry: Codable {
@@ -42,13 +41,7 @@ final class ServerRegistry {
     }
 
     var servers: [RegisteredServer]
-    var activeServerID: UUID? {
-        didSet {
-            guard activeServerID != oldValue else { return }
-            reloadAdvancedPrinterControlsPreference()
-        }
-    }
-    private(set) var advancedPrinterControlsEnabled = false
+    var activeServerID: UUID?
 
     /// Awaited snapshot purge authority, wired by `ServiceContainer`. Server
     /// removal is gated on this: a successful purge must complete before the
@@ -146,7 +139,6 @@ final class ServerRegistry {
             migrateLegacyServerIfNeeded()
         }
         sanitizeActiveSelection()
-        reloadAdvancedPrinterControlsPreference()
     }
 
     var activeServer: RegisteredServer? {
@@ -195,9 +187,6 @@ final class ServerRegistry {
         updated.updatedAt = now()
 
         servers[index] = updated
-        if endpointChanged {
-            clearAdvancedPrinterControlsPreference(for: server.id)
-        }
         persist()
     }
 
@@ -213,7 +202,6 @@ final class ServerRegistry {
         if activeServerID == id {
             activeServerID = servers.first?.id
         }
-        clearAdvancedPrinterControlsPreference(for: id)
         persist()
     }
 
@@ -253,7 +241,6 @@ final class ServerRegistry {
         // Consume the revision CAS FIRST (side-effect-free on failure).
         guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
-        clearAdvancedPrinterControlsPreference(for: candidate.id)
         persist()
         return true
     }
@@ -297,19 +284,6 @@ final class ServerRegistry {
         }
         activeServerID = id
         persist()
-    }
-
-    func setAdvancedPrinterControlsEnabled(_ enabled: Bool) {
-        guard let activeServerID else {
-            advancedPrinterControlsEnabled = false
-            return
-        }
-
-        userDefaults.set(
-            enabled,
-            forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
-        )
-        advancedPrinterControlsEnabled = enabled
     }
 
     static func normalizedURLString(for raw: String) throws -> String {
@@ -414,30 +388,6 @@ final class ServerRegistry {
         if !servers.contains(where: { $0.id == activeServerID }) {
             self.activeServerID = servers.first?.id
             persist()
-        }
-    }
-
-    private static func advancedPrinterControlsPreferenceKey(for serverID: UUID) -> String {
-        "\(advancedPrinterControlsPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
-    }
-
-    private func reloadAdvancedPrinterControlsPreference() {
-        guard let activeServerID else {
-            advancedPrinterControlsEnabled = false
-            return
-        }
-
-        advancedPrinterControlsEnabled = userDefaults.bool(
-            forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
-        )
-    }
-
-    private func clearAdvancedPrinterControlsPreference(for serverID: UUID) {
-        userDefaults.removeObject(
-            forKey: Self.advancedPrinterControlsPreferenceKey(for: serverID)
-        )
-        if activeServerID == serverID {
-            advancedPrinterControlsEnabled = false
         }
     }
 

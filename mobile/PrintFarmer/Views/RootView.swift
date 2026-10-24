@@ -2,20 +2,15 @@ import SwiftUI
 
 enum UnauthenticatedRootRoute: Equatable {
     case onboarding
-    case advancedPrinterControls
     case localNetworkPermission
     case login
 
     static func resolve(
-        hasSeenAdvancedPrinterControlsPrompt: Bool,
         hasSeenOnboarding: Bool,
         hasCompletedNetworkPermission: Bool
     ) -> Self {
         if !hasSeenOnboarding {
             return .onboarding
-        }
-        if !hasSeenAdvancedPrinterControlsPrompt {
-            return .advancedPrinterControls
         }
         if !hasCompletedNetworkPermission {
             return .localNetworkPermission
@@ -38,8 +33,6 @@ struct RootView: View {
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @State private var connectionMonitor = ConnectionMonitor()
     @State private var connectionGate = BackendConnectionGate()
-    @AppStorage(AdvancedPrinterControlsPromptState.hasSeenPromptKey)
-    private var hasSeenAdvancedPrinterControlsPrompt = false
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
@@ -93,19 +86,11 @@ struct RootView: View {
                     }
                 } else {
                     switch UnauthenticatedRootRoute.resolve(
-                        hasSeenAdvancedPrinterControlsPrompt: hasSeenAdvancedPrinterControlsPrompt,
                         hasSeenOnboarding: hasSeenOnboarding,
                         hasCompletedNetworkPermission: hasCompletedNetworkPermission
                     ) {
                     case .onboarding:
                         OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
-                    case .advancedPrinterControls:
-                        AdvancedPrinterControlsPermissionView(
-                            serverRegistry: serverRegistry,
-                            onComplete: {
-                                hasSeenAdvancedPrinterControlsPrompt = true
-                            }
-                        )
                     case .localNetworkPermission:
                         LocalNetworkPermissionView(
                             hasCompletedNetworkPermission: $hasCompletedNetworkPermission

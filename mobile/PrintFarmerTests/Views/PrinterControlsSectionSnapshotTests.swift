@@ -1601,10 +1601,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 1024, dynamicType: .large, name: "regular")
     }
 
-    func test_blockedEditors_hideOfflineAndExplainPreferenceAndPermissionGates() async throws {
+    func test_blockedEditors_hideOfflineAndExplainReadinessAndPermissionGates() async throws {
         for reason in [
             "Printer is offline.",
-            "Enable printer controls for this server in Settings.",
+            "Sign in and wait for this server to be ready.",
             "Printer controls require Queue.Start permission."
         ] {
             let printer = try makePrinter(backend: .octoPrint, isOnline: reason != "Printer is offline.")

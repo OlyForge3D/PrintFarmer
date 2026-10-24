@@ -227,7 +227,7 @@ Navigation remains Farm grid → pushed printer detail.
 
 Both **Overview** and **Controls** remain visible, through the segmented selector
 or a swipe, even offline or with setup controls disabled. Controls explains the
-restriction and links to the existing per-server Printer Safety settings.
+restriction (for example, the printer is offline or the account lacks permission).
 Selection is retained when access changes; visibility does not grant permission
 or trigger capability loading while setup controls are unavailable.
 
@@ -379,18 +379,15 @@ Emergency Stop remains separate and confirmed. After interruption or an
 uncertain response, inspect the original printer before another action.
 See the [guarded controls design and availability matrix](docs/design/printer-controls-section.md#guarded-physical-material-and-calibration-2599).
 
-### Advanced Printer Controls
+### Printer Controls Access
 
-Advanced printer controls are off by default for every server. To use jog,
-preheat, home, z-offset, or disable motors, open **Settings** → **Printer
-Safety** and enable **Advanced Printer Controls** for the active server. Once
-enabled, jog/preheat/home setup is reachable as the Controls page of printer
-detail (see above) — there is no separate "Advanced" screen nested inside
-another "Advanced" entry. Enabling the controls on one server does not enable
-them on another. Turning the setting off removes command access immediately;
-an open Controls page retains selection and explains the restriction. Changing a registered
-server's URL also resets the setting to off so an opt-in cannot carry over to a
-different endpoint. Misuse may damage a printer or ruin a print.
+Jog, preheat, home, z-offset and disable-motors controls live on the Control
+page of printer detail. There is no per-server opt-in and no separate
+"Advanced" screen: the Control page shows whenever the printer is online, the
+backend reports the capability, and the signed-in account has the server-side
+permission (Queue.Start). When any of those checks fails, an open Control page
+keeps its selection and explains the restriction. Misuse may damage a printer
+or ruin a print.
 
 ### Post-Login Connection Check
 

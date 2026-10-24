@@ -123,79 +123,33 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         XCTAssertFalse(loginViewModel.isServerURLExpanded)
     }
 
-    func testAdvancedPrinterControlsDefaultOffForFreshAndExistingRegistries() throws {
-        let registry = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        _ = try registry.add(
+    /// The retired per-server "Advanced printer controls" opt-in left
+    /// `pf_advanced_printer_controls_enabled.<server-id>` keys and the
+    /// onboarding `hasSeenAdvancedPrinterControlsPrompt` flag behind. An
+    /// upgraded install must load cleanly, ignore them, and never write them.
+    func testRetiredAdvancedControlsOptInKeysAreIgnoredOnUpgrade() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        var server = try registry.add(
             displayName: "Farm",
             baseURL: URL(string: "https://print.example.com")!
         )
+        let legacyKey = "pf_advanced_printer_controls_enabled.\(server.id.uuidString.lowercased())"
+        userDefaults.set(false, forKey: legacyKey)
+        userDefaults.set(true, forKey: "hasSeenAdvancedPrinterControlsPrompt")
 
-        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
-
-        let upgradedRegistry = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        XCTAssertFalse(upgradedRegistry.advancedPrinterControlsEnabled)
-    }
-
-    func testAdvancedPrinterControlsPreferencePersistsPerServer() throws {
-        let registry = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        let home = try registry.add(
-            displayName: "Home",
-            baseURL: URL(string: "https://home.example.com")!
-        )
-        let client = try registry.add(
-            displayName: "Client",
-            baseURL: URL(string: "https://client.example.com")!,
-            makeActiveIfNeeded: false
-        )
-
-        registry.setAdvancedPrinterControlsEnabled(true)
-        XCTAssertTrue(registry.advancedPrinterControlsEnabled)
-
-        try registry.setActive(id: client.id)
-        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
-
-        try registry.setActive(id: home.id)
-        XCTAssertTrue(registry.advancedPrinterControlsEnabled)
-
-        let reloaded = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        XCTAssertTrue(reloaded.advancedPrinterControlsEnabled)
-        try reloaded.setActive(id: client.id)
-        XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
-    }
-
-    func testChangingServerURLClearsAdvancedPrinterControlsPreference() throws {
-        let registry = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        var server = try registry.add(
-            displayName: "Personal",
-            baseURL: URL(string: "https://personal.example.com")!
-        )
-        registry.setAdvancedPrinterControlsEnabled(true)
+        let upgraded = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        XCTAssertEqual(upgraded.activeServerID, server.id)
+        XCTAssertEqual(upgraded.servers.map(\.id), [server.id])
 
         server.baseURL = URL(string: "https://client.example.com")!
-        try registry.update(server)
+        try upgraded.update(server)
+        try upgraded.setActive(id: server.id)
 
-        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
-
-        let reloaded = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
+        XCTAssertEqual(userDefaults.object(forKey: legacyKey) as? Bool, false)
+        XCTAssertFalse(
+            userDefaults.dictionaryRepresentation().keys.contains {
+                $0.hasPrefix("pf_advanced_printer_controls_enabled") && $0 != legacyKey
+            }
         )
-        XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
-        XCTAssertEqual(reloaded.activeServer?.normalizedURLString, "https://client.example.com")
     }
 }

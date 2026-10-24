@@ -51,7 +51,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()
         try fixture.registry.setActive(id: fixture.second.id)
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         await fixture.disconnect.waitUntilArrived()
         XCTAssertNil(fixture.services.printerControlsComposition)
         fixture.disconnect.release()
@@ -119,7 +118,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
     func testProductionDetailHostInitialLoadCreatesOneControlsOwner() async throws {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let controller = DetailHostingController(rootView: try host(
             PrinterDetailView(printerId: fixture.printer.id), services: fixture.services, registry: fixture.registry
         ))
@@ -146,7 +144,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
         let fixture = try detailHostFixture()
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
@@ -281,7 +278,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
             writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)]
         )
         let fixture = try detailHostFixture(writableSensors: [auxiliaryFan, temperatureFan, chamber])
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
@@ -316,7 +312,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let barrier = AsyncBarrier()
         defer { barrier.close() }
         let fixture = try detailHostFixture(verifiedMaterial: true, capabilityBarrier: barrier)
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let controller = DetailHostingController(rootView: try host(
             PrinterDetailView(printerId: fixture.printer.id),
             services: fixture.services, registry: fixture.registry
@@ -349,7 +344,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testFilamentSafetyRefreshSurvivesStatusQueueAndControlTraversal() async throws {
         let fixture = try detailHostFixture(verifiedMaterial: true)
-        fixture.registry.setAdvancedPrinterControlsEnabled(true)
         let detail = PrinterDetailView(printerId: fixture.printer.id)
         let controller = DetailHostingController(rootView: try host(
             detail, services: fixture.services, registry: fixture.registry
@@ -1377,8 +1371,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
     // MARK: - Controls owner mapping (Hicks review finding 15)
 
     func testControlsOwnerMappingSkipsBuildWhenControlsUnavailable() {
-        // Avoid a new capability request for a Overview-only visit — the
-        // common case, since Advanced Printer Controls defaults off.
+        // Avoid a new capability request when the printer's controls are
+        // hidden (for example, offline or missing permission).
         XCTAssertFalse(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
             existingOwnerPrinterID: nil, printerID: UUID(), controlsAvailable: false
         ))

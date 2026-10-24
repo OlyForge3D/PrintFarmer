@@ -9,7 +9,6 @@ enum AppDestination: Hashable {
     case jobQueue
     case offlineQueue
     case manageServers
-    case advancedPrinterControls(printerId: UUID)
 }
 
 enum AppTab: String, Hashable, CaseIterable, Sendable {

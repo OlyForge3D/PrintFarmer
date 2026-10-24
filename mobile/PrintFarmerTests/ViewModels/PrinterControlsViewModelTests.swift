@@ -408,7 +408,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         _ model: PrinterControlsViewModel, services: ServiceContainer, registry: ServerRegistry
     ) {
         model.configureAccess(serverID: model.registeredServerID) { [weak model] in
-            guard let model, AdvancedPrinterControlsAccess.matchesComposition(
+            guard let model, PrinterControlsAccess.matchesComposition(
                 model, selectedServerID: registry.activeServerID, composition: services.printerControlsComposition
             ) else { return "Server composition changed. Reopen this printer." }
             return nil

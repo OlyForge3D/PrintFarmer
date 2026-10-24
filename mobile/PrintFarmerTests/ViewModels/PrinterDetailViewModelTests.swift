@@ -1829,16 +1829,12 @@ final class PrinterDetailViewModelTests: XCTestCase {
 
     // MARK: - SignalR Live Updates (Refs #706 reviewer BLOCK)
 
-    /// Regression: `AdvancedPrinterControlsDestination` (F1 #706) must
-    /// call `configureSignalR(services.signalRService)` just like
-    /// `PrinterDetailView.task` so state/lockouts refresh live and
-    /// pending commands clear. Bishop/Hicks/Vasquez consensus flagged
-    /// the missing wire-up in the destination as a BLOCK. This test
-    /// pins the underlying `PrinterDetailViewModel.configureSignalR`
-    /// seam: once wired to a SignalR service and a printer is loaded,
-    /// a `printerupdated` broadcast for the same printer must be
-    /// applied to `viewModel.printer` — the same guarantee the
-    /// Advanced surface now depends on.
+    /// Regression (F1 #706): `PrinterDetailView.task` wires
+    /// `configureSignalR(services.signalRService)` so state/lockouts refresh
+    /// live and pending commands clear. This test pins the underlying
+    /// `PrinterDetailViewModel.configureSignalR` seam: once wired to a
+    /// SignalR service and a printer is loaded, a `printerupdated` broadcast
+    /// for the same printer must be applied to `viewModel.printer`.
     func testConfigureSignalRAppliesLivePrinterUpdate() async throws {
         let printer = try TestData.decodePrinter() // testUUID, state: "printing"
         mockService.printerToReturn = printer

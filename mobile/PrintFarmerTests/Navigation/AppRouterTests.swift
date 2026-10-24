@@ -859,20 +859,13 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNil(router.pendingFilamentSwap)
     }
 
-    func testAdvancedControlsAccessRequiresOptInAndOnlinePrinter() throws {
+    func testControlsAccessRequiresOnlinePrinterWithoutPerServerOptIn() throws {
         var printer = try TestData.decodePrinter()
 
-        XCTAssertFalse(
-            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: false, for: printer)
-        )
-        XCTAssertTrue(
-            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: true, for: printer)
-        )
+        XCTAssertTrue(PrinterControlsAccess.isEntryVisible(for: printer))
 
         printer.isOnline = false
-        XCTAssertFalse(
-            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: true, for: printer)
-        )
+        XCTAssertFalse(PrinterControlsAccess.isEntryVisible(for: printer))
     }
 
     // MARK: - Reset to root
@@ -893,19 +886,6 @@ final class AppRouterTests: XCTestCase {
 
         router.resetToRoot(tab: .filament)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-    }
-
-    // MARK: - AppDestination migrations
-
-    func testAdvancedPrinterControlsDestinationEncodesPrinterId() {
-        // F1 (#706): jog/preheat/z-offset controls are only reachable via
-        // this destination, which must round-trip the printer id.
-        let destination = AppDestination.advancedPrinterControls(printerId: printerId)
-        if case .advancedPrinterControls(let id) = destination {
-            XCTAssertEqual(id, printerId)
-        } else {
-            XCTFail("Expected advancedPrinterControls case")
-        }
     }
 
     // MARK: - Inventory feature visibility
