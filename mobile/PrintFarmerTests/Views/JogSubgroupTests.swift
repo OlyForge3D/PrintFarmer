@@ -251,16 +251,16 @@ final class JogSubgroupTests: XCTestCase {
         // Firmware keeps reporting the last kinematic position after homing is
         // invalidated, so the number must not be presented as a position.
         let display = JogSubgroup.positionDisplay(axis: "Z", value: 12.3, homedAxes: "xy", unit: "mm")
-        XCTAssertEqual(display.text, "—")
+        XCTAssertEqual(display.text, "--")
         XCTAssertEqual(display.accessibilityLabel, "Z position unavailable, axis not homed")
 
         let compact = JogSubgroup.positionDisplay(axis: "Z", value: 12.3, homedAxes: "xy")
-        XCTAssertEqual(compact.text, "—")
+        XCTAssertEqual(compact.text, "--")
         XCTAssertEqual(compact.accessibilityLabel, "Z position unavailable, axis not homed")
 
         // Nothing homed at all still withholds every axis.
         for axis in ["X", "Y", "Z"] {
-            XCTAssertEqual(JogSubgroup.positionDisplay(axis: axis, value: 1.0, homedAxes: "", unit: "mm").text, "—", axis)
+            XCTAssertEqual(JogSubgroup.positionDisplay(axis: axis, value: 1.0, homedAxes: "", unit: "mm").text, "--", axis)
         }
     }
 
@@ -280,10 +280,14 @@ final class JogSubgroupTests: XCTestCase {
         XCTAssertEqual(compact.accessibilityLabel, "Y 85.5")
     }
 
-    func test_positionDisplay_reportsUnknownForMissingOrNonFiniteCoordinates() {
+    func test_positionDisplay_reportsPlaceholderForMissingOrNonFiniteCoordinates() {
         for value in [nil, Double.nan, .infinity] as [Double?] {
-            XCTAssertEqual(JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz", unit: "mm").text, "Unknown")
-            XCTAssertEqual(JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz").text, "---")
+            let withUnit = JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz", unit: "mm")
+            XCTAssertEqual(withUnit.text, "--")
+            XCTAssertEqual(withUnit.accessibilityLabel, "X not reported")
+            let compact = JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz")
+            XCTAssertEqual(compact.text, "--")
+            XCTAssertEqual(compact.accessibilityLabel, "X not reported")
         }
     }
 

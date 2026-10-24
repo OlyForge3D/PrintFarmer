@@ -11,9 +11,10 @@ enum EssentialControlsStyle {
     }
 }
 
-struct EssentialControlHeading: View {
+struct EssentialControlHeading<Trailing: View>: View {
     let title: String
     var detail: String? = nil
+    @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -28,8 +29,15 @@ struct EssentialControlHeading: View {
                 Text(detail).font(.caption).foregroundStyle(Color.pfTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            trailing
         }
         .frame(minHeight: 22)
+    }
+}
+
+extension EssentialControlHeading where Trailing == EmptyView {
+    init(title: String, detail: String? = nil) {
+        self.init(title: title, detail: detail) { EmptyView() }
     }
 }
 
@@ -53,6 +61,11 @@ struct ControlNumberField: UIViewRepresentable {
     /// need "-" keep full access. Temperature fields pass `.decimalPad` so
     /// iOS shows the compact numeric keypad instead of the full keyboard.
     var keyboardType: UIKeyboardType = .numbersAndPunctuation
+    /// Stepper values read as centred primary monospaced text (weight 500),
+    /// with no border or fill, matching mockup B's `.stepper .val`.
+    var stepperValueStyle = false
+    /// Incrementing this asks the field to become first responder (Heat "Custom…").
+    var focusRequest = 0
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -89,33 +102,46 @@ struct ControlNumberField: UIViewRepresentable {
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.text = $text
         if field.text != text { field.text = text }
-        let placeholderFont = UIFont.systemFont(ofSize: fontSize)
+        // A stepper's placeholder is the live target, so it reads as the value.
+        let valueFont = stepperValueStyle
+            ? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
+            : UIFont.systemFont(ofSize: fontSize)
         field.attributedPlaceholder = NSAttributedString(
             string: placeholder,
             attributes: [
-                .foregroundColor: UIColor(Color.pfTextSecondary),
-                .font: placeholderFont
+                .foregroundColor: UIColor(stepperValueStyle ? Color.pfTextPrimary : Color.pfTextSecondary),
+                .font: valueFont
             ]
         )
-        field.font = placeholderFont
+        field.font = valueFont
         field.isEnabled = isEnabled
         field.accessibilityLabel = label
         field.accessibilityIdentifier = identifier
         field.accessibilityHint = hint
         field.textColor = UIColor(Color.pfTextPrimary)
-        field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
+        field.textAlignment = stepperValueStyle ? .center : .natural
+        field.borderStyle = stepperValueStyle ? .none : .roundedRect
+        field.backgroundColor = stepperValueStyle ? .clear : UIColor(Color.pfBackgroundTertiary)
+        if focusRequest != context.coordinator.focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async { if field.isEnabled { field.becomeFirstResponder() } }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 200, height: EssentialControlsStyle.inputHeight(fontSize: fontSize))
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, focusRequest: focusRequest) }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var text: Binding<String>
+        var focusRequest: Int
         weak var field: UITextField?
-        init(text: Binding<String>) { self.text = text }
+        init(text: Binding<String>, focusRequest: Int = 0) {
+            self.text = text
+            self.focusRequest = focusRequest
+        }
         @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             textField.resignFirstResponder()
@@ -124,6 +150,41 @@ struct ControlNumberField: UIViewRepresentable {
         @objc func doneTapped() {
             field?.resignFirstResponder()
         }
+    }
+}
+
+// MARK: - Control tab environment overrides
+
+private struct ControlActionCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+private struct PreheatPresetsFillRowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct ControlActionSelectedFillKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+extension EnvironmentValues {
+    /// Overrides `ControlActionButton`'s corner radius for surfaces that follow
+    /// the DESIGN.md 8 pt ceiling without restyling every existing control host.
+    var controlActionCornerRadius: CGFloat? {
+        get { self[ControlActionCornerRadiusKey.self] }
+        set { self[ControlActionCornerRadiusKey.self] = newValue }
+    }
+
+    /// Lays detail-mode preheat presets out as one row of equal-width buttons.
+    var preheatPresetsFillRow: Bool {
+        get { self[PreheatPresetsFillRowKey.self] }
+        set { self[PreheatPresetsFillRowKey.self] = newValue }
+    }
+
+    /// Overrides the selected fill of segmented `ControlActionButton`s.
+    var controlActionSelectedFill: Color? {
+        get { self[ControlActionSelectedFillKey.self] }
+        set { self[ControlActionSelectedFillKey.self] = newValue }
     }
 }
 
@@ -149,6 +210,8 @@ struct ControlActionButton: UIViewRepresentable {
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
+    @Environment(\.controlActionSelectedFill) private var selectedFillOverride
 
     func makeUIView(context: Context) -> UIButton {
         let button = NativeControlButton(type: .system)
@@ -171,7 +234,7 @@ struct ControlActionButton: UIViewRepresentable {
             configuration.contentInsets = .init(top: 8, leading: 8, bottom: 8, trailing: 8)
         }
         if menu != nil { configuration.contentInsets.trailing = 30 }
-        configuration.background.cornerRadius = segmented ? 8 : 10
+        configuration.background.cornerRadius = cornerRadiusOverride ?? (segmented ? 8 : 10)
         configuration.baseForegroundColor = UIColor(
             !isEnabled ? Color.pfTextTertiary :
                 isDestructive ? Color.pfError : prominent ? Color.pfButtonPrimaryText :
@@ -179,7 +242,8 @@ struct ControlActionButton: UIViewRepresentable {
         )
         configuration.background.backgroundColor = UIColor(
             textOnly ? Color.clear : !isEnabled ? Color.pfBackgroundTertiary : prominent ? Color.pfButtonPrimary :
-                segmented && !selected ? Color.clear : Color.pfBackground
+                segmented && !selected ? Color.clear :
+                segmented ? (selectedFillOverride ?? Color.pfBackground) : Color.pfBackground
         )
         configuration.background.strokeColor = UIColor(Color.pfBorder)
         configuration.background.strokeWidth = segmented || prominent || textOnly ? 0 : 1
@@ -260,13 +324,26 @@ struct PreheatSubgroup: View {
     /// disabled (offline / mid-print). Cleared after a few seconds. Phone
     /// equivalent of the `.help()` tooltip that appears on iPad/Mac.
     @State private var disabledTapMessage: String?
+    /// Bumped by the More menu's "Custom…" to focus the Nozzle target field.
+    @State private var nozzleFocusRequest = 0
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .subheadline) private var presetFontSize: CGFloat = 14
+    @Environment(\.preheatPresetsFillRow) private var presetsFillRow
+    @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
+
+    /// The Control tab's filled preset row shows Cool down as a snowflake;
+    /// VoiceOver still speaks "Cool down" via `accessibilityLabel(preset:isPending:)`.
+    static func detailPresetSymbol(_ preset: PreheatPreset, fillsRow: Bool) -> String? {
+        fillsRow && preset == .coolDown ? "snowflake" : nil
+    }
 
     /// Fixed display order matching the UX spec.
-    static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
+    static let presets: [PreheatPreset] = PreheatPreset.rowMaterials + [.coolDown]
+
+    /// Cool down is always offered: heater shutdown when supported, else 0/0 targets while idle.
+    private var visiblePresets: [PreheatPreset] { Self.presets }
 
     /// Presets require explicit hotend-control evidence, including Cool Down.
     static func isVisible(capabilities: PrinterBackendCapabilities?) -> Bool {
@@ -280,17 +357,18 @@ struct PreheatSubgroup: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             if compactForDetail {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) {
-                        heatHeading
-                        Spacer(minLength: 4)
-                        detailPresets
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        heatHeading
-                        detailPresets
+                // The Heat segment already names this panel, so detail mode shows only presets.
+                Group {
+                    if presetsFillRow {
+                        filledPresetRow
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            detailPresets
+                            grid
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 8)
             } else {
                 heatHeading.padding(.bottom, 14)
@@ -300,7 +378,8 @@ struct PreheatSubgroup: View {
             IndividualHeaterControls(
                 viewModel: viewModel,
                 usesSteppers: usesSteppers,
-                compactForDetail: compactForDetail
+                compactForDetail: compactForDetail,
+                nozzleFocusRequest: nozzleFocusRequest
             )
 
             if !compactForDetail {
@@ -329,11 +408,130 @@ struct PreheatSubgroup: View {
 
     private var detailPresets: some View {
         HStack(spacing: 4) {
-            ForEach(Self.presets, id: \.self) { preset in
+            ForEach(visiblePresets, id: \.self) { preset in
                 button(for: preset, compactForDetail: true)
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    enum PresetSlot: Hashable {
+        case preset(PreheatPreset)
+        case more
+    }
+
+    /// Mockup v3: PLA · PETG · ABS · More · Cool down in one row; from
+    /// xxLarge (including every accessibility size) the materials wrap above
+    /// More + Cool down, so More stays reachable at every text size.
+    static func presetRows(dynamicTypeSize: DynamicTypeSize) -> [[PresetSlot]] {
+        let materials = PreheatPreset.rowMaterials.map(PresetSlot.preset)
+        let trailing: [PresetSlot] = [.more, .preset(.coolDown)]
+        return dynamicTypeSize >= .xxLarge ? [materials, trailing] : [materials + trailing]
+    }
+
+    private var filledPresetRow: some View {
+        VStack(spacing: 8) {
+            ForEach(Self.presetRows(dynamicTypeSize: dynamicTypeSize), id: \.self) { row in
+                // Every slot stretches to the tallest one, so More matches
+                // Cool down when accessibility sizes grow the row.
+                HStack(spacing: 8) {
+                    ForEach(row, id: \.self) { slot in
+                        switch slot {
+                        case .preset(let preset):
+                            button(for: preset, compactForDetail: true)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        case .more:
+                            moreMenu.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    static func menuItemSingleLineText(_ material: String, temperatures: String) -> String {
+        "\(material)  \(temperatures)"
+    }
+
+    static func menuItemTemperatureText(_ preset: PreheatPreset, hasBed: Bool) -> String {
+        hasBed ? "\(Int(preset.hotend))° · \(Int(preset.bed))°" : "\(Int(preset.hotend))°"
+    }
+
+    /// Native menu of extra materials, then "Custom…" which focuses the
+    /// existing Nozzle target field rather than opening a new editor.
+    private var customMenuItem: some View {
+        Button {
+            nozzleFocusRequest += 1
+        } label: {
+            Label("Custom…", systemImage: "slider.horizontal.3")
+        }
+        .accessibilityIdentifier("printer.controls.preheat.custom")
+    }
+
+    private var moreMenu: some View {
+        let canControl = viewModel.canRunPreheat(.pla)
+        let disabledReason = viewModel.preheatMenuBlockedReason
+        let isEnabled = disabledReason == nil
+        // The native menu doesn't scroll at accessibility sizes, so Custom…
+        // moves to the top there to stay reachable.
+        let customFirst = dynamicTypeSize.isAccessibilitySize
+        return Menu {
+            if customFirst {
+                customMenuItem
+                Divider()
+            }
+            Section {
+                ForEach(PreheatPreset.menuMaterials, id: \.self) { preset in
+                    Button {
+                        handleTap(preset: preset, canControl: canControl)
+                    } label: {
+                        let temperatures = Self.menuItemTemperatureText(preset, hasBed: viewModel.supports(.bed))
+                        // One line per item keeps more of the menu on screen.
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Text(Self.menuItemSingleLineText(preset.displayLabel, temperatures: temperatures))
+                        } else {
+                            Text(preset.displayLabel)
+                            Text(temperatures)
+                        }
+                    }
+                    .disabled(viewModel.preheatBlockedReason(preset) != nil)
+                    .accessibilityIdentifier("printer.controls.preheat.\(preset.rawValue)")
+                }
+            }
+            if !customFirst {
+                Divider()
+                customMenuItem
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text("More")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(isEnabled ? Color.accentColor : Color.pfTextTertiary)
+            .frame(maxWidth: .infinity, minHeight: 48, maxHeight: .infinity)
+            .padding(.horizontal, 4)
+            .background(
+                isEnabled ? Color.pfBackground : Color.pfBackgroundTertiary,
+                in: RoundedRectangle(cornerRadius: cornerRadiusOverride ?? 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadiusOverride ?? 10, style: .continuous)
+                    .strokeBorder(Color.pfBorder)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(!isEnabled)
+        .accessibilityLabel(String(localized: "More materials", comment: "VoiceOver: Heat More menu button"))
+        .accessibilityHint(isEnabled
+            ? String(localized: "Shows more preheat materials and a custom nozzle target.", comment: "VoiceOver: Heat More menu hint")
+            : disabledReason ?? "")
+        .accessibilityIdentifier("printer.controls.preheat.more")
     }
 
     @ViewBuilder
@@ -342,7 +540,7 @@ struct PreheatSubgroup: View {
         // Cool down sits in the same row as ABS (spec update): all four
         // presets share one grid so they render at identical dimensions.
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(Self.presets, id: \.self) { preset in
+            ForEach(visiblePresets, id: \.self) { preset in
                 button(for: preset)
             }
         }
@@ -368,7 +566,7 @@ struct PreheatSubgroup: View {
             }
             return false
         }()
-        let canControl = viewModel.canControl
+        let canControl = viewModel.canRunPreheat(preset)
         let limitsReason = viewModel.preheatBlockedReason(preset)
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
@@ -384,7 +582,8 @@ struct PreheatSubgroup: View {
         }
         .buttonStyle(PreheatButtonStyle(
             preset: preset, isEnabled: isInteractive, isPending: isPending,
-            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize
+            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize,
+            cornerRadius: cornerRadiusOverride ?? 10
         ))
         .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
@@ -395,13 +594,17 @@ struct PreheatSubgroup: View {
         .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(limitsReason ?? viewModel.blockedReason ?? "")
+        .help(limitsReason ?? viewModel.preheatAccessReason(preset) ?? "")
     }
 
     struct IndividualHeaterControls: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         var usesSteppers = false
         var compactForDetail = false
+        /// Tune passes `true`: its targets stay editable mid-print when the
+        /// backend supports it. Heat is idle-only.
+        var allowsActivePrint = false
+        var nozzleFocusRequest = 0
         @State private var hotend = ""
         @State private var bed = ""
         @State private var inputError: String?
@@ -415,7 +618,8 @@ struct PreheatSubgroup: View {
                 layout {
                     HeaterTargetEditor(
                         viewModel: viewModel, heater: .hotend, target: $hotend,
-                        usesStepper: usesSteppers, compactForDetail: compactForDetail
+                        usesStepper: usesSteppers, compactForDetail: compactForDetail,
+                        focusRequest: nozzleFocusRequest
                     )
                     HeaterTargetEditor(
                         viewModel: viewModel, heater: .bed, target: $bed,
@@ -431,7 +635,7 @@ struct PreheatSubgroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .disabled(!viewModel.canControl || viewModel.isExecuting)
+            .disabled(!(allowsActivePrint ? viewModel.canControlHeat : viewModel.canControl) || viewModel.isExecuting)
         }
 
         private var setTargetsButton: some View {
@@ -468,10 +672,11 @@ struct PreheatSubgroup: View {
         @Binding var target: String
         var usesStepper = false
         var compactForDetail = false
+        var focusRequest = 0
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
-            guard let value, value.isFinite else { return "Unknown" }
+            guard let value, value.isFinite else { return "Not reported" }
             return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
         }
 
@@ -501,6 +706,7 @@ struct PreheatSubgroup: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(Color.pfTextSecondary)
                                 .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         stepperEditor
@@ -519,6 +725,7 @@ struct PreheatSubgroup: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.pfTextSecondary)
                                     .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
+                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
                             }
                         }
                         .frame(minHeight: 20, alignment: .leading)
@@ -537,10 +744,13 @@ struct PreheatSubgroup: View {
                     label: "\(heater.title) target in degrees Celsius",
                     identifier: "printer.controls.\(heater.rawValue).target",
                     hint: targetHint,
-                    keyboardType: .decimalPad
+                    keyboardType: .decimalPad,
+                    stepperValueStyle: usesStepper,
+                    focusRequest: focusRequest
                 )
                 .frame(width: compactForDetail && !dynamicTypeSize.isAccessibilitySize ? 72 : nil)
                 Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize()
                     .accessibilityHidden(true)
                 if usesStepper { stepButton(delta: 5, symbol: "plus") }
             }
@@ -576,8 +786,14 @@ struct PreheatSubgroup: View {
 
         private var measuredTemperatureLabel: String {
             let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
-            guard let value, value.isFinite else { return "now Unknown" }
+            guard let value, value.isFinite else { return "now \(PrinterDetailViewModel.missingValuePlaceholder)" }
             return "now \(value.formatted(.number.precision(.fractionLength(0...1))))°"
+        }
+
+        private var measuredTemperatureAccessibilityLabel: String {
+            let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+            guard let value, value.isFinite else { return "Current temperature not reported" }
+            return "Current \(value.formatted(.number.precision(.fractionLength(0...1)))) degrees"
         }
 
         private var targetHint: String {
@@ -609,12 +825,31 @@ struct PreheatSubgroup: View {
         compactForDetail: Bool = false
     ) -> some View {
         VStack(spacing: 3) {
-            if compactForDetail {
+            if compactForDetail, let symbol = Self.detailPresetSymbol(preset, fillsRow: presetsFillRow) {
+                Image(systemName: symbol)
+                    .font(.body.weight(.semibold))
+                    .opacity(isPending ? 0 : 1)
+                    .accessibilityHidden(true)
+            } else if compactForDetail {
                 Text(preset == .coolDown ? "Off" : preset.displayLabel)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .opacity(isPending ? 0 : 1)
+                if preset != .coolDown {
+                    Text(Self.compactTargetsText(
+                        preset, hasBed: viewModel.supports(.bed),
+                        dynamicTypeSize: dynamicTypeSize
+                    ))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.8)
+                        .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
+                        .opacity(isPending ? 0 : 1)
+                        .accessibilityHidden(true)
+                }
             } else if preset == .coolDown {
                 // Larger snowflake icon with no text, matching web UI styling.
                 Image(systemName: "snowflake")
@@ -632,8 +867,12 @@ struct PreheatSubgroup: View {
         // Height comes from the type metrics alone, never the rendered label, so
         // every preset matches Cool down and the row keeps one height whichever
         // readings the backend supports.
-        .frame(height: compactForDetail ? 44 : max(54, presetFontSize * 2 + 14))
-        .frame(maxWidth: .infinity)
+        // Accessibility sizes let the compact row grow so captions aren't clipped.
+        .frame(height: compactForDetail
+            ? (dynamicTypeSize.isAccessibilitySize ? nil : 48)
+            : max(54, presetFontSize * 2 + 14))
+        .frame(minHeight: compactForDetail ? 48 : nil)
+        .frame(maxWidth: .infinity, maxHeight: compactForDetail && presetsFillRow ? .infinity : nil)
         .overlay {
             if isPending {
                 ProgressView()
@@ -643,12 +882,25 @@ struct PreheatSubgroup: View {
         }
     }
 
+    /// Compact preset caption, e.g. "200/60" (nozzle only without a heated bed).
+    /// Accessibility sizes stack the targets ("200°" over "60°") so the bed
+    /// target wraps instead of truncating.
+    static func compactTargetsText(
+        _ preset: PreheatPreset, hasBed: Bool,
+        dynamicTypeSize: DynamicTypeSize = .large
+    ) -> String {
+        if dynamicTypeSize.isAccessibilitySize {
+            return hasBed ? "\(Int(preset.hotend))°\n\(Int(preset.bed))°" : "\(Int(preset.hotend))°"
+        }
+        return hasBed ? "\(Int(preset.hotend))/\(Int(preset.bed))" : "\(Int(preset.hotend))"
+    }
+
     private func handleTap(preset: PreheatPreset, canControl: Bool) {
         guard viewModel.preheatBlockedReason(preset) == nil else { return }
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.
-            let message = viewModel.blockedReason ?? "Controls are unavailable."
+            let message = viewModel.preheatAccessReason(preset) ?? "Controls are unavailable."
             withAnimation(.easeInOut(duration: 0.15)) {
                 disabledTapMessage = message
             }
@@ -690,7 +942,7 @@ struct PreheatSubgroup: View {
         if !canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return preset.a11yHint(hasBed: viewModel.supports(.bed))
+        return preset.a11yHint(hasBed: viewModel.supports(.bed), turnsOffHeaters: viewModel.supportsHeaterShutdown)
     }
 
     func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
@@ -709,36 +961,28 @@ struct PreheatSubgroup: View {
 // MARK: - Preset display helpers
 
 private extension PreheatPreset {
-    var displayLabel: String {
-        switch self {
-        case .pla: return "PLA"
-        case .petg: return "PETG"
-        case .abs: return "ABS"
-        case .coolDown: return "Cool down"
-        }
-    }
+    var displayLabel: String { definition.name }
 
-    var spokenName: String {
-        switch self {
-        case .pla: return "PLA"
-        case .petg: return "PETG"
-        case .abs: return "ABS"
-        case .coolDown: return "cool down"
-        }
-    }
+    var spokenName: String { self == .coolDown ? "cool down" : definition.name }
 
     var temperatureLabel: String {
         "\(Int(hotend))° / \(Int(bed))°"
     }
+}
 
+extension PreheatPreset {
     /// VoiceOver idle hint per spec §4.1. Omits bed segment when printer has no heated bed.
-    func a11yHint(hasBed: Bool) -> String {
+    /// Cool down describes the path it takes: heater shutdown, or the 0° target fallback.
+    func a11yHint(hasBed: Bool, turnsOffHeaters: Bool) -> String {
         switch self {
         case .coolDown:
+            if turnsOffHeaters {
+                return String(localized: "Turns off all heaters.", comment: "VoiceOver: Cool Down hint when the backend supports heater shutdown")
+            }
             return hasBed
                 ? String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
                 : String(localized: "Sets hotend to 0 degrees.", comment: "VoiceOver: Cool Down hotend-only hint")
-        case .pla, .petg, .abs:
+        case .pla, .petg, .abs, .asa, .tpu, .pc, .nylon:
             if hasBed {
                 return String(localized: "Sets hotend to \(Int(hotend)) degrees, bed to \(Int(bed)) degrees.", comment: "VoiceOver: preheat idle hint with bed")
             } else {
@@ -756,6 +1000,7 @@ private struct PreheatButtonStyle: ButtonStyle {
     let isEnabled: Bool
     let isPending: Bool
     let compact: Bool
+    let cornerRadius: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -764,7 +1009,7 @@ private struct PreheatButtonStyle: ButtonStyle {
             .background(background)
             .foregroundStyle(foreground)
             .overlay(border)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .opacity(configuration.isPressed && isEnabled ? 0.7 : 1.0)
             .contentShape(Rectangle())
     }
@@ -788,7 +1033,7 @@ private struct PreheatButtonStyle: ButtonStyle {
 
     @ViewBuilder
     private var border: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .strokeBorder(
                 isPending ? Color.pfAssigned : Color.pfBorder,
                 lineWidth: isPending ? 1.5 : 1

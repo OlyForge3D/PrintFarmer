@@ -60,8 +60,6 @@ enum UITestBootstrap {
     static let attentionHarvestScanLaunchArgument =
         "--uitesting-attention-harvest-scan"
     static let preserveStateLaunchArgument = "--uitesting-preserve-state"
-    static let advancedControlsPromptSeenLaunchArgument =
-        "--uitesting-advanced-controls-prompt-seen"
     static let onboardingSeenLaunchArgument = "--uitesting-onboarding-seen"
     static let networkPermissionCompletedLaunchArgument =
         "--uitesting-network-permission-complete"
@@ -1018,7 +1016,6 @@ enum UITestBootstrap {
             ServerCredentials(accessToken: Issue3259VisualAcceptanceURLProtocol.accessToken),
             serverId: server.id
         )
-        registry.setAdvancedPrinterControlsEnabled(true)
 
         let services = ServiceContainer(
             serverRegistry: registry,
@@ -2257,13 +2254,9 @@ enum UITestBootstrap {
         guard !arguments.contains(preserveStateLaunchArgument) else {
             return
         }
-        defaults.removeObject(forKey: AdvancedPrinterControlsPromptState.hasSeenPromptKey)
         defaults.removeObject(forKey: "hasSeenOnboarding")
         defaults.removeObject(forKey: "hasCompletedNetworkPermission")
 
-        if arguments.contains(advancedControlsPromptSeenLaunchArgument) {
-            defaults.set(true, forKey: AdvancedPrinterControlsPromptState.hasSeenPromptKey)
-        }
         if arguments.contains(onboardingSeenLaunchArgument) {
             defaults.set(true, forKey: "hasSeenOnboarding")
         }

@@ -6,6 +6,14 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Advanced Printer Controls opt-in and legacy screen** — Removed the
+  unreachable Advanced printer controls screen and its navigation destination,
+  the per-server **Settings → Printer Safety → Advanced printer controls**
+  toggle, and the onboarding prompt that offered it. The Control tab stays
+  visible; its controls are blocked with a reason when the printer is offline,
+  lacks control support, or the account lacks Queue.Start. Every existing
+  capability, connectivity and permission check still applies. Stored opt-in values from older installs
+  are ignored.
 - **APNs registration from the v1 mobile client** — Removed remote-notification
   registration callbacks, device-token persistence/upload, the in-app push
   toggle, APNs entitlement/build setting, and unreachable actionable
@@ -119,6 +127,52 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Changed
 
+- Control tab follows the #3460 heater contract: **Cool down** is always shown
+  and is idle-only (disabled while a job is starting, printing or paused;
+  Emergency stop covers that case). It calls `POST /heaters/off` when the
+  backend reports `supportsHeaterShutdown`, otherwise it sets hotend/bed
+  targets to 0. No confirmation is needed. Heat is idle-only: presets, the
+  More menu, Custom… and the Heat target fields are blocked while a job is
+  starting, printing or paused, even with
+  `supportsTemperatureControlDuringPrint`. Mid-print temperature changes
+  happen only on Tune, which keeps that capability gate; Tune omits the `enabled` quantity,
+  and `allowZero` targets step to/from 0. Missing thermal values show "--"
+  (VoiceOver "not reported").
+- Heat presets: PLA · PETG · ABS · **More** · Cool down in one row (wrapping
+  to presets, then More + Cool down at xxLarge and above, including every
+  accessibility text size, so More stays reachable). Each material preset
+  shows its nozzle/bed targets; More and Cool down show none. More's disabled
+  VoiceOver hint names the actual reason (printing, offline, a pending command
+  or unconfirmed access). More is a native menu (no section title) with ASA, TPU, PC and Nylon, then
+  "Custom…", which focuses the Nozzle target field. Preset temperatures
+  (°C, nozzle/bed): PLA 200/60, PETG 230/80, ABS 245/100, ASA 245/100,
+  TPU 220/50, PC 260/110, Nylon 250/80. PETG and ABS change from 240/80 and
+  240/100. PC and Nylon are capped for PTFE-lined hotends (preheat values, not
+  print temperatures). All values live in the single `PreheatPreset.definition` table.
+- At accessibility text sizes the More menu lists each material on one line
+  and puts "Custom…" at the top, because the native menu doesn't scroll and
+  Custom… was clipped below its bottom edge.
+- Printer detail polish: the pager's page dots use a compact 16 pt indicator,
+  the Move empty state shows an SF Symbol like the other empty states, and
+  Emergency Stop is a full-width, solid red button with a white icon and label
+  (accessibility label and confirmation unchanged).
+- Tune shows editable hotend and bed targets while a job is printing or paused,
+  disabled with a short reason only when the backend cannot apply them.
+- **Removed:** all fan controls from Tune (part-fan stepper and fan or
+  temperature-fan sensor rows).
+- Move & home X/Y/Z readouts show "--" for a missing position (VoiceOver
+  "not reported").
+- Instrument panel: while printing, Move and Heat are disabled and Tune is
+  the only enabled segment. Tune is selected on entering Control and when a
+  print starts; when the print ends Move and Heat re-enable and Tune stays
+  selected. Disabled segments use standard VoiceOver "dimmed" semantics (the
+  extra "Unavailable while printing" hint is gone). Other instrument panel changes: jog distance defaults to 1 mm, the X/Y/Z readout is
+  centred with hairline dividers, the babystep readout sits on the "Z babystep"
+  header row in medium-weight monospaced text (shows "--", VoiceOver "Z offset
+  not reported", when missing), and temperature steppers show the target as
+  centred primary monospaced text with no fill chip.
+- Idle Status no longer shows an empty progress bar and duplicate "0%"; the
+  progress block appears only while actively printing.
 - Native control capability fallback no longer infers physical-command support
   from a backend name. Explicit per-operation server evidence is required;
   older servers without that evidence leave commands unavailable. Heater,

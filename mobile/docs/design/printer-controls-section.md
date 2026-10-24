@@ -39,7 +39,8 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   distance, disclosures or the command owner.
 - Heat: side-by-side Hotend/Bed target fields with **one compact Go button**
   on the same row (stacked at accessibility text sizes), compact
-  PLA/PETG/ABS row, then **Cool down**. Actual/target values appear only in the
+  PLA · PETG · ABS · **More** · **Cool down** row (More is a native menu, with
+  no section title, listing ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field). Actual/target values appear only in the
   strip above, not repeated around each editor. Accessibility text stacks the
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
   native controls; do not import the browser wrapper's styling.
@@ -159,24 +160,25 @@ online/offline content, so hiding controls cannot strand an acknowledgement.
 
 **Essential integration (#2594):** `PrinterDetailView` embeds the presentation-only
 `PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
-`AdvancedPrinterControlsAccess.isEntryVisible` gates command content and owner
+`PrinterControlsAccess.isEntryVisible` gates command content and owner
 construction, not destination existence. An offline/disabled visit explains
-the restriction without loading capabilities, enabling a setting or dispatching
-commands. The settings link uses the existing `AppDestination.settings` route.
+the restriction without dispatching commands, and loads capabilities only for
+Moonraker printers (the detail view always builds their owner for durable motion, #2678). There is
+no per-server opt-in setting.
 
 For embedding, retain one owner above page visibility, scoped by registered server
 and printer UUID. The host supplies the scoped service, loads capabilities once,
 and forwards meaningful updates while the Controls page is hidden. Do not use
 the test-only wrapper initializer or create an owner per page. Apply
-`AdvancedPrinterControlsAccess` before exposing command content; this observer does not
+`PrinterControlsAccess` before exposing command content; this observer does not
 read feature flags. Replace the owner when the real server/printer target changes.
 
 ### Effective native operations and gates
 
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
-| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
-| Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
+| Preheat PLA/PETG/ABS (+ ASA/TPU/PC/Nylon via More) | `setTemperatures` | Idle-only (blocked while starting, printing or paused, regardless of `supportsTemperatureControlDuringPrint`). Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
+| Cool Down | `turnOffHeaters` (`POST /heaters/off`), else `setTemperatures` 0/0 | Always shown; idle-only (disabled while starting, printing or paused). Heater shutdown when `supportsHeaterShutdown`, otherwise 0/0 targets; confirms 0 on each supported heater |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
@@ -310,9 +312,20 @@ These tests prove native guards and typed synthetic shared-contract behavior,
 - Heat follows the approved Essential composition above, with one combined
   command owner path. Range guidance is in the field's VoiceOver hint and
   specific validation errors, not repeated permanent range paragraphs.
-- Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
-  Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
-  explicitly bed-less hardware omits the bed, including during Cool Down.
+- Presets (nozzle/bed °C) are PLA **200/60**, PETG **230/80**, ABS
+  **245/100**, plus ASA **245/100**, TPU **220/50**, PC **260/110** and Nylon
+  **250/80** under More. PC and Nylon are capped for PTFE-lined hotends: they
+  are preheat values, not print temperatures. `PreheatPreset.definition` is the
+  only place these values live; views and tests read from it. Also
+  Cool Down (heater shutdown with `supportsHeaterShutdown`, else a 0/0 idle
+  fallback matching the web app). Presets
+  require proven hotend support; unsupported or explicitly bed-less hardware
+  omits the bed. Heat (presets, More, Custom… and its target fields) is
+  idle-only. Mid-print temperature edits happen only on Tune and require
+  `supportsTemperatureControlDuringPrint`. While printing, Move and Heat
+  segments are disabled and Tune is auto-selected; it stays selected when the
+  print ends. Cool Down is idle-only, with no
+  confirmation; Emergency stop covers stopping an active print.
 - The paired editors send only entered, supported heaters in one request.
   Zero explicitly turns that heater off; blank is not zero. Both requested
   targets must match before telemetry acknowledgement; measured-temperature
@@ -359,7 +372,7 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   unchanged, including signed coordinates and zero; no firmware tolerance is
   invented. Decimal validation also rejects tiny entered fractions that would
   otherwise disappear during numeric parsing.
-- Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
+- Relative jog retains **0.1/1/10/100 mm** (default **1 mm**), XY **3000 mm/min**, Z **600 mm/min**.
   Unknown/false specific movement flags hide movement controls. The #2597
   handoff currently proves neither relative nor absolute motion on production
   backends; synthetic UI fixtures are not capability evidence.
@@ -411,12 +424,13 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   Cancellation proven to precede dispatch releases safely without sending
   anything. After an HTTP response has already returned, Stop waiting may end
   telemetry observation, but cannot undo printer execution. Nothing is replayed.
-  Disabled editors expose the preference/permission reason in the
+  Disabled editors expose the readiness/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
   success/acceptance notices. Offline controls remain hidden, with the
   explanation supplied by the detail host.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
-  and no dependency on pending setup commands. The shared owner/composition
+  and no dependency on pending setup commands. It is a full-width, solid red
+  (`pfErrorFill`) rectangle with a white icon and label. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
 
 **Owner-lifetime contract:** a MainActor registry in
@@ -620,14 +634,21 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 
 #### Preheat
 
-- Four buttons, fixed order: **PLA, PETG, ABS, Cool Down**.
+- Fixed order: **PLA, PETG, ABS, Cool Down**; Cool Down is always shown.
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.
-- Presets use a compact four-button row on standard phone and iPad text sizes,
-  two columns at XX Large/XXX Large, and one column at accessibility sizes.
-  Labels and temperature pairs remain visible; the compact **Cool** label keeps
-  the full **Cool down** VoiceOver name. Hit targets remain at least 44pt.
+- On the Control tab's Heat segment the row is **PLA · PETG · ABS · More ·
+  Cool down** (mockup v3). From XX Large, including every accessibility size,
+  it wraps to the three materials, then More + Cool down, so More (ASA, TPU,
+  PC, Nylon, Custom…) stays reachable at every text size. At accessibility
+  sizes the buttons grow taller instead of clipping their captions. The native
+  More menu doesn't scroll, so at accessibility sizes each material item is a
+  single line ("ASA  245° · 100°") and Custom… moves to the top of the menu. Elsewhere
+  presets use a compact four-button row on standard text sizes, two columns at
+  XX Large/XXX Large, and one column at accessibility sizes. Labels and
+  temperature pairs remain visible; the compact **Cool** label keeps the full
+  **Cool down** VoiceOver name. Hit targets remain at least 44pt.
 - **No custom temp input. No long-press. No swipe.**
 
 #### Home
@@ -775,9 +796,10 @@ All controls must satisfy:
 | Control | Label | Hint | Traits | State announcement |
 | --- | --- | --- | --- | --- |
 | Preheat PLA | "Preheat for PLA" | "Sets hotend to 200 degrees, bed to 60 degrees." | `.button` | "Pending" / "Failed: <reason>. Double-tap to retry." |
-| Preheat PETG | "Preheat for PETG" | "Sets hotend to 240 degrees, bed to 80 degrees." | `.button` | (same pattern) |
-| Preheat ABS | "Preheat for ABS" | "Sets hotend to 240 degrees, bed to 100 degrees." | `.button` | (same pattern) |
-| Cool Down | "Cool down" | "Sets hotend and bed to 0 degrees." | `.button` | (same pattern) |
+| Preheat PETG | "Preheat for PETG" | "Sets hotend to 230 degrees, bed to 80 degrees." | `.button` | (same pattern) |
+| Preheat ABS | "Preheat for ABS" | "Sets hotend to 245 degrees, bed to 100 degrees." | `.button` | (same pattern) |
+| More (Control tab) | "More materials" | "Shows more preheat materials and a custom nozzle target." (while blocked: the actual reason, e.g. "Controls are locked while a print is active.", "Printer is offline." or "Another printer operation is still pending.") | `.button` (native `Menu`) | Menu items read "<material>" with "<nozzle>° · <bed>°"; "Custom…" focuses the Nozzle field |
+| Cool Down | "Cool down" | "Turns off all heaters." with heater shutdown; otherwise "Sets hotend and bed to 0 degrees." (hotend-only: "Sets hotend to 0 degrees.") | `.button` | (same pattern) |
 | Home All | "Home all axes" | "Homes X, Y, and Z." | `.button` | (same pattern) |
 | Home XY | "Home X and Y" | "Homes X and Y axes only." | `.button` | (same pattern) |
 | Home Z | "Home Z" | "Homes Z axis only." | `.button` | (same pattern) |
@@ -901,9 +923,11 @@ struct JogSubgroup: View {
 **Helper enums** (Hudson decides exact ownership — model layer or view-local):
 
 ```swift
-enum PreheatPreset { case pla, petg, abs, coolDown
-    var hotend: Double { ... }   // 200, 240, 240, 0
-    var bed: Double { ... }      // 60, 80, 100, 0
+enum PreheatPreset { case pla, petg, abs, asa, tpu, pc, nylon, coolDown
+    // Row: pla, petg, abs (rowMaterials) · More · coolDown.
+    // More menu: asa, tpu, pc, nylon (menuMaterials), then "Custom…".
+    var hotend: Double { ... }   // from `definition`: 200, 230, 245, 245, 220, 260, 250, 0
+    var bed: Double { ... }      // 60, 80, 100, 100, 50, 110, 80, 0
     var label: String { ... }
 }
 enum JogAxis: String, CaseIterable, Identifiable { case x, y, z; var id: String { rawValue } }

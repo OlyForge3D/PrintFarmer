@@ -140,14 +140,18 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         return try TestData.decoder.decode(Printer.self, from: json.data(using: .utf8)!)
     }
 
-    private static let fullCaps = PrinterBackendCapabilities(
-        supportsMovement: true,
-        supportsTemperatureControl: true,
-        supportsBedTemperature: true,
-        supportsFanControl: true,
-        supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"]
-    )
+    private static let fullCaps: PrinterBackendCapabilities = {
+        var caps = PrinterBackendCapabilities(
+            supportsMovement: true,
+            supportsTemperatureControl: true,
+            supportsBedTemperature: true,
+            supportsFanControl: true,
+            supportsHoming: true,
+            supportedAxes: ["X", "Y", "Z"]
+        )
+        caps.supportsHeaterShutdown = true
+        return caps
+    }()
 
     /// Bed control unsupported (e.g. FlashForge).
     private static let noBedCaps = PrinterBackendCapabilities(
@@ -192,8 +196,8 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
             await vm.preheat(.coolDown)
             assertAcceptanceOnly(vm)
             XCTAssertEqual(vm.printer.hotendTemp, measured)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
+            XCTAssertEqual(service.turnOffHeatersCallCount, 1)
+            XCTAssertNil(service.setTemperaturesCalledWith)
         }
     }
 

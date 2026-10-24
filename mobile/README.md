@@ -227,11 +227,14 @@ Navigation remains Farm grid → pushed printer detail.
 
 Both **Overview** and **Controls** remain visible, through the segmented selector
 or a swipe, even offline or with setup controls disabled. Controls explains the
-restriction and links to the existing per-server Printer Safety settings.
-Selection is retained when access changes; visibility does not grant permission
-or trigger capability loading while setup controls are unavailable.
+restriction (for example, the printer is offline or the account lacks permission).
+Selection is retained when access changes; visibility does not grant permission.
+Capabilities are not loaded while setup controls are unavailable, except for
+offline Moonraker printers, whose capabilities are always fetched so durable
+motion can be built (#2678).
 
-A compact labeled **Emergency Stop** stays above the selector on both pages,
+A full-width, solid red **Emergency Stop** with a white icon and label stays
+above the selector on both pages,
 with confirmation, its own pending guard, and an offline explanation. It never
 requires a timed hold and is not disabled by an unrelated pending command.
 Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
@@ -283,9 +286,17 @@ server generation fence rejects stale in-flight responses.
 Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
 support. A failed capability read remains unknown and shows a read-only retry
 affordance; it is not cached as permanent unsupported state.
-Preheat, including Cool Down, stays hidden and refuses dispatch until hotend
-support is confirmed. Cool Down omits an unconfirmed bed just like heating
-presets; unknown support never permits a speculative 0/0 command. Missing bed
+Preheat stays hidden and refuses dispatch until hotend support is confirmed.
+**Cool down** is always offered and is idle-only: it is disabled while a job is
+starting, printing or paused (Emergency stop covers stopping a print). Idle, it
+calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
+otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat targets
+stay available while printing only when the backend reports
+`supportsTemperatureControlDuringPrint`; the instrument panel's Heat segment is
+disabled while printing because Tune carries those targets. While a job is
+printing or paused, **Tune** also shows the hotend and bed targets with the same
+gating; Tune has no fan controls. Heating presets omit an unconfirmed bed; unknown support never permits a
+speculative command. Missing bed
 support is described as unavailable control, not physically absent hardware.
 Demo mode advertises no physical or persistence capabilities: its no-op commands
 are not backend support evidence.
@@ -371,18 +382,15 @@ Emergency Stop remains separate and confirmed. After interruption or an
 uncertain response, inspect the original printer before another action.
 See the [guarded controls design and availability matrix](docs/design/printer-controls-section.md#guarded-physical-material-and-calibration-2599).
 
-### Advanced Printer Controls
+### Printer Controls Access
 
-Advanced printer controls are off by default for every server. To use jog,
-preheat, home, z-offset, or disable motors, open **Settings** → **Printer
-Safety** and enable **Advanced Printer Controls** for the active server. Once
-enabled, jog/preheat/home setup is reachable as the Controls page of printer
-detail (see above) — there is no separate "Advanced" screen nested inside
-another "Advanced" entry. Enabling the controls on one server does not enable
-them on another. Turning the setting off removes command access immediately;
-an open Controls page retains selection and explains the restriction. Changing a registered
-server's URL also resets the setting to off so an opt-in cannot carry over to a
-different endpoint. Misuse may damage a printer or ruin a print.
+Jog, preheat, home, z-offset and disable-motors controls live on the Control
+page of printer detail. There is no per-server opt-in and no separate
+"Advanced" screen. The Control page is always visible; its controls are
+blocked with a reason when the printer is offline, lacks control support, or
+the signed-in account lacks the server-side permission (Queue.Start). An open
+Control page keeps its selection when a check fails. Misuse may damage a printer
+or ruin a print.
 
 ### Post-Login Connection Check
 

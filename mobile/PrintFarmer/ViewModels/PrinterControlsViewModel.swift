@@ -3,26 +3,38 @@ import Foundation
 
 // MARK: - Public Types
 
-enum PreheatPreset: String, Equatable, Sendable {
-    case pla, petg, abs, coolDown
+enum PreheatPreset: String, CaseIterable, Equatable, Sendable {
+    case pla, petg, abs, asa, tpu, pc, nylon, coolDown
 
-    var hotend: Double {
+    /// Display name plus nozzle/bed targets in °C. This table is the only
+    /// place preset values live; views and tests read from it. PC and Nylon
+    /// are capped for PTFE-lined hotends: they are preheat values, not
+    /// print temperatures.
+    struct Definition: Equatable, Sendable {
+        let name: String
+        let hotend: Double
+        let bed: Double
+    }
+
+    var definition: Definition {
         switch self {
-        case .pla: return 200
-        case .petg: return 240
-        case .abs: return 240
-        case .coolDown: return 0
+        case .pla: Definition(name: "PLA", hotend: 200, bed: 60)
+        case .petg: Definition(name: "PETG", hotend: 230, bed: 80)
+        case .abs: Definition(name: "ABS", hotend: 245, bed: 100)
+        case .asa: Definition(name: "ASA", hotend: 245, bed: 100)
+        case .tpu: Definition(name: "TPU", hotend: 220, bed: 50)
+        case .pc: Definition(name: "PC", hotend: 260, bed: 110)
+        case .nylon: Definition(name: "Nylon", hotend: 250, bed: 80)
+        case .coolDown: Definition(name: "Cool down", hotend: 0, bed: 0)
         }
     }
 
-    var bed: Double {
-        switch self {
-        case .pla: return 60
-        case .petg: return 80
-        case .abs: return 100
-        case .coolDown: return 0
-        }
-    }
+    var hotend: Double { definition.hotend }
+    var bed: Double { definition.bed }
+
+    /// Materials on the Heat row, then those behind the "More" menu.
+    static let rowMaterials: [PreheatPreset] = [.pla, .petg, .abs]
+    static let menuMaterials: [PreheatPreset] = [.asa, .tpu, .pc, .nylon]
 }
 
 struct ControlCommand: Equatable, Sendable {
@@ -45,7 +57,7 @@ struct ControlCommand: Equatable, Sendable {
             return .motion
         case .extrusion, .filament:
             return .material
-        case .fanSpeed, .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl:
             return .runtime
         }
     }
@@ -69,7 +81,6 @@ struct ControlCommand: Equatable, Sendable {
         case calibrationPosition(target: SafetyVector3Dto, centered: Bool)
         case calibrationAdjust(delta: Double, target: SafetyVector3Dto)
         case calibrationSave(offsetMm: Double)
-        case fanSpeed(targetPercent: Int)
         case transientZOffset(targetMm: Double, deltaMm: Double)
         case sensorControl(sensorId: String, quantity: SensorQuantity, value: Double)
     }
@@ -177,6 +188,8 @@ enum MaterialControlInput {
     static let distances = [10.0, 25, 50, 100]
     static let speeds = [1, 5, 10]
     static let increments = [0.01, 0.05, 0.1]
+    /// Live babystep deltas offered on the Tune segment; adjustments round to 0.001 mm.
+    static let babystepIncrements = [0.005, 0.01, 0.025, 0.05]
 
     static func feedrate(distance: Double, speed: Int) throws -> Int {
         guard distance.isFinite, distances.contains(abs(distance)), speeds.contains(speed) else {
@@ -1212,10 +1225,6 @@ final class PrinterControlsViewModel: ObservableObject {
         // value is valid evidence even when it matches the previous cached value.
         let matches: Bool
         switch command.kind {
-        case let .fanSpeed(targetPercent):
-            guard let actual = status.fanSpeedPercent,
-                  actual.isFinite, (0...100).contains(actual) else { return }
-            matches = abs(actual - Double(targetPercent)) < 0.5
         case let .transientZOffset(targetMm, _):
             guard let actual = status.liveZOffsetMm, actual.isFinite else { return }
             matches = abs(actual - targetMm) < 0.001
@@ -1260,18 +1269,21 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
 
+        // Cool down is idle-only (canExecute). It prefers the backend's
+        // all-heaters-off command and otherwise falls back to 0/0 setpoints,
+        // matching the web app.
+        if preset == .coolDown, caps.supportsHeaterShutdown {
+            await perform(command) { [printerService, printer] in
+                try await printerService.turnOffHeaters(printerId: printer.id)
+            }
+            return
+        }
+
         guard validateTemperature(sentHotend, heater: .hotend, command: command),
               validateTemperature(sentBed, heater: .bed, command: command) else { return }
         await perform(command) { [printerService, printer] in
             try await printerService.setTemperatures(printerId: printer.id, hotend: sentHotend, bed: sentBed)
         }
-    }
-
-    var fanSpeedPercent: Double? {
-        guard let value = printer.fanSpeedPercent, value.isFinite, (0...100).contains(value) else {
-            return nil
-        }
-        return value
     }
 
     var liveZOffsetMm: Double? {
@@ -1284,15 +1296,6 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && runtimePrinterStateIsSupported && !isExecuting
     }
 
-    var fanControlUnavailableReason: String? {
-        guard let capabilities else { return "Checking fan support…" }
-        guard capabilities.supportsFanControl, capabilities.supportsFanSpeedReadback else {
-            return "Fan control and readback are unavailable on this printer."
-        }
-        guard fanSpeedPercent != nil else { return "Fan speed readback is unknown; controls are disabled." }
-        return runtimeControlAccessReason
-    }
-
     var zOffsetUnavailableReason: String? {
         guard let capabilities else { return "Checking Z-offset support…" }
         guard capabilities.supportsZOffsetAdjustment, capabilities.supportsZOffsetReadback else {
@@ -1300,28 +1303,6 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard liveZOffsetMm != nil else { return "Live Z-offset readback is unknown; controls are disabled." }
         return runtimeControlAccessReason
-    }
-
-    func setFanSpeed(_ targetPercent: Int) async {
-        let command = ControlCommand(kind: .fanSpeed(targetPercent: targetPercent), startedAt: clock())
-        guard beginCommand(command) else { return }
-        defer { endCommand(command) }
-        guard (0...100).contains(targetPercent),
-              capabilities?.supportsFanControl == true,
-              capabilities?.supportsFanSpeedReadback == true,
-              let current = fanSpeedPercent,
-              Double(targetPercent) != current else {
-            setError(command: command, message: "Fan control requires a supported capability and a known current readback.", isRetryable: false)
-            return
-        }
-        await perform(command) { [printerService, printer] in
-            let result = try await printerService.setFanSpeed(
-                printerId: printer.id, speedPercent: targetPercent
-            )
-            guard result.success else { throw PrinterControlError.rejected(result.message) }
-        }
-        guard pendingCommand == command, lastError == nil else { return }
-        await refreshSafetyEvidence(refreshDiscovery: false)
     }
 
     /// Writable sensor entries (read-only entries never expose inputs).
@@ -1376,7 +1357,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard capabilities?.supportsZOffsetAdjustment == true,
               capabilities?.supportsZOffsetReadback == true,
               deltaMm.isFinite, deltaMm != 0, abs(deltaMm) <= 0.2,
-              MaterialControlInput.increments.contains(abs(deltaMm)),
+              MaterialControlInput.babystepIncrements.contains(abs(deltaMm)),
               target.isFinite, target != current else {
             setError(command: command, message: "Transient Z-offset adjustment requires supported controls and a known live readback.", isRetryable: false)
             return
@@ -1656,11 +1637,6 @@ final class PrinterControlsViewModel: ObservableObject {
         case let .heaterTargets(hotend, bed):
             return (hotend != nil || bed != nil)
                 && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
-        case let .fanSpeed(targetPercent):
-            guard let actual = updated.fanSpeedPercent,
-                  actual.isFinite, (0...100).contains(actual),
-                  previous.fanSpeedPercent != actual else { return false }
-            return abs(actual - Double(targetPercent)) < 0.5
         case let .transientZOffset(targetMm, _):
             guard let actual = updated.liveZOffsetMm, actual.isFinite,
                   previous.liveZOffsetMm != actual else { return false }
@@ -1710,6 +1686,46 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && !isPrintingOrPaused
     }
 
+    /// Heater targets stay available during a print only when the backend
+    /// confirms it can apply them under the active-print lease.
+    var supportsHeatDuringPrint: Bool {
+        capabilities?.supportsTemperatureControlDuringPrint == true
+    }
+
+    var canControlHeat: Bool {
+        guard supportsHeatDuringPrint, isPrintingOrPaused else { return canControl }
+        return commandIdentity != nil && hasConfiguredAccess && isActive && accessCheck() == nil
+            && printer.isOnline && runtimePrinterStateIsSupported
+    }
+
+    var heatBlockedReason: String? {
+        guard supportsHeatDuringPrint, isPrintingOrPaused else { return blockedReason }
+        return runtimeControlAccessReason
+    }
+
+    /// Heat presets, including Cool down, are idle-only: mid-print
+    /// temperature changes belong to Tune, and Emergency Stop covers stopping
+    /// an active print.
+    func canRunPreheat(_ preset: PreheatPreset) -> Bool {
+        canControl
+    }
+
+    /// Why the Heat More menu is disabled, or nil when it is usable.
+    var preheatMenuBlockedReason: String? {
+        if !canRunPreheat(.pla) { return preheatAccessReason(.pla) ?? "Controls are unavailable." }
+        if isExecuting { return "Another printer operation is still pending." }
+        return nil
+    }
+
+    func preheatAccessReason(_ preset: PreheatPreset) -> String? {
+        blockedReason
+    }
+
+    /// Cool down uses POST /heaters/off when supported; otherwise it sets 0/0 targets while idle.
+    var supportsHeaterShutdown: Bool {
+        capabilities?.supportsHeaterShutdown == true
+    }
+
     private var runtimePrinterStateIsSupported: Bool {
         Self.runtimeStatusStateIsSupported(printer.state)
     }
@@ -1733,8 +1749,12 @@ final class PrinterControlsViewModel: ObservableObject {
     private func canExecute(_ command: ControlCommand) -> Bool {
         let permitsActivePrint: Bool
         switch command.kind {
-        case .fanSpeed, .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl:
             permitsActivePrint = true
+        case .preheat:
+            permitsActivePrint = false
+        case .heater, .heaterTargets:
+            permitsActivePrint = supportsHeatDuringPrint
         default:
             permitsActivePrint = false
         }
@@ -1760,7 +1780,11 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     var isPrintingOrPaused: Bool {
-        switch printer.state?.lowercased() {
+        Self.isPrintingOrPaused(state: printer.state)
+    }
+
+    nonisolated static func isPrintingOrPaused(state: String?) -> Bool {
+        switch state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false
         }
@@ -1941,7 +1965,7 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .fanSpeed, .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl:
             return "Matching readback received. This reports the backend value, not a physical inspection."
         default:
             return "Matching telemetry received. Check the machine before further setup."

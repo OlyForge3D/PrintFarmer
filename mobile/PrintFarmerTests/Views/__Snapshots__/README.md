@@ -176,3 +176,93 @@ component configuration, light appearance, default simulator locale, fixture
 data, and strict assertions remain unchanged. Only the two sensor iPad PNGs
 were recorded; neither iPhone nor Controls references were re-recorded.
 Both iPad sensor cases then passed with recording disabled and zero skips.
+
+## Status sensor readout without the Temperatures group
+
+The printer detail Status page already shows nozzle and bed in its temperature
+strip, so `PrinterSensorsReadout` no longer renders the duplicate Temperatures
+group. `test_statusSensorReadout` keeps its fixture (nozzle, bed, chamber, MCU
+and part fan) and now renders only the Fans group.
+
+Both `test_statusSensorReadout` references were replaced with the strict
+comparison's actual output, after reference and actual images were inspected:
+iPhone 15 (3x) and iPad Pro 13-inch (M5) (2x), Xcode 26.6 (17F113), iOS 26.5
+(23F77), light appearance, default locale. The only difference is the removed
+Temperatures group. `test_controlSensorRows` and every Controls reference were
+not re-recorded and pass unchanged on both families.
+
+## Status sensor readout and temperature strip removed
+
+The printer detail Status page no longer shows the sensor/fan readout or the
+nozzle/bed temperature strip. Temperatures remain on the Control tab's Heat
+section, and writable fans and sensors remain in Tune. `PrinterSensorsReadout`
+and `test_statusSensorReadout` were deleted together with both
+`test_statusSensorReadout` references (iPhone and iPad). `test_controlSensorRows`
+and every Controls reference are unchanged; no PNGs were re-recorded.
+
+## Cool down follows heater-shutdown support (#3460)
+
+Cool down now calls `POST /heaters/off` and is hidden unless the backend
+reports `supportsHeaterShutdown`; the remaining PLA/PETG/ABS presets fill the
+row. The Moonraker fixture now mirrors the real backend
+(`supportsHeaterShutdown` and `supportsTemperatureControlDuringPrint` true), so
+`test_snapshot_moonrakerProfile` still shows Cool down and was not re-recorded.
+
+The iPhone references for `test_snapshot_flashForgeProfile`,
+`test_snapshot_sdcpProfile` and `test_snapshot_loadingState_capabilitiesNil`
+were replaced with the strict comparison's actual output after reference and
+actual images were inspected: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5
+(23F77), light appearance, default locale. The only difference is the omitted
+Cool down button and the three-column preset row. These cases have no iPad
+references.
+
+## Tune drops fans; Cool down always shown
+
+Tune no longer renders fan controls, and Cool down is shown for every printer
+with hotend control (heater shutdown when supported, otherwise a 0/0 idle
+fallback). The lockout banner no longer mentions fan adjustments. The iPhone
+references for `test_snapshot_flashForgeProfile`, `test_snapshot_sdcpProfile`,
+`test_snapshot_loadingState_capabilitiesNil` (Cool down restored, four-column
+preset row), `test_snapshot_disabledState_printerStarting`,
+`test_snapshot_lockoutBanner_printingState` (banner copy) and
+`PrinterSensorsSnapshotTests/test_controlSensorRows` (fan rows removed, chamber
+row only) were replaced with the strict comparison's actual output after
+inspection: iPhone 15 (3x), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale. The iPad references for
+`test_snapshot_disabledState_printerStarting`,
+`test_snapshot_lockoutBanner_printingState` and `test_controlSensorRows` were
+replaced the same way on iPad Pro 13-inch (M5) (iOS 26.5, 23F77). The other
+iPad references already matched and were not re-recorded.
+
+## Cool down is idle-only
+
+Cool down is disabled while a job is starting, printing or paused, whatever
+`supportsHeaterShutdown` reports, and no longer asks for confirmation.
+`test_snapshot_lockoutBanner_printingState` was re-recorded on iPhone 15 (3x)
+and iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale, after inspecting both images: the snowflake is
+disabled again, and both PNGs are byte-identical to the references before the
+mid-print change. The Heat stepper and babystep restyle has no snapshot
+coverage; it was checked with scratch renders only.
+
+## Final preset temperatures
+
+PETG and ABS presets changed to 230/80 and 245/100 (nozzle/bed °C), read from
+`PreheatPreset.definition`. Their captions changed in
+`test_snapshot_disabledState_printerStarting`, `test_snapshot_flashForgeProfile`,
+`test_snapshot_loadingState_capabilitiesNil`,
+`test_snapshot_lockoutBanner_printingState`, `test_snapshot_moonrakerProfile`
+and `test_snapshot_sdcpProfile`. All six were re-recorded on iPhone 15 (3x) and
+iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale, after inspecting the images. These snapshots
+render the standalone `PrinterSetupControlsContent` (formerly hosted by the
+removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
+tab's five-slot row with More has no snapshot coverage and is exercised by
+`Issue3259ControlIdleUITests.testHeatPresetRowOffersMoreMenuWhileIdle`.
+
+### Advanced printer controls opt-in removed
+
+The Advanced printer controls screen, its Settings toggle and the onboarding
+prompt were removed. No reference image changed: the blocked-editor evidence
+test now covers the readiness gate instead of the retired Settings opt-in, and
+it attaches screenshots without comparing reference images.

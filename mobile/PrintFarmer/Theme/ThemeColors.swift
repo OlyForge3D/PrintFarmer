@@ -59,6 +59,9 @@ extension Color {
     static let pfBorder = adaptive(light: "#e2e8f0", dark: "#243145")
     /// Light/subtle border color
     static let pfBorderLight = adaptive(light: "#cbd5e1", dark: "#475569")
+    /// Selected segment or step fill: raised white in light mode, DESIGN.md
+    /// `border-strong` in dark mode so the selection reads lighter than its track.
+    static let pfSegmentSelected = adaptive(light: "#ffffff", dark: "#3d4f72")
 
     // MARK: Status
 

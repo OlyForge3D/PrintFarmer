@@ -10,42 +10,6 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : nil
     }
 
-    func test_statusSensorReadout() {
-        let readout = PrinterSensorsReadout(sensors: [
-            PrinterSensor(
-                id: "nozzle", displayName: "Nozzle", kind: .nozzle,
-                readings: [
-                    SensorReading(quantity: .temperature, value: .number(205), unit: .celsius),
-                    SensorReading(quantity: .targetTemperature, value: .number(210), unit: .celsius)
-                ]
-            ),
-            PrinterSensor(
-                id: "bed", displayName: "Bed", kind: .bed,
-                readings: [
-                    SensorReading(quantity: .temperature, value: .number(58), unit: .celsius),
-                    SensorReading(quantity: .targetTemperature, value: .number(60), unit: .celsius)
-                ]
-            ),
-            PrinterSensor(
-                id: "chamber", displayName: "Chamber", kind: .chamber,
-                readings: [SensorReading(quantity: .temperature, value: .number(37.5), unit: .celsius)]
-            ),
-            PrinterSensor(
-                id: "part-fan", displayName: "Part fan", kind: .fan, fanRole: .partCooling,
-                readings: [
-                    SensorReading(quantity: .fanSpeed, value: .number(42), unit: .percent),
-                    SensorReading(quantity: .fanRpm, value: .number(3840), unit: .rpm)
-                ]
-            ),
-            PrinterSensor(id: "mcu", displayName: "MCU", kind: .mcu, available: false)
-        ])
-        .padding(12)
-        .frame(width: 390)
-        .fixedSize(horizontal: false, vertical: true)
-
-        assertSnapshot(of: host(readout), as: .image(on: .iPhone13), named: snapshotName)
-    }
-
     func test_controlSensorRows() async throws {
         var printer = try TestData.decodePrinter()
         printer.isOnline = true

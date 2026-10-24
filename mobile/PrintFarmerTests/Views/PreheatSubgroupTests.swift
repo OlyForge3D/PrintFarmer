@@ -289,8 +289,8 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     func test_individualHeaterLabels_preserveUnknownVersusZero() {
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Not reported")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Not reported")
         XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
         XCTAssertEqual(Heater.hotend.title, "Hotend")
         XCTAssertEqual(Heater.bed.title, "Bed")
@@ -506,17 +506,104 @@ final class PreheatSubgroupTests: XCTestCase {
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .petg, canControl: true, hasError: false),
-            "Sets hotend to 240 degrees, bed to 80 degrees."
+            "Sets hotend to \(Int(PreheatPreset.petg.hotend)) degrees, bed to \(Int(PreheatPreset.petg.bed)) degrees."
         )
     }
 
-    func test_accessibilityHint_idle_coolDown() async throws {
+    /// N-AX1: accessibility sizes stack nozzle over bed so the bed target
+    /// wraps onto a second line instead of truncating.
+    func test_compactTargetsText_stacksTargetsAtAccessibilitySizes() {
+        for preset in PreheatPreset.rowMaterials {
+            let hotend = Int(preset.definition.hotend), bed = Int(preset.definition.bed)
+            for size in [DynamicTypeSize.accessibility1, .accessibility3, .accessibility5] {
+                XCTAssertEqual(
+                    PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: size),
+                    "\(hotend)°\n\(bed)°"
+                )
+                XCTAssertEqual(
+                    PreheatSubgroup.compactTargetsText(preset, hasBed: false, dynamicTypeSize: size),
+                    "\(hotend)°"
+                )
+            }
+            XCTAssertEqual(
+                PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: .xxxLarge),
+                "\(hotend)/\(bed)"
+            )
+        }
+    }
+
+    /// Row captions and More-menu subtitles read from the preset definition.
+    func test_presetTargetText_readsFromDefinition() {
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            let hotend = Int(preset.definition.hotend), bed = Int(preset.definition.bed)
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: true), "\(hotend)/\(bed)")
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: false), "\(hotend)")
+            XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: true), "\(hotend)° · \(bed)°")
+            XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: false), "\(hotend)°")
+            XCTAssertEqual(
+                PreheatSubgroup.menuItemSingleLineText(
+                    "ASA",
+                    temperatures: PreheatSubgroup.menuItemTemperatureText(preset, hasBed: true)
+                ),
+                "ASA  \(hotend)° · \(bed)°"
+            )
+            XCTAssertEqual(
+                preset.a11yHint(hasBed: true, turnsOffHeaters: true),
+                "Sets hotend to \(hotend) degrees, bed to \(bed) degrees."
+            )
+        }
+    }
+
+    /// R3464-B13: every text size, including AX1–AX5, keeps the five slots so
+    /// More (and through it ASA/TPU/PC/Nylon and Custom…) stays reachable.
+    func test_presetRows_keepMoreAtEveryTextSizeAndWrapFromXXLarge() {
+        let expected: [PreheatSubgroup.PresetSlot] =
+            PreheatPreset.rowMaterials.map { .preset($0) } + [.more, .preset(.coolDown)]
+        for size in DynamicTypeSize.allCases {
+            let rows = PreheatSubgroup.presetRows(dynamicTypeSize: size)
+            XCTAssertEqual(rows.flatMap { $0 }, expected, "\(size)")
+            XCTAssertEqual(rows.count, size >= .xxLarge ? 2 : 1, "\(size)")
+        }
+        XCTAssertEqual(PreheatPreset.menuMaterials, [.asa, .tpu, .pc, .nylon])
+    }
+
+    /// R3464-B15: More's disabled hint names the actual reason.
+    func test_moreMenuBlockedReason_matchesActualReason() async throws {
+        let idle = try makeVM(state: "ready", isOnline: true)
+        await idle.loadCapabilities()
+        XCTAssertNil(idle.preheatMenuBlockedReason)
+
+        let offline = try makeVM(state: "ready", isOnline: false)
+        await offline.loadCapabilities()
+        XCTAssertEqual(offline.preheatMenuBlockedReason, "Printer is offline.")
+
+        let printing = try makeVM(state: "printing", isOnline: true)
+        await printing.loadCapabilities()
+        XCTAssertEqual(printing.preheatMenuBlockedReason, "Controls are locked while a print is active.")
+        for vm in [offline, printing] {
+            XCTAssertNotEqual(vm.preheatMenuBlockedReason, "Disabled while printing.")
+        }
+    }
+
+    func test_accessibilityHint_idle_coolDown_describesHeaterShutdown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
         await vm.loadCapabilities()
+        XCTAssertTrue(vm.supportsHeaterShutdown)
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),
-            "Sets hotend and bed to 0 degrees."
+            "Turns off all heaters."
+        )
+    }
+
+    func test_coolDownHint_describesZeroTargetFallbackWithoutHeaterShutdown() {
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: false), "Sets hotend and bed to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: false, turnsOffHeaters: false), "Sets hotend to 0 degrees.")
+        XCTAssertEqual(PreheatPreset.coolDown.a11yHint(hasBed: true, turnsOffHeaters: true), "Turns off all heaters.")
+        XCTAssertEqual(
+            PreheatPreset.pla.a11yHint(hasBed: true, turnsOffHeaters: true),
+            "Sets hotend to 200 degrees, bed to 60 degrees.",
+            "Heater shutdown only changes the Cool down hint"
         )
     }
 
@@ -573,6 +660,29 @@ final class PreheatSubgroupTests: XCTestCase {
         }
         """
         return try JSONDecoder().decode(Printer.self, from: Data(json.utf8))
+    }
+
+    func testPresetFillRowAndRadiusOverridesAreOptInSoOtherScreensKeepTheirLayout() {
+        let defaults = EnvironmentValues()
+        XCTAssertFalse(defaults.preheatPresetsFillRow)
+        XCTAssertNil(defaults.controlActionCornerRadius)
+        XCTAssertNil(defaults.controlActionSelectedFill)
+    }
+
+    func testControlTabPresetRowIsFourEqualButtonsEndingWithSnowflakeCoolDown() throws {
+        XCTAssertEqual(PreheatSubgroup.presets, [.pla, .petg, .abs, .coolDown])
+        XCTAssertEqual(PreheatSubgroup.presets.last, .coolDown)
+        XCTAssertEqual(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: true), "snowflake")
+        for preset in [PreheatPreset.pla, .petg, .abs] {
+            XCTAssertNil(PreheatSubgroup.detailPresetSymbol(preset, fillsRow: true))
+        }
+        XCTAssertNil(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: false),
+                     "Other screens keep their existing Cool down label")
+        let printer = try Self.makePrinter(state: "ready", isOnline: true)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
+        let subgroup = PreheatSubgroup(viewModel: vm)
+        XCTAssertEqual(subgroup.accessibilityLabel(preset: .coolDown, isPending: false), "Cool down",
+                       "The snowflake is icon-only visually but must stay spoken")
     }
 }
 
