@@ -450,36 +450,59 @@ struct PreheatSubgroup: View {
         }
     }
 
+    static func menuItemSingleLineText(_ material: String, temperatures: String) -> String {
+        "\(material)  \(temperatures)"
+    }
+
     static func menuItemTemperatureText(_ preset: PreheatPreset, hasBed: Bool) -> String {
         hasBed ? "\(Int(preset.hotend))° · \(Int(preset.bed))°" : "\(Int(preset.hotend))°"
     }
 
     /// Native menu of extra materials, then "Custom…" which focuses the
     /// existing Nozzle target field rather than opening a new editor.
+    private var customMenuItem: some View {
+        Button {
+            nozzleFocusRequest += 1
+        } label: {
+            Label("Custom…", systemImage: "slider.horizontal.3")
+        }
+        .accessibilityIdentifier("printer.controls.preheat.custom")
+    }
+
     private var moreMenu: some View {
         let canControl = viewModel.canRunPreheat(.pla)
         let disabledReason = viewModel.preheatMenuBlockedReason
         let isEnabled = disabledReason == nil
+        // The native menu doesn't scroll at accessibility sizes, so Custom…
+        // moves to the top there to stay reachable.
+        let customFirst = dynamicTypeSize.isAccessibilitySize
         return Menu {
+            if customFirst {
+                customMenuItem
+                Divider()
+            }
             Section {
                 ForEach(PreheatPreset.menuMaterials, id: \.self) { preset in
                     Button {
                         handleTap(preset: preset, canControl: canControl)
                     } label: {
-                        Text(preset.displayLabel)
-                        Text(Self.menuItemTemperatureText(preset, hasBed: viewModel.supports(.bed)))
+                        let temperatures = Self.menuItemTemperatureText(preset, hasBed: viewModel.supports(.bed))
+                        // One line per item keeps more of the menu on screen.
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Text(Self.menuItemSingleLineText(preset.displayLabel, temperatures: temperatures))
+                        } else {
+                            Text(preset.displayLabel)
+                            Text(temperatures)
+                        }
                     }
                     .disabled(viewModel.preheatBlockedReason(preset) != nil)
                     .accessibilityIdentifier("printer.controls.preheat.\(preset.rawValue)")
                 }
             }
-            Divider()
-            Button {
-                nozzleFocusRequest += 1
-            } label: {
-                Label("Custom…", systemImage: "slider.horizontal.3")
+            if !customFirst {
+                Divider()
+                customMenuItem
             }
-            .accessibilityIdentifier("printer.controls.preheat.custom")
         } label: {
             HStack(spacing: 3) {
                 Text("More")

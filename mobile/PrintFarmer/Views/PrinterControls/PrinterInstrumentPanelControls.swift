@@ -249,13 +249,24 @@ struct PrinterInstrumentPanelControls: View {
 
     // MARK: - Move
 
+    static let moveEmptyStateSymbol = "arrow.up.and.down.and.arrow.left.and.right"
+
     private var movePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             if JogSubgroup.isHidden(for: viewModel.capabilities) {
-                Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
+                HStack(spacing: 8) {
+                    Image(systemName: Self.moveEmptyStateSymbol)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.pfTextTertiary)
+                        .accessibilityHidden(true)
+                    Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("printer.controls.motion-empty")
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     xyPad

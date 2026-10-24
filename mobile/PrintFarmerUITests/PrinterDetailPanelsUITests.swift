@@ -1108,12 +1108,17 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             XCTAssertTrue(app.buttons["printer.controls.preheat.\(material)"].waitForExistence(timeout: 5), material)
         }
         attachScreen("\(device)-heat-presets-more-open")
-        // At accessibility sizes the menu scrolls; Custom… sits below the fold.
+        // The native menu doesn't scroll, so Custom… must be fully visible
+        // without scrolling at every text size.
         let custom = app.buttons["printer.controls.preheat.custom"]
-        for _ in 0..<3 where !custom.exists {
-            app.buttons["printer.controls.preheat.asa"].swipeUp()
-        }
         XCTAssertTrue(custom.waitForExistence(timeout: 5), "Custom…")
+        XCTAssertTrue(custom.isHittable, "Custom…")
+        XCTAssertGreaterThanOrEqual(custom.frame.minY, app.windows.firstMatch.frame.minY, "Custom… top edge")
+        XCTAssertLessThanOrEqual(
+            custom.frame.maxY, app.buttons["printer.detail.control.emergencyStop"].frame.minY,
+            "Custom… must sit fully above the Emergency Stop bar"
+        )
+        attachScreen("\(device)-heat-presets-more-custom")
     }
 
     func testCaptureApprovedIdleControlScreen() {

@@ -16,6 +16,14 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
+    func testPageIndicatorUsesCompactHeight() {
+        XCTAssertLessThanOrEqual(PrinterDetailLayout.pageIndicatorHeight, 20)
+    }
+
+    func testMoveEmptyStateUsesAValidSFSymbol() {
+        XCTAssertNotNil(UIImage(systemName: PrinterInstrumentPanelControls.moveEmptyStateSymbol))
+    }
+
     func testFarmToolbarReturnsToFarmRootFromNonFarmOrigins() {
         let router = AppRouter()
         for origin in AppTab.allCases where origin != .farm {

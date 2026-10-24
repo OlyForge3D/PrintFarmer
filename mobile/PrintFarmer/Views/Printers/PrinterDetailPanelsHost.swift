@@ -105,7 +105,7 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                     Circle()
                         .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
                         .frame(width: 6, height: 6)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 44, height: PrinterDetailLayout.pageIndicatorHeight)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -713,4 +713,10 @@ struct PrinterDetailTemperatureStrip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
+}
+
+extension PrinterDetailLayout {
+    /// Compact dot strip; the segmented picker above is the primary
+    /// 44 pt navigation target, so the dots don't need a full-height row.
+    static let pageIndicatorHeight: CGFloat = 16
 }

@@ -541,6 +541,13 @@ final class PreheatSubgroupTests: XCTestCase {
             XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: true), "\(hotend)° · \(bed)°")
             XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: false), "\(hotend)°")
             XCTAssertEqual(
+                PreheatSubgroup.menuItemSingleLineText(
+                    "ASA",
+                    temperatures: PreheatSubgroup.menuItemTemperatureText(preset, hasBed: true)
+                ),
+                "ASA  \(hotend)° · \(bed)°"
+            )
+            XCTAssertEqual(
                 preset.a11yHint(hasBed: true, turnsOffHeaters: true),
                 "Sets hotend to \(hotend) degrees, bed to \(bed) degrees."
             )

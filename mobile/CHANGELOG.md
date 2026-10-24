@@ -149,6 +149,13 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   TPU 220/50, PC 260/110, Nylon 250/80. PETG and ABS change from 240/80 and
   240/100. PC and Nylon are capped for PTFE-lined hotends (preheat values, not
   print temperatures). All values live in the single `PreheatPreset.definition` table.
+- At accessibility text sizes the More menu lists each material on one line
+  and puts "Custom…" at the top, because the native menu doesn't scroll and
+  Custom… was clipped below its bottom edge.
+- Printer detail polish: the pager's page dots use a compact 16 pt indicator,
+  the Move empty state shows an SF Symbol like the other empty states, and
+  Emergency Stop is a full-width, solid red button with a white icon and label
+  (accessibility label and confirmation unchanged).
 - Tune shows editable hotend and bed targets while a job is printing or paused,
   disabled with a short reason only when the backend cannot apply them.
 - **Removed:** all fan controls from Tune (part-fan stepper and fan or

@@ -141,20 +141,25 @@ public struct PrinterRunActionBar: View {
                     .lineLimit(shouldStack ? 2 : nil)
             }
             .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .frame(
                 maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil,
                 minHeight: 44
             )
-            .contentShape(Rectangle())
+            .background(Color.pfErrorFill, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
             .fontWeight(.semibold)
             // Keep the complete emergency label legible instead of breaking
             // "Emergency" mid-word at accessibility sizes; VoiceOver keeps
             // the full, uncapped "Emergency Stop" label below.
             .dynamicTypeSize(shouldStack ? .xxxLarge : dynamicTypeSize)
         }
-        .buttonStyle(.bordered)
+        // Solid red fill with a white label in both appearances; the shared
+        // fill colour keeps white text above 4.5:1 contrast.
+        .buttonStyle(EmergencyStopButtonStyle())
         .frame(maxWidth: shouldStack || emergencyStopFillsAvailableWidth ? .infinity : nil)
-        .tint(Color.pfError)
         .disabled(!descriptor.isEnabled || descriptor.isPending)
         .accessibilityIdentifier(
             PrinterRunActionLabels.accessibilityIdentifier(for: .emergencyStop)
@@ -165,6 +170,15 @@ public struct PrinterRunActionBar: View {
         .accessibilityHint(accessibilityHint(for: descriptor))
         .accessibilityValue(accessibilityValue(for: descriptor))
         .accessibilityAddTraits(traits(for: descriptor))
+    }
+
+    private struct EmergencyStopButtonStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
+        }
     }
 
     // MARK: - Callback gate

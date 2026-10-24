@@ -429,7 +429,8 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   success/acceptance notices. Offline controls remain hidden, with the
   explanation supplied by the detail host.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
-  and no dependency on pending setup commands. The shared owner/composition
+  and no dependency on pending setup commands. It is a full-width, solid red
+  (`pfErrorFill`) rectangle with a white icon and label. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
 
 **Owner-lifetime contract:** a MainActor registry in
@@ -641,7 +642,9 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
   Cool down** (mockup v3). From XX Large, including every accessibility size,
   it wraps to the three materials, then More + Cool down, so More (ASA, TPU,
   PC, Nylon, Custom…) stays reachable at every text size. At accessibility
-  sizes the buttons grow taller instead of clipping their captions. Elsewhere
+  sizes the buttons grow taller instead of clipping their captions. The native
+  More menu doesn't scroll, so at accessibility sizes each material item is a
+  single line ("ASA  245° · 100°") and Custom… moves to the top of the menu. Elsewhere
   presets use a compact four-button row on standard text sizes, two columns at
   XX Large/XXX Large, and one column at accessibility sizes. Labels and
   temperature pairs remain visible; the compact **Cool** label keeps the full
