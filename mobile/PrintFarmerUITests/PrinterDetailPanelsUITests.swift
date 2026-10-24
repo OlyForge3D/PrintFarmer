@@ -1216,14 +1216,16 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         attachScreen("\(device)-heat-presets-idle")
 
         app.buttons["printer.controls.preheat.more"].tap()
-        for material in ["ASA", "TPU", "PC", "Nylon", "Custom…"] {
-            XCTAssertTrue(
-                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", material)).firstMatch
-                    .waitForExistence(timeout: 5),
-                material
-            )
+        for material in ["asa", "tpu", "pc", "nylon"] {
+            XCTAssertTrue(app.buttons["printer.controls.preheat.\(material)"].waitForExistence(timeout: 5), material)
         }
         attachScreen("\(device)-heat-presets-more-open")
+        // At accessibility sizes the menu scrolls; Custom… sits below the fold.
+        let custom = app.buttons["printer.controls.preheat.custom"]
+        for _ in 0..<3 where !custom.exists {
+            app.buttons["printer.controls.preheat.asa"].swipeUp()
+        }
+        XCTAssertTrue(custom.waitForExistence(timeout: 5), "Custom…")
     }
 
     func testCaptureApprovedIdleControlScreen() {

@@ -1710,6 +1710,13 @@ final class PrinterControlsViewModel: ObservableObject {
         canControl
     }
 
+    /// Why the Heat More menu is disabled, or nil when it is usable.
+    var preheatMenuBlockedReason: String? {
+        if !canRunPreheat(.pla) { return preheatAccessReason(.pla) ?? "Controls are unavailable." }
+        if isExecuting { return "Another printer operation is still pending." }
+        return nil
+    }
+
     func preheatAccessReason(_ preset: PreheatPreset) -> String? {
         blockedReason
     }

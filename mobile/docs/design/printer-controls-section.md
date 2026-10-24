@@ -39,8 +39,8 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   distance, disclosures or the command owner.
 - Heat: side-by-side Hotend/Bed target fields with **one compact Go button**
   on the same row (stacked at accessibility text sizes), compact
-  PLA · PETG · ABS · **More** · **Cool down** row (More is a native menu with
-  ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field; the
+  PLA · PETG · ABS · **More** · **Cool down** row (More is a native menu, with
+  no section title, listing ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field; the
   Advanced screen keeps PLA/PETG/ABS + Cool down). Actual/target values appear only in the
   strip above, not repeated around each editor. Accessibility text stacks the
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
@@ -637,10 +637,15 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.
-- Presets use a compact four-button row on standard phone and iPad text sizes,
-  two columns at XX Large/XXX Large, and one column at accessibility sizes.
-  Labels and temperature pairs remain visible; the compact **Cool** label keeps
-  the full **Cool down** VoiceOver name. Hit targets remain at least 44pt.
+- On the Control tab's Heat segment the row is **PLA · PETG · ABS · More ·
+  Cool down** (mockup v3). From XX Large, including every accessibility size,
+  it wraps to the three materials, then More + Cool down, so More (ASA, TPU,
+  PC, Nylon, Custom…) stays reachable at every text size. At accessibility
+  sizes the buttons grow taller instead of clipping their captions. Elsewhere
+  presets use a compact four-button row on standard text sizes, two columns at
+  XX Large/XXX Large, and one column at accessibility sizes. Labels and
+  temperature pairs remain visible; the compact **Cool** label keeps the full
+  **Cool down** VoiceOver name. Hit targets remain at least 44pt.
 - **No custom temp input. No long-press. No swipe.**
 
 #### Home
@@ -790,7 +795,7 @@ All controls must satisfy:
 | Preheat PLA | "Preheat for PLA" | "Sets hotend to 200 degrees, bed to 60 degrees." | `.button` | "Pending" / "Failed: <reason>. Double-tap to retry." |
 | Preheat PETG | "Preheat for PETG" | "Sets hotend to 230 degrees, bed to 80 degrees." | `.button` | (same pattern) |
 | Preheat ABS | "Preheat for ABS" | "Sets hotend to 245 degrees, bed to 100 degrees." | `.button` | (same pattern) |
-| More (Control tab) | "More materials" | "Shows more preheat materials and a custom nozzle target." (while blocked: "Disabled while printing.") | `.button` (native `Menu`) | Menu items read "<material>" with "<nozzle>° · <bed>°"; "Custom…" focuses the Nozzle field |
+| More (Control tab) | "More materials" | "Shows more preheat materials and a custom nozzle target." (while blocked: the actual reason, e.g. "Controls are locked while a print is active.", "Printer is offline." or "Another printer operation is still pending.") | `.button` (native `Menu`) | Menu items read "<material>" with "<nozzle>° · <bed>°"; "Custom…" focuses the Nozzle field |
 | Cool Down | "Cool down" | "Turns off all heaters." with heater shutdown; otherwise "Sets hotend and bed to 0 degrees." (hotend-only: "Sets hotend to 0 degrees.") | `.button` | (same pattern) |
 | Home All | "Home all axes" | "Homes X, Y, and Z." | `.button` | (same pattern) |
 | Home XY | "Home X and Y" | "Homes X and Y axes only." | `.button` | (same pattern) |
@@ -915,9 +920,11 @@ struct JogSubgroup: View {
 **Helper enums** (Hudson decides exact ownership — model layer or view-local):
 
 ```swift
-enum PreheatPreset { case pla, petg, abs, coolDown
-    var hotend: Double { ... }   // from `definition`: 200, 230, 245, 0
-    var bed: Double { ... }      // 60, 80, 100, 0
+enum PreheatPreset { case pla, petg, abs, asa, tpu, pc, nylon, coolDown
+    // Row: pla, petg, abs (rowMaterials) · More · coolDown.
+    // More menu: asa, tpu, pc, nylon (menuMaterials), then "Custom…".
+    var hotend: Double { ... }   // from `definition`: 200, 230, 245, 245, 220, 260, 250, 0
+    var bed: Double { ... }      // 60, 80, 100, 100, 50, 110, 80, 0
     var label: String { ... }
 }
 enum JogAxis: String, CaseIterable, Identifiable { case x, y, z; var id: String { rawValue } }

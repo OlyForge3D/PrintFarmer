@@ -525,6 +525,37 @@ final class PreheatSubgroupTests: XCTestCase {
         }
     }
 
+    /// R3464-B13: every text size, including AX1–AX5, keeps the five slots so
+    /// More (and through it ASA/TPU/PC/Nylon and Custom…) stays reachable.
+    func test_presetRows_keepMoreAtEveryTextSizeAndWrapFromXXLarge() {
+        let expected: [PreheatSubgroup.PresetSlot] =
+            PreheatPreset.rowMaterials.map { .preset($0) } + [.more, .preset(.coolDown)]
+        for size in DynamicTypeSize.allCases {
+            let rows = PreheatSubgroup.presetRows(dynamicTypeSize: size)
+            XCTAssertEqual(rows.flatMap { $0 }, expected, "\(size)")
+            XCTAssertEqual(rows.count, size >= .xxLarge ? 2 : 1, "\(size)")
+        }
+        XCTAssertEqual(PreheatPreset.menuMaterials, [.asa, .tpu, .pc, .nylon])
+    }
+
+    /// R3464-B15: More's disabled hint names the actual reason.
+    func test_moreMenuBlockedReason_matchesActualReason() async throws {
+        let idle = try makeVM(state: "ready", isOnline: true)
+        await idle.loadCapabilities()
+        XCTAssertNil(idle.preheatMenuBlockedReason)
+
+        let offline = try makeVM(state: "ready", isOnline: false)
+        await offline.loadCapabilities()
+        XCTAssertEqual(offline.preheatMenuBlockedReason, "Printer is offline.")
+
+        let printing = try makeVM(state: "printing", isOnline: true)
+        await printing.loadCapabilities()
+        XCTAssertEqual(printing.preheatMenuBlockedReason, "Controls are locked while a print is active.")
+        for vm in [offline, printing] {
+            XCTAssertNotEqual(vm.preheatMenuBlockedReason, "Disabled while printing.")
+        }
+    }
+
     func test_accessibilityHint_idle_coolDown_describesHeaterShutdown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
         await vm.loadCapabilities()

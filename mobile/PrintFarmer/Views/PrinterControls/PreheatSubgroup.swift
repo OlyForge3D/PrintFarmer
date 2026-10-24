@@ -359,7 +359,7 @@ struct PreheatSubgroup: View {
             if compactForDetail {
                 // The Heat segment already names this panel, so detail mode shows only presets.
                 Group {
-                    if presetsFillRow && !dynamicTypeSize.isAccessibilitySize {
+                    if presetsFillRow {
                         filledPresetRow
                     } else {
                         ViewThatFits(in: .horizontal) {
@@ -415,26 +415,32 @@ struct PreheatSubgroup: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    enum PresetSlot: Hashable {
+        case preset(PreheatPreset)
+        case more
+    }
+
     /// Mockup v3: PLA · PETG · ABS · More · Cool down in one row; from
-    /// xxLarge the materials wrap above More + Cool down.
+    /// xxLarge (including every accessibility size) the materials wrap above
+    /// More + Cool down, so More stays reachable at every text size.
+    static func presetRows(dynamicTypeSize: DynamicTypeSize) -> [[PresetSlot]] {
+        let materials = PreheatPreset.rowMaterials.map(PresetSlot.preset)
+        let trailing: [PresetSlot] = [.more, .preset(.coolDown)]
+        return dynamicTypeSize >= .xxLarge ? [materials, trailing] : [materials + trailing]
+    }
+
     private var filledPresetRow: some View {
-        let materials = ForEach(PreheatPreset.rowMaterials, id: \.self) { preset in
-            button(for: preset, compactForDetail: true).frame(maxWidth: .infinity)
-        }
-        let trailing = Group {
-            moreMenu.frame(maxWidth: .infinity)
-            button(for: .coolDown, compactForDetail: true).frame(maxWidth: .infinity)
-        }
-        return Group {
-            if dynamicTypeSize >= .xxLarge {
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) { materials }
-                    HStack(spacing: 8) { trailing }
-                }
-            } else {
+        VStack(spacing: 8) {
+            ForEach(Self.presetRows(dynamicTypeSize: dynamicTypeSize), id: \.self) { row in
                 HStack(spacing: 8) {
-                    materials
-                    trailing
+                    ForEach(row, id: \.self) { slot in
+                        switch slot {
+                        case .preset(let preset):
+                            button(for: preset, compactForDetail: true).frame(maxWidth: .infinity)
+                        case .more:
+                            moreMenu.frame(maxWidth: .infinity)
+                        }
+                    }
                 }
             }
         }
@@ -448,9 +454,10 @@ struct PreheatSubgroup: View {
     /// existing Nozzle target field rather than opening a new editor.
     private var moreMenu: some View {
         let canControl = viewModel.canRunPreheat(.pla)
-        let isEnabled = canControl && !viewModel.isExecuting
+        let disabledReason = viewModel.preheatMenuBlockedReason
+        let isEnabled = disabledReason == nil
         return Menu {
-            Section("Preheat to") {
+            Section {
                 ForEach(PreheatPreset.menuMaterials, id: \.self) { preset in
                     Button {
                         handleTap(preset: preset, canControl: canControl)
@@ -496,7 +503,7 @@ struct PreheatSubgroup: View {
         .accessibilityLabel(String(localized: "More materials", comment: "VoiceOver: Heat More menu button"))
         .accessibilityHint(isEnabled
             ? String(localized: "Shows more preheat materials and a custom nozzle target.", comment: "VoiceOver: Heat More menu hint")
-            : String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1"))
+            : disabledReason ?? "")
         .accessibilityIdentifier("printer.controls.preheat.more")
     }
 
@@ -828,7 +835,11 @@ struct PreheatSubgroup: View {
         // Height comes from the type metrics alone, never the rendered label, so
         // every preset matches Cool down and the row keeps one height whichever
         // readings the backend supports.
-        .frame(height: compactForDetail ? 48 : max(54, presetFontSize * 2 + 14))
+        // Accessibility sizes let the compact row grow so captions aren't clipped.
+        .frame(height: compactForDetail
+            ? (dynamicTypeSize.isAccessibilitySize ? nil : 48)
+            : max(54, presetFontSize * 2 + 14))
+        .frame(minHeight: compactForDetail ? 48 : nil)
         .frame(maxWidth: .infinity)
         .overlay {
             if isPending {

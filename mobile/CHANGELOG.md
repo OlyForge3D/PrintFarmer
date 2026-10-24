@@ -131,8 +131,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   and `allowZero` targets step to/from 0. Missing thermal values show "--"
   (VoiceOver "not reported").
 - Heat presets: PLA · PETG · ABS · **More** · Cool down in one row (wrapping
-  to presets, then More + Cool down at xxLarge and above), each showing its
-  nozzle/bed targets. More is a native menu with ASA, TPU, PC and Nylon, then
+  to presets, then More + Cool down at xxLarge and above, including every
+  accessibility text size, so More stays reachable). Each material preset
+  shows its nozzle/bed targets; More and Cool down show none. More's disabled
+  VoiceOver hint names the actual reason (printing, offline, a pending command
+  or unconfirmed access). More is a native menu (no section title) with ASA, TPU, PC and Nylon, then
   "Custom…", which focuses the Nozzle target field. Preset temperatures
   (°C, nozzle/bed): PLA 200/60, PETG 230/80, ABS 245/100, ASA 245/100,
   TPU 220/50, PC 260/110, Nylon 250/80. PETG and ABS change from 240/80 and
