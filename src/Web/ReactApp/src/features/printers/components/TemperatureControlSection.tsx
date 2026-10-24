@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PrinterValueControl } from '@/features/printers/components/PrinterValueControl';
 import { PrinterSensorGlyph, PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { TemperaturePresetMenu } from '@/features/printers/components/TemperaturePresetMenu';
+import { HEATER_LABELS } from '@/features/printers/constants/temperaturePresets';
 import { primaryHeater, primaryHeaterLimits, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor, PrinterTemperatures } from '@/types/api';
 
@@ -42,8 +43,8 @@ export function TemperatureControlSection({
   const authorized = hasPermission('queue', 'start');
   const disabled = busy || !canSetTemperatures || !authorized;
   const rows = [
-    { heater: 'hotend' as const, name: 'Hotend', target: hotendTarget, current: hotendCurrent, max: maxHotendTemp },
-    { heater: 'bed' as const, name: 'Bed', target: bedTarget, current: bedCurrent, max: maxBedTemp },
+    { heater: 'hotend' as const, name: HEATER_LABELS.hotend, target: hotendTarget, current: hotendCurrent, max: maxHotendTemp },
+    { heater: 'bed' as const, name: HEATER_LABELS.bed, target: bedTarget, current: bedCurrent, max: maxBedTemp },
   ];
   return <div className="min-w-0">
     {showHeading && <h4 className="mb-1 text-xs font-medium text-pf-text-secondary">Temperatures</h4>}

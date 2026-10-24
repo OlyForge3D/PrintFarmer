@@ -33,7 +33,7 @@ import type { PrinterMovement } from "@/features/printers/hooks/use-printer-move
 
 function chooseTemperaturePreset(value: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Apply temperature preset' }));
-  const label = value.includes(':') ? value.replace('hotend:', 'Hotend ').replace('bed:', 'Bed ') : `Both heaters ${value}`;
+  const label = value.includes(':') ? value.replace('hotend:', 'Extruder ').replace('bed:', 'Heater Bed ') : `Both heaters ${value}`;
   fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${label},`) }));
 }
 
@@ -286,7 +286,7 @@ describe("PrinterDetailsSidebar", () => {
         writable: [{ quantity: 'TargetTemperature', unit: 'Celsius', min: 0, max: 300, step: null, allowZero: true }] }] }}
       backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsHeaterShutdown: true })}
       onClose={vi.fn()} />);
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeEnabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(mockTurnOffHeaters).toHaveBeenCalledExactlyOnceWith(printer.id));
@@ -296,7 +296,7 @@ describe("PrinterDetailsSidebar", () => {
   it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
     render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, backend: PrinterBackend.Moonraker }}
       backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />);
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
   });
 
   it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {
@@ -317,7 +317,7 @@ describe("PrinterDetailsSidebar", () => {
     rerender(contents({ ...hot, hotendTemp: undefined, bedTemp: undefined }));
     expect(thermal()).toHaveTextContent("205.0°C");
     expect(thermal()).toHaveTextContent("60.0°C");
-    for (const [kind, title] of [["Nozzle", "Hotend temperature"], ["Bed", "Bed temperature"]]) {
+    for (const [kind, title] of [["Nozzle", "Extruder temperature"], ["Bed", "Heater Bed temperature"]]) {
       const actual = thermal().querySelector(`[data-sensor-glyph="${kind}"] svg`)!;
       const compact = within(screen.getByTestId("compact-temperature-reference")).getByTitle(title).querySelector("svg")!;
       expect(actual).toHaveClass("opacity-40");
@@ -341,7 +341,7 @@ describe("PrinterDetailsSidebar", () => {
     rerender(contents({ ...hot, activeExtruderId: null, hotendTemp: undefined, bedTemp: undefined }));
     expect(thermal()).not.toHaveTextContent('205.0°C');
     expect(thermal()).not.toHaveTextContent('60.0°C');
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
     expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 
@@ -499,8 +499,8 @@ describe("PrinterDetailsSidebar", () => {
   });
 
   it.each([
-    ['Hotend', 250, 'hotend', '210.5', '220'],
-    ['Bed', 100, 'bed', '60.5', '65'],
+    ['Extruder', 250, 'hotend', '210.5', '220'],
+    ['Heater Bed', 100, 'bed', '60.5', '65'],
   ] as const)('enforces persisted %s limits and integer precision without writable descriptors', async (name, max, heater, fractional, accepted) => {
     mockPrinterDetails = { capabilities: {
       id: 'caps', printerId: printer.id, printerName: printer.name, maxHotendTemp: 250, maxBedTemp: 100,
@@ -526,7 +526,7 @@ describe("PrinterDetailsSidebar", () => {
     await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: Number(accepted) }));
   });
 
-  it.each(['Hotend', 'Bed'] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async name => {
+  it.each([['Extruder', 'hotend'], ['Heater Bed', 'bed']] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async (name, heater) => {
     render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
       backendCapabilities={capabilities()} onClose={vi.fn()} />);
     const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
@@ -539,7 +539,7 @@ describe("PrinterDetailsSidebar", () => {
     expect(mockSetTemperatures).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '65' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [name.toLowerCase()]: 65 }));
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: 65 }));
     expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
   });
 
@@ -604,7 +604,7 @@ describe("PrinterDetailsSidebar", () => {
       expect(mockSetTemperatures).toHaveBeenCalledTimes(++count);
       expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, targets);
     }
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
     fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
     await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledTimes(4));
     expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, { hotend: 0, bed: 0 });

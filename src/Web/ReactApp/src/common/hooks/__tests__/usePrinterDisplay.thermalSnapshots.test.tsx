@@ -65,7 +65,7 @@ describe('Moonraker authoritative heater snapshots', () => {
       hotendCurrent={display.hotendTemp} hotendTarget={display.hotendTarget} sensors={display.sensors}
       temperatureActionPending={false} canSetTemperatures canCooldown
       onApplyPreset={vi.fn()} onApplySingleHeaterPreset={vi.fn()} />);
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
     expect(state.setPrinterSensor).not.toHaveBeenCalled();
     expect(state.setTemperatures).not.toHaveBeenCalled();
   });

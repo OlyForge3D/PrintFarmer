@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/common/components/ui';
 import { ChevronDownIcon } from '@/common/components/icons/MdiIcons';
-import { materialPresets } from '@/features/printers/constants/temperaturePresets';
+import { HEATER_LABELS, materialPresets } from '@/features/printers/constants/temperaturePresets';
 
 interface TemperaturePresetMenuProps {
   disabled: boolean;
@@ -12,8 +12,8 @@ interface TemperaturePresetMenuProps {
 
 const GROUPS = [
   { label: 'Both heaters', heater: undefined },
-  { label: 'Hotend', heater: 'hotend' },
-  { label: 'Bed', heater: 'bed' },
+  { label: HEATER_LABELS.hotend, heater: 'hotend' },
+  { label: HEATER_LABELS.bed, heater: 'bed' },
 ] as const;
 const MENU_MARGIN = 8;
 const MENU_GAP = 4;

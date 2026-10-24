@@ -6,6 +6,7 @@ import { TemperatureControlSection } from '@/features/printers/components/Temper
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import type { PrinterSensor } from '@/types/api';
 import { additionalPrinterSensors } from '@/features/printers/utils/additionalPrinterSensors';
+import { temperatureTargetLimitError } from '@/features/printers/constants/temperaturePresets';
 
 const mocks = vi.hoisted(() => ({ setTemperatures: vi.fn(), setPrinterSensor: vi.fn(), error: vi.fn(), allowed: true }));
 vi.mock('@/services/api', () => ({ apiClient: { setTemperatures: mocks.setTemperatures, setPrinterSensor: mocks.setPrinterSensor } }));
@@ -47,10 +48,33 @@ describe('TemperatureControlSection', () => {
     writable: [{ quantity: 'TargetTemperature', min: 10, max: 250 + index * 10, step: 0.5, unit: 'Celsius', allowZero: true }],
   }));
 
+  it.each([true, false])('uses Mainsail heater names with showHeading=%s without changing targets', showHeading => {
+    renderSection({ showHeading });
+    expect(screen.getByRole('rowheader', { name: 'Extruder' })).toBeVisible();
+    expect(screen.getByRole('rowheader', { name: 'Heater Bed' })).toBeVisible();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toHaveValue(210);
+    expect(screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' })).toHaveValue(60);
+    expect(screen.queryByRole('rowheader', { name: /^(Hotend|Bed)$/ })).not.toBeInTheDocument();
+    expect(mocks.setTemperatures).not.toHaveBeenCalled();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['hotend', 'Extruder', 250],
+    ['bed', 'Heater Bed', 100],
+  ] as const)('uses %s display terminology in limit errors without changing the heater key', (heater, label, max) => {
+    const capabilities = { maxHotendTemp: 250, maxBedTemp: 100 };
+    expect(temperatureTargetLimitError({ [heater]: max + 1 }, undefined, capabilities))
+      .toBe(`${label} target ${max + 1}°C exceeds maximum ${max}°C. Nothing sent.`);
+    expect(temperatureTargetLimitError({ [heater]: -1 }, undefined, capabilities))
+      .toBe(`${label} target -1°C is below minimum 0°C. Nothing sent.`);
+    expect(temperatureTargetLimitError({ [heater]: max }, undefined, capabilities)).toBeUndefined();
+  });
+
   it('addresses the active physical heater and allows zero below its heating minimum', async () => {
     const user = userEvent.setup();
     renderSection({ activeExtruderId: 'extruder3', sensors: tools });
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveAttribute('max', '280');
     await user.clear(input);
     await user.type(input, '0{Enter}');
@@ -62,9 +86,9 @@ describe('TemperatureControlSection', () => {
   it('discards an unsent draft when the active tool changes and restores tool zero as an additional row', async () => {
     const props = baseProps({ activeExtruderId: 'extruder', sensors: tools });
     const { rerender } = render(<TemperatureControlSection {...props} />);
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Hotend target temperature' }), { target: { value: '240' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Extruder target temperature' }), { target: { value: '240' } });
     rerender(<TemperatureControlSection {...props} activeExtruderId="extruder2" hotendTarget={230} />);
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveValue(230);
     expect(input).toHaveAttribute('max', '270');
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -76,13 +100,13 @@ describe('TemperatureControlSection', () => {
   it('disables presets during printing or pause without disabling manual targets or cooldown', () => {
     renderSection({ presetsDisabled: true });
     expect(screen.getByRole('button', { name: /apply temperature preset/i })).toBeDisabled();
-    expect(screen.getByLabelText('Hotend target temperature')).toBeEnabled();
+    expect(screen.getByLabelText('Extruder target temperature')).toBeEnabled();
     expect(screen.getByLabelText('Cooldown')).toBeEnabled();
   });
 
   it('fails closed when active heater identity is explicitly unknown', () => {
     renderSection({ activeExtruderId: null, sensors: tools });
-    expect(screen.getByLabelText('Hotend target temperature')).toBeDisabled();
+    expect(screen.getByLabelText('Extruder target temperature')).toBeDisabled();
     expect(additionalPrinterSensors(tools, { activeExtruderId: null })).toHaveLength(4);
   });
   it('renders the Temps heading by default and omits it when showHeading is false', () => {
@@ -105,7 +129,7 @@ describe('TemperatureControlSection', () => {
       <PrintProgressBar progress={0} jobName={null} isActive={false} showTemperatures isOnline={online} hotendTemp={hotend} bedTemp={bed} />
       <TemperatureControlSection {...baseProps({ hotendCurrent: hotend, bedCurrent: bed, isOnline: online })} />
     </>);
-    for (const [kind, title] of [['Nozzle', 'Hotend temperature'], ['Bed', 'Bed temperature']]) {
+    for (const [kind, title] of [['Nozzle', 'Extruder temperature'], ['Bed', 'Heater Bed temperature']]) {
       const detailed = container.querySelector(`[data-sensor-glyph="${kind}"] svg`)!;
       const compact = screen.getByTitle(title).querySelector('svg')!;
       expect(detailed.querySelector('path')).toHaveAttribute('d', compact.querySelector('path')!.getAttribute('d'));
@@ -143,9 +167,9 @@ describe('TemperatureControlSection', () => {
     const props = renderSection();
     const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
     await user.click(presets);
-    await user.click(screen.getByRole('menuitem', { name: /^Hotend ABS,/ }));
+    await user.click(screen.getByRole('menuitem', { name: /^Extruder ABS,/ }));
     await user.click(presets);
-    await user.click(screen.getByRole('menuitem', { name: /^Bed PETG,/ }));
+    await user.click(screen.getByRole('menuitem', { name: /^Heater Bed PETG,/ }));
 
     expect(props.onApplySingleHeaterPreset).toHaveBeenNthCalledWith(1, 'hotend', 'ABS');
     expect(props.onApplySingleHeaterPreset).toHaveBeenNthCalledWith(2, 'bed', 'PETG');
@@ -156,8 +180,8 @@ describe('TemperatureControlSection', () => {
 
     expect(screen.getByLabelText(/cooldown/i)).toBeDisabled();
     expect(screen.getByRole('button', { name: /apply temperature preset/i })).toBeDisabled();
-    expect(screen.getByLabelText(/hotend target temperature/i)).toBeDisabled();
-    expect(screen.getByLabelText(/bed target temperature/i)).toBeDisabled();
+    expect(screen.getByLabelText(/extruder target temperature/i)).toBeDisabled();
+    expect(screen.getByLabelText(/heater bed target temperature/i)).toBeDisabled();
   });
 
   it('disables the full section while a temperature action is pending', () => {
@@ -165,14 +189,14 @@ describe('TemperatureControlSection', () => {
 
     expect(screen.getByLabelText(/cooldown/i)).toBeDisabled();
     expect(screen.getByRole('button', { name: /apply temperature preset/i })).toBeDisabled();
-    expect(screen.getByLabelText(/hotend target temperature/i)).toBeDisabled();
-    expect(screen.getByLabelText(/bed target temperature/i)).toBeDisabled();
+    expect(screen.getByLabelText(/extruder target temperature/i)).toBeDisabled();
+    expect(screen.getByLabelText(/heater bed target temperature/i)).toBeDisabled();
   });
 
   it.each(['{Enter}{Tab}', '{Tab}'])('sends only the edited heater once on %s, never a stale companion target', async keys => {
     const user = userEvent.setup();
     renderSection();
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveValue(210);
     await user.clear(input);
     await user.type(input, `220${keys}`);
@@ -183,8 +207,8 @@ describe('TemperatureControlSection', () => {
 
   it('keeps missing cells blank and genuine zeros visible', () => {
     renderSection({ hotendTarget: undefined, hotendCurrent: undefined, bedTarget: 0, bedCurrent: 0 });
-    expect(screen.getByRole('spinbutton', { name: 'Hotend target temperature' })).toHaveValue(null);
-    expect(screen.getByRole('spinbutton', { name: 'Bed target temperature' })).toHaveValue(0);
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toHaveValue(null);
+    expect(screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' })).toHaveValue(0);
     expect(screen.getByText('0.0°C')).toBeInTheDocument();
     expect(screen.queryByText('---')).not.toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
@@ -194,7 +218,7 @@ describe('TemperatureControlSection', () => {
     const user = userEvent.setup();
     renderSection({ sensors: [{ id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
       writable: [{ quantity: 'TargetTemperature', min: 10, max: 250, step: 0.5, unit: 'Celsius' }] }] });
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveAttribute('min', '10');
     expect(input).toHaveAttribute('max', '250');
     expect(input).toHaveAttribute('step', '0.5');
@@ -208,7 +232,7 @@ describe('TemperatureControlSection', () => {
     const user = userEvent.setup();
     mocks.setTemperatures.mockResolvedValueOnce({ success: false, error: 'Busy heater' });
     renderSection();
-    const input = screen.getByRole('spinbutton', { name: 'Bed target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' });
     await user.clear(input);
     await user.type(input, '65{Enter}');
     await screen.findByText(/Busy heater.*retry/);
@@ -234,16 +258,16 @@ describe('TemperatureControlSection', () => {
       id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
       writable: [{ quantity: 'TargetTemperature', min: 0, max: descriptorMax, step: 0.5, unit: 'Celsius' }],
     }] });
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     if (expectedMax === undefined) {
       expect(input).not.toHaveAttribute('max');
       expect(input).toHaveAttribute('step', '1');
-      expect(input).toHaveAccessibleDescription(/Hotend maximum temperature unknown.*firmware limits/);
+      expect(input).toHaveAccessibleDescription(/Extruder maximum temperature unknown.*firmware limits/);
     } else {
       expect(input).toHaveAttribute('max', String(expectedMax));
       expect(input).not.toHaveAccessibleDescription(/maximum temperature unknown/);
     }
-    expect(screen.getByRole('spinbutton', { name: 'Bed target temperature' })).not.toHaveAccessibleDescription(/maximum temperature unknown/);
+    expect(screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' })).not.toHaveAccessibleDescription(/maximum temperature unknown/);
   });
 
   it.each([undefined, 250])('rejects a negative descriptor maximum even above its minimum and falls back to %s', persistedMax => {
@@ -251,7 +275,7 @@ describe('TemperatureControlSection', () => {
       id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
       writable: [{ quantity: 'TargetTemperature', min: -20, max: -10, step: 1, unit: 'Celsius' }],
     }] });
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     if (persistedMax === undefined) {
       expect(input).not.toHaveAttribute('max');
       expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
@@ -265,10 +289,10 @@ describe('TemperatureControlSection', () => {
     let finish!: (value: { success: boolean }) => void;
     mocks.setTemperatures.mockReturnValue(new Promise(resolve => { finish = resolve; }));
     renderSection();
-    const input = screen.getByRole('spinbutton', { name: 'Hotend target temperature' });
+    const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     fireEvent.change(input, { target: { value: '220' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(screen.getByRole('spinbutton', { name: 'Bed target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cooldown' })).toBeDisabled();
     expect(screen.getByText('Sending…')).toBeVisible();
     expect(screen.queryByText(/outcome unknown/)).not.toBeInTheDocument();
@@ -293,11 +317,11 @@ describe('TemperatureControlSection', () => {
     await user.keyboard('{ArrowDown}');
     expect(screen.getAllByRole('menuitem')).toHaveLength(15);
     expect(screen.getByRole('group', { name: 'Both heaters' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Hotend' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Bed' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Extruder' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Heater Bed' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /^Both heaters ABS,/ })).toHaveFocus();
     await user.keyboard('{ArrowDown}{End}');
-    expect(screen.getByRole('menuitem', { name: /^Bed Cooldown,/ })).toHaveFocus();
+    expect(screen.getByRole('menuitem', { name: /^Heater Bed Cooldown,/ })).toHaveFocus();
     await user.keyboard('{Home}{Escape}');
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
