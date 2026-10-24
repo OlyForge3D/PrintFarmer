@@ -753,6 +753,16 @@ export class ApiClient {
     return response.data;
   }
 
+  async setPrinterSpeedFactor(id: string, percent: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${id}/speed-factor`, { percent }, { allowAuthReplay: false });
+    return response.data;
+  }
+
+  async setPrinterFlowFactor(id: string, percent: number): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(`/printers/${id}/flow-factor`, { percent }, { allowAuthReplay: false });
+    return response.data;
+  }
+
   async setPrinterSensor(
     id: string,
     sensorId: string,

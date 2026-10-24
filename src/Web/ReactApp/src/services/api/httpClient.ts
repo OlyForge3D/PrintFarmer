@@ -17,6 +17,7 @@ import { clearStoredAuthentication, renewAccessToken } from "@/common/auth/sessi
 declare module "axios" {
   interface AxiosRequestConfig {
     skipAuthRedirect?: boolean;
+    allowAuthReplay?: boolean;
   }
 }
 
@@ -34,6 +35,8 @@ export interface PfRequestConfig extends AxiosRequestConfig {
    * rather than an expired session.
    */
   skipAuthRedirect?: boolean;
+  /** False for physical commands that require a fresh explicit action after a 401, even after renewal. */
+  allowAuthReplay?: boolean;
 }
 
 interface PfInternalRequestConfig extends PfRequestConfig {
@@ -98,7 +101,9 @@ function createHttpClient(): AxiosInstance {
         requestConfig?.authTokenAtRequest
       ) {
         const currentToken = localStorage.getItem("auth-token");
-        if (!requestConfig.authRetried && currentToken !== requestConfig.authTokenAtRequest && currentToken) {
+        const allowAuthReplay = requestConfig.allowAuthReplay !== false;
+        let authenticationRenewed = false;
+        if (allowAuthReplay && !requestConfig.authRetried && currentToken !== requestConfig.authTokenAtRequest && currentToken) {
           requestConfig.authRetried = true;
           requestConfig.authChangedWhileInFlight = true;
           return instance.request(requestConfig);
@@ -106,13 +111,16 @@ function createHttpClient(): AxiosInstance {
         if (!requestConfig.authRetried && currentToken === requestConfig.authTokenAtRequest && localStorage.getItem('auth-refresh-token')) {
           const renewedToken = await renewAccessToken();
           if (renewedToken) {
-            requestConfig.authRetried = true;
-            requestConfig.headers = requestConfig.headers ?? {};
-            requestConfig.headers.Authorization = ['Bearer', renewedToken].join(' ');
-            return instance.request(requestConfig);
+            authenticationRenewed = true;
+            if (allowAuthReplay) {
+              requestConfig.authRetried = true;
+              requestConfig.headers = requestConfig.headers ?? {};
+              requestConfig.headers.Authorization = ['Bearer', renewedToken].join(' ');
+              return instance.request(requestConfig);
+            }
           }
         }
-        if (!requestConfig.authChangedWhileInFlight && localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
+        if (!authenticationRenewed && !requestConfig.authChangedWhileInFlight && localStorage.getItem("auth-token") === requestConfig.authTokenAtRequest) {
           try {
             await resetAuthenticatedSignalRSession();
           } catch (resetError) {

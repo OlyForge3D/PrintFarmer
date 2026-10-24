@@ -236,6 +236,34 @@ factor observations or invalidations.
 Changes from Mainsail, macros, tool changes and other operators use the same authoritative
 pipeline; command submission itself never fabricates telemetry.
 
+### Web runtime controls
+
+The detailed printer card and printer sidebar expose independent **Speed %**
+and **Flow %** controls only when their respective operation capability is
+explicitly true for that printer. Older servers and unsupported backends hide
+them. Queue.Start permission, a live connection, enabled/non-maintenance status
+and a known allowed printer state are required. The server remains authoritative
+for printer Submit access and active-print queue ownership/fences.
+
+Each row separates **Observed** readback from the **New value** input.
+Unknown or explicitly cleared telemetry displays **Unknown**, never an assumed
+100%; external observations outside the write range are shown unchanged.
+Type a percentage and choose **Apply** (or press Enter); editing or leaving an
+input does not send a command. Speed and flow are separate operations.
+An acknowledgement does not change the observed value. Reconnects and
+printer/server/identity changes discard old observations and drafts until fresh
+status arrives. Live external changes update the observation, not an unsent edit.
+
+Writes are not automatically retried or queued for a later connection.
+An HTTP `401` never replays a runtime override, including after successful
+token renewal or a switch to another signed-in operator. Authentication may
+renew for future requests; the failed command still requires a fresh,
+deliberate **Apply** after reviewing the printer and current value.
+For failures, especially `503`/timeouts with an unknown physical outcome, inspect
+the live readback and printer before deliberately applying another value.
+These overrides affect the current runtime, not a saved slicer profile; reverting
+the percentage cannot repair print damage already caused by an unsuitable value.
+
 Verified upstream mapping: `M220 S<percent>` controls speed,
 `M221 S<percent>` controls extrusion; public `gcode_move.speed_factor` and
 `gcode_move.extrude_factor` are unitless multipliers converted by multiplying

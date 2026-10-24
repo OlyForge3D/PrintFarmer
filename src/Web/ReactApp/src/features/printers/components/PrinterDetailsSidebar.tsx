@@ -1,5 +1,6 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1226,6 +1227,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             }}
           />}
         </PrinterSensorsSection>
+
+        <RuntimeFactorControls printer={displayPrinter} backendCapabilities={backendCapabilities} />
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}
