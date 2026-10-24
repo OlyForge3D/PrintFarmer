@@ -1,9 +1,10 @@
-import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
+import { context, propagation, trace } from '@opentelemetry/api';
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core';
 import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION, SEMRESATTRS_SERVICE_NAMESPACE } from '@opentelemetry/semantic-conventions';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-web';
+import { BatchSpanProcessor, ConsoleSpanExporter, StackContextManager, TracerProvider } from '@opentelemetry/sdk-trace';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 // Import unified logging to initialize console redirection
 import '../services/unifiedLogging';
@@ -18,7 +19,7 @@ const config = {
   enableConsoleLogging: import.meta.env.DEV === true
 };
 
-let provider: WebTracerProvider | null = null;
+let provider: TracerProvider | null = null;
 
 export function initializeTelemetry(): void {
   if (provider) {
@@ -40,7 +41,7 @@ export function initializeTelemetry(): void {
     
     // Add console exporter for development
     if (config.enableConsoleLogging) {
-      spanProcessors.push(new BatchSpanProcessor(new ConsoleSpanExporter()));
+      spanProcessors.push(new BatchSpanProcessor({ exporter: new ConsoleSpanExporter() }));
     }
 
     // Add OTLP exporter if endpoint is configured
@@ -49,16 +50,20 @@ export function initializeTelemetry(): void {
         url: config.otlpEndpoint,
         headers: config.otlpHeaders ? JSON.parse(config.otlpHeaders) : {}
       });
-      spanProcessors.push(new BatchSpanProcessor(otlpExporter));
+      spanProcessors.push(new BatchSpanProcessor({ exporter: otlpExporter }));
     }
 
-    provider = new WebTracerProvider({
+    provider = new TracerProvider({
       resource,
       spanProcessors
     });
 
-    // Register the provider globally
-    provider.register();
+    // Preserve WebTracerProvider's browser defaults after the SDK 3 package split.
+    trace.setGlobalTracerProvider(provider);
+    context.setGlobalContextManager(new StackContextManager().enable());
+    propagation.setGlobalPropagator(new CompositePropagator({
+      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+    }));
 
     // Register auto-instrumentations
     registerInstrumentations({
