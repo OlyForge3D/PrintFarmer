@@ -66,9 +66,47 @@ internal sealed class PrinterState
 
     public double? LiveZOffsetMm { get; set; }
 
-    public double? SpeedFactorPercent { get; set; }
+    private readonly object _runtimeFactorLock = new();
+    private long _runtimeFactorSequence;
+    private long _speedFactorSequence;
+    private long _flowFactorSequence;
+    private double? _speedFactorPercent;
+    private double? _flowFactorPercent;
 
-    public double? FlowFactorPercent { get; set; }
+    public long BeginRuntimeFactorObservation() => Interlocked.Increment(ref _runtimeFactorSequence);
+
+    public (double? Speed, double? Flow) ReadRuntimeFactors()
+    {
+        lock (_runtimeFactorLock)
+        {
+            return (_speedFactorPercent, _flowFactorPercent);
+        }
+    }
+
+    public (double? Speed, double? Flow) UpdateRuntimeFactors(
+        long observation, bool hasSpeed, double? speed, bool hasFlow, double? flow)
+    {
+        lock (_runtimeFactorLock)
+        {
+            // HTTP observations are ordered at request start, before any newer WebSocket delta.
+            if (hasSpeed && observation >= _speedFactorSequence)
+            {
+                _speedFactorSequence = observation;
+                _speedFactorPercent = speed;
+            }
+
+            if (hasFlow && observation >= _flowFactorSequence)
+            {
+                _flowFactorSequence = observation;
+                _flowFactorPercent = flow;
+            }
+
+            return (_speedFactorPercent, _flowFactorPercent);
+        }
+    }
+
+    public void ClearRuntimeFactors() =>
+        UpdateRuntimeFactors(BeginRuntimeFactorObservation(), true, null, true, null);
 
     /// <summary>Backend-neutral Klipper sensor/fan telemetry (issue #3407).</summary>
     public MoonrakerSensorTracker Sensors { get; } = new();
@@ -81,8 +119,7 @@ internal sealed class PrinterState
         TotalLayers = null;
         FanSpeedPercent = null;
         LiveZOffsetMm = null;
-        SpeedFactorPercent = null;
-        FlowFactorPercent = null;
+        ClearRuntimeFactors();
     }
 
     /// <summary>

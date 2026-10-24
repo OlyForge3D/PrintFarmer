@@ -210,6 +210,8 @@ public sealed class MoonrakerSubscriptionService(
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker immediate refresh", ct)
                 .ConfigureAwait(false);
+            PrinterState observedState = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+            long factorObservation = observedState.BeginRuntimeFactorObservation();
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
                 printer.BackendUrl,
                 printer.Credential,
@@ -244,7 +246,7 @@ public sealed class MoonrakerSubscriptionService(
                 FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
                 ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
                 ActiveExtruderId: compositeStatus.ActiveExtruderId);
-            statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate);
+            statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate, observedState, factorObservation);
             _statusCacheWriter.UpdateStatus(
                 statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds),
                 originWatermark);
@@ -892,8 +894,7 @@ public sealed class MoonrakerSubscriptionService(
     {
         await MarkSensorsUnavailableAsync(printer.Id, ct);
         PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
-        state.SpeedFactorPercent = null;
-        state.FlowFactorPercent = null;
+        state.ClearRuntimeFactors();
         state.Sensors.Discover(objectNames);
         await LoadSensorConfigurationAsync(printer, state, ct);
         ct.ThrowIfCancellationRequested();
@@ -1082,14 +1083,21 @@ public sealed class MoonrakerSubscriptionService(
     /// Uses fresh authenticated REST sensors or explicitly unavailable last-known readings.
     /// Cache and broadcasts receive the same complete snapshot.
     /// </summary>
-    private PrinterStatusUpdate WithHttpSensors(Guid printerId, PrinterCompositeStatus composite, PrinterStatusUpdate update)
+    private PrinterStatusUpdate WithHttpSensors(
+        Guid printerId, PrinterCompositeStatus composite, PrinterStatusUpdate update,
+        PrinterState observedState, long factorObservation)
     {
+        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
+        (double? speed, double? flow) = ReferenceEquals(state, observedState)
+            ? state.UpdateRuntimeFactors(
+                factorObservation, true, composite.IsOnline ? composite.SpeedFactorPercent : null,
+                true, composite.IsOnline ? composite.FlowFactorPercent : null)
+            : state.ReadRuntimeFactors();
         update = update with
         {
-            SpeedFactorPercent = composite.IsOnline ? composite.SpeedFactorPercent : null,
-            FlowFactorPercent = composite.IsOnline ? composite.FlowFactorPercent : null,
+            SpeedFactorPercent = speed,
+            FlowFactorPercent = flow,
         };
-        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
         if (composite.Sensors is not null)
         {
             state.LastHttpSensors = composite.Sensors;
@@ -1112,8 +1120,7 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         _ = state.Sensors.MarkAllUnavailable();
-        state.SpeedFactorPercent = null;
-        state.FlowFactorPercent = null;
+        state.ClearRuntimeFactors();
         return state.Sensors.Snapshot();
     }
 
@@ -1128,8 +1135,7 @@ public sealed class MoonrakerSubscriptionService(
             _printerStates.TryGetValue(printerId, out PrinterState? state);
             if (state is not null)
             {
-                state.SpeedFactorPercent = null;
-                state.FlowFactorPercent = null;
+                state.ClearRuntimeFactors();
             }
 
             PrinterStatusDto? invalidated = _statusCacheWriter.ClearRuntimeFactors(printerId);
@@ -1561,8 +1567,7 @@ public sealed class MoonrakerSubscriptionService(
 
         if (resolvedReady == false)
         {
-            state.SpeedFactorPercent = null;
-            state.FlowFactorPercent = null;
+            state.ClearRuntimeFactors();
         }
 
         HandlePositionUpdate(state, statusObj);
@@ -1838,21 +1843,15 @@ public sealed class MoonrakerSubscriptionService(
     {
         if (gcodeMove.ValueKind != JsonValueKind.Object)
         {
-            state.SpeedFactorPercent = null;
-            state.FlowFactorPercent = null;
+            state.ClearRuntimeFactors();
             return;
         }
 
         // Omission in a Moonraker delta is not a reset. Explicit invalid values are.
-        if (gcodeMove.TryGetProperty("speed_factor", out _))
-        {
-            state.SpeedFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "speed_factor");
-        }
-
-        if (gcodeMove.TryGetProperty("extrude_factor", out _))
-        {
-            state.FlowFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "extrude_factor");
-        }
+        state.UpdateRuntimeFactors(
+            state.BeginRuntimeFactorObservation(),
+            gcodeMove.TryGetProperty("speed_factor", out _), MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "speed_factor"),
+            gcodeMove.TryGetProperty("extrude_factor", out _), MoonrakerRuntimeFactorMapper.ReadPercent(gcodeMove, "extrude_factor"));
 
         if (!gcodeMove.TryGetProperty("homing_origin", out JsonElement homingOrigin))
         {
@@ -3209,6 +3208,7 @@ public sealed class MoonrakerSubscriptionService(
 
             // Complete sensor snapshot (issue #3407): sensor-only notifications reach clients too.
             IReadOnlyList<PrinterSensorDto> sensors = state.Sensors.Snapshot();
+            (double? speedFactor, double? flowFactor) = state.ReadRuntimeFactors();
 
             // Build MMU status if detected
             MmuStatusDto? mmuStatus = state.BuildMmuStatus();
@@ -3265,8 +3265,8 @@ public sealed class MoonrakerSubscriptionService(
                 FanSpeedPercent: state.FanSpeedPercent,
                 LiveZOffsetMm: state.LiveZOffsetMm,
                 ActiveExtruderId: state.ActiveExtruderId,
-                SpeedFactorPercent: isOnline ? state.SpeedFactorPercent : null,
-                FlowFactorPercent: isOnline ? state.FlowFactorPercent : null)
+                SpeedFactorPercent: isOnline ? speedFactor : null,
+                FlowFactorPercent: isOnline ? flowFactor : null)
             {
                 Sensors = sensors,
             };
@@ -3309,8 +3309,8 @@ public sealed class MoonrakerSubscriptionService(
                 FanSpeedPercent: state.FanSpeedPercent,
                 LiveZOffsetMm: state.LiveZOffsetMm,
                 ActiveExtruderId: state.ActiveExtruderId,
-                SpeedFactorPercent: isOnline ? state.SpeedFactorPercent : null,
-                FlowFactorPercent: isOnline ? state.FlowFactorPercent : null)
+                SpeedFactorPercent: isOnline ? speedFactor : null,
+                FlowFactorPercent: isOnline ? flowFactor : null)
             {
                 Sensors = sensors,
             };
@@ -3832,6 +3832,8 @@ public sealed class MoonrakerSubscriptionService(
             long? originWatermark = await OriginWatermark
                 .CaptureAsync(watermarkReader, _logger, "Moonraker HTTP status", ct)
                 .ConfigureAwait(false);
+            PrinterState observedState = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
+            long factorObservation = observedState.BeginRuntimeFactorObservation();
             PrinterCompositeStatus compositeStatus = await moonrakerClient.GetCompositeStatusAsync(
                 printer.BackendUrl,
                 printer.Credential,
@@ -3865,7 +3867,7 @@ public sealed class MoonrakerSubscriptionService(
                     FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName),
                     ThumbnailCacheIdentity: compositeStatus.ThumbnailCacheIdentity,
                     ActiveExtruderId: compositeStatus.ActiveExtruderId);
-                statusUpdate = WithHttpSensors(printer.Id, compositeStatus, statusUpdate);
+                statusUpdate = WithHttpSensors(printer.Id, compositeStatus, statusUpdate, observedState, factorObservation);
 
                 try
                 {

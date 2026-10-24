@@ -187,4 +187,45 @@ public sealed class PrintersControllerRuntimeFactorTests
         _actuation.Verify(s => s.MarkDirectUnknownAsync(It.IsAny<PrinterActuationLease>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         _actuation.Verify(s => s.CompleteDirectAsync(It.IsAny<PrinterActuationLease>(), true, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Theory]
+    [InlineData(true, "idle")]
+    [InlineData(false, "idle")]
+    [InlineData(true, "printing")]
+    [InlineData(false, "printing")]
+    public async Task SetRuntimeFactorAsync_CallerCancelledAfterSend_PropagatesCancellationAndMarksUnknownOnce(bool speed, string state)
+    {
+        PrintersController controller = CreateController(state);
+        using var cancellation = new CancellationTokenSource();
+        async Task<bool> CancelAsync(Guid id, double percent, CancellationToken token)
+        {
+            cancellation.Cancel();
+            return await Task.FromCanceled<bool>(token);
+        }
+
+        if (speed)
+        {
+            _printers.Setup(service => service.SetSpeedFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()))
+                .Returns(CancelAsync);
+        }
+        else
+        {
+            _printers.Setup(service => service.SetFlowFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()))
+                .Returns(CancelAsync);
+        }
+
+        var request = new RuntimeFactorRequest { Percent = 123.45 };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => speed
+            ? controller.SetSpeedFactorAsync(_id, request, cancellation.Token)
+            : controller.SetFlowFactorAsync(_id, request, cancellation.Token));
+
+        _actuation.Verify(service => service.MarkDirectUnknownAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        _actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _printers.Verify(service => service.SetSpeedFactorAsync(
+            _id, 123.45, It.IsAny<CancellationToken>()), speed ? Times.Once() : Times.Never());
+        _printers.Verify(service => service.SetFlowFactorAsync(
+            _id, 123.45, It.IsAny<CancellationToken>()), speed ? Times.Never() : Times.Once());
+    }
 }

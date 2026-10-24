@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Modules.Printers.Controllers.Requests;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Modules.Printers.Controllers;
 
@@ -85,9 +86,23 @@ public partial class PrintersController
         }
 
         string operation = speed ? "set_speed_factor" : "set_flow_factor";
-        Task<bool> SendAsync(CancellationToken token) => speed
-            ? _printersService.SetSpeedFactorAsync(id, percent, token)
-            : _printersService.SetFlowFactorAsync(id, percent, token);
+        async Task<bool> SendAsync(CancellationToken token)
+        {
+            try
+            {
+                return speed
+                    ? await _printersService.SetSpeedFactorAsync(id, percent, token)
+                    : await _printersService.SetFlowFactorAsync(id, percent, token);
+            }
+            catch (OperationCanceledException exception) when (!token.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Runtime override {Operation} timed out on printer {PrinterId}; its physical outcome is unknown",
+                    operation, id);
+                return false;
+            }
+        }
 
         return active
             ? await ExecuteActiveCommandControlAsync(

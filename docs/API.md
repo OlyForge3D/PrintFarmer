@@ -206,6 +206,8 @@ Validation/unsupported failures use ProblemDetails; command/state outcomes use
 the existing `CommandResult` envelope. A `503` after dispatch can mean an unknown
 physical outcome; inspect status and the printer before retrying. Automatic
 retries can overwrite another operator's update.
+Backend-owned timeouts return the same `503` unknown-outcome envelope without
+retrying; actual caller cancellation still propagates as cancellation.
 
 `GET /api/printers/{id}/status`, detail/fast/complete snapshots and the existing
 lowercase `printerupdated` event add:
@@ -227,8 +229,11 @@ contract. A client reconnect must re-subscribe with `SubscribeToPrinterAsync` /
 Moonraker subscribes to all `gcode_move` fields. Partial notifications preserve
 each omitted factor independently; invalid reported fields clear only that
 factor. Transport loss, Klippy restart and re-subscription invalidate prior
-observations until fresh readback. HTTP fallback queries both fields. Changes
-from Mainsail, macros, tool changes and other operators use the same authoritative
+observations until fresh readback. HTTP fallback queries both fields. HTTP
+refresh/fallback observations also become the baseline for subsequent
+factor-free notifications. Older in-flight HTTP reads cannot overwrite newer
+factor observations or invalidations.
+Changes from Mainsail, macros, tool changes and other operators use the same authoritative
 pipeline; command submission itself never fabricates telemetry.
 
 Verified upstream mapping: `M220 S<percent>` controls speed,
