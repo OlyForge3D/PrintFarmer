@@ -188,7 +188,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 XCTAssertEqual(farmCount.label, "Farm count 12")
                 let queueCount = app.staticTexts["sidebar.count.queue"]
                 XCTAssertTrue(queueCount.waitForExistence(timeout: 8))
-                XCTAssertEqual(queueCount.label, "Queue count 7")
+                // #3284 derives totalPrinting from the fleet: 4 queued + 5 printing.
+                XCTAssertEqual(queueCount.label, "Queue count 9")
                 XCTAssertTrue(app.staticTexts["sidebar.count.filament"].waitForExistence(timeout: 8))
                 XCTAssertTrue(app.buttons["sidebar.settings"].exists)
             }
@@ -519,11 +520,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
                         .firstMatch
                     XCTAssertTrue(finishTime.exists)
+                    // The fixture omits layer counters (#3284), so Layer shows the
+                    // "--" placeholder, which VoiceOver reads as "not reported".
                     let layerFact = app.staticTexts
                         .matching(identifier: "printer.detail.job")
-                        .matching(NSPredicate(format: "label CONTAINS %@", "142/221"))
+                        .matching(NSPredicate(format: "label == %@", "Layer, not reported"))
                         .firstMatch
                     XCTAssertTrue(layerFact.waitForExistence(timeout: 5))
+                    XCTAssertFalse(
+                        page.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Unavailable")).firstMatch.exists,
+                        "Missing Status values use the -- placeholder, not Unavailable."
+                    )
                     let preview = app.images
                         .matching(identifier: "printer.detail.hero")
                         .matching(NSPredicate(format: "label == %@", "Current print preview"))
@@ -727,13 +734,22 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(page.exists)
             XCTAssertGreaterThanOrEqual(page.frame.height, 100, "The pinned header must leave a usable page viewport")
             if title == "Status" {
-                let job = app.otherElements["printer.detail.job"]
-                let beforeScroll = job.frame.minY
+                // printer.detail.job propagates to several children; the reading
+                // column is the single element that scrolls with the job block.
+                let readingColumn = app.otherElements["printer.detail.readingColumn"]
+                let beforeScroll = readingColumn.frame.minY
                 let statusContent = app.descendants(matching: .any)
                     .matching(identifier: "printer.detail.status.content").firstMatch
                 XCTAssertTrue(statusContent.exists)
-                app.swipeUp()
-                XCTAssertLessThan(job.frame.minY, beforeScroll, "The reading column must actually scroll")
+                if statusContent.frame.maxY > page.frame.maxY {
+                    app.swipeUp()
+                    XCTAssertLessThan(readingColumn.frame.minY, beforeScroll, "The reading column must actually scroll")
+                } else {
+                    // Regular-width iPads fit the whole Status page at AX sizes,
+                    // so prove nothing is clipped instead of demanding a scroll.
+                    XCTAssertGreaterThanOrEqual(statusContent.frame.minY, page.frame.minY)
+                    XCTAssertLessThanOrEqual(statusContent.frame.maxY, page.frame.maxY)
+                }
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             if title == "Control" {
@@ -1076,10 +1092,25 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
         let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
-        for _ in 0..<8 where !printerCard.exists {
-            app.swipeUp()
+        // SwiftUI surfaces the Farm scroll view as farm.printerList on iPhone
+        // and as farm.root inside the iPad split view.
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        // At accessibility sizes the card can sit below the fold; tap() targets
+        // its centre, so scroll until that point is inside the list viewport.
+        // A short drag without fling momentum cannot skip past it between checks.
+        func cardIsVisible() -> Bool {
+            guard printerCard.exists, printerCard.isHittable else { return false }
+            let card = printerCard.frame
+            return farmScroll.frame.contains(CGPoint(x: card.midX, y: card.midY))
         }
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        for _ in 0..<12 where !cardIsVisible() {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
+        XCTAssertTrue(cardIsVisible(), "The idle printer card centre must be on screen before tapping")
         printerCard.tap()
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
