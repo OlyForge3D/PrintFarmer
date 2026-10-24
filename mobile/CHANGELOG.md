@@ -123,19 +123,32 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   and is idle-only (disabled while a job is starting, printing or paused;
   Emergency stop covers that case). It calls `POST /heaters/off` when the
   backend reports `supportsHeaterShutdown`, otherwise it sets hotend/bed
-  targets to 0. No confirmation is needed. Heat targets stay
-  usable while printing only when the backend reports
-  `supportsTemperatureControlDuringPrint`; Tune omits the `enabled` quantity,
+  targets to 0. No confirmation is needed. Heat is idle-only: presets, the
+  More menu, Custom… and the Heat target fields are blocked while a job is
+  starting, printing or paused, even with
+  `supportsTemperatureControlDuringPrint`. Mid-print temperature changes
+  happen only on Tune, which keeps that capability gate; Tune omits the `enabled` quantity,
   and `allowZero` targets step to/from 0. Missing thermal values show "--"
   (VoiceOver "not reported").
+- Heat presets: PLA · PETG · ABS · **More** · Cool down in one row (wrapping
+  to presets, then More + Cool down at xxLarge and above), each showing its
+  nozzle/bed targets. More is a native menu with ASA, TPU, PC and Nylon, then
+  "Custom…", which focuses the Nozzle target field. Preset temperatures
+  (°C, nozzle/bed): PLA 200/60, PETG 230/80, ABS 245/100, ASA 245/100,
+  TPU 220/50, PC 260/110, Nylon 250/80. PETG and ABS change from 240/80 and
+  240/100. PC and Nylon are capped for PTFE-lined hotends (preheat values, not
+  print temperatures). All values live in the single `PreheatPreset.definition` table.
 - Tune shows editable hotend and bed targets while a job is printing or paused,
   disabled with a short reason only when the backend cannot apply them.
 - **Removed:** all fan controls from Tune (part-fan stepper and fan or
   temperature-fan sensor rows).
 - Move & home X/Y/Z readouts show "--" for a missing position (VoiceOver
   "not reported").
-- Instrument panel: the Heat segment is disabled while printing (Tune carries
-  the hotend/bed targets), jog distance defaults to 1 mm, the X/Y/Z readout is
+- Instrument panel: while printing, Move and Heat are disabled and Tune is
+  the only enabled segment. Tune is selected on entering Control and when a
+  print starts; when the print ends Move and Heat re-enable and Tune stays
+  selected. Disabled segments use standard VoiceOver "dimmed" semantics (the
+  extra "Unavailable while printing" hint is gone). Other instrument panel changes: jog distance defaults to 1 mm, the X/Y/Z readout is
   centred with hairline dividers, the babystep readout sits on the "Z babystep"
   header row in medium-weight monospaced text (shows "--", VoiceOver "Z offset
   not reported", when missing), and temperature steppers show the target as

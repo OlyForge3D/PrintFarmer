@@ -3,26 +3,38 @@ import Foundation
 
 // MARK: - Public Types
 
-enum PreheatPreset: String, Equatable, Sendable {
-    case pla, petg, abs, coolDown
+enum PreheatPreset: String, CaseIterable, Equatable, Sendable {
+    case pla, petg, abs, asa, tpu, pc, nylon, coolDown
 
-    var hotend: Double {
+    /// Display name plus nozzle/bed targets in °C. This table is the only
+    /// place preset values live; views and tests read from it. PC and Nylon
+    /// are capped for PTFE-lined hotends: they are preheat values, not
+    /// print temperatures.
+    struct Definition: Equatable, Sendable {
+        let name: String
+        let hotend: Double
+        let bed: Double
+    }
+
+    var definition: Definition {
         switch self {
-        case .pla: return 200
-        case .petg: return 240
-        case .abs: return 240
-        case .coolDown: return 0
+        case .pla: Definition(name: "PLA", hotend: 200, bed: 60)
+        case .petg: Definition(name: "PETG", hotend: 230, bed: 80)
+        case .abs: Definition(name: "ABS", hotend: 245, bed: 100)
+        case .asa: Definition(name: "ASA", hotend: 245, bed: 100)
+        case .tpu: Definition(name: "TPU", hotend: 220, bed: 50)
+        case .pc: Definition(name: "PC", hotend: 260, bed: 110)
+        case .nylon: Definition(name: "Nylon", hotend: 250, bed: 80)
+        case .coolDown: Definition(name: "Cool down", hotend: 0, bed: 0)
         }
     }
 
-    var bed: Double {
-        switch self {
-        case .pla: return 60
-        case .petg: return 80
-        case .abs: return 100
-        case .coolDown: return 0
-        }
-    }
+    var hotend: Double { definition.hotend }
+    var bed: Double { definition.bed }
+
+    /// Materials on the Heat row, then those behind the "More" menu.
+    static let rowMaterials: [PreheatPreset] = [.pla, .petg, .abs]
+    static let menuMaterials: [PreheatPreset] = [.asa, .tpu, .pc, .nylon]
 }
 
 struct ControlCommand: Equatable, Sendable {
@@ -1691,15 +1703,15 @@ final class PrinterControlsViewModel: ObservableObject {
         return runtimeControlAccessReason
     }
 
-    /// Cool down is idle-only: it stays locked while a job is starting,
-    /// printing or paused, even when heat targets are writable mid-print.
-    /// Emergency Stop covers stopping an active print.
+    /// Heat presets, including Cool down, are idle-only: mid-print
+    /// temperature changes belong to Tune, and Emergency Stop covers stopping
+    /// an active print.
     func canRunPreheat(_ preset: PreheatPreset) -> Bool {
-        preset == .coolDown ? canControl : canControlHeat
+        canControl
     }
 
     func preheatAccessReason(_ preset: PreheatPreset) -> String? {
-        preset == .coolDown ? blockedReason : heatBlockedReason
+        blockedReason
     }
 
     /// Cool down uses POST /heaters/off when supported; otherwise it sets 0/0 targets while idle.
@@ -1732,8 +1744,8 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .transientZOffset, .sensorControl:
             permitsActivePrint = true
-        case let .preheat(preset, _, _):
-            permitsActivePrint = preset != .coolDown && supportsHeatDuringPrint
+        case .preheat:
+            permitsActivePrint = false
         case .heater, .heaterTargets:
             permitsActivePrint = supportsHeatDuringPrint
         default:

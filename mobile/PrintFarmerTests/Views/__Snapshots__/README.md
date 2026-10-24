@@ -244,3 +244,17 @@ appearance, default locale, after inspecting both images: the snowflake is
 disabled again, and both PNGs are byte-identical to the references before the
 mid-print change. The Heat stepper and babystep restyle has no snapshot
 coverage; it was checked with scratch renders only.
+
+## Final preset temperatures
+
+PETG and ABS presets changed to 230/80 and 245/100 (nozzle/bed °C), read from
+`PreheatPreset.definition`. Their captions changed in
+`test_snapshot_disabledState_printerStarting`, `test_snapshot_flashForgeProfile`,
+`test_snapshot_loadingState_capabilitiesNil`,
+`test_snapshot_lockoutBanner_printingState`, `test_snapshot_moonrakerProfile`
+and `test_snapshot_sdcpProfile`. All six were re-recorded on iPhone 15 (3x) and
+iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale, after inspecting the images. These snapshots
+render the Advanced screen, which keeps PLA/PETG/ABS + Cool down; the Control
+tab's five-slot row with More has no snapshot coverage and is exercised by
+`Issue3259ControlIdleUITests.testHeatPresetRowOffersMoreMenuWhileIdle`.

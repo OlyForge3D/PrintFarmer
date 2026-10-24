@@ -1188,6 +1188,44 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         )
     }
 
+    func testHeatPresetRowOffersMoreMenuWhileIdle() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
+        for _ in 0..<8 where !printerCard.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let heat = app.buttons["printer.controls.segment.heat"]
+        XCTAssertTrue(heat.waitForExistence(timeout: 8))
+        heat.tap()
+
+        let slots = ["Preheat for PLA", "Preheat for PETG", "Preheat for ABS", "printer.controls.preheat.more", "Cool down"]
+        for key in slots {
+            let slot = app.buttons[key]
+            XCTAssertTrue(slot.waitForExistence(timeout: 5), key)
+            XCTAssertTrue(slot.isEnabled, key)
+            XCTAssertGreaterThanOrEqual(slot.frame.height, 44, key)
+        }
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        attachScreen("\(device)-heat-presets-idle")
+
+        app.buttons["printer.controls.preheat.more"].tap()
+        for material in ["ASA", "TPU", "PC", "Nylon", "Custom…"] {
+            XCTAssertTrue(
+                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", material)).firstMatch
+                    .waitForExistence(timeout: 5),
+                material
+            )
+        }
+        attachScreen("\(device)-heat-presets-more-open")
+    }
+
     func testCaptureApprovedIdleControlScreen() {
         let isIPad = UIDevice.current.userInterfaceIdiom == .pad
         if isIPad {

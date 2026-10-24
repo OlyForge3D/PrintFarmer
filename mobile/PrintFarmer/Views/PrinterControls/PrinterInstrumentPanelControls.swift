@@ -65,6 +65,12 @@ struct PrinterInstrumentPanelControls: View {
         isAvailable(selected, isPrinting: isPrinting) ? selected : .tune
     }
 
+    /// Entering Control mid-print, or a print starting while it is open,
+    /// selects Tune; when the print ends the selection stays put.
+    static func selection(afterPrintingChange selected: Segment, isPrinting: Bool) -> Segment {
+        isPrinting ? resolvedSegment(selected, isPrinting: true) : selected
+    }
+
     static func babystepText(_ offset: Double?) -> String {
         guard let number = babystepNumberText(offset) else { return PrinterDetailViewModel.missingValuePlaceholder }
         return "\(number) mm"
@@ -131,7 +137,7 @@ struct PrinterInstrumentPanelControls: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.instrument-panel")
             .onChange(of: isPrinting, initial: true) { _, printing in
-                if printing { selectedSegment = segment }
+                selectedSegment = Self.selection(afterPrintingChange: selectedSegment, isPrinting: printing)
             }
         }
     }
@@ -225,7 +231,6 @@ struct PrinterInstrumentPanelControls: View {
                 ControlActionButton(
                     title: option.title,
                     identifier: "printer.controls.segment.\(option.rawValue)",
-                    hint: available ? nil : "Unavailable while printing",
                     selected: segment == option,
                     compact: true,
                     segmented: true,
@@ -443,7 +448,7 @@ struct PrinterInstrumentPanelControls: View {
             EssentialControlHeading(title: "Temperatures")
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
             PreheatSubgroup.IndividualHeaterControls(
-                viewModel: viewModel, usesSteppers: true, compactForDetail: true
+                viewModel: viewModel, usesSteppers: true, compactForDetail: true, allowsActivePrint: true
             )
             .disabled(reason != nil)
             if let reason {

@@ -2145,7 +2145,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         await vm.preheat(.petg)
 
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 240)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, PreheatPreset.petg.hotend)
         XCTAssertNil(mockService.setTemperaturesCalledWith?.bed, "Bed must be silently dropped when unsupported")
         XCTAssertNil(vm.lastError, "Dropping the bed value must not surface as an error")
     }
@@ -2252,6 +2252,88 @@ final class PrinterControlsViewModelTests: XCTestCase {
             vm.cancelPendingCommand()
             await vm.homeAll()
             XCTAssertNil(service.homeCalledWith)
+        }
+    }
+
+    /// Heat is idle-only: no preset (row, More menu or Cool down) runs while a
+    /// job is starting, printing or paused, even when the backend supports
+    /// temperature control during a print. Tune's heater targets still apply.
+    func test_heatPresets_blockedMidPrintEvenWithCapability_whileTuneTargetsApply() async throws {
+        for state in ["starting", "printing", "paused"] {
+            var printer = try idlePrinter()
+            printer.state = state
+            let service = MockPrinterService()
+            var caps = Self.fullCaps
+            caps.supportsTemperatureControlDuringPrint = true
+            service.capabilitiesToReturn = caps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+            XCTAssertTrue(vm.supportsHeatDuringPrint, state)
+
+            for preset in PreheatPreset.allCases {
+                let label = "\(state) \(preset)"
+                XCTAssertFalse(vm.canRunPreheat(preset), label)
+                XCTAssertEqual(vm.preheatAccessReason(preset), "Controls are locked while a print is active.", label)
+                await vm.preheat(preset)
+                XCTAssertNil(service.setTemperaturesCalledWith, label)
+                XCTAssertEqual(service.turnOffHeatersCallCount, 0, label)
+                vm.cancelPendingCommand()
+            }
+
+            if state != "starting" {
+                XCTAssertTrue(vm.canControlHeat, state)
+                await vm.setHeaterTargets(hotend: 215, bed: 65)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 215, state)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 65, state)
+            }
+        }
+    }
+
+    func test_presetDefinitions_coverRowMenuAndCoolDown() {
+        XCTAssertEqual(PreheatPreset.rowMaterials + PreheatPreset.menuMaterials + [.coolDown], PreheatPreset.allCases)
+        XCTAssertEqual(PreheatSubgroup.presets, PreheatPreset.rowMaterials + [.coolDown])
+        XCTAssertEqual(PreheatPreset.coolDown.definition, .init(name: "Cool down", hotend: 0, bed: 0))
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            XCTAssertFalse(preset.definition.name.isEmpty, "\(preset)")
+            XCTAssertGreaterThan(preset.hotend, 0, "\(preset)")
+            XCTAssertGreaterThan(preset.bed, 0, "\(preset)")
+            XCTAssertEqual(preset.hotend, preset.definition.hotend, "\(preset)")
+            XCTAssertEqual(preset.bed, preset.definition.bed, "\(preset)")
+        }
+        XCTAssertEqual(Set((PreheatPreset.rowMaterials + PreheatPreset.menuMaterials).map(\.definition.name)).count, 7)
+    }
+
+    /// Every material, including the More menu ones, sends its definition's
+    /// targets while idle.
+    func test_materialPresets_whileIdle_sendDefinitionTargets() async throws {
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            let printer = try idlePrinter()
+            let service = MockPrinterService()
+            service.capabilitiesToReturn = Self.fullCaps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: 300, bed: 120)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+
+            XCTAssertTrue(vm.canRunPreheat(preset), "\(preset)")
+            XCTAssertNil(vm.preheatBlockedReason(preset), "\(preset)")
+            await vm.preheat(preset)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, preset.definition.hotend, "\(preset)")
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, preset.definition.bed, "\(preset)")
+        }
+    }
+
+    /// More-menu materials above the reported maxima are listed but blocked.
+    func test_menuPresets_aboveReportedMaximum_areBlocked() async throws {
+        let printer = try idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let hotendMax = Int(PreheatPreset.menuMaterials.map(\.hotend).max()!) - 1
+        service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: hotendMax, bed: 200)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        for preset in PreheatPreset.menuMaterials {
+            XCTAssertEqual(vm.preheatBlockedReason(preset) != nil, preset.hotend > Double(hotendMax), "\(preset)")
         }
     }
 

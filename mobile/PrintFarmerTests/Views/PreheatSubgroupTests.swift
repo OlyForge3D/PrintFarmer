@@ -506,8 +506,23 @@ final class PreheatSubgroupTests: XCTestCase {
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .petg, canControl: true, hasError: false),
-            "Sets hotend to 240 degrees, bed to 80 degrees."
+            "Sets hotend to \(Int(PreheatPreset.petg.hotend)) degrees, bed to \(Int(PreheatPreset.petg.bed)) degrees."
         )
+    }
+
+    /// Row captions and More-menu subtitles read from the preset definition.
+    func test_presetTargetText_readsFromDefinition() {
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            let hotend = Int(preset.definition.hotend), bed = Int(preset.definition.bed)
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: true), "\(hotend)/\(bed)")
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: false), "\(hotend)")
+            XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: true), "\(hotend)° · \(bed)°")
+            XCTAssertEqual(PreheatSubgroup.menuItemTemperatureText(preset, hasBed: false), "\(hotend)°")
+            XCTAssertEqual(
+                preset.a11yHint(hasBed: true, turnsOffHeaters: true),
+                "Sets hotend to \(hotend) degrees, bed to \(bed) degrees."
+            )
+        }
     }
 
     func test_accessibilityHint_idle_coolDown_describesHeaterShutdown() async throws {

@@ -805,6 +805,19 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(Panel.Segment.allCases.map(\.title), ["Move", "Heat", "Tune"])
     }
 
+    /// Entering Control mid-print or a print starting selects Tune; the print
+    /// ending re-enables Move/Heat but keeps Tune selected.
+    func testInstrumentPanelSelectsTuneOnPrintStartAndKeepsItAfterwards() {
+        typealias Panel = PrinterInstrumentPanelControls
+        for selected in Panel.Segment.allCases {
+            XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: true), .tune, "\(selected)")
+            XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: false), selected, "\(selected)")
+        }
+        let duringPrint = Panel.selection(afterPrintingChange: .heat, isPrinting: true)
+        XCTAssertEqual(Panel.selection(afterPrintingChange: duringPrint, isPrinting: false), .tune)
+        XCTAssertTrue(Panel.Segment.allCases.allSatisfy { Panel.isAvailable($0, isPrinting: false) })
+    }
+
     func testInstrumentPanelSharesPrintingStatesWithControlsViewModel() {
         for state in [nil, "", "idle", "printing", "Paused", "STARTING", "error"] as [String?] {
             XCTAssertEqual(

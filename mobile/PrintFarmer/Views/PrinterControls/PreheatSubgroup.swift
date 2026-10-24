@@ -64,6 +64,8 @@ struct ControlNumberField: UIViewRepresentable {
     /// Stepper values read as centred primary monospaced text (weight 500),
     /// with no border or fill, matching mockup B's `.stepper .val`.
     var stepperValueStyle = false
+    /// Incrementing this asks the field to become first responder (Heat "Custom…").
+    var focusRequest = 0
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -120,18 +122,26 @@ struct ControlNumberField: UIViewRepresentable {
         field.textAlignment = stepperValueStyle ? .center : .natural
         field.borderStyle = stepperValueStyle ? .none : .roundedRect
         field.backgroundColor = stepperValueStyle ? .clear : UIColor(Color.pfBackgroundTertiary)
+        if focusRequest != context.coordinator.focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async { if field.isEnabled { field.becomeFirstResponder() } }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? 200, height: EssentialControlsStyle.inputHeight(fontSize: fontSize))
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, focusRequest: focusRequest) }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var text: Binding<String>
+        var focusRequest: Int
         weak var field: UITextField?
-        init(text: Binding<String>) { self.text = text }
+        init(text: Binding<String>, focusRequest: Int = 0) {
+            self.text = text
+            self.focusRequest = focusRequest
+        }
         @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             textField.resignFirstResponder()
@@ -314,6 +324,8 @@ struct PreheatSubgroup: View {
     /// disabled (offline / mid-print). Cleared after a few seconds. Phone
     /// equivalent of the `.help()` tooltip that appears on iPad/Mac.
     @State private var disabledTapMessage: String?
+    /// Bumped by the More menu's "Custom…" to focus the Nozzle target field.
+    @State private var nozzleFocusRequest = 0
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -328,7 +340,7 @@ struct PreheatSubgroup: View {
     }
 
     /// Fixed display order matching the UX spec.
-    static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
+    static let presets: [PreheatPreset] = PreheatPreset.rowMaterials + [.coolDown]
 
     /// Cool down is always offered: heater shutdown when supported, else 0/0 targets while idle.
     private var visiblePresets: [PreheatPreset] { Self.presets }
@@ -366,7 +378,8 @@ struct PreheatSubgroup: View {
             IndividualHeaterControls(
                 viewModel: viewModel,
                 usesSteppers: usesSteppers,
-                compactForDetail: compactForDetail
+                compactForDetail: compactForDetail,
+                nozzleFocusRequest: nozzleFocusRequest
             )
 
             if !compactForDetail {
@@ -402,13 +415,89 @@ struct PreheatSubgroup: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    /// Mockup v3: PLA · PETG · ABS · More · Cool down in one row; from
+    /// xxLarge the materials wrap above More + Cool down.
     private var filledPresetRow: some View {
-        HStack(spacing: 8) {
-            ForEach(visiblePresets, id: \.self) { preset in
-                button(for: preset, compactForDetail: true)
-                    .frame(maxWidth: .infinity)
+        let materials = ForEach(PreheatPreset.rowMaterials, id: \.self) { preset in
+            button(for: preset, compactForDetail: true).frame(maxWidth: .infinity)
+        }
+        let trailing = Group {
+            moreMenu.frame(maxWidth: .infinity)
+            button(for: .coolDown, compactForDetail: true).frame(maxWidth: .infinity)
+        }
+        return Group {
+            if dynamicTypeSize >= .xxLarge {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) { materials }
+                    HStack(spacing: 8) { trailing }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    materials
+                    trailing
+                }
             }
         }
+    }
+
+    static func menuItemTemperatureText(_ preset: PreheatPreset, hasBed: Bool) -> String {
+        hasBed ? "\(Int(preset.hotend))° · \(Int(preset.bed))°" : "\(Int(preset.hotend))°"
+    }
+
+    /// Native menu of extra materials, then "Custom…" which focuses the
+    /// existing Nozzle target field rather than opening a new editor.
+    private var moreMenu: some View {
+        let canControl = viewModel.canRunPreheat(.pla)
+        let isEnabled = canControl && !viewModel.isExecuting
+        return Menu {
+            Section("Preheat to") {
+                ForEach(PreheatPreset.menuMaterials, id: \.self) { preset in
+                    Button {
+                        handleTap(preset: preset, canControl: canControl)
+                    } label: {
+                        Text(preset.displayLabel)
+                        Text(Self.menuItemTemperatureText(preset, hasBed: viewModel.supports(.bed)))
+                    }
+                    .disabled(viewModel.preheatBlockedReason(preset) != nil)
+                    .accessibilityIdentifier("printer.controls.preheat.\(preset.rawValue)")
+                }
+            }
+            Divider()
+            Button {
+                nozzleFocusRequest += 1
+            } label: {
+                Label("Custom…", systemImage: "slider.horizontal.3")
+            }
+            .accessibilityIdentifier("printer.controls.preheat.custom")
+        } label: {
+            HStack(spacing: 3) {
+                Text("More")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(isEnabled ? Color.accentColor : Color.pfTextTertiary)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .padding(.horizontal, 4)
+            .background(
+                isEnabled ? Color.pfBackground : Color.pfBackgroundTertiary,
+                in: RoundedRectangle(cornerRadius: cornerRadiusOverride ?? 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadiusOverride ?? 10, style: .continuous)
+                    .strokeBorder(Color.pfBorder)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(!isEnabled)
+        .accessibilityLabel(String(localized: "More materials", comment: "VoiceOver: Heat More menu button"))
+        .accessibilityHint(isEnabled
+            ? String(localized: "Shows more preheat materials and a custom nozzle target.", comment: "VoiceOver: Heat More menu hint")
+            : String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1"))
+        .accessibilityIdentifier("printer.controls.preheat.more")
     }
 
     @ViewBuilder
@@ -478,6 +567,10 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         var usesSteppers = false
         var compactForDetail = false
+        /// Tune passes `true`: its targets stay editable mid-print when the
+        /// backend supports it. Heat is idle-only.
+        var allowsActivePrint = false
+        var nozzleFocusRequest = 0
         @State private var hotend = ""
         @State private var bed = ""
         @State private var inputError: String?
@@ -491,7 +584,8 @@ struct PreheatSubgroup: View {
                 layout {
                     HeaterTargetEditor(
                         viewModel: viewModel, heater: .hotend, target: $hotend,
-                        usesStepper: usesSteppers, compactForDetail: compactForDetail
+                        usesStepper: usesSteppers, compactForDetail: compactForDetail,
+                        focusRequest: nozzleFocusRequest
                     )
                     HeaterTargetEditor(
                         viewModel: viewModel, heater: .bed, target: $bed,
@@ -507,7 +601,7 @@ struct PreheatSubgroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .disabled(!viewModel.canControlHeat || viewModel.isExecuting)
+            .disabled(!(allowsActivePrint ? viewModel.canControlHeat : viewModel.canControl) || viewModel.isExecuting)
         }
 
         private var setTargetsButton: some View {
@@ -544,6 +638,7 @@ struct PreheatSubgroup: View {
         @Binding var target: String
         var usesStepper = false
         var compactForDetail = false
+        var focusRequest = 0
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
@@ -616,7 +711,8 @@ struct PreheatSubgroup: View {
                     identifier: "printer.controls.\(heater.rawValue).target",
                     hint: targetHint,
                     keyboardType: .decimalPad,
-                    stepperValueStyle: usesStepper
+                    stepperValueStyle: usesStepper,
+                    focusRequest: focusRequest
                 )
                 .frame(width: compactForDetail && !dynamicTypeSize.isAccessibilitySize ? 72 : nil)
                 Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
@@ -676,7 +772,7 @@ struct PreheatSubgroup: View {
 
     private var blockedReasonMessage: String? {
         if horizontalSizeClass == .regular {
-            return viewModel.heatBlockedReason
+            return viewModel.blockedReason
         }
         return disabledTapMessage
     }
@@ -706,6 +802,15 @@ struct PreheatSubgroup: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .opacity(isPending ? 0 : 1)
+                if preset != .coolDown {
+                    Text(Self.compactTargetsText(preset, hasBed: viewModel.supports(.bed)))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .opacity(isPending ? 0 : 1)
+                        .accessibilityHidden(true)
+                }
             } else if preset == .coolDown {
                 // Larger snowflake icon with no text, matching web UI styling.
                 Image(systemName: "snowflake")
@@ -723,7 +828,7 @@ struct PreheatSubgroup: View {
         // Height comes from the type metrics alone, never the rendered label, so
         // every preset matches Cool down and the row keeps one height whichever
         // readings the backend supports.
-        .frame(height: compactForDetail ? 44 : max(54, presetFontSize * 2 + 14))
+        .frame(height: compactForDetail ? 48 : max(54, presetFontSize * 2 + 14))
         .frame(maxWidth: .infinity)
         .overlay {
             if isPending {
@@ -732,6 +837,11 @@ struct PreheatSubgroup: View {
                     .tint(Color.pfTextPrimary)
             }
         }
+    }
+
+    /// Compact preset caption, e.g. "200/60" (nozzle only without a heated bed).
+    static func compactTargetsText(_ preset: PreheatPreset, hasBed: Bool) -> String {
+        hasBed ? "\(Int(preset.hotend))/\(Int(preset.bed))" : "\(Int(preset.hotend))"
     }
 
     private func handleTap(preset: PreheatPreset, canControl: Bool) {
@@ -800,23 +910,9 @@ struct PreheatSubgroup: View {
 // MARK: - Preset display helpers
 
 private extension PreheatPreset {
-    var displayLabel: String {
-        switch self {
-        case .pla: return "PLA"
-        case .petg: return "PETG"
-        case .abs: return "ABS"
-        case .coolDown: return "Cool down"
-        }
-    }
+    var displayLabel: String { definition.name }
 
-    var spokenName: String {
-        switch self {
-        case .pla: return "PLA"
-        case .petg: return "PETG"
-        case .abs: return "ABS"
-        case .coolDown: return "cool down"
-        }
-    }
+    var spokenName: String { self == .coolDown ? "cool down" : definition.name }
 
     var temperatureLabel: String {
         "\(Int(hotend))° / \(Int(bed))°"
@@ -835,7 +931,7 @@ extension PreheatPreset {
             return hasBed
                 ? String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
                 : String(localized: "Sets hotend to 0 degrees.", comment: "VoiceOver: Cool Down hotend-only hint")
-        case .pla, .petg, .abs:
+        case .pla, .petg, .abs, .asa, .tpu, .pc, .nylon:
             if hasBed {
                 return String(localized: "Sets hotend to \(Int(hotend)) degrees, bed to \(Int(bed)) degrees.", comment: "VoiceOver: preheat idle hint with bed")
             } else {
