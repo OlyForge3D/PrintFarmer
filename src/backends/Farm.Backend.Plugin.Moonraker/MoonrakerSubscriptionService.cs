@@ -585,7 +585,7 @@ public sealed class MoonrakerSubscriptionService(
                 await SendConnectionIdentificationAsync(ws, ct);
 
                 // Step 2: Subscribe to printer objects
-                await SendObjectSubscriptionAsync(ws, printer.Id, ct);
+                await SendObjectSubscriptionAsync(ws, printer, ct);
 
                 // Step 2b: Query initial toolhead data (especially homed_axes) since Moonraker only sends incremental updates
                 try
@@ -795,9 +795,9 @@ public sealed class MoonrakerSubscriptionService(
     /// ensuring full state coverage for any Moonraker configuration without hardcoding object names.
     /// </summary>
     /// <param name="ws">The WebSocket connection.</param>
-    /// <param name="printerId">The printer whose persistent subscription state is being refreshed.</param>
+    /// <param name="printer">The printer whose persistent subscription state is being refreshed.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, Guid printerId, CancellationToken ct)
+    private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, Printer printer, CancellationToken ct)
     {
         // Step 1: Query the list of all available objects from Moonraker
         JsonRpcRequest listRequest = new()
@@ -855,7 +855,6 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         // Step 3: Parse the objects list and build subscription params
-        Dictionary<string, string[]?> subscriptionObjects = new Dictionary<string, string[]?>();
         List<string>? discoveredObjects = null;
 
         if (!string.IsNullOrEmpty(objectsListJson))
@@ -864,27 +863,97 @@ public sealed class MoonrakerSubscriptionService(
             if (doc.RootElement.TryGetProperty("result", out JsonElement resultElem) &&
                 TryReadObjectNames(resultElem, out discoveredObjects))
             {
-                subscriptionObjects = BuildSubscriptionObjects(discoveredObjects);
+                _logger.LogDebug("Discovered {ObjectCount} Klipper objects", discoveredObjects.Count);
             }
         }
 
-        PrinterState state = _printerStates.GetOrAdd(printerId, _ => new PrinterState());
-        state.ResetMmuState();
-        state.ResetLiveReadbacks();
-        if (discoveredObjects is not null)
+        if (discoveredObjects is null)
         {
-            state.Sensors.Discover(discoveredObjects);
+            throw new InvalidOperationException("Moonraker object discovery did not return an object list.");
         }
 
-        // Step 4: Send the subscription request with discovered objects
-        string subJson = BuildSubscriptionRequestJson(subscriptionObjects);
-        byte[] subBytes = Encoding.UTF8.GetBytes(subJson);
-        await ws.SendAsync(subBytes, WebSocketMessageType.Text, endOfMessage: true, ct);
+        PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
+        state.ResetMmuState();
+        state.ResetLiveReadbacks();
+        await SubscribeToObjectsAsync(
+            printer,
+            discoveredObjects,
+            async (json, token) =>
+                await ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, endOfMessage: true, token),
+            ct);
+    }
 
+    /// <summary>Loads static heater configuration before the live snapshot can advertise controls.</summary>
+    internal async Task SubscribeToObjectsAsync(
+        Printer printer,
+        List<string> objectNames,
+        Func<string, CancellationToken, Task> send,
+        CancellationToken ct)
+    {
+        await MarkSensorsUnavailableAsync(printer.Id, ct);
+        PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
+        state.Sensors.Discover(objectNames);
+        await LoadSensorConfigurationAsync(printer, state, ct);
+        ct.ThrowIfCancellationRequested();
+
+        Dictionary<string, string[]?> subscriptionObjects = BuildSubscriptionObjects(objectNames);
+        await send(BuildSubscriptionRequestJson(subscriptionObjects), ct);
         _logger.LogInformation(
             "Sent subscription request for {ObjectCount} objects to Moonraker: {ObjectList}",
             subscriptionObjects.Count.ToString(),
             string.Join(", ", subscriptionObjects.Keys));
+    }
+
+    private async Task LoadSensorConfigurationAsync(Printer printer, PrinterState state, CancellationToken ct)
+    {
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            // Static settings can be absent from subscription acknowledgements; ordinary deltas
+            // must use the same validated limits as HTTP snapshots, not guessed model defaults.
+            Uri queryUri = new(new Uri(printer.BackendUrl.TrimEnd('/') + "/"), "printer/objects/query?configfile=settings");
+            using HttpClient client = _httpClientFactory.CreateClient();
+            using HttpRequestMessage request = MoonrakerClient.CreateSafetyDiscoveryRequest(queryUri, printer.Credential);
+            using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Heater configuration for printer {PrinterId} returned {StatusCode}; heaters remain read-only",
+                    printer.Id,
+                    (int)response.StatusCode);
+                return;
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("result", out JsonElement result) || result.ValueKind != JsonValueKind.Object ||
+                !result.TryGetProperty("status", out JsonElement status) || status.ValueKind != JsonValueKind.Object ||
+                !status.TryGetProperty("configfile", out JsonElement configfile) || configfile.ValueKind != JsonValueKind.Object ||
+                !configfile.TryGetProperty("settings", out JsonElement settings) || settings.ValueKind != JsonValueKind.Object)
+            {
+                _logger.LogWarning(
+                    "Heater configuration for printer {PrinterId} contained no settings object; heaters remain read-only",
+                    printer.Id);
+                return;
+            }
+
+            timeout.Token.ThrowIfCancellationRequested();
+            _ = state.Sensors.Apply(status, DateTime.UtcNow);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Heater configuration query timed out for printer {PrinterId}; heaters remain read-only", printer.Id);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Heater configuration query failed for printer {PrinterId}; heaters remain read-only", printer.Id);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Heater configuration was not valid JSON for printer {PrinterId}; heaters remain read-only", printer.Id);
+        }
     }
 
     /// <summary>Reads the object names from a <c>printer.objects.list</c> result.</summary>
@@ -994,20 +1063,16 @@ public sealed class MoonrakerSubscriptionService(
             return;
         }
 
-        PrinterState state = _printerStates.GetOrAdd(printer.Id, _ => new PrinterState());
-        state.Sensors.Discover(objectNames);
-
         if (!_jsonRpcSenders.TryGetValue(printer.Id, out Func<string, CancellationToken, Task>? sender))
         {
             _logger.LogDebug("Connection for printer {PrinterName} closed before re-subscribing", printer.Name);
             return;
         }
 
-        Dictionary<string, string[]?> subscriptionObjects = BuildSubscriptionObjects(objectNames);
-        await sender(BuildSubscriptionRequestJson(subscriptionObjects), ct);
+        await SubscribeToObjectsAsync(printer, objectNames, sender, ct);
         _logger.LogInformation(
             "Re-subscribed to {ObjectCount} Klipper objects for printer {PrinterName} after Klippy ready",
-            subscriptionObjects.Count.ToString(),
+            objectNames.Count.ToString(),
             printer.Name);
     }
 
@@ -1378,6 +1443,7 @@ public sealed class MoonrakerSubscriptionService(
             case "notify_klippy_ready":
                 _logger.LogInformation("Klippy ready for printer {PrinterName}, switching to WebSocket real-time mode", printer.Name);
                 _klippyReadyState[printer.Id] = true;
+                await MarkSensorsUnavailableAsync(printer.Id, ct);
                 SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
                 CancelOfflineGraceTimer(printer.Id);
                 RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Connected, "Klippy ready");

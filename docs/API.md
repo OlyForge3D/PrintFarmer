@@ -274,6 +274,17 @@ object-list and full status/configuration queries and publish fresh, mapped
 sensors; a failed query preserves the previous list as unavailable, not live.
 The next WebSocket status update restores its own tracked availability.
 
+Before initial subscription and after object rediscovery, PrintFarmer explicitly
+queries `configfile.settings` with the printer's configured authentication and
+loads the validated bounds into the live sensor tracker. Subscription responses
+may omit these static settings; subsequent temperature/fan deltas retain the
+loaded limits rather than replacing HTTP-populated controls with read-only rows.
+Disconnect, shutdown and rediscovery invalidate old limits. Configuration reads
+are bounded to five seconds; HTTP errors, malformed responses or timeouts are
+logged and leave heaters read-only without blocking live readings. A subsequent
+connection or rediscovery reads configuration again. Model defaults and another
+printer's bounds are never substituted; writes still revalidate live limits.
+
 `activeExtruderId` identifies the physical `extruder`/`extruderN` represented by
 the primary Hotend readings and controls. It follows `toolhead.extruder`, not
 an assumed tool zero. The other extruders remain individually addressed rows.

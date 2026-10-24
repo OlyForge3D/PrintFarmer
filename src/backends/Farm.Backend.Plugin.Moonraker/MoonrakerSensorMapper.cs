@@ -397,6 +397,7 @@ internal sealed class MoonrakerSensorTracker
         lock (_gate)
         {
             _discovered = new HashSet<string>(objectNames, StringComparer.Ordinal);
+            _settings.Clear();
             _activeExtruderId = null;
             _activeExtruderReported = false;
             foreach (Entry entry in _entries.Values)
@@ -497,7 +498,8 @@ internal sealed class MoonrakerSensorTracker
     {
         lock (_gate)
         {
-            bool changed = false;
+            bool changed = _settings.Count > 0;
+            _settings.Clear();
             foreach (Entry entry in _entries.Values.Where(entry => entry.Available))
             {
                 entry.Available = false;
