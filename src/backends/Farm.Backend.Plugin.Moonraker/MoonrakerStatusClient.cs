@@ -93,7 +93,9 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 TotalLayers: status.TotalLayers,
                 FanSpeedPercent: status.FanSpeedPercent,
                 LiveZOffsetMm: status.LiveZOffsetMm,
-                ActiveExtruderId: status.ActiveExtruderId);
+                ActiveExtruderId: status.ActiveExtruderId,
+                SpeedFactorPercent: movement.IsOnline ? status.SpeedFactorPercent : null,
+                FlowFactorPercent: movement.IsOnline ? status.FlowFactorPercent : null);
             return status.Sensors is not null ? result with { Sensors = status.Sensors } : result;
         }
         catch (OperationCanceledException)

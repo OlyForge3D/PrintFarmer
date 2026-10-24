@@ -10,6 +10,8 @@
   "hotendTarget": 220,
   "bedTarget": 60,
   "speedMultiplier": 100,
+  "speedFactorPercent": 125,
+  "flowFactorPercent": 87.5,
   "safetyTelemetry": {
     "measuredHotendTemperatureC": {
       "value": 215.4,

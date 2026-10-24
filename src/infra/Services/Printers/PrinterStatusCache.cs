@@ -342,6 +342,23 @@ public class PrinterStatusCache :
         DateTime observedAtUtc) =>
         status.SensorsReported ? observedAtUtc : existingSnapshot?.SensorsUpdatedAtUtc;
 
+    /// <inheritdoc />
+    public PrinterStatusDto? ClearRuntimeFactors(Guid printerId)
+    {
+        lock (_lockObj)
+        {
+            if (!_cache.TryGetValue(printerId, out PrinterStatusCacheSnapshot? snapshot) ||
+                snapshot.Status is { SpeedFactorPercent: null, FlowFactorPercent: null })
+            {
+                return null;
+            }
+
+            PrinterStatusDto updated = snapshot.Status with { SpeedFactorPercent = null, FlowFactorPercent = null };
+            _cache[printerId] = snapshot with { Status = updated };
+            return updated;
+        }
+    }
+
     public void ClearStatus(Guid printerId)
     {
         lock (_lockObj)

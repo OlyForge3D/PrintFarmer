@@ -176,7 +176,8 @@ public class PrinterStatusClientTests
         var printer = new Printer { Id = Guid.NewGuid(), Name = "Fresh snapshot", ServerUrl = "http://fixture.invalid" };
         var composite = new PrinterCompositeStatus(true, "printing", 0.5, "part.gcode", null, null, null,
             X: 999, Y: 999, Z: 999, HotendTemp: 200, BedTemp: 60, HotendTarget: 210, BedTarget: 65,
-            PrintTimeLeftSeconds: 30, HomedAxes: "", HomedAxesObservedAtUtc: DateTime.UtcNow.AddHours(-1));
+            PrintTimeLeftSeconds: 30, HomedAxes: "", HomedAxesObservedAtUtc: DateTime.UtcNow.AddHours(-1),
+            SpeedFactorPercent: 125, FlowFactorPercent: 87.5);
         var telemetry = PrinterSafetyTelemetryDto.Empty with
         {
             HomedAxes = new SafetyAxesTelemetryFactDto(["x", "y", "z"], DateTime.UtcNow, 15, "snapshot"),
@@ -209,6 +210,8 @@ public class PrinterStatusClientTests
         Assert.Equal(200, status.HotendTemp);
         Assert.Equal(60, status.BedTemp);
         Assert.Equal(30, status.PrintTimeLeftSeconds);
+        Assert.Equal(125, status.SpeedFactorPercent);
+        Assert.Equal(87.5, status.FlowFactorPercent);
         backend.Verify(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -221,7 +224,8 @@ public class PrinterStatusClientTests
                 printer.BackendUrl,
                 printer.Credential,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PrinterCompositeStatus(true, "standby", null, null, null, null, null, X: 10, Y: 20, Z: 30));
+            .ReturnsAsync(new PrinterCompositeStatus(true, "standby", null, null, null, null, null, X: 10, Y: 20, Z: 30,
+                SpeedFactorPercent: 125, FlowFactorPercent: 87.5));
         backend.Setup(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Snapshot unavailable"));
         var breakers = new Mock<ICircuitBreakerService>();
@@ -236,6 +240,8 @@ public class PrinterStatusClientTests
         Assert.Null(status.Z);
         Assert.Null(status.HomedAxes);
         Assert.Null(status.SafetyTelemetry);
+        Assert.Null(status.SpeedFactorPercent);
+        Assert.Null(status.FlowFactorPercent);
     }
 
     [Fact]

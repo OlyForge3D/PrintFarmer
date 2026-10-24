@@ -556,6 +556,12 @@ public interface IPrintersService
     /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
     Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
 
+    /// <summary>Sets only the runtime speed override percentage through a semantic backend capability.</summary>
+    Task<bool> SetSpeedFactorAsync(Guid id, double percent, CancellationToken ct);
+
+    /// <summary>Sets only the runtime flow override percentage through a semantic backend capability.</summary>
+    Task<bool> SetFlowFactorAsync(Guid id, double percent, CancellationToken ct);
+
     /// <summary>Turns off all heaters through an explicitly supported backend operation.</summary>
     Task<bool> TurnOffHeatersAsync(Guid id, CancellationToken ct);
 

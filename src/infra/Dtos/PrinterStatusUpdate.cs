@@ -35,7 +35,9 @@ public record PrinterStatusUpdate(
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
     double? LiveZOffsetMm = null,
-    string? ActiveExtruderId = null)
+    string? ActiveExtruderId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null)
 {
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
@@ -92,7 +94,9 @@ public record PrinterStatusUpdate(
             TotalLayers: TotalLayers,
             FanSpeedPercent: FanSpeedPercent,
             LiveZOffsetMm: LiveZOffsetMm,
-            ActiveExtruderId: ActiveExtruderId);
+            ActiveExtruderId: ActiveExtruderId,
+            SpeedFactorPercent: SpeedFactorPercent,
+            FlowFactorPercent: FlowFactorPercent);
         return SensorsReported ? status with { Sensors = Sensors } : status;
     }
 }

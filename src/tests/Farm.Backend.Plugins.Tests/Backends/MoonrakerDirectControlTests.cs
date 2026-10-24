@@ -15,6 +15,55 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class MoonrakerDirectControlTests
 {
     [Theory]
+    [InlineData(true, 1, "M220 S1")]
+    [InlineData(true, 123.45, "M220 S123.45")]
+    [InlineData(false, 87.65, "M221 S87.65")]
+    [InlineData(false, 200, "M221 S200")]
+    public async Task SetRuntimeFactorAsync_IndependentInvariantPercent_SendsOneCommand(bool speed, double percent, string script)
+    {
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+        try
+        {
+            using var handler = new ControlHandler();
+            using var http = new HttpClient(handler);
+            var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+            bool accepted = speed
+                ? await client.SetSpeedFactorAsync("http://direct-fixture.invalid/", percent, PrinterCredential.FromApiKey("fixture-key"))
+                : await client.SetFlowFactorAsync("http://direct-fixture.invalid/", percent, PrinterCredential.FromApiKey("fixture-key"));
+
+            Assert.True(accepted);
+            Assert.Equal(1, handler.Requests);
+            Assert.Equal(script, handler.Script);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(200.01)]
+    [InlineData(99.999)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    public async Task SetRuntimeFactorAsync_InvalidPercent_DispatchesNothing(double percent)
+    {
+        using var handler = new ControlHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            client.SetSpeedFactorAsync("http://direct-fixture.invalid/", percent, null));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            client.SetFlowFactorAsync("http://direct-fixture.invalid/", percent, null));
+        Assert.Equal(0, handler.Requests);
+    }
+
+    [Theory]
     [InlineData("move")]
     [InlineData("moveto")]
     public async Task ManualJogAsync_FreshSnapshotThenSend_UsesTwoRequestsWithoutReceiptOrPolling(string operation)
@@ -169,7 +218,28 @@ public sealed class MoonrakerDirectControlTests
         Assert.Equal(180, status.TotalLayers);
         Assert.Equal(65, status.FanSpeedPercent);
         Assert.Equal(0.025, status.LiveZOffsetMm);
+        Assert.Equal(125, status.SpeedFactorPercent);
+        Assert.Equal(87.5, status.FlowFactorPercent);
         Assert.Contains("GET /printer/objects/query?fan=speed", handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("""{"speed_factor":"NaN","extrude_factor":"Infinity"}""")]
+    [InlineData("""{"speed_factor":-1,"extrude_factor":0}""")]
+    [InlineData("""{"speed_factor":1e309,"extrude_factor":1e308}""")]
+    public async Task GetCompositeStatusAsync_MalformedOrMissingFactors_ReturnsUnknown(string factors)
+    {
+        using var handler = new CompositeStatusHandler { Factors = factors };
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+        PrinterCompositeStatus status = await client.GetCompositeStatusAsync("http://fixture.invalid/", PrinterCredential.FromApiKey("fixture-key"));
+
+        Assert.True(status.IsOnline);
+        Assert.Null(status.SpeedFactorPercent);
+        Assert.Null(status.FlowFactorPercent);
     }
 
     [Fact]
@@ -384,6 +454,9 @@ public sealed class MoonrakerDirectControlTests
 
         public bool FailPrinterInfo { get; init; }
 
+        public string Factors { get; init; } =
+            """{"gcode_position":[1,2,3,0],"homing_origin":[0,0,0.025,0],"speed_factor":1.25,"extrude_factor":0.875}""";
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -400,8 +473,8 @@ public sealed class MoonrakerDirectControlTests
                 "/printer/info" => """{"state":"ready"}""",
                 "/printer/objects/query?print_stats&display_status&job_queue" =>
                     """{"result":{"status":{"print_stats":{"state":"printing","info":{"current_layer":42,"total_layer":180}},"display_status":{"progress":0.25}}}}""",
-                "/printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin" =>
-                    """{"result":{"status":{"toolhead":{"position":[1,2,3,0],"homed_axes":"xyz"},"gcode_move":{"gcode_position":[1,2,3,0],"homing_origin":[0,0,0.025,0]}}}}""",
+                "/printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin,speed_factor,extrude_factor" =>
+                    """{"result":{"status":{"toolhead":{"position":[1,2,3,0],"homed_axes":"xyz"},"gcode_move":""" + Factors + "}}}",
                 "/printer/objects/query?fan=speed" =>
                     """{"result":{"status":{"fan":{"speed":0.65}}}}""",
                 "/printer/objects/list" =>

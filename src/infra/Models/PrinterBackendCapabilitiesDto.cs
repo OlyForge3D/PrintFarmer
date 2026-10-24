@@ -53,6 +53,12 @@ public record PrinterBackendCapabilitiesDto(
     /// <summary>Whether the latest printer status includes a valid part-fan output percentage.</summary>
     public bool SupportsFanSpeedReadback { get; init; }
 
+    /// <summary>Whether the shared speed-factor route has a semantic backend implementation.</summary>
+    public bool SupportsSpeedFactorControl { get; init; }
+
+    /// <summary>Whether the shared flow-factor route has a semantic backend implementation.</summary>
+    public bool SupportsFlowFactorControl { get; init; }
+
     /// <summary>
     /// Whether the backend publishes backend-neutral <c>sensors</c> in status payloads. When false,
     /// <c>sensors</c> is always empty. Independent of the legacy temperature and fan flags.

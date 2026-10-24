@@ -162,6 +162,89 @@ status endpoint reports the printer offline, the composite status omits all
 secondary job and live telemetry readbacks rather than mixing them with an
 offline state.
 
+## Runtime Speed and Flow Overrides
+
+Read `GET /api/printers/{id}/backend-capabilities` before enabling controls:
+`supportsSpeedFactorControl` and `supportsFlowFactorControl` are independent
+operation flags, currently true only for Moonraker. Other backends report false
+and reject writes with `501`; raw G-code support is not a substitute.
+
+| Route | Body | Meaning |
+| --- | --- | --- |
+| `POST /api/printers/{id}/speed-factor` | `{"percent": 125}` | Speed multiplier 1.25, flow unchanged |
+| `POST /api/printers/{id}/flow-factor` | `{"percent": 87.5}` | Extrusion multiplier 0.875, speed unchanged |
+
+Both accept finite **1 through 200 percent**, inclusive, with at most two decimal
+places; `100` restores the normal multiplier. These are conservative application
+write limits, not firmware limits or a guarantee of print quality/safety on every
+machine. Klipper accepts positive percentages without an upper bound. Readback
+may legitimately exceed the application's write range after an external change;
+do not clamp it or infer a default. No profile/configuration is saved.
+
+Writes require authenticated `Queue.Start` permission and printer **Submit**
+access. Known online idle states (`idle`, `ready`, `standby`, `complete`,
+`completed`, `cancelled`) use the existing direct actuation barrier; `printing`
+and `paused` use the active-print barrier. Existing queue ownership/fence checks
+still apply, including rejection of an externally started job without a local
+active attempt. Disabled printers and printers in maintenance return `409`.
+
+`200 {"success":true}` means the backend acknowledged **that single command**,
+not that the factor was subsequently observed. Never optimistically replace live
+values with the requested value. The two routes are intentionally separate:
+there is no atomic two-factor update or claim that both succeeded.
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Missing, malformed, non-finite, out-of-range or over-precision percent; no command |
+| `401` / `403` | Authentication / `Queue.Start` denied; no command |
+| `404` | Missing printer or insufficient resource access; no command |
+| `409` | Unknown/transitional/error state or ownership/fence conflict; no command |
+| `501` | Unsupported operation; no command |
+| `503` | Offline/unavailable, or an unconfirmed/failed/timed-out backend command |
+
+Validation/unsupported failures use ProblemDetails; command/state outcomes use
+the existing `CommandResult` envelope. A `503` after dispatch can mean an unknown
+physical outcome; inspect status and the printer before retrying. Automatic
+retries can overwrite another operator's update.
+Backend-owned timeouts return the same `503` unknown-outcome envelope without
+retrying; actual caller cancellation still propagates as cancellation.
+
+`GET /api/printers/{id}/status`, detail/fast/complete snapshots and the existing
+lowercase `printerupdated` event add:
+
+```json
+{
+  "speedFactorPercent": 125,
+  "flowFactorPercent": 87.5
+}
+```
+
+Both are nullable numbers. New payloads explicitly send `null` when unknown,
+malformed, disconnected or unsupported, so clients can clear stale observations.
+Older servers can omit either field: treat absence as unknown on an initial
+snapshot, not 100. Existing `speedMultiplier` is unchanged and is not this
+contract. A client reconnect must re-subscribe with `SubscribeToPrinterAsync` /
+`SubscribeToPrintersAsync`, or invoke `RequestPrinterStatus`, to replay cached status.
+
+Moonraker subscribes to all `gcode_move` fields. Partial notifications preserve
+each omitted factor independently; invalid reported fields clear only that
+factor. Transport loss, Klippy restart and re-subscription invalidate prior
+observations until fresh readback. HTTP fallback queries both fields. HTTP
+refresh/fallback observations also become the baseline for subsequent
+factor-free notifications. Older in-flight HTTP reads cannot overwrite newer
+factor observations or invalidations.
+Changes from Mainsail, macros, tool changes and other operators use the same authoritative
+pipeline; command submission itself never fabricates telemetry.
+
+Verified upstream mapping: `M220 S<percent>` controls speed,
+`M221 S<percent>` controls extrusion; public `gcode_move.speed_factor` and
+`gcode_move.extrude_factor` are unitless multipliers converted by multiplying
+by 100. The public speed factor is **not** Klipper's internal minutes/seconds
+conversion. Sources: [Klipper gcode_move implementation](https://github.com/Klipper3d/klipper/blob/master/klippy/extras/gcode_move.py)
+and [Klipper status reference](https://www.klipper3d.org/Status_Reference.html#gcode_move).
+Mocked transport/SignalR regression coverage does not replace real-printer
+verification; no hardware verification is claimed.
+
 ## Printer Sensors and Fans
 
 Status DTOs (`GET /api/printers/{id}/status`) and every `printerupdated`

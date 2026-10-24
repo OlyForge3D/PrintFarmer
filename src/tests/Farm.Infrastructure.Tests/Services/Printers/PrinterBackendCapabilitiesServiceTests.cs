@@ -89,6 +89,11 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(dto.SupportsFilamentChange);
         Assert.Equal(sensorTelemetry, dto.SupportsSensorTelemetry);
         Assert.Equal(sensorControl, dto.SupportsSensorControl);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsSpeedFactorControl);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFlowFactorControl);
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsSpeedFactorControl").GetBoolean());
+        Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsFlowFactorControl").GetBoolean());
         Assert.Equal(
             VerifiedSafetyDiscoveryState.Unavailable,
             dto.VerifiedSafety.Discovery.State);

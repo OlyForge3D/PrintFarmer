@@ -2,6 +2,10 @@
 
 ### Features
 
+- Add independent Moonraker runtime speed/flow API controls with bounded
+  percentages, semantic capabilities and nullable authoritative status/SignalR
+  readback. Other backends explicitly reject unsupported writes (#3474).
+
 - Make cameras a first-class feature at `/cameras` with all, by-location and
   by-printer views. Cameras link to many printers (one primary per printer),
   are auto-discovered from printer backends on connect, create and every

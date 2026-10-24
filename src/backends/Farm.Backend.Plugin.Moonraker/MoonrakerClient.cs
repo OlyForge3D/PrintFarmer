@@ -556,6 +556,7 @@ public partial class MoonrakerClient(
         double? x = null, y = null, z = null;
         double? liveZOffsetMm = null;
         double? fanSpeedPercent = null;
+        double? speedFactorPercent = null, flowFactorPercent = null;
         string? homedAxes = null;
         DateTime? homedAxesObservedAtUtc = null;
         try
@@ -565,7 +566,7 @@ public partial class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri posUri = new(
                 baseUri,
-                "printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin");
+                "printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position,homing_origin,speed_factor,extrude_factor");
             using HttpRequestMessage request = CreateSafetyDiscoveryRequest(posUri, credential);
             using HttpResponseMessage resp = await _http.SendAsync(request, cts.Token);
             if (resp.IsSuccessStatusCode)
@@ -576,6 +577,13 @@ public partial class MoonrakerClient(
                 if (root.TryGetProperty("result", out JsonElement result) &&
                     result.TryGetProperty("status", out JsonElement statusNode))
                 {
+                    if (statusNode.ValueKind == JsonValueKind.Object &&
+                        statusNode.TryGetProperty("gcode_move", out JsonElement factorState))
+                    {
+                        speedFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(factorState, "speed_factor");
+                        flowFactorPercent = MoonrakerRuntimeFactorMapper.ReadPercent(factorState, "extrude_factor");
+                    }
+
                     if (statusNode.TryGetProperty("toolhead", out JsonElement th) && th.ValueKind == JsonValueKind.Object &&
                         th.TryGetProperty("homed_axes", out JsonElement axes) && axes.ValueKind == JsonValueKind.String)
                     {
@@ -675,7 +683,9 @@ public partial class MoonrakerClient(
             TotalLayers: job?.TotalLayers,
             FanSpeedPercent: fanSpeedPercent,
             LiveZOffsetMm: liveZOffsetMm,
-            ActiveExtruderId: activeExtruderId)
+            ActiveExtruderId: activeExtruderId,
+            SpeedFactorPercent: speedFactorPercent,
+            FlowFactorPercent: flowFactorPercent)
         {
             Sensors = sensors?.Snapshot(),
         };
@@ -809,7 +819,9 @@ public partial class MoonrakerClient(
             TotalLayers: status.TotalLayers,
             FanSpeedPercent: status.FanSpeedPercent,
             LiveZOffsetMm: status.LiveZOffsetMm,
-            ActiveExtruderId: status.ActiveExtruderId));
+            ActiveExtruderId: status.ActiveExtruderId,
+            SpeedFactorPercent: status.SpeedFactorPercent,
+            FlowFactorPercent: status.FlowFactorPercent));
     }
 
     public async Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)

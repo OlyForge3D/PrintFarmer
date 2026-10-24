@@ -41,7 +41,9 @@ public record PrinterStatusDto(
     int? TotalLayers = null,
     double? FanSpeedPercent = null,
     double? LiveZOffsetMm = null,
-    string? ActiveExtruderId = null)
+    string? ActiveExtruderId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null)
 {
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by

@@ -6,6 +6,24 @@ namespace Farm.Infrastructure.Tests.Dtos;
 
 public class PrinterStatusDtoTests
 {
+    [Fact]
+    public void RuntimeFactors_OlderPayload_RemainUnknownAndSerializeExplicitNull()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        };
+        PrinterStatusDto old = JsonSerializer.Deserialize<PrinterStatusDto>(
+            """{"id":"11111111-1111-1111-1111-111111111111","isOnline":true,"state":"idle"}""", options)!;
+
+        Assert.Null(old.SpeedFactorPercent);
+        Assert.Null(old.FlowFactorPercent);
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(old, options));
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("speedFactorPercent").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("flowFactorPercent").ValueKind);
+        Assert.False(json.RootElement.TryGetProperty("SpeedFactorPercent", out _));
+    }
+
     [Theory]
     [InlineData(null, null)]
     [InlineData("", null)]

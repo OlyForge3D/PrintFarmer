@@ -6,6 +6,8 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
@@ -60,6 +62,12 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
 
         var services = new ServiceCollection();
         services.AddScoped(_ => _client.Object);
+        var printers = new Mock<IPrintersRepository>();
+        printers.Setup(repository => repository.FindByIdAsync(_printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Printer);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(value => value.Printers).Returns(printers.Object);
+        services.AddScoped(_ => unitOfWork.Object);
         _provider = services.BuildServiceProvider();
 
         var httpClientFactory = new Mock<IHttpClientFactory>();
@@ -149,6 +157,172 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         """;
 
     [Fact]
+    public async Task ProcessStatusUpdateAsync_RuntimeFactors_PreservesIndependentDeltasAndInvalidatesMalformedValues()
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"print_stats":{"state":"printing"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        Assert.Equal(125, _cached[^1].SpeedFactorPercent);
+        Assert.Equal(87.5, _cached[^1].FlowFactorPercent);
+        await ProcessStatusAsync("""{"gcode_move":{"speed_factor":0.8}}""");
+        Assert.Equal(80, _cached[^1].SpeedFactorPercent);
+        Assert.Equal(87.5, _cached[^1].FlowFactorPercent);
+        await ProcessStatusAsync("""{"fan":{"speed":0.4}}""");
+        Assert.Equal(80, _cached[^1].SpeedFactorPercent);
+        Assert.Equal(87.5, _cached[^1].FlowFactorPercent);
+        await ProcessStatusAsync("""{"gcode_move":{"extrude_factor":1.1}}""");
+        PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Last();
+        Assert.Equal(80, update.SpeedFactorPercent);
+        Assert.Equal(110, update.FlowFactorPercent!.Value, precision: 10);
+        Assert.Equal(update.SpeedFactorPercent, update.ToStatusDto().SpeedFactorPercent);
+        Assert.Equal(update.FlowFactorPercent, update.ToStatusDto().FlowFactorPercent);
+        await ProcessStatusAsync("""{"gcode_move":{"speed_factor":null,"extrude_factor":"NaN"}}""");
+        Assert.Null(_cached[^1].SpeedFactorPercent);
+        Assert.Null(_cached[^1].FlowFactorPercent);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"speed_factor":"NaN","extrude_factor":"Infinity"}""")]
+    [InlineData("""{"speed_factor":-1,"extrude_factor":0}""")]
+    [InlineData("""{"speed_factor":1e309,"extrude_factor":1e308}""")]
+    [InlineData("""{"speed_factor":false,"extrude_factor":[]}""")]
+    [InlineData("null")]
+    public async Task ProcessStatusUpdateAsync_UnknownRuntimeFactors_NeverInventsDefaults(string factors)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":""" + factors + "}");
+        Assert.Null(_cached[^1].SpeedFactorPercent);
+        Assert.Null(_cached[^1].FlowFactorPercent);
+        PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Last();
+        Assert.Null(update.SpeedFactorPercent);
+        Assert.Null(update.FlowFactorPercent);
+    }
+
+    [Fact]
+    public async Task SubscribeToObjectsAsync_Reconnect_DropsOldFactorsUntilNewSnapshot()
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        List<string> requests = [];
+        await _service.SubscribeToObjectsAsync(Printer, ["gcode_move", "webhooks"], (json, _) =>
+        {
+            requests.Add(json);
+            return Task.CompletedTask;
+        }, _cts.Token);
+        using JsonDocument request = JsonDocument.Parse(Assert.Single(requests));
+        Assert.Equal(JsonValueKind.Null, request.RootElement.GetProperty("params").GetProperty("objects").GetProperty("gcode_move").ValueKind);
+        await ProcessMessageAsync("""{"jsonrpc":"2.0","id":101,"result":{"status":{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":0.7}}}}""");
+        Assert.Equal(70, _cached[^1].SpeedFactorPercent);
+        Assert.Null(_cached[^1].FlowFactorPercent);
+    }
+
+    [Fact]
+    public async Task MarkSensorsUnavailableAsync_TransportLost_DoesNotResurrectFactorsFromPartialUpdates()
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        await _service.MarkSensorsUnavailableAsync(_printerId, _cts.Token);
+        _cacheWriter.Verify(w => w.ClearRuntimeFactors(_printerId), Times.Once);
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"}}""");
+        Assert.Null(_cached[^1].SpeedFactorPercent);
+        Assert.Null(_cached[^1].FlowFactorPercent);
+    }
+
+    [Fact]
+    public async Task ProcessStatusUpdateAsync_KlippyShutdown_DiscardsLastFactorObservations()
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        await ProcessStatusAsync("""{"webhooks":{"state":"shutdown"}}""");
+        Assert.Null(_cached[^1].SpeedFactorPercent);
+        Assert.Null(_cached[^1].FlowFactorPercent);
+    }
+
+    [Theory]
+    [InlineData(false, 80d, 95d)]
+    [InlineData(true, 80d, 95d)]
+    [InlineData(false, null, 95d)]
+    [InlineData(true, null, 95d)]
+    [InlineData(false, 80d, null)]
+    [InlineData(true, 80d, null)]
+    public async Task HttpRuntimeFactors_FactorFreeDelta_PreservesHttpObservationsAndIndependentUnknowns(
+        bool refresh, double? speed, double? flow)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FactorStatus(speed, flow));
+
+        await ReadHttpFactorsAsync(refresh);
+        AssertRuntimeFactors(speed, flow);
+        await ProcessStatusAsync("""{"fan":{"speed":0.4},"extruder":{"temperature":201}}""");
+        AssertRuntimeFactors(speed, flow);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpRuntimeFactors_DelayedResponse_PreservesNewerIndependentWebSocketObservation(bool refresh)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<PrinterCompositeStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => started.SetResult())
+            .Returns(response.Task);
+
+        Task olderRead = ReadHttpFactorsAsync(refresh);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await ProcessStatusAsync("""{"gcode_move":{"speed_factor":0.6}}""");
+        response.SetResult(FactorStatus(80, 95));
+        await olderRead;
+
+        AssertRuntimeFactors(60, 95);
+        await ProcessStatusAsync("""{"fan":{"speed":0.4}}""");
+        AssertRuntimeFactors(60, 95);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpRuntimeFactors_DelayedResponse_DoesNotReplaceNewerHttpObservationOrInvalidation(bool refresh)
+    {
+        await ProcessStatusAsync("""{"webhooks":{"state":"ready"},"gcode_move":{"speed_factor":1.25,"extrude_factor":0.875}}""");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<PrinterCompositeStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => started.SetResult())
+            .Returns(response.Task);
+
+        Task olderRead = ReadHttpFactorsAsync(refresh);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _client.Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FactorStatus(75, null));
+        await ReadHttpFactorsAsync(!refresh);
+        AssertRuntimeFactors(75, null);
+        response.SetResult(FactorStatus(80, 95));
+        await olderRead;
+
+        AssertRuntimeFactors(75, null);
+        await ProcessStatusAsync("""{"fan":{"speed":0.4}}""");
+        AssertRuntimeFactors(75, null);
+    }
+
+    private static PrinterCompositeStatus FactorStatus(double? speed, double? flow) =>
+        new(true, "printing", null, null, null, null, null, SpeedFactorPercent: speed, FlowFactorPercent: flow);
+
+    private Task ReadHttpFactorsAsync(bool refresh) => refresh
+        ? _service.RefreshPrinterStatusAsync(_printerId, delayMs: 0, _cts.Token)
+        : _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
+
+    private void AssertRuntimeFactors(double? speed, double? flow)
+    {
+        Assert.Equal(speed, _cached[^1].SpeedFactorPercent);
+        Assert.Equal(flow, _cached[^1].FlowFactorPercent);
+        PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Last();
+        Assert.Equal(speed, update.SpeedFactorPercent);
+        Assert.Equal(flow, update.FlowFactorPercent);
+    }
+
+    [Fact]
     public async Task ProcessStatusUpdateAsync_FourTools_UsesActiveIdentityAndKeepsUnrelatedUpdatesFromRefreshingHeaterEvidence()
     {
         await ProcessStatusAsync(
@@ -199,7 +373,7 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         _client
             .Setup(c => c.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterCompositeStatus(true, "printing", null, null, null, null, null,
-                HotendTemp: 203, HotendTarget: 213, ActiveExtruderId: "extruder3")
+                HotendTemp: 203, HotendTarget: 213, ActiveExtruderId: "extruder3", SpeedFactorPercent: 135, FlowFactorPercent: 92)
             { Sensors = [sensor] });
         _broadcasts.Clear();
         _cached.Clear();
@@ -209,6 +383,10 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
         PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Should().ContainSingle().Subject;
         update.Sensors.Should().ContainSingle().Which.Should().BeEquivalentTo(sensor);
         update.ActiveExtruderId.Should().Be("extruder3");
+        Assert.Equal(135, update.SpeedFactorPercent);
+        Assert.Equal(92, update.FlowFactorPercent);
+        Assert.Equal(135, _cached[0].SpeedFactorPercent);
+        Assert.Equal(92, _cached[0].FlowFactorPercent);
         _cached.Should().ContainSingle().Which.SensorsReported.Should().BeTrue();
         _cached[0].Sensors.Should().BeEquivalentTo(update.Sensors);
     }
