@@ -256,6 +256,21 @@ actor PrinterService: PrinterServiceProtocol {
         return result
     }
 
+    func setRuntimeFactor(printerId: UUID, factor: RuntimeFactor, percent: Double) async throws -> CommandResult {
+        try Task.checkCancellation()
+        guard RuntimeFactor.isValidPercent(percent) else {
+            throw PrinterControlError.invalidRequest(
+                "\(factor.title) must be between 1 and 200 percent with at most two decimals."
+            )
+        }
+        let result: CommandResult = try await apiClient.post(
+            "/api/printers/\(printerId)/\(factor.pathComponent)",
+            body: RuntimeFactorRequest(percent: percent)
+        )
+        try requireAccepted(result)
+        return result
+    }
+
     func home(printerId: UUID, axes: [String]) async throws {
         let selected = Set(axes.map { $0.uppercased() })
         guard selected == ["X", "Y", "Z"] || selected == ["X", "Y"] || selected == ["Z"] else {
@@ -465,6 +480,11 @@ struct FanSpeedRequest: Encodable, Sendable {
 
 struct ZOffsetAdjustmentRequest: Encodable, Sendable {
     let offsetMm: Double
+}
+
+/// Encodes backend `RuntimeFactorRequest(double? Percent)` for speed and flow.
+struct RuntimeFactorRequest: Encodable, Sendable {
+    let percent: Double
 }
 
 /// Encodes a single-axis relative move into backend `MoveRequest(double? X, double? Y, double? Z, double? F)`.

@@ -673,6 +673,43 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(updatedZOffset.waitForExistence(timeout: 5), "Live Z-offset readback must reflect the accepted API command.")
             attachScreen("control-authenticated-command-readback")
         }
+
+        func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
+            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+            XCTAssertTrue(farm.exists)
+            farm.tap()
+            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+            printerCard.tap()
+
+            let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+            XCTAssertTrue(selector.waitForExistence(timeout: 8))
+            selector.buttons["Control"].tap()
+            let tune = app.buttons["printer.controls.segment.tune"]
+            XCTAssertTrue(tune.waitForExistence(timeout: 8))
+            tune.tap()
+
+            let speedValue = app.staticTexts["printer.controls.runtime.speed-factor.value"]
+            let flowValue = app.staticTexts["printer.controls.runtime.flow-factor.value"]
+            XCTAssertTrue(speedValue.waitForExistence(timeout: 8))
+            XCTAssertTrue(flowValue.waitForExistence(timeout: 5))
+            XCTAssertEqual(speedValue.label, "Speed 100 percent")
+            XCTAssertEqual(flowValue.label, "Flow 98 percent")
+            let babystep = app.buttons["printer.controls.runtime.z-offset.increase"]
+            XCTAssertTrue(babystep.waitForExistence(timeout: 5))
+            XCTAssertLessThan(speedValue.frame.minY, flowValue.frame.minY, "Speed precedes Flow")
+            XCTAssertLessThan(flowValue.frame.minY, babystep.frame.minY, "Factors sit above babystep")
+
+            let speedIncrease = app.buttons["printer.controls.runtime.speed-factor.increase"]
+            XCTAssertEqual(speedIncrease.label, "Increase speed by 5 percent")
+            XCTAssertGreaterThanOrEqual(speedIncrease.frame.height, 44)
+            speedIncrease.tap()
+            let updatedSpeed = app.staticTexts.matching(identifier: "printer.controls.runtime.speed-factor.value")
+                .matching(NSPredicate(format: "label == %@", "Speed 105 percent")).firstMatch
+            XCTAssertTrue(updatedSpeed.waitForExistence(timeout: 5), "Speed must reflect accepted command readback")
+            XCTAssertEqual(flowValue.label, "Flow 98 percent", "A speed step never changes flow")
+            attachScreen("control-tune-speed-flow")
+        }
     }
 
     #endif

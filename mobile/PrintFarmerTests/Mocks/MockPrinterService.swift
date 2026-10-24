@@ -96,6 +96,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var setSensorValueCalledWith: (printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double)?
     private(set) var setSensorValueCallCount = 0
     private(set) var adjustZOffsetCallCount = 0
+    private(set) var setRuntimeFactorCalls: [(printerId: UUID, factor: RuntimeFactor, percent: Double)] = []
+    var beforeSetRuntimeFactor: (@Sendable () async -> Void)?
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
     var physicalFilamentCalls: [String] = []
@@ -340,6 +342,13 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    func setRuntimeFactor(printerId: UUID, factor: RuntimeFactor, percent: Double) async throws -> CommandResult {
+        setRuntimeFactorCalls.append((printerId, factor, percent))
+        if let beforeSetRuntimeFactor { await beforeSetRuntimeFactor() }
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
         adjustZOffsetCallCount += 1
         adjustZOffsetCalledWith = (printerId, offsetMm)
@@ -451,6 +460,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         setSensorValueCalledWith = nil
         setSensorValueCallCount = 0
         adjustZOffsetCalledWith = nil
+        setRuntimeFactorCalls = []
+        beforeSetRuntimeFactor = nil
         unloadFilamentToolheadIndex = nil
         unloadResultToReturn = nil
         getBackendCapabilitiesCallCount = 0

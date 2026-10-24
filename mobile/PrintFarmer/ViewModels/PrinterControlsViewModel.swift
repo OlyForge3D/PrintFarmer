@@ -57,7 +57,7 @@ struct ControlCommand: Equatable, Sendable {
             return .motion
         case .extrusion, .filament:
             return .material
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             return .runtime
         }
     }
@@ -83,6 +83,7 @@ struct ControlCommand: Equatable, Sendable {
         case calibrationSave(offsetMm: Double)
         case transientZOffset(targetMm: Double, deltaMm: Double)
         case sensorControl(sensorId: String, quantity: SensorQuantity, value: Double)
+        case runtimeFactor(RuntimeFactor, percent: Double)
     }
 }
 
@@ -561,6 +562,8 @@ final class PrinterControlsViewModel: ObservableObject {
             printer.state = status.state
             printer.fanSpeedPercent = status.fanSpeedPercent
             printer.liveZOffsetMm = status.liveZOffsetMm
+            printer.speedFactorPercent = status.speedFactorPercent
+            printer.flowFactorPercent = status.flowFactorPercent
             if let sensors = status.sensors { printer.sensors = sensors }
             safetyCheckedAt = clock()
             safetyReadError = nil
@@ -1232,6 +1235,9 @@ final class PrinterControlsViewModel: ObservableObject {
             guard let actual = status.sensors?.first(where: { $0.id == sensorId })?
                 .reading(quantity)?.value.number else { return }
             matches = abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: status) else { return }
+            matches = abs(actual - percent) < RuntimeFactor.readbackTolerance
         default:
             return
         }
@@ -1341,6 +1347,64 @@ final class PrinterControlsViewModel: ObservableObject {
                 printerId: printer.id, sensorId: sensorId, quantity: quantity, value: value
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
+        }
+        guard pendingCommand == command, lastError == nil else { return }
+        await refreshSafetyEvidence(refreshDiscovery: false)
+    }
+
+    func runtimeFactorPercent(_ factor: RuntimeFactor) -> Double? {
+        factor.percent(of: printer)
+    }
+
+    /// Missing or false capabilities hide the control; it never sends a request.
+    func supportsRuntimeFactor(_ factor: RuntimeFactor) -> Bool {
+        factor.isSupported(by: capabilities)
+    }
+
+    func runtimeFactorUnavailableReason(_ factor: RuntimeFactor) -> String? {
+        guard supportsRuntimeFactor(factor) else {
+            return "\(factor.title) control is not supported on this printer."
+        }
+        guard runtimeFactorPercent(factor) != nil else {
+            return "\(factor.title) readback is unknown; controls are disabled."
+        }
+        return runtimeControlAccessReason
+    }
+
+    func canStepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) -> Bool {
+        runtimeFactorUnavailableReason(factor) == nil && canAdjustRuntimeControls
+            && RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) != nil
+    }
+
+    /// Steps from the authoritative readback, never from an unconfirmed local value.
+    func stepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) async {
+        guard let target = RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) else { return }
+        await setRuntimeFactor(factor, percent: target)
+    }
+
+    func setRuntimeFactor(_ factor: RuntimeFactor, percent: Double) async {
+        let command = ControlCommand(kind: .runtimeFactor(factor, percent: percent), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard supportsRuntimeFactor(factor), RuntimeFactor.isValidPercent(percent) else {
+            setError(
+                command: command,
+                message: "\(factor.title) requires confirmed backend support and a value from 1 to 200 percent.",
+                isRetryable: false
+            )
+            return
+        }
+        await perform(command) { [printerService, printer] in
+            do {
+                let result = try await printerService.setRuntimeFactor(
+                    printerId: printer.id, factor: factor, percent: percent
+                )
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+            } catch NetworkError.serverError(501) {
+                throw PrinterControlError.rejected(
+                    "\(factor.title) control is not supported by this printer. No command was sent."
+                )
+            }
         }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
@@ -1645,6 +1709,10 @@ final class PrinterControlsViewModel: ObservableObject {
             let read = { (p: Printer) in p.sensors.first(where: { $0.id == sensorId })?.reading(quantity)?.value.number }
             guard let actual = read(updated), read(previous) != actual else { return false }
             return abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: updated),
+                  factor.percent(of: previous) != actual else { return false }
+            return abs(actual - percent) < RuntimeFactor.readbackTolerance
         case .disableMotors, .extrusion, .filament, .calibrationSave:
             return false
         case .calibrationHome, .calibrationPosition, .calibrationAdjust:
@@ -1749,7 +1817,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private func canExecute(_ command: ControlCommand) -> Bool {
         let permitsActivePrint: Bool
         switch command.kind {
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             permitsActivePrint = true
         case .preheat:
             permitsActivePrint = false
@@ -1965,7 +2033,7 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             return "Matching readback received. This reports the backend value, not a physical inspection."
         default:
             return "Matching telemetry received. Check the machine before further setup."

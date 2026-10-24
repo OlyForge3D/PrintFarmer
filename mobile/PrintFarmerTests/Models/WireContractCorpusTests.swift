@@ -18,6 +18,8 @@ final class WireContractCorpusTests: XCTestCase {
         XCTAssertTrue(populated.isOnline)
         XCTAssertEqual(populated.state, "printing")
         XCTAssertEqual(populated.progress, 42.5)
+        XCTAssertEqual(populated.speedFactorPercent, 125)
+        XCTAssertEqual(populated.flowFactorPercent, 87.5)
 
         let minimal: PrinterStatusUpdate = try await decodeThroughAPIClient(
             "api/printer-status/printerupdated.missing-key.json"
@@ -26,6 +28,8 @@ final class WireContractCorpusTests: XCTestCase {
         XCTAssertNil(minimal.state)
         XCTAssertNil(minimal.progress)
         XCTAssertNil(minimal.jobName)
+        XCTAssertNil(minimal.speedFactorPercent, "Null readback stays unknown, never 100")
+        XCTAssertNil(minimal.flowFactorPercent)
     }
 
     func testAPIClientDecodesCanonicalQueueVariants() async throws {

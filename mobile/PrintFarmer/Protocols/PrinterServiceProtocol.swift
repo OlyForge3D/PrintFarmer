@@ -58,6 +58,8 @@ protocol PrinterServiceProtocol: Sendable {
     func turnOffHeaters(printerId: UUID) async throws
     func setFanSpeed(printerId: UUID, speedPercent: Int) async throws -> CommandResult
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult
+    /// Sets the live speed (`POST /speed-factor`) or flow (`POST /flow-factor`) percentage.
+    func setRuntimeFactor(printerId: UUID, factor: RuntimeFactor, percent: Double) async throws -> CommandResult
     func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult
     func home(printerId: UUID, axes: [String]) async throws
     func homeXY(printerId: UUID) async throws
@@ -120,6 +122,10 @@ extension PrinterServiceProtocol {
 
     func adjustZOffset(printerId: UUID, offsetMm: Double) async throws -> CommandResult {
         throw ServiceError.notImplemented("Transient Z-offset adjustment is unavailable in this printer service")
+    }
+
+    func setRuntimeFactor(printerId: UUID, factor: RuntimeFactor, percent: Double) async throws -> CommandResult {
+        throw ServiceError.notImplemented("\(factor.title) factor control is unavailable in this printer service")
     }
 
     func getCurrentJobThumbnail(id: UUID, path: String) async throws -> Data {

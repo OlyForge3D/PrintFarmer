@@ -616,6 +616,8 @@ enum UITestBootstrap {
         printer.totalLayers = nil
         printer.fanSpeedPercent = 60
         printer.liveZOffsetMm = 0.025
+        printer.speedFactorPercent = 100
+        printer.flowFactorPercent = 98
         printer.jobName = "benchy_0.2mm_PLA.gcode"
         printer.fileName = "benchy_0.2mm_PLA.gcode"
         printer.currentJobThumbnailUrl = issue3259VisualAcceptanceThumbnailPath(for: printer.id)
@@ -695,6 +697,8 @@ enum UITestBootstrap {
         idleMk4.bedTarget = 60
         idleMk4.fanSpeedPercent = 35
         idleMk4.liveZOffsetMm = 0.025
+        idleMk4.speedFactorPercent = 100
+        idleMk4.flowFactorPercent = 98
         idleMk4.x = 0
         idleMk4.y = 0
         idleMk4.z = 5
@@ -828,6 +832,8 @@ enum UITestBootstrap {
             totalLayers: printer.totalLayers,
             fanSpeedPercent: 60,
             liveZOffsetMm: 0.025,
+            speedFactorPercent: 100,
+            flowFactorPercent: 98,
             jobName: printer.jobName,
             thumbnailUrl: printer.thumbnailUrl,
             cameraStreamUrl: printer.cameraStreamUrl,
@@ -1156,6 +1162,8 @@ enum UITestBootstrap {
                     "supportsZOffsetAdjustment": true,
                     "supportsZOffsetReadback": true,
                     "supportsZOffsetFirmwareSave": true,
+                    "supportsSpeedFactorControl": true,
+                    "supportsFlowFactorControl": true,
                     "supportsHoming": true,
                     "supportsHomingXY": true,
                     "supportsHomingZ": true,
@@ -1234,6 +1242,8 @@ enum UITestBootstrap {
                                 totalLayers: printer.totalLayers,
                                 fanSpeedPercent: printer.fanSpeedPercent,
                                 liveZOffsetMm: printer.liveZOffsetMm,
+                                speedFactorPercent: printer.speedFactorPercent,
+                                flowFactorPercent: printer.flowFactorPercent,
                                 jobName: printer.jobName,
                                 thumbnailUrl: printer.thumbnailUrl,
                                 cameraStreamUrl: printer.cameraStreamUrl,
@@ -1744,6 +1754,16 @@ enum UITestBootstrap {
                     requestField: "offsetMm",
                     addsToCurrentValue: true
                 )
+            case ("POST", "/api/printers/\(printerID)/speed-factor"):
+                result = updateStatus(
+                    &fixture, field: "speedFactorPercent", request: request,
+                    requestField: "percent", addsToCurrentValue: false
+                )
+            case ("POST", "/api/printers/\(printerID)/flow-factor"):
+                result = updateStatus(
+                    &fixture, field: "flowFactorPercent", request: request,
+                    requestField: "percent", addsToCurrentValue: false
+                )
             default:
                 result = (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
             }
@@ -1810,6 +1830,9 @@ enum UITestBootstrap {
                 case ("liveZOffsetMm", "offsetMm"):
                     commandMessage = "offsetMm must be non-zero and between -0.2 and 0.2 mm."
                     validValue = value.isFinite && value != 0 && (-0.2...0.2).contains(value)
+                case ("speedFactorPercent", "percent"), ("flowFactorPercent", "percent"):
+                    commandMessage = "percent must be between 1 and 200 with at most two decimals."
+                    validValue = RuntimeFactor.isValidPercent(value)
                 default:
                     return (400, "application/problem+json", Data(#"{"detail":"Fixture command field is unsupported."}"#.utf8))
                 }
@@ -1825,9 +1848,13 @@ enum UITestBootstrap {
                 guard let currentNumber = statusObject[field] as? NSNumber,
                       currentNumber.doubleValue.isFinite,
                       field != "fanSpeedPercent" || (0...100).contains(currentNumber.doubleValue) else {
-                    let message = field == "fanSpeedPercent"
-                        ? "The printer does not report a valid part-fan speed; no command was sent."
-                        : "The printer does not report a valid live Z offset; no command was sent."
+                    let message: String
+                    switch field {
+                    case "fanSpeedPercent": message = "The printer does not report a valid part-fan speed; no command was sent."
+                    case "speedFactorPercent": message = "The printer does not report a valid speed factor; no command was sent."
+                    case "flowFactorPercent": message = "The printer does not report a valid flow factor; no command was sent."
+                    default: message = "The printer does not report a valid live Z offset; no command was sent."
+                    }
                     return (502, "application/json", try encoder.encode(
                         CommandResult(success: false, message: message)
                     ))

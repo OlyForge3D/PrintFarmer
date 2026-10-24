@@ -94,6 +94,8 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             totalLayers: p.totalLayers,
             fanSpeedPercent: p.fanSpeedPercent,
             liveZOffsetMm: p.liveZOffsetMm,
+            speedFactorPercent: p.speedFactorPercent,
+            flowFactorPercent: p.flowFactorPercent,
             jobName: p.jobName,
             thumbnailUrl: p.thumbnailUrl,
             cameraStreamUrl: p.cameraStreamUrl,
