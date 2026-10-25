@@ -1264,8 +1264,10 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
-        guard pendingCommand == command, lastError == nil else { return }
-        await refreshSafetyEvidence(refreshDiscovery: false)
+        finishAcceptedRequest(
+            command,
+            notice: "Sensor command accepted. Readback remains observational; physical completion is not confirmed."
+        )
     }
 
     func runtimeFactorPercent(_ factor: RuntimeFactor) -> Double? {

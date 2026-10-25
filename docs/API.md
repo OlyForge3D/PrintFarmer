@@ -371,6 +371,10 @@ before any command is sent:
 Errors use `application/problem+json`. Sensor ids are matched exactly
 (case-sensitive).
 
+The iOS shared controls lease ends when the sensor command request settles.
+An acknowledgment does not require matching readback and does not replace
+observed values or prove physical completion.
+
 #### Moonraker (Klipper) mapping
 
 Moonraker advertises both sensor capabilities. Sensor ids are the Klipper object

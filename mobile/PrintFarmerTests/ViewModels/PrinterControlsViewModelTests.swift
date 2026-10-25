@@ -219,6 +219,48 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(model.lastError)
         XCTAssertEqual(mockService.setSensorValueCalledWith?.value, 60)
         XCTAssertEqual(mockService.setSensorValueCallCount, 1)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertFalse(model.isExecuting)
+        XCTAssertTrue(model.commandNotice?.contains("physical completion is not confirmed") == true)
+    }
+
+    func test_sensorControl_sharedLeaseReleasesAfterAcknowledgmentWithoutMatchingReadback() async throws {
+        for available in [false, true] {
+            var printer = try idlePrinter()
+            printer.sensors = try JSONDecoder().decode(
+                [PrinterSensor].self,
+                from: Data(Self.sensorJSON.replacingOccurrences(
+                    of: "\"available\":true", with: "\"available\":\(available)"
+                ).utf8)
+            )
+            let serverID = UUID()
+            let (original, service) = try await leaseOwner(serverID: serverID, printer: printer, sensorControls: true)
+            let (replacement, replacementService) = try await leaseOwner(serverID: serverID, printer: printer, sensorControls: true)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.beforeSetSensorValue = { await barrier.arriveAndWait() }
+
+            let request = Task {
+                await original.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 60)
+            }
+            await barrier.waitUntilArrived()
+            XCTAssertNotNil(original.pendingCommand)
+            XCTAssertTrue(replacement.isExecuting)
+            await replacement.homeAll()
+            XCTAssertNil(replacementService.homeCalledWith, "The HTTP request still owns the shared lease")
+
+            barrier.release()
+            await request.value
+
+            original.handlePrinterUpdate(printer)
+            XCTAssertNil(original.pendingCommand, "Missing or unchanged readback must not retain the accepted request")
+            XCTAssertFalse(original.isExecuting)
+            XCTAssertFalse(replacement.isExecuting)
+            XCTAssertEqual(original.printer.sensors, printer.sensors, "Acknowledgment must not invent a new observation")
+            XCTAssertEqual(service.setSensorValueCallCount, 1)
+            await replacement.homeAll()
+            XCTAssertNotNil(replacementService.homeCalledWith)
+        }
     }
 
     func test_sensorControl_offGridValueIsRejectedWithoutServiceCall() async throws {
@@ -308,7 +350,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     private func leaseOwner(
-        serverID: UUID, printer: Printer? = nil, runtimeControls: Bool = false
+        serverID: UUID, printer: Printer? = nil, runtimeControls: Bool = false, sensorControls: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         let printer = try printer ?? idlePrinter()
         let service = MockPrinterService()
@@ -318,6 +360,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         caps.supportsFanSpeedReadback = runtimeControls
         caps.supportsZOffsetAdjustment = runtimeControls
         caps.supportsZOffsetReadback = runtimeControls
+        caps.supportsSensorControl = sensorControls
         caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         service.capabilitiesToReturn = caps
         service.statusToReturn = VerifiedSafetyFixtures.status(
