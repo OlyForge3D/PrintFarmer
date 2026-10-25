@@ -24,7 +24,7 @@
 #   AUTO_ADMIN_EMAIL=admin@printfarmer.local
 #
 # Requirements:
-#   - .NET SDK 10.0.101+
+#   - Exact .NET SDK from root global.json
 #   - Node.js >=20.19
 
 set -euo pipefail

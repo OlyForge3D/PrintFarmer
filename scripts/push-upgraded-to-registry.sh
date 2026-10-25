@@ -4,6 +4,7 @@
 # Much simpler than TAR file management!
 
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/docker/container-versions.conf"
 
 # Colors
 RED='\033[0;31m'
@@ -41,7 +42,7 @@ print_header "Push Pre-Upgraded Images to Local Registry"
 
 # Pre-upgraded images that were built with --prepare-offline
 UPGRADED_IMAGES=(
-    "mcr.microsoft.com/dotnet/sdk:10.0-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG}-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim-upgraded"
     "ubuntu:24.04-upgraded"
     "node:24-alpine-upgraded"

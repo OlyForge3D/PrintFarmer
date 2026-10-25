@@ -177,9 +177,11 @@ function Show-Help {
 }
 
 # Define base images to manage
+. (Join-Path $PSScriptRoot 'dotnet-sdk.ps1')
+$SdkTag = Get-ApprovedDotnetSdkTag
 $script:BaseImages = @(
     # .NET SDK for build stages (required for multi-stage builds during docker compose up)
-    "mcr.microsoft.com/dotnet/sdk:10.0",
+    "mcr.microsoft.com/dotnet/sdk:$SdkTag",
     # .NET API runtime (ASP.NET 10.0 for API service and slicer worker base)
     "mcr.microsoft.com/dotnet/aspnet:10.0-bookworm-slim",
     # Ubuntu for OrcaSlicer binaries extraction stage

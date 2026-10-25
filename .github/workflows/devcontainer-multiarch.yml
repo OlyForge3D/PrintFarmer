@@ -6,6 +6,7 @@ on:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
     paths:
       - '.devcontainer/**'
+      - 'global.json'
       - '.github/workflows/devcontainer-multiarch.yml'
   workflow_dispatch:
     inputs:
@@ -99,7 +100,7 @@ jobs:
             --label "org.opencontainers.image.created=${TIMESTAMP}" \
             --label "org.opencontainers.image.url=https://github.com/${{ github.repository }}/releases${TAG:+/tag/${TAG}}" \
             $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-            --push .devcontainer
+            --file .devcontainer/Dockerfile --push .
 
           # If a semver/release tag was provided, also push that tag with same metadata
           if [ -n "$TAG" ]; then
@@ -112,7 +113,7 @@ jobs:
               --label "org.opencontainers.image.created=${TIMESTAMP}" \
               --label "org.opencontainers.image.url=https://github.com/${{ github.repository }}/releases/tag/${TAG}" \
               $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-              --push .devcontainer
+              --file .devcontainer/Dockerfile --push .
           fi
 
       - name: Inspect pushed devcontainer manifests and upload labels

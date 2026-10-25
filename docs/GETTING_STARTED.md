@@ -5,7 +5,7 @@ A quick guide to set up PrintFarmer for local development.
 ## Prerequisites
 
 - **Node.js** 24.15+ within 24.x, or 26+ (required by the jsdom test environment)
-- **.NET SDK** 10.0.101 or later
+- **.NET SDK** exactly the version in [`global.json`](../global.json), with no roll-forward
 - **npm** 10.0 or later
 - **Git**
 
@@ -233,20 +233,17 @@ lsof -ti:3000 | xargs kill -9
 
 ### .NET SDK Not Found
 
-Install .NET 10.0 SDK:
+Install the SDK approved in root `global.json` (Python 3 required):
 
 ```bash
-# Download installer from https://dot.net/download
-# Or using package manager:
-# Ubuntu/Debian
-sudo apt-get install dotnet-sdk-10.0
-
-# macOS
-brew install dotnet-sdk@10
-
-# Verify installation
-dotnet --info
+# From the repository root, on Linux/macOS
+bash scripts/dotnet-install.sh --version "$(python3 scripts/dotnet-sdk.py version)"
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$DOTNET_ROOT:$PATH"
+python3 scripts/dotnet-sdk.py verify
 ```
+
+For Windows, see [SDK installation](./DOTNET_SDK_INSTALLATION.md).
 
 ### npm Packages Not Installing
 

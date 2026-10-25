@@ -42,6 +42,7 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -t "orcaslicer-binaries:${ORCA_VERSION}" \
   -f ./Dockerfile.multistage --target orcaslicer-binaries \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+  --build-arg "SDK_TAG=$SDK_TAG" \
   --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
   --build-arg ALLOW_STUB=false \
   --load .
@@ -55,6 +56,7 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -f ./Dockerfile.multistage --target orcaslicer-worker \
   -t "${TAG}" \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+  --build-arg "SDK_TAG=$SDK_TAG" \
   --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
   --load .
 

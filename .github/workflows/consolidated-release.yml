@@ -97,7 +97,10 @@ jobs:
           node-version: 24
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
       - name: Recheck owner and protected route before credentials
         env:
           GH_TOKEN: ${{ github.token }}

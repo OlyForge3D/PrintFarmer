@@ -62,8 +62,8 @@ if [[ -f "$VERSIONS_FILE" ]]; then
     export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION ORCASLICER_SHA256 BUILD_VERBOSITY
 fi
 
-# Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
-DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
+# Runtime display version is independent of the exact compiler SDK.
+DOTNET_MAJOR_VERSION="${ASPNET_TAG%%-*}"
 
 # Default flags
 DRY_RUN=false
@@ -215,7 +215,7 @@ fi
 # Note: SDK_TAG and ASPNET_TAG are sourced from container-versions.conf
 # Update that file to change .NET versions for future migrations
 declare -a DOCKER_IMAGES_CONFIG=(
-    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG}-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}-upgraded"
     "ubuntu:${UBUNTU_TAG:-24.04}|Dockerfile.base-ubuntu|ubuntu:${UBUNTU_TAG:-24.04}-upgraded"
     "node:${NODE_TAG:-24-alpine}|Dockerfile.base-node|node:${NODE_TAG:-24-alpine}-upgraded"
@@ -1552,7 +1552,7 @@ pull_base_images() {
     print_header "📥 Pulling Base Container Images"
 
     print_info "Pulling essential images for PrintFarmer core services:"
-    print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
+    print_info "  - .NET SDK $DOTNET_SDK_VERSION (multi-stage builds during deployment)"
     print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
     print_info "  - Node.js 24 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
@@ -2041,7 +2041,7 @@ build_base_images() {
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
         # Prepare build command with optional platform
-        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
+        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust" --build-arg "SDK_TAG=$SDK_TAG")
 
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -3626,16 +3626,12 @@ check_dotnet_sdk() {
     print_info "Checking for .NET SDK..."
 
     if command -v dotnet &> /dev/null; then
-        DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
-        print_success ".NET SDK found: $DOTNET_VERSION"
-
-        # Check if version meets minimum requirement (uses DOTNET_MAJOR_VERSION from config)
-        local major_ver="${DOTNET_MAJOR_VERSION%%.*}"  # Extract just the major number (e.g., "10")
-        if [[ "$DOTNET_VERSION" =~ ^${major_ver}\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
-            print_success ".NET SDK version is compatible"
+        DOTNET_VERSION=$(cd "$REPO_ROOT" && dotnet --version 2>/dev/null) || DOTNET_VERSION="unavailable"
+        if [[ "$DOTNET_VERSION" == "$DOTNET_SDK_VERSION" ]]; then
+            print_success ".NET SDK selected: $DOTNET_VERSION (global.json)"
         else
             print_warning ".NET SDK version $DOTNET_VERSION detected"
-            print_warning "PrintFarmer requires .NET $DOTNET_MAJOR_VERSION or later"
+            print_warning "Local builds require exactly SDK $DOTNET_SDK_VERSION from global.json"
             print_info "Docker builds will still work, but local development may have issues"
         fi
     else
@@ -3688,8 +3684,8 @@ install_dotnet_sdk() {
     chmod +x "$install_script"
     print_success "Installation script downloaded"
 
-    # Install .NET SDK (required version from container-versions.conf)
-    print_info "Installing .NET SDK $DOTNET_MAJOR_VERSION..."
+    # Install the exact SDK approved in global.json.
+    print_info "Installing .NET SDK $DOTNET_SDK_VERSION..."
     print_info "This may take a few minutes..."
 
     if [ "$OS" = "windows" ]; then
@@ -3701,8 +3697,8 @@ install_dotnet_sdk() {
     fi
 
     # Run installation script
-    if ./"$install_script" --channel "$DOTNET_MAJOR_VERSION" --install-dir "$HOME/.dotnet"; then
-        print_success ".NET SDK $DOTNET_MAJOR_VERSION installed successfully"
+    if ./"$install_script" --version "$DOTNET_SDK_VERSION" --install-dir "$HOME/.dotnet"; then
+        print_success ".NET SDK $DOTNET_SDK_VERSION installed successfully"
 
         # Add to PATH for current session
         export PATH="$HOME/.dotnet:$PATH"
@@ -3723,8 +3719,7 @@ install_dotnet_sdk() {
 
         # Verify installation
         if command -v dotnet &> /dev/null; then
-            DOTNET_VERSION=$(dotnet --version)
-            print_success "Verified: .NET SDK $DOTNET_VERSION is now available"
+            "$PYTHON_CMD" "$REPO_ROOT/scripts/dotnet-sdk.py" verify || return 1
         else
             print_warning "Installation completed but 'dotnet' command not found in PATH"
             print_info "You may need to start a new terminal session"
@@ -5124,7 +5119,7 @@ ORCASLICER_CONTAINER_DIGEST=$ORCASLICER_CONTAINER_DIGEST
 # If not set by config file, these defaults are used
 # Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
 # Check for upgraded images and use them if available (appends -upgraded suffix)
-SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "${SDK_TAG:-10.0-noble}")
+SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "$SDK_TAG")
 ASPNET_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/aspnet" "${ASPNET_TAG:-10.0-noble}")
 NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-24-alpine}")
 NGINX_TAG=$(resolve_image_tag "nginx" "${NGINX_TAG:-alpine}")

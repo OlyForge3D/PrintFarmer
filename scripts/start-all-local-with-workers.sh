@@ -22,7 +22,7 @@
 #   5. (Deprecated) PrusaSlicer worker support has been removed
 #
 # Requirements:
-#   - .NET SDK 10.0.101+
+#   - Exact .NET SDK from root global.json
 #   - Node.js >=24.13
 #   - Docker (for worker containers)
 #   - Docker images: printfarmer/orcaslicer-worker

@@ -14,13 +14,14 @@ echo ""
 
 # Change to repo root
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/docker/container-versions.conf
 
 # Array of images: (name:tag | dockerfile_path)
 declare -a IMAGES=(
     "nginx:alpine-upgraded|dockerfiles/Dockerfile.base-nginx"
     "node:24-alpine-upgraded|dockerfiles/Dockerfile.base-node"
     "postgres:17-alpine-upgraded|dockerfiles/Dockerfile.base-postgres"
-    "sdk:10.0.101-alpine-upgraded|dockerfiles/Dockerfile.base-sdk"
+    "sdk:${SDK_TAG}-upgraded|scripts/docker/dockerfiles/Dockerfile.base-sdk"
     "aspnet:10.0.1-alpine-upgraded|dockerfiles/Dockerfile.base-aspnet"
     "ubuntu:24.04-upgraded|dockerfiles/Dockerfile.base-ubuntu"
 )
@@ -39,6 +40,7 @@ for spec in "${IMAGES[@]}"; do
     
     # Build locally first for this platform
     if docker build \
+        --build-arg "SDK_TAG=$SDK_TAG" \
         --platform "${PLATFORM}" \
         --file "${dockerfile}" \
         --tag "${registry_image}" \

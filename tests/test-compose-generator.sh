@@ -91,7 +91,7 @@ test_help_output() {
 test_standard_generation() {
     start_test "standard generation"
     
-    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
+    assert_command_success "SDK_TAG=9.0-stale $COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     # Check required files were created
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -104,6 +104,25 @@ test_standard_generation() {
     assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     assert_contains "$compose_content" "target: api-runtime" "Should contain API runtime target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend runtime target"
+
+    local test_python
+    test_python="$(resolve_test_python_cmd)"
+    "$test_python" - "$REPO_ROOT/global.json" "$TEST_TEMP_DIR/docker-compose.yml" <<'PY'
+import json
+import sys
+from ruamel.yaml import YAML
+
+with open(sys.argv[1]) as policy:
+    expected = json.load(policy)["sdk"]["version"] + "-noble"
+with open(sys.argv[2]) as compose:
+    services = YAML(typ="safe").load(compose)["services"]
+tags = [
+    service["build"]["args"]["SDK_TAG"]
+    for service in services.values()
+    if "SDK_TAG" in service.get("build", {}).get("args", {})
+]
+assert len(tags) >= 2 and all(tag == expected for tag in tags), (expected, tags)
+PY
     
     # Validate service structure
     assert_contains "$compose_content" "services:" "Should have services section"

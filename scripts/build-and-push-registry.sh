@@ -62,6 +62,7 @@ ORCA_BUILD_CMD+=( -f ./Dockerfile.multistage --target orcaslicer-binaries \
     -t "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" \
     -t "$REGISTRY_HOST/orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg "SDK_TAG=$SDK_TAG" \
     --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     ${GITHUB_TOKEN:+--build-arg GITHUB_TOKEN=$GITHUB_TOKEN} \
@@ -84,6 +85,7 @@ WORKER_CMD+=( -f Dockerfile.multistage --target orcaslicer-worker \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg "SDK_TAG=$SDK_TAG" \
     --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     --build-arg GIT_SHA=$GIT_SHA \

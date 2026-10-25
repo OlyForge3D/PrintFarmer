@@ -34,7 +34,7 @@ cd Web/ReactApp && npm run dev
 - **API Health**: http://localhost:5245/healthz
 
 ### Requirements
-- .NET 10.0.101 SDK
+- Exact .NET SDK from [`global.json`](../global.json) for local builds (not needed on a Docker-only host)
 - Node.js 24.15+ within 24.x, or 26+ (including the jsdom test environment)
 - 2GB+ RAM
 

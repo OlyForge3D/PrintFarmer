@@ -200,7 +200,8 @@ Database: SQLite / PostgreSQL / SQL Server
 ### Technology Stack
 
 **Backend:**
-- ASP.NET Core 10 (.NET SDK 10.0)
+- ASP.NET Core 10 (exact .NET SDK selected by [`global.json`](./global.json);
+  see [SDK installation](./docs/DOTNET_SDK_INSTALLATION.md))
 - Entity Framework Core (multi-database ORM)
 - SignalR (real-time WebSocket communication)
 - Refit (type-safe HTTP clients)
