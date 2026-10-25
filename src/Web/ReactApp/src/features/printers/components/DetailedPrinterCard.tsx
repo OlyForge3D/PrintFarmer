@@ -922,16 +922,18 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           available in the sidebar are also available from the detail card. */}
       {mmuStatus && !isSnapmakerU1Mmu && (
         <div className="mb-2">
-          <MmuControlBox
-            printerId={printer.id}
-            mmuStatus={mmuStatus}
-            isOnline={isOnline}
-            toolheads={printerDetails?.toolheads}
-            modelName={printer.modelName}
-            reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-            showExternalSpool={showExternalSpool}
-            filamentControl={filamentControl}
-          />
+          <CollapsibleSection title="Materials" keepMounted>
+            <MmuControlBox
+              printerId={printer.id}
+              mmuStatus={mmuStatus}
+              isOnline={isOnline}
+              toolheads={printerDetails?.toolheads}
+              modelName={printer.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              showExternalSpool={showExternalSpool}
+              filamentControl={filamentControl}
+            />
+          </CollapsibleSection>
         </div>
       )}
 
@@ -939,27 +941,29 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           and the parallel Spools assignment list, which could disagree. Hidden
           when the AMS control box already represents the slots. */}
       {materialLoadout && !(mmuStatus && !isSnapmakerU1Mmu) && (
-        <MaterialLoadout
-          printerId={printer.id}
-          mmuStatus={mmuStatus}
-          toolheads={printerDetails?.toolheads}
-          currentSpoolId={printer.currentSpoolId}
-          spoolInfo={printer.spoolInfo}
-          modelName={printer.modelName}
-          reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
-          compact
-          isOnline={isOnline}
-          filamentControl={filamentControl}
-          className="mb-2"
-        />
+        <div className="mb-2">
+          <CollapsibleSection title="Materials" keepMounted>
+            <MaterialLoadout
+              printerId={printer.id}
+              mmuStatus={mmuStatus}
+              toolheads={printerDetails?.toolheads}
+              currentSpoolId={printer.currentSpoolId}
+              spoolInfo={printer.spoolInfo}
+              modelName={printer.modelName}
+              reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
+              compact
+              isOnline={isOnline}
+              filamentControl={filamentControl}
+            />
+          </CollapsibleSection>
+        </div>
       )}
 
       {/* Single-spool printers keep the classic spool card; multi-slot printers are
           fully described by the materials module above. */}
-      {(spoolmanReady || printer.spoolInfo) && !materialLoadout && (
+      {(spoolmanReady || printer.spoolInfo) && !materialLoadout && !(mmuStatus && !isSnapmakerU1Mmu) && (
         <div className="mb-2">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
+          <CollapsibleSection title="Materials" keepMounted headerActions={
             <div className="flex items-center gap-0.5">
               <Button
                 type="button"
@@ -1032,9 +1036,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 ></Button>
               )}
             </div>
-          </div>
-          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
-          <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+          }>
+            <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" isOnline={isOnline} />
+            <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+          </CollapsibleSection>
         </div>
       )}
 

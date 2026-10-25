@@ -173,7 +173,7 @@ describe('runtime percentage controls', () => {
   it('uses labelled bounded sliders without numeric inputs, Apply buttons or redundant explanations', async () => {
     mount();
     await ready();
-    expect(screen.getByRole('region', { name: 'Tuning' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Collapse Tuning/ })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument();
     for (const slider of [speedInput(), flowInput()]) {
@@ -255,6 +255,8 @@ describe('runtime percentage controls', () => {
     const user = userEvent.setup();
     mount();
     await ready();
+    await user.tab();
+    expect(screen.getByRole('button', { name: /Collapse Tuning/ })).toHaveFocus();
     await user.tab();
     expect(speedInput()).toHaveFocus();
     fireEvent.keyDown(speedInput(), { key: 'ArrowRight' });

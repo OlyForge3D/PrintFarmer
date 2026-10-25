@@ -79,6 +79,9 @@ export function mountSensors(element: HTMLElement) {
     homedAxes: 'xyz', x: 100, y: 110, z: 5,
     hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60,
     sensors: fixtureOptions.has('empty-sensors') ? [] : sensors,
+    ...(fixtureOptions.has('materials') && {
+      spoolInfo: { hasActiveSpool: true, activeSpoolId: 7, spoolName: 'Fixture PLA', material: 'PLA', remainingWeightG: 750 },
+    }),
   };
   if (tuning) {
     Object.defineProperty(printerSignalRService, 'isConnected', { get: () => true });

@@ -12,7 +12,7 @@ test('Tuning commits native pointer and keyboard slider gestures once on both pr
   let sent = 0;
   for (const surface of ['card', 'sidebar']) {
     const root = page.getByRole('region', { name: surface, exact: true });
-    const tuning = root.getByRole('region', { name: 'Tuning', exact: true });
+    const tuning = root.getByRole('button', { name: /Collapse Tuning/ }).locator('..');
     await expect(tuning.getByRole('spinbutton')).toHaveCount(0);
     await expect(tuning.getByRole('button', { name: /Apply/ })).toHaveCount(0);
     await expect(tuning.getByText('1%', { exact: true })).toHaveCount(2);
@@ -59,7 +59,7 @@ test('Tuning is print-only and empty sensor copy stays absent at narrow widths',
   for (const state of ['Idle', 'Paused', 'Starting', 'Completed', 'Printing']) {
     await page.goto(`/src/test/fixtures/printer-sensors.html?sidebar-online&tuning&empty-sensors&tuning-state=${state}`);
     for (const surface of ['card', 'sidebar']) {
-      const tuning = page.getByRole('region', { name: surface, exact: true }).getByRole('region', { name: 'Tuning', exact: true });
+      const tuning = page.getByRole('region', { name: surface, exact: true }).getByRole('button', { name: /Collapse Tuning/ }).locator('..');
       for (const label of ['Speed %', 'Flow %']) {
         const slider = tuning.getByRole('slider', { name: label, exact: true });
         if (state === 'Printing') await expect(slider).toBeEnabled();
@@ -69,6 +69,53 @@ test('Tuning is print-only and empty sensor copy stays absent at narrow widths',
     }
     await expect(page.getByText('No sensors reported.', { exact: true })).toHaveCount(0);
     await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+  }
+});
+
+test('Materials and Tuning disclosures work independently on both printer surfaces', async ({ page }) => {
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  for (const width of [1400, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online&tuning&materials');
+    for (const surface of ['card', 'sidebar']) {
+      const root = page.getByRole('region', { name: surface, exact: true });
+      const tuningToggle = root.getByRole('button', { name: /(?:Collapse|Expand) Tuning/ });
+      const materialToggle = root.getByRole('button', { name: /(?:Collapse|Expand) Materials/ });
+      const speed = root.getByRole('slider', { name: 'Speed %', exact: true });
+      const spool = root.getByText(/^Fixture PLA/);
+      await expect(speed).toBeEnabled();
+      await expect(spool).toBeVisible();
+      const materialPanelId = await materialToggle.getAttribute('aria-controls');
+      const materialPanel = page.locator(`[id="${materialPanelId}"]`);
+      await materialToggle.click();
+      await expect(materialToggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(materialPanel).toBeHidden();
+      await expect(materialPanel).toHaveCount(1);
+      await expect(root.getByRole('button', { name: /Change spool/ })).toHaveCount(0);
+      await expect(speed).toBeVisible();
+      await page.keyboard.press('Enter');
+      await expect(materialPanel).toBeVisible();
+      await page.keyboard.press('Space');
+      await expect(materialPanel).toBeHidden();
+      await page.keyboard.press('Enter');
+      await expect(spool).toBeVisible();
+      const tuningPanelId = await tuningToggle.getAttribute('aria-controls');
+      const tuningPanel = page.locator(`[id="${tuningPanelId}"]`);
+      await tuningToggle.click();
+      await expect(tuningToggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(tuningPanel).toBeHidden();
+      await expect(tuningPanel).toHaveCount(1);
+      await expect(root.getByRole('slider', { name: 'Speed %', exact: true })).toHaveCount(0);
+      await expect(spool).toBeVisible();
+      await page.keyboard.press('Space');
+      await expect(speed).toBeVisible();
+      await expect(speed).toHaveValue('125');
+      await expect(root.getByLabel('Observed flow')).toHaveText('Observed: 87.5%');
+      await expect(materialToggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+      expect(await root.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    }
   }
 });
 

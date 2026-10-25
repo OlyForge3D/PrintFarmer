@@ -64,7 +64,10 @@ sensor sections; the underlying API remains available.
 The shared API also exposes independent runtime speed and flow overrides for
 Moonraker, with bounded writes and authoritative nullable readback. Web **Tuning**
 sliders are enabled only while printing and send once when a drag or keyboard
-adjustment ends, without Apply buttons. See the
+adjustment ends, without Apply buttons. Both the detailed printer card and sidebar
+use collapsible **Tuning** and **Materials** groups; Materials contains the
+printer's filament slots or single-spool details. Collapsing a group preserves
+pending controls and does not send a command. See the
 [runtime factor API contract](./docs/API.md#runtime-speed-and-flow-overrides).
 
 Homing, jogging, and absolute movement use direct POST requests to the existing

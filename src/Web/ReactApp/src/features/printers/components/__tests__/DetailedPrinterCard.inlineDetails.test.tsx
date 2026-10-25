@@ -519,13 +519,11 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     const objects = screen.getByText('Objects');
     const move = screen.getByTestId('movement-section');
     const temperature = screen.getByTestId('temp-section');
-    // No mmuStatus is set up on this printer, so materialLoadout resolves to
-    // null and the single-spool fallback card ("Spool") renders instead of
-    // MaterialLoadout — both occupy the same "materials" slot in the order.
-    const spool = screen.getByText('Spool');
+    const materials = screen.getByText('Materials');
+    expect(screen.getByRole('button', { name: /Collapse Materials/ })).toHaveAttribute('aria-expanded', 'true');
 
     expect(precedes(objects, move)).toBe(true);
     expect(precedes(move, temperature)).toBe(true);
-    expect(precedes(temperature, spool)).toBe(true);
+    expect(precedes(temperature, materials)).toBe(true);
   });
 });
