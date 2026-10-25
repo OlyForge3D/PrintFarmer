@@ -94,21 +94,33 @@ struct MJPEGStreamView: UIViewRepresentable {
             webView.load(request)
         }
 
-        let rotationCSS = """
+        context.coordinator.rotation = rotation
+        webView.evaluateJavaScript(Self.layoutScript(rotation: rotation), completionHandler: nil)
+    }
+
+    /// Centres the frame and aspect-fits it; a quarter turn swaps the image box
+    /// so the rotated frame fills the (already swapped) container (#3496).
+    static func layoutScript(rotation: Int) -> String {
+        let quarterTurn = PrinterDetailCameraLayout.isQuarterTurn(rotation)
+        return """
             document.body.style.margin = '0';
             document.body.style.padding = '0';
             document.body.style.overflow = 'hidden';
             document.body.style.background = 'transparent';
+            document.body.style.height = '100vh';
             var img = document.querySelector('img');
             if (img) {
-                img.style.width = '100%';
-                img.style.height = 'auto';
+                img.style.position = 'absolute';
+                img.style.left = '50%';
+                img.style.top = '50%';
+                img.style.width = '\(quarterTurn ? "100vh" : "100vw")';
+                img.style.height = '\(quarterTurn ? "100vw" : "100vh")';
+                img.style.objectFit = 'contain';
                 img.style.display = 'block';
-                img.style.transform = 'rotate(\(rotation)deg)';
+                img.style.transform = 'translate(-50%, -50%) rotate(\(rotation)deg)';
                 img.style.transformOrigin = 'center center';
             }
         """
-        webView.evaluateJavaScript(rotationCSS, completionHandler: nil)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -118,22 +130,11 @@ struct MJPEGStreamView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var currentRequest: URLRequest?
         var hasLoaded = false
+        var rotation = 0
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             hasLoaded = true
-            let setupCSS = """
-                document.body.style.margin = '0';
-                document.body.style.padding = '0';
-                document.body.style.overflow = 'hidden';
-                document.body.style.background = 'transparent';
-                var img = document.querySelector('img');
-                if (img) {
-                    img.style.width = '100%';
-                    img.style.height = 'auto';
-                    img.style.display = 'block';
-                }
-            """
-            webView.evaluateJavaScript(setupCSS, completionHandler: nil)
+            webView.evaluateJavaScript(MJPEGStreamView.layoutScript(rotation: rotation), completionHandler: nil)
         }
     }
 }
@@ -147,11 +148,17 @@ struct MJPEGStreamContainer: View {
     @State private var isLoading = true
     @State private var loadingTask: Task<Void, Never>?
 
+    static func aspectRatio(rotation: Int) -> CGFloat {
+        PrinterDetailCameraLayout.aspectRatio(
+            imageSize: PrinterDetailCameraLayout.streamImageSize, rotation: rotation
+        ) ?? 16 / 9
+    }
+
     var body: some View {
         ZStack {
             if let request {
                 MJPEGStreamView(request: request, rotation: rotation)
-                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .aspectRatio(Self.aspectRatio(rotation: rotation), contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .onAppear { scheduleLoadingDismiss() }
             }
@@ -159,7 +166,7 @@ struct MJPEGStreamContainer: View {
             if isLoading || request == nil {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.pfCard)
-                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .aspectRatio(Self.aspectRatio(rotation: rotation), contentMode: .fit)
                     .overlay {
                         VStack(spacing: 8) {
                             ProgressView()

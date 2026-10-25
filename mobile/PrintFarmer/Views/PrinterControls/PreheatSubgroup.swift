@@ -638,12 +638,21 @@ struct PreheatSubgroup: View {
             .disabled(!(allowsActivePrint ? viewModel.canControlHeat : viewModel.canControl) || viewModel.isExecuting)
         }
 
+        static func isHeaterTargetPending(_ kind: ControlCommand.Kind?) -> Bool {
+            switch kind {
+            case .heater, .heaterTargets: true
+            default: false
+            }
+        }
+
         private var setTargetsButton: some View {
-            ControlActionButton(
+            let pending = Self.isHeaterTargetPending(viewModel.pendingCommand?.kind)
+            return ControlActionButton(
                 title: "Go", identifier: "printer.controls.heat.set-targets",
                 accessibilityTitle: "Go, set heater targets",
                 hint: "Sets only entered targets. Blank leaves a heater unchanged; zero switches it off.",
-                compact: true, prominent: true, matchesInputHeight: true
+                compact: true, prominent: true, value: pending ? "Pending" : nil,
+                matchesInputHeight: true, isPending: pending
             ) {
                 do {
                     let hotendValue = try viewModel.supports(.hotend) ? ControlNumberInput.heaterTarget(hotend) : nil

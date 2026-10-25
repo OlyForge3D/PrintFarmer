@@ -1371,7 +1371,7 @@ final class PrinterControlsViewModel: ObservableObject {
             return "\(factor.title) control is not supported on this printer."
         }
         if let reason = runtimeControlAccessReason { return reason }
-        guard isPrintingOrPaused, runtimePrinterStateIsSupported else {
+        guard isRunningPrint, runtimePrinterStateIsSupported else {
             return "\(factor.title) can be tuned only while printing or paused."
         }
         guard runtimeFactorPercent(factor) != nil else {
@@ -1850,7 +1850,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
         if case .runtimeFactor = command.kind {
-            return isPrintingOrPaused && runtimePrinterStateIsSupported
+            return isRunningPrint && runtimePrinterStateIsSupported
         }
         if permitsActivePrint {
             return runtimePrinterStateIsSupported
@@ -1875,11 +1875,33 @@ final class PrinterControlsViewModel: ObservableObject {
         Self.isPrintingOrPaused(state: printer.state)
     }
 
+    /// Motion commands have no correlated telemetry, so HTTP success settles them.
+    private static func settlesOnResponse(_ command: ControlCommand) -> Bool {
+        switch command.kind {
+        case .home, .jog, .moveTo: return true
+        default: return false
+        }
+    }
+
     nonisolated static func isPrintingOrPaused(state: String?) -> Bool {
         switch state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false
         }
+    }
+
+    /// A print that is actually running or paused. Unlike `isPrintingOrPaused`
+    /// (which also locks idle controls during `starting`), this excludes
+    /// transitional states and gates Tune and the current-job block (#3496).
+    nonisolated static func isRunningPrint(state: String?) -> Bool {
+        switch state?.lowercased() {
+        case "printing", "paused": return true
+        default: return false
+        }
+    }
+
+    var isRunningPrint: Bool {
+        Self.isRunningPrint(state: printer.state)
     }
 
     // MARK: - Private
@@ -1987,13 +2009,8 @@ final class PrinterControlsViewModel: ObservableObject {
                 commandNotice = "Request accepted, but waiting was interrupted or controls became unavailable. Physical outcome is unknown; check the machine before another action."
                 return
             }
-            switch command.kind {
-            case .home, .jog, .moveTo:
-                pendingCommand = nil
-                commandNotice = nil
-            default:
-                commandNotice = nil
-            }
+            commandNotice = nil
+            if Self.settlesOnResponse(command) { pendingCommand = nil }
         case .failure(let error):
             if error is CancellationError {
                 pendingCommand = nil

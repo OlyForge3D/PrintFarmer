@@ -520,22 +520,19 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
                         .firstMatch
                     XCTAssertTrue(finishTime.exists)
-                    // The fixture omits layer counters (#3284), so Layer shows the
-                    // "--" placeholder, which VoiceOver reads as "not reported".
-                    let layerFact = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
-                        .matching(NSPredicate(format: "label == %@", "Layer, not reported"))
-                        .firstMatch
-                    XCTAssertTrue(layerFact.waitForExistence(timeout: 5))
+                    // The fixture omits layer counters (#3284), so the Layer cell is
+                    // omitted rather than showing a "--" placeholder (#3496).
+                    XCTAssertFalse(
+                        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists
+                    )
                     XCTAssertFalse(
                         page.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Unavailable")).firstMatch.exists,
                         "Missing Status values use the -- placeholder, not Unavailable."
                     )
-                    let preview = app.images
-                        .matching(identifier: "printer.detail.hero")
-                        .matching(NSPredicate(format: "label == %@", "Current print preview"))
-                        .firstMatch
+                    let preview = app.images["printer.detail.camera.media"]
                     XCTAssertTrue(preview.waitForExistence(timeout: 5))
+                    XCTAssertEqual(preview.label, "Current print preview")
+                    XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Print preview")
                     if size == "largest" {
                         let pause = app.buttons["printer.detail.control.pause"]
                         let cancel = app.buttons["printer.detail.control.cancel"]
@@ -590,9 +587,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         app.staticTexts["printer.detail.filament.extruder.heading"].exists,
                         "Load and Unload belong directly beneath the loaded-spool hero."
                     )
-                    XCTAssertEqual(
-                        app.staticTexts["printer.detail.filament.printingLockout"].label,
-                        "Unavailable while printing"
+                    XCTAssertFalse(
+                        app.staticTexts["printer.detail.filament.printingLockout"].exists,
+                        "Dimmed buttons and their VoiceOver hint replace the lockout caption (#3496)."
                     )
                     attachScreen("\(device)-\(size)-printer-filament")
                     if size == "largest" {
@@ -1067,24 +1064,19 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         printerCard.tap()
 
         let content = app.descendants(matching: .any)["printer.detail.status.content"]
-        // The card's hero identifier propagates to its children, so match by label.
-        let title = app.staticTexts
-            .matching(identifier: "printer.detail.hero")
-            .matching(NSPredicate(format: "label == %@", "Camera"))
-            .firstMatch
-        let preview = app.images
-            .matching(identifier: "printer.detail.hero")
-            .matching(NSPredicate(format: "label == %@", "Current print preview"))
-            .firstMatch
+        let title = app.staticTexts["printer.detail.camera.title"]
+        let preview = app.images["printer.detail.camera.media"]
         XCTAssertTrue(content.waitForExistence(timeout: 8))
         XCTAssertTrue(title.waitForExistence(timeout: 8))
         XCTAssertTrue(preview.waitForExistence(timeout: 8))
-        XCTAssertEqual(title.label, "Camera")
+        // Without a camera the hero shows the sliced-model preview (#3496 D3).
+        XCTAssertEqual(title.label, "Print preview")
+        XCTAssertEqual(preview.label, "Current print preview")
         XCTAssertLessThanOrEqual(title.frame.maxY, preview.frame.minY + 1, "The header row sits above the media")
-        XCTAssertLessThan(title.frame.midX, preview.frame.midX, "Camera sits at the top left")
-        XCTAssertGreaterThanOrEqual(
-            preview.frame.width, content.frame.width - 40,
-            "The media spans the card width instead of sharing a row with the header"
+        XCTAssertLessThan(title.frame.midX, preview.frame.midX, "The title sits at the top left")
+        XCTAssertLessThanOrEqual(
+            preview.frame.height, app.windows.firstMatch.frame.height * 0.6 + 1,
+            "The media height is capped relative to the container (#3496 B01)"
         )
         attachScreen("status-camera-header-full-width-media")
     }
@@ -1487,6 +1479,111 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
 final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITests {
     override var contentSizeCategory: String {
         "UICTContentSizeCategoryAccessibilityXXXL"
+    }
+}
+
+/// Camera header layout with real camera media (#3496 D2): the title sits
+/// top left, Rotate/Refresh top right, and the media spans the card below.
+@MainActor
+class Issue3496CameraLayoutUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    var cameraLaunchArgument: String { "" }
+
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-issue3259-visual-acceptance",
+            cameraLaunchArgument,
+            "-pf_theme_mode", "dark",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"
+        ]
+    }
+
+    func openPrimaryPrinterStatus() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.status.content"].waitForExistence(timeout: 8)
+        )
+    }
+
+    func assertHeaderAboveMedia(
+        buttons identifiers: [String],
+        name: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let title = app.staticTexts["printer.detail.camera.title"]
+        let media = app.descendants(matching: .any)["printer.detail.camera.media"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8), file: file, line: line)
+        XCTAssertTrue(media.waitForExistence(timeout: 8), file: file, line: line)
+        XCTAssertEqual(title.label, "Camera", file: file, line: line)
+        XCTAssertLessThanOrEqual(title.frame.maxY, media.frame.minY + 1, file: file, line: line)
+        for identifier in identifiers {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.waitForExistence(timeout: 8), "\(identifier) is missing", file: file, line: line)
+            XCTAssertLessThanOrEqual(
+                button.frame.maxY, media.frame.minY + 1,
+                "\(identifier) sits in the header row above the media", file: file, line: line
+            )
+            XCTAssertGreaterThan(button.frame.minX, title.frame.maxX, "\(identifier) sits right of the title",
+                                 file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, file: file, line: line)
+            XCTAssertFalse(button.label.isEmpty, "\(identifier) keeps its VoiceOver label", file: file, line: line)
+        }
+        let card = app.descendants(matching: .any)["printer.detail.hero"]
+        if media.frame.width < card.frame.width - 2 {
+            // The height cap binds (e.g. a quarter-turned 4:3 image), so the
+            // media aspect-fits inside the cap and centres in the card.
+            XCTAssertLessThan(media.frame.width, media.frame.height, "Only portrait media narrows below the card width",
+                              file: file, line: line)
+            XCTAssertEqual(media.frame.midX, card.frame.midX, accuracy: 2, "Capped media is centred",
+                           file: file, line: line)
+        }
+        XCTAssertLessThanOrEqual(
+            media.frame.height, app.windows.firstMatch.frame.height * 0.6 + 1,
+            "Media height is capped relative to the container", file: file, line: line
+        )
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Issue 3496 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-\(name)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+}
+
+@MainActor
+final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
+    override var cameraLaunchArgument: String { "--uitesting-issue3496-camera-snapshot" }
+
+    func testSnapshotCameraHeaderSitsAboveFullWidthMedia() {
+        openPrimaryPrinterStatus()
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
+            name: "camera-snapshot"
+        )
+        // A quarter turn keeps the header above capped, full-width media.
+        app.buttons["printer.detail.camera.rotate"].tap()
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
+            name: "camera-snapshot-rotated-90"
+        )
+    }
+}
+
+@MainActor
+final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
+    override var cameraLaunchArgument: String { "--uitesting-issue3496-camera-mjpeg" }
+
+    func testMjpegCameraHeaderSitsAboveFullWidthMedia() {
+        openPrimaryPrinterStatus()
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.livetoggle"],
+            name: "camera-mjpeg"
+        )
     }
 }
 

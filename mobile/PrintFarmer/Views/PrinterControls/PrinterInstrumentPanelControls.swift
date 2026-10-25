@@ -28,19 +28,25 @@ struct PrinterInstrumentPanelControls: View {
     static let babystepOptions: [Double] = MaterialControlInput.babystepIncrements
     static let cornerRadius: CGFloat = 8
 
+    /// Tune eligibility: printing or paused only. Transitional states such as
+    /// `starting` cannot select Tune (#3496).
     static func isPrinting(state: String?) -> Bool {
+        PrinterControlsViewModel.isRunningPrint(state: state)
+    }
+
+    /// Move and Heat stay locked for any active-print state, including `starting`.
+    static func isLocked(state: String?) -> Bool {
         PrinterControlsViewModel.isPrintingOrPaused(state: state)
     }
 
-    /// Short Tune explanation shown only when the backend cannot apply heater
-    /// targets right now; `nil` keeps the temperatures editable.
-    static func tuneTemperatureBlockedReason(
-        isPrinting: Bool, heatDuringPrint: Bool, canControlHeat: Bool, heatBlockedReason: String?
-    ) -> String? {
-        if isPrinting, !heatDuringPrint { return "This printer can't change temperatures during a print." }
-        guard !canControlHeat else { return nil }
-        return heatBlockedReason
+    /// Tune shows heater targets only when the backend can apply them during a
+    /// print; otherwise the block is omitted entirely (#3496).
+    static func showsTuneTemperatures(isPrinting: Bool, heatDuringPrint: Bool) -> Bool {
+        isPrinting && heatDuringPrint
     }
+
+    /// iPad keeps the jog pad at a thumb-sized width, centred in the panel.
+    static let maximumJogPadWidth: CGFloat = 480
 
     /// VoiceOver reads position values with their unit, e.g. "X 120.0 millimeters".
     static func readoutAccessibilityLabel(axis: String, value: Double?, homedAxes: String?) -> String {
@@ -56,21 +62,23 @@ struct PrinterInstrumentPanelControls: View {
     /// temperatures mid-print, and Tune already carries the hotend/bed targets.
     /// Tune (speed, flow, babystep) only applies to a running or paused print
     /// (#3496), so it is disabled while idle.
-    static func isAvailable(_ segment: Segment, isPrinting: Bool) -> Bool {
+    /// `isLocked` defaults to `isPrinting`; pass it separately for transitional
+    /// states (`starting`) that lock Move/Heat without enabling Tune.
+    static func isAvailable(_ segment: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Bool {
         switch segment {
         case .tune: isPrinting
-        case .heat, .move: !isPrinting
+        case .heat, .move: !(isLocked ?? isPrinting)
         }
     }
 
-    static func resolvedSegment(_ selected: Segment, isPrinting: Bool) -> Segment {
-        isAvailable(selected, isPrinting: isPrinting) ? selected : (isPrinting ? .tune : .move)
+    static func resolvedSegment(_ selected: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Segment {
+        isAvailable(selected, isPrinting: isPrinting, isLocked: isLocked) ? selected : (isPrinting ? .tune : .move)
     }
 
     /// Entering Control mid-print, or a print starting while it is open,
     /// selects Tune; when the print ends a Tune selection falls back to Move.
-    static func selection(afterPrintingChange selected: Segment, isPrinting: Bool) -> Segment {
-        resolvedSegment(selected, isPrinting: isPrinting)
+    static func selection(afterPrintingChange selected: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Segment {
+        resolvedSegment(selected, isPrinting: isPrinting, isLocked: isLocked)
     }
 
     static func unavailableHint(_ segment: Segment) -> String {
@@ -103,18 +111,22 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private var isPrinting: Bool {
-        Self.isPrinting(state: printer.state) || viewModel.isPrintingOrPaused
+        Self.isPrinting(state: printer.state) || viewModel.isRunningPrint
+    }
+
+    private var isLocked: Bool {
+        Self.isLocked(state: printer.state) || viewModel.isPrintingOrPaused
     }
 
     private var segment: Segment {
-        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting)
+        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting, isLocked: isLocked)
     }
 
     var body: some View {
         if !PrinterControlsSection.isHidden(for: printer) {
             VStack(alignment: .leading, spacing: 12) {
                 loadIssues
-                if !isPrinting, let reason = viewModel.blockedReason {
+                if !isLocked, let reason = viewModel.blockedReason {
                     Label(reason, systemImage: "lock.fill")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextPrimary)
@@ -142,7 +154,9 @@ struct PrinterInstrumentPanelControls: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.instrument-panel")
             .onChange(of: isPrinting, initial: true) { _, printing in
-                selectedSegment = Self.selection(afterPrintingChange: selectedSegment, isPrinting: printing)
+                selectedSegment = Self.selection(
+                    afterPrintingChange: selectedSegment, isPrinting: printing, isLocked: isLocked
+                )
             }
         }
     }
@@ -179,13 +193,19 @@ struct PrinterInstrumentPanelControls: View {
 
     // MARK: - Position readout
 
-    /// The Move readout appears only when every axis has a reported value it
-    /// can show; otherwise it is omitted rather than filled with placeholders.
+    /// The Move readout is hidden only when the printer reports no position at
+    /// all; unhomed or unreported axes show `readoutPlaceholder` (#3496).
     static func showsPositionReadout(x: Double?, y: Double?, z: Double?, homedAxes: String?) -> Bool {
-        [("X", x), ("Y", y), ("Z", z)].allSatisfy { axis, value in
-            JogSubgroup.positionDisplay(axis: axis, value: value, homedAxes: homedAxes).text
-                != PrinterDetailViewModel.missingValuePlaceholder
-        }
+        [x, y, z].contains { $0?.isFinite == true }
+    }
+
+    static let readoutPlaceholder = "\u{2014}"
+
+    static func readoutText(axis: String, value: Double?, homedAxes: String?) -> String {
+        let text = JogSubgroup.positionDisplay(
+            axis: axis, value: value, homedAxes: homedAxes, fractionDigits: readoutFractionDigits(axis: axis)
+        ).text
+        return text == PrinterDetailViewModel.missingValuePlaceholder ? readoutPlaceholder : text
     }
 
     private var positionReadout: some View {
@@ -209,15 +229,11 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private func readoutColumn(_ axis: String, value: Double?) -> some View {
-        let display = JogSubgroup.positionDisplay(
-            axis: axis, value: value, homedAxes: viewModel.printer.homedAxes,
-            fractionDigits: Self.readoutFractionDigits(axis: axis)
-        )
-        return VStack(alignment: .center, spacing: 2) {
+        VStack(alignment: .center, spacing: 2) {
             Text(axis)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
-            Text(display.text)
+            Text(Self.readoutText(axis: axis, value: value, homedAxes: viewModel.printer.homedAxes))
                 .font(.title3.monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -242,7 +258,7 @@ struct PrinterInstrumentPanelControls: View {
     private var segmentPicker: some View {
         HStack(spacing: 2) {
             ForEach(Segment.allCases) { option in
-                let available = Self.isAvailable(option, isPrinting: isPrinting)
+                let available = Self.isAvailable(option, isPrinting: isPrinting, isLocked: isLocked)
                 ControlActionButton(
                     title: option.title,
                     identifier: "printer.controls.segment.\(option.rawValue)",
@@ -294,6 +310,8 @@ struct PrinterInstrumentPanelControls: View {
                     xyPad
                     zColumn.frame(width: 72)
                 }
+                .frame(maxWidth: Self.maximumJogPadWidth)
+                .frame(maxWidth: .infinity)
                 .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 if let note = jogSafetyNote {
                     Text(note)
@@ -396,9 +414,13 @@ struct PrinterInstrumentPanelControls: View {
     // MARK: - Heat
 
     private var heatPanel: some View {
-        PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("printer.controls.heat-group")
+        VStack(alignment: .leading, spacing: 12) {
+            PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
+            // Writable sensors stay reachable while idle; Tune carries them mid-print.
+            PrinterSensorControlRows(viewModel: viewModel, compact: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.heat-group")
     }
 
     // MARK: - Tune
@@ -459,7 +481,7 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
-            if isPrinting {
+            if Self.showsTuneTemperatures(isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint) {
                 Divider()
                 tuneTemperatures
             }
@@ -469,29 +491,14 @@ struct PrinterInstrumentPanelControls: View {
         .accessibilityIdentifier("printer.controls.runtime")
     }
 
-    /// Hotend and bed targets stay editable in Tune during a print when the
-    /// backend can apply them; otherwise a short reason explains why not.
+    /// Hotend and bed target steppers, shown only when the backend can apply
+    /// them during a print. No caption: disabled rows speak for themselves.
     private var tuneTemperatures: some View {
-        let reason = Self.tuneTemperatureBlockedReason(
-            isPrinting: isPrinting,
-            heatDuringPrint: viewModel.supportsHeatDuringPrint,
-            canControlHeat: viewModel.canControlHeat,
-            heatBlockedReason: viewModel.heatBlockedReason
-        )
-        return VStack(alignment: .leading, spacing: 8) {
-            EssentialControlHeading(title: "Temperatures")
+        VStack(alignment: .leading, spacing: 8) {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
             PreheatSubgroup.IndividualHeaterControls(
                 viewModel: viewModel, usesSteppers: true, compactForDetail: true, allowsActivePrint: true
             )
-            .disabled(reason != nil)
-            if let reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("printer.controls.runtime.temperatures.reason")
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime.temperatures")
@@ -546,6 +553,10 @@ struct PrinterInstrumentPanelControls: View {
     private func runtimeFactorButton(_ factor: RuntimeFactor, delta: Double, reason: String?) -> some View {
         let increase = delta > 0
         let step = RuntimeFactor.stepPercent.formatted()
+        let pending = Self.isRuntimeFactorPending(
+            viewModel.pendingCommand?.kind, factor: factor, increase: increase,
+            current: viewModel.runtimeFactorPercent(factor)
+        )
         return ControlActionButton(
             title: "",
             identifier: "printer.controls.runtime.\(factor.rawValue)-factor.\(increase ? "increase" : "decrease")",
@@ -553,10 +564,27 @@ struct PrinterInstrumentPanelControls: View {
             hint: reason ?? "Sends a new \(factor.title.lowercased()) percentage to the printer.",
             compact: true,
             systemImage: increase ? "plus" : "minus",
-            minimumHeight: 44
+            value: pending ? "Pending" : nil,
+            minimumHeight: 44,
+            isPending: pending
         ) { Task { await viewModel.stepRuntimeFactor(factor, by: delta) } }
         .frame(width: 44, height: 44)
         .disabled(!viewModel.canStepRuntimeFactor(factor, by: delta))
+    }
+
+    /// The in-flight runtime-factor request is shown on the stepper button that
+    /// sent it: a target above the current readback came from "+".
+    static func isRuntimeFactorPending(
+        _ kind: ControlCommand.Kind?, factor: RuntimeFactor, increase: Bool, current: Double?
+    ) -> Bool {
+        guard case let .runtimeFactor(pendingFactor, percent) = kind, pendingFactor == factor else { return false }
+        guard let current, current.isFinite else { return increase }
+        return (percent > current) == increase
+    }
+
+    static func isBabystepPending(_ kind: ControlCommand.Kind?, raise: Bool) -> Bool {
+        guard case let .transientZOffset(_, deltaMm) = kind else { return false }
+        return (deltaMm > 0) == raise
     }
 
     static func runtimeFactorText(_ percent: Double?) -> String {
@@ -570,14 +598,17 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private func babystepButton(raise: Bool, reason: String?) -> some View {
-        ControlActionButton(
+        let pending = Self.isBabystepPending(viewModel.pendingCommand?.kind, raise: raise)
+        return ControlActionButton(
             title: raise ? "Raise nozzle" : "Lower nozzle",
             identifier: "printer.controls.runtime.z-offset.\(raise ? "increase" : "decrease")",
             accessibilityTitle: raise ? "Raise nozzle" : "Lower nozzle",
             hint: reason ?? "Moves the live Z offset \(babystep.formatted()) millimeters.",
             compact: true,
             systemImage: raise ? "arrow.up" : "arrow.down",
-            minimumHeight: 44
+            value: pending ? "Pending" : nil,
+            minimumHeight: 44,
+            isPending: pending
         ) { Task { await viewModel.adjustLiveZOffset(by: raise ? babystep : -babystep) } }
         .frame(maxWidth: .infinity, minHeight: 44)
     }

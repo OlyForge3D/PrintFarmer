@@ -193,10 +193,16 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         let printer: Printer
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-        private var status: String {
-            guard printer.isOnline else { return "Offline" }
-            guard let state = printer.state, !state.isEmpty else { return "Not reported" }
-            return state.capitalized
+        private var status: String { Self.statusText(state: printer.state, isOnline: printer.isOnline) }
+
+        /// Ready, idle and operational all read "Idle", matching the printer list.
+        static func statusText(state: String?, isOnline: Bool) -> String {
+            guard isOnline else { return "Offline" }
+            guard let state, !state.isEmpty else { return "Not reported" }
+            switch state.lowercased() {
+            case "ready", "idle", "operational": return "Idle"
+            default: return state.capitalized
+            }
         }
 
         private var statusColor: Color {
@@ -558,6 +564,34 @@ enum PrinterDetailCameraLayout {
         return isQuarterTurn(rotation)
             ? imageSize.height / imageSize.width
             : imageSize.width / imageSize.height
+    }
+
+    /// Livestreams do not report their frame size; assume 16:9 before rotation.
+    static let streamImageSize = CGSize(width: 16, height: 9)
+
+    /// Media may use at most this share of the visible page height, so a
+    /// portrait (or quarter-turned) image never pushes the job off screen.
+    static let maximumHeightFraction: CGFloat = 0.6
+    static let minimumMaximumHeight: CGFloat = 180
+
+    static func maximumHeight(containerHeight: CGFloat) -> CGFloat {
+        guard containerHeight.isFinite, containerHeight > 0 else { return .infinity }
+        return max(containerHeight * maximumHeightFraction, minimumMaximumHeight)
+    }
+
+    /// Aspect-fit inside `width` x `maxHeight`: full width unless that would
+    /// exceed the height cap, in which case the media narrows and centres.
+    static func fittedSize(aspect: CGFloat, width: CGFloat, maxHeight: CGFloat) -> CGSize {
+        guard aspect > 0, width > 0 else { return .zero }
+        let height = width / aspect
+        guard height > maxHeight else { return CGSize(width: width, height: height) }
+        return CGSize(width: maxHeight * aspect, height: maxHeight)
+    }
+
+    /// Width limit that keeps aspect-fit media within `maxHeight`.
+    static func maximumWidth(aspect: CGFloat?, maxHeight: CGFloat) -> CGFloat {
+        guard let aspect, aspect > 0, maxHeight.isFinite else { return .infinity }
+        return maxHeight * aspect
     }
 }
 

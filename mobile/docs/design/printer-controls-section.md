@@ -396,18 +396,17 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   until the request returns even when matching telemetry arrives first.
   Other-axis, measured-temperature and unrelated setpoint noise do not
   acknowledge an individual target or absolute move.
-- Only a matching **post-dispatch** update permits “Matching telemetry received.”
-  If cached heater setpoints or absolute coordinates already match, successful
-  HTTP acceptance ends waiting with an explicit notice that fresh physical
-  completion is **not confirmed**. This applies equally to repeated presets,
-  already-zero Cool Down, individual heaters and already-matching destinations.
-  A fresh update arriving before the HTTP response retains telemetry wording,
-  but never releases the response's single-flight slot early.
-- Home All/XY/Z on axes already reported homed completes local waiting after
-  successful request acceptance, explicitly **without confirming fresh physical
-  completion**. Otherwise homing waits for a fresh requested-axis report.
-  Cached homing or unrelated noise never releases an outstanding HTTP request;
-  a server rejection still wins over telemetry received before its response.
+- Pending and success are **silent** (#3496). The app triggers the action as
+  the web UI does: the tapped control shows a small spinner and a VoiceOver
+  "Pending" value while its command is in flight, then returns to normal. There
+  is no "Command pending", acceptance or "Matching telemetry received" text.
+  Correlation rules are unchanged: only a matching **post-dispatch** update
+  acknowledges telemetry, cached setpoints, coordinates or homed axes end
+  waiting on HTTP acceptance, and a fresh update never releases the response's
+  single-flight slot early. A server rejection still wins over telemetry
+  received before its response.
+- Only actionable outcomes show a notice: **rejected**, **unsupported**,
+  **error**, or an **unknown outcome** the user must check on the printer.
 - The access-lifecycle modifier belongs on the **detail host**, not a pager
   child. It fences server generation, signed-in user, per-server preference,
   readiness and Queue.Start permission. Leaving the detail or losing authority

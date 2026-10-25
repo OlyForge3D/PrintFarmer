@@ -120,6 +120,26 @@ enum UITestBootstrap {
         "--uitesting-issue3259-control-idle"
     static let issue3259SafeFilamentActionsLaunchArgument =
         "--uitesting-issue3259-safe-filament-actions"
+    /// Gives the primary visual-acceptance printer a polled snapshot camera.
+    static let issue3496CameraSnapshotLaunchArgument =
+        "--uitesting-issue3496-camera-snapshot"
+    /// Gives the primary visual-acceptance printer an MJPEG livestream camera.
+    static let issue3496CameraMjpegLaunchArgument =
+        "--uitesting-issue3496-camera-mjpeg"
+
+    /// A 4:3 camera frame generated at runtime, so no asset is needed (#3496).
+    nonisolated static let issue3496CameraSnapshotData: Data = {
+        let size = CGSize(width: 640, height: 480)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor(red: 0.16, green: 0.18, blue: 0.22, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.94, green: 0.42, blue: 0.29, alpha: 1).setFill()
+            context.fill(CGRect(x: 240, y: 200, width: 160, height: 120))
+        }
+        return image.jpegData(compressionQuality: 0.8) ?? Data()
+    }()
     #endif
 
     #if DEBUG
@@ -649,6 +669,16 @@ enum UITestBootstrap {
             printer.y = 0
             printer.z = 5
             printer.homedAxes = ""
+        }
+        if ProcessInfo.processInfo.arguments.contains(issue3496CameraSnapshotLaunchArgument) {
+            printer.cameraAccessMode = .snapshotOnly
+            printer.cameraStreamUrl = nil
+            printer.cameraSnapshotUrl = nil
+        } else if ProcessInfo.processInfo.arguments.contains(issue3496CameraMjpegLaunchArgument) {
+            printer.cameraAccessMode = .streamOnly
+            printer.cameraStreamFormat = .mjpeg
+            printer.cameraStreamUrl = "http://127.0.0.1:9/webcam/?action=stream"
+            printer.cameraSnapshotUrl = nil
         }
         if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
             printer.state = "ready"
@@ -1623,6 +1653,10 @@ enum UITestBootstrap {
                 result = (200, "application/json", fixture.printersData)
             case ("GET", "/api/printers/camera-urls"):
                 result = (200, "application/json", Data("[]".utf8))
+            case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/snapshot")
+                    && path.split(separator: "/").count == 4:
+                result = (200, "image/jpeg", UITestBootstrap.issue3496CameraSnapshotData)
             case ("GET", let path)
                 where path.hasPrefix("/api/printers/") && path.split(separator: "/").count == 3:
                 let components = path.split(separator: "/")

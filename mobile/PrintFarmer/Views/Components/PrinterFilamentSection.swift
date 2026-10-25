@@ -149,8 +149,13 @@ struct PrinterFilamentSection: View {
                         .font(embedded ? .callout.weight(.semibold) : .subheadline)
                 }
                 if showsAllActions && row.hasAssignment {
-                    coverageSummary(row, useConciseRunoutCopy: true)
-                    if let spoolID = row.spoolID, let spoolDetails = spoolDetailsByID[spoolID] {
+                    let spoolDetails = row.spoolID.flatMap { spoolDetailsByID[$0] }
+                    // The meter already states the remaining weight, so the
+                    // quantity line only stands in when there is no meter (#3496 D4).
+                    if spoolDetails == nil || conciseCoverageSummaryText(for: row) != nil {
+                        coverageSummary(row, useConciseRunoutCopy: true)
+                    }
+                    if let spoolDetails {
                         spoolWeightMeter(spoolDetails)
                     } else if let spoolLookupMessage, row.spoolID != nil {
                         Text(spoolLookupMessage)
@@ -238,7 +243,7 @@ struct PrinterFilamentSection: View {
             if let fraction = meter.fraction {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.pfBackgroundTertiary)
+                        Capsule().fill(Color.pfBorder)
                         Capsule()
                             .fill(fraction <= 0.12 ? Color.pfError : fraction <= 0.25 ? Color.pfWarning : Color.pfSuccess)
                             .frame(width: geometry.size.width * fraction)
@@ -253,6 +258,7 @@ struct PrinterFilamentSection: View {
                 .foregroundStyle(Color.pfTextSecondary)
                 .accessibilityIdentifier("printer.filament.remainingMeter.label")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.filament.remainingMeter")
     }

@@ -1190,14 +1190,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertNotNil(model.pendingCommand)
                 XCTAssertEqual(origin.configuration?.showsActivityIndicator, true, "Pending must be visible, not only an accessibility value")
                 XCTAssertFalse(origin.isEnabled)
-                let stop = try button("stop-waiting")
-                XCTAssertTrue(stop.isEnabled)
-                XCTAssertEqual(nativeControls(in: controller.view).filter {
+                XCTAssertFalse(nativeControls(in: controller.view).contains {
                     $0.accessibilityIdentifier == "printer.controls.stop-waiting"
-                }.count, 1)
-                try assertMotionLocal(stop)
+                }, "Pending is silent: no Stop waiting button (#3496)")
                 try await capture(id)
-                stop.sendActions(for: .touchUpInside)
+                model.cancelPendingCommand()
                 try await layout()
                 XCTAssertNotNil(model.pendingCommand, "Stopping observation cannot release an in-flight request")
                 gate.release()
@@ -1264,21 +1261,16 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             controller.view.frame = window.bounds
             try await settle(controller)
             let controls = nativeControls(in: controller.view)
-            let stop = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.stop-waiting" })
+            XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                           "Pending is silent: no Stop waiting button (#3496)")
             let originID = section == .heat ? "heat.set-targets" : "filament-load"
             let origin = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.\(originID)" })
-            let home = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.home.all" })
-            let stopFrame = stop.convert(stop.bounds, to: controller.view)
-            XCTAssertLessThan(stopFrame.maxY, origin.convert(origin.bounds, to: controller.view).minY)
-            if section == .heat {
-                XCTAssertLessThan(stopFrame.maxY, home.convert(home.bounds, to: controller.view).minY)
-            } else {
-                XCTAssertGreaterThan(stopFrame.minY, home.convert(home.bounds, to: controller.view).maxY)
+            XCTAssertFalse(origin.isEnabled, "The originating control stays disabled while in flight")
+            if section == .material {
                 barrier.release()
                 await request?.value
                 XCTAssertNil(model.pendingCommand)
                 XCTAssertEqual(model.feedbackSection, .material)
-                XCTAssertNotNil(model.commandNotice)
             }
             model.cancelPendingCommand()
         }
@@ -1572,7 +1564,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
     }
 
-    func test_pendingCommand_disablesNativeActionsButKeepsStopWaitingEnabled() async throws {
+    func test_pendingCommand_disablesNativeActionsSilently() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
@@ -1587,12 +1579,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let controls = nativeControls(in: controller.view)
         let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
         let input = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
-        let stop = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.stop-waiting" })
+        XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                       "Pending is silent: no Stop waiting button (#3496)")
         XCTAssertFalse(apply.isEnabled)
         XCTAssertFalse(input.isEnabled)
-        XCTAssertTrue(stop.isEnabled)
-        XCTAssertGreaterThanOrEqual(stop.bounds.height, 44)
-        stop.sendActions(for: .touchUpInside)
+        model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         XCTAssertTrue(model.commandNotice?.contains("may still execute") == true)
     }

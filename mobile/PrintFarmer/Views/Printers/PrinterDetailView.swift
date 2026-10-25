@@ -580,6 +580,15 @@ struct PrinterDetailView: View {
         return user.permissions.contains("queue:start") || user.roles.contains("farm_admin")
     }
 
+    private func physicalFilamentCommandBlock(
+        for operation: PhysicalFilamentOperation
+    ) -> PrinterDetailViewModel.PhysicalFilamentBlock? {
+        guard canStartPrinterCommand else {
+            return .blocked("Queue.Start permission is required to use physical filament controls.")
+        }
+        return viewModel.physicalFilamentCommandBlock(for: operation)
+    }
+
     private func physicalFilamentCommandBlockedReason(load: Bool) -> String? {
         guard canStartPrinterCommand else {
             return "Queue.Start permission is required to use physical filament controls."
@@ -597,12 +606,6 @@ struct PrinterDetailView: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.filament.extruder.heading")
                 Spacer(minLength: 8)
-                if viewModel.isActivelyPrinting {
-                    Text("Unavailable while printing")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityIdentifier("printer.detail.filament.printingLockout")
-                }
             }
             HStack(spacing: 12) {
                 Button {
@@ -631,9 +634,10 @@ struct PrinterDetailView: View {
             }
 
             if !viewModel.isActivelyPrinting,
-               let reason = [loadReason, unloadReason].compactMap({ $0 })
-                .first(where: { $0 != PrinterDetailViewModel.unsupportedFilamentCommandReason }) {
-                Text(reason)
+               let block = [PhysicalFilamentOperation.load, .unload]
+                .compactMap({ physicalFilamentCommandBlock(for: $0) })
+                .first(where: \.isShownOnScreen) {
+                Text(block.message)
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
             }
@@ -780,8 +784,11 @@ struct PrinterDetailView: View {
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    cameraSection(printer)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    cameraSection(
+                        printer,
+                        maxMediaHeight: PrinterDetailCameraLayout.maximumHeight(containerHeight: geometry.size.height)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 8) {
                         currentJobBlock(printer)
                     }
@@ -1044,13 +1051,13 @@ struct PrinterDetailView: View {
         )
     }
 
+    /// Omitted when the printer reports no layer data, instead of a "--" cell.
+    @ViewBuilder
     private func layerFact(_ printer: Printer) -> some View {
         let layer = viewModel.layerLabel(for: printer)
-        return statusFact(
-            "Layer",
-            value: layer,
-            spokenValue: layer == PrinterDetailViewModel.missingValuePlaceholder ? "not reported" : nil
-        )
+        if layer != PrinterDetailViewModel.missingValuePlaceholder {
+            statusFact("Layer", value: layer)
+        }
     }
 
     private func statusFact(_ title: String, value: String, spokenValue: String? = nil) -> some View {
@@ -1268,15 +1275,18 @@ struct PrinterDetailView: View {
 
     // MARK: - Camera Snapshot
 
-    private func cameraSection(_ printer: Printer) -> some View {
+    private func cameraSection(_ printer: Printer, maxMediaHeight: CGFloat) -> some View {
         let hasCamera = hasUsableCamera(for: printer)
         let previewPath = viewModel.currentJobThumbnailUrl
         let previewRequest = "\(printer.id.uuidString)|\(printer.state ?? "")|\(previewPath ?? "")|\(hasCamera)"
+        let previewImage = !hasCamera && printPreviewPath == previewPath ? printPreviewImage : nil
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Camera")
+                Text(previewImage != nil ? "Print preview" : "Camera")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.pfTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("printer.detail.camera.title")
                 if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                     Text(viewModel.showLivestream && viewModel.canShowLivestream ? "LIVE" : "SNAPSHOT")
                         .font(.caption2.weight(.bold))
@@ -1290,6 +1300,15 @@ struct PrinterDetailView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if !hasCamera, previewImage == nil {
+                    // Collapsed: no empty media card when there is nothing to show.
+                    Text("No camera available")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .padding(.trailing, 8)
+                        .accessibilityIdentifier("printer.detail.camera.unavailable")
+                }
 
                 if viewModel.canShowLivestream {
                     Button {
@@ -1305,7 +1324,9 @@ struct PrinterDetailView: View {
                 }
 
                 if viewModel.cameraPreviewMode != .unsupported,
-                   viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil || viewModel.cameraPreviewMode == .snapshotPolling {
+                   viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil
+                    || viewModel.cameraPreviewMode == .snapshotPolling
+                    || (viewModel.showLivestream && viewModel.canShowLivestream) {
                     Button {
                         viewModel.rotateCameraView()
                     } label: {
@@ -1315,6 +1336,7 @@ struct PrinterDetailView: View {
                             .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Rotate camera view")
+                    .accessibilityIdentifier("printer.detail.camera.rotate")
 
                     if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                         Button {
@@ -1328,6 +1350,7 @@ struct PrinterDetailView: View {
                         }
                         .disabled(viewModel.isLoadingSnapshot)
                         .accessibilityLabel("Refresh camera snapshot")
+                        .accessibilityIdentifier("printer.detail.camera.refresh")
                     }
                 }
             }
@@ -1335,23 +1358,28 @@ struct PrinterDetailView: View {
             .padding(.leading, 12)
             .padding(.trailing, 4)
             .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.detail.camera.header")
 
-            Group {
-                if !hasCamera {
-                    if let printPreviewImage, printPreviewPath == previewPath {
-                        Image(uiImage: printPreviewImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .accessibilityLabel("Current print preview")
-                    } else {
-                        noCameraPlaceholder()
-                    }
-                } else {
-                    cameraPreview(printer)
+            if !hasCamera {
+                if let previewImage {
+                    Image(uiImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(
+                            aspect: PrinterDetailCameraLayout.aspectRatio(imageSize: previewImage.size, rotation: 0),
+                            maxHeight: maxMediaHeight
+                        ))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("Current print preview")
+                        .accessibilityIdentifier("printer.detail.camera.media")
                 }
+            } else {
+                cameraPreview(printer, maxMediaHeight: maxMediaHeight)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("printer.detail.camera.media")
             }
-            .frame(maxWidth: .infinity)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
@@ -1359,6 +1387,7 @@ struct PrinterDetailView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.hero")
         .task(id: previewRequest) {
             await loadPrintPreview(printer: printer, path: previewPath, hasCamera: hasCamera)
@@ -1415,7 +1444,7 @@ struct PrinterDetailView: View {
     }
 
     @ViewBuilder
-    private func cameraPreview(_ printer: Printer) -> some View {
+    private func cameraPreview(_ printer: Printer, maxMediaHeight: CGFloat) -> some View {
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
             #if canImport(UIKit)
@@ -1439,8 +1468,12 @@ struct PrinterDetailView: View {
                         await apiClient?.currentCameraCredentials()
                     }
                 )
+                .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(
+                    aspect: MJPEGStreamContainer.aspectRatio(rotation: viewModel.cameraRotation),
+                    maxHeight: maxMediaHeight
+                ))
             } else if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
@@ -1448,7 +1481,7 @@ struct PrinterDetailView: View {
             }
             #else
             if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
@@ -1457,7 +1490,7 @@ struct PrinterDetailView: View {
             #endif
         case .snapshotPolling:
             if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if viewModel.isLoadingSnapshot {
                 loadingSnapshotPlaceholder()
             } else {
@@ -1465,7 +1498,7 @@ struct PrinterDetailView: View {
             }
         case .directSnapshot:
             if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
@@ -1479,17 +1512,15 @@ struct PrinterDetailView: View {
     }
 
     #if canImport(UIKit)
-    private func snapshotImage(from data: Data) -> some View {
+    private func snapshotImage(from data: Data, maxHeight: CGFloat) -> some View {
         Group {
             if let uiImage = UIImage(data: data) {
                 let rotation = viewModel.cameraRotation
                 let quarterTurn = PrinterDetailCameraLayout.isQuarterTurn(rotation)
+                let aspect = PrinterDetailCameraLayout.aspectRatio(imageSize: uiImage.size, rotation: rotation)
                 Color.clear
-                    .aspectRatio(
-                        PrinterDetailCameraLayout.aspectRatio(imageSize: uiImage.size, rotation: rotation),
-                        contentMode: .fit
-                    )
-                    .frame(maxWidth: .infinity)
+                    .aspectRatio(aspect, contentMode: .fit)
+                    .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(aspect: aspect, maxHeight: maxHeight))
                     .overlay {
                         GeometryReader { geometry in
                             Image(uiImage: uiImage)
@@ -1504,13 +1535,14 @@ struct PrinterDetailView: View {
                         }
                     }
                     .clipped()
+                    .frame(maxWidth: .infinity)
             } else {
                 snapshotUnavailable()
             }
         }
     }
     #else
-    private func snapshotImage(from data: Data) -> some View {
+    private func snapshotImage(from data: Data, maxHeight: CGFloat) -> some View {
         snapshotUnavailable()
     }
     #endif

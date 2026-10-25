@@ -2154,11 +2154,53 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
-    /// Hint-only reason: the disabled buttons already say enough on screen.
-    static let unsupportedFilamentCommandReason =
-        "This printer backend does not report support for that filament command."
+    /// Why a physical filament command is blocked. `unsupported` is hint-only:
+    /// the disabled buttons already say enough on screen.
+    enum PhysicalFilamentBlock: Equatable {
+        case unsupported
+        case blocked(String)
+
+        static let unsupportedMessage =
+            "This printer backend does not report support for that filament command."
+
+        var message: String {
+            switch self {
+            case .unsupported: Self.unsupportedMessage
+            case let .blocked(reason): reason
+            }
+        }
+
+        /// Whether the reason is worth a visible caption below the buttons.
+        var isShownOnScreen: Bool { self != .unsupported }
+    }
 
     func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
+        physicalFilamentCommandBlock(for: operation)?.message
+    }
+
+    func physicalFilamentCommandBlock(for operation: PhysicalFilamentOperation) -> PhysicalFilamentBlock? {
+        if let reason = physicalFilamentCommandStateBlockedReason(for: operation) { return .blocked(reason) }
+        guard let printer else { return .blocked("Printer status is unavailable.") }
+        guard let capabilities = filamentCommandCapabilities else {
+            if let filamentCommandCapabilitiesError {
+                return .blocked("Printer support could not be confirmed: \(filamentCommandCapabilitiesError)")
+            }
+            return .blocked("Checking printer filament-command support.")
+        }
+        let isSupported = operation == .load
+            ? capabilities.supportsFilamentLoad
+            : capabilities.supportsFilamentUnload
+        guard isSupported else { return .unsupported }
+        return PhysicalFilamentCommandEligibility.blockedReason(
+            for: operation,
+            capabilities: capabilities,
+            status: statusDetail,
+            configurationRevision: printer.configurationRevision,
+            now: nowProvider()
+        ).map(PhysicalFilamentBlock.blocked)
+    }
+
+    private func physicalFilamentCommandStateBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
         guard printerService != nil else { return "Printer service is not available." }
         guard let printer else { return "Printer status is unavailable." }
         guard printer.isOnline else { return "Printer is offline." }
@@ -2172,25 +2214,7 @@ final class PrinterDetailViewModel {
             return "Filament load and unload are disabled while a print is active."
         }
         guard !isPerformingAction else { return "Another printer operation is in progress." }
-        guard let capabilities = filamentCommandCapabilities else {
-            if let filamentCommandCapabilitiesError {
-                return "Printer support could not be confirmed: \(filamentCommandCapabilitiesError)"
-            }
-            return "Checking printer filament-command support."
-        }
-        let isSupported = operation == .load
-            ? capabilities.supportsFilamentLoad
-            : capabilities.supportsFilamentUnload
-        guard isSupported else {
-            return Self.unsupportedFilamentCommandReason
-        }
-        return PhysicalFilamentCommandEligibility.blockedReason(
-            for: operation,
-            capabilities: capabilities,
-            status: statusDetail,
-            configurationRevision: printer.configurationRevision,
-            now: nowProvider()
-        )
+        return nil
     }
 
     @discardableResult
@@ -2406,8 +2430,11 @@ final class PrinterDetailViewModel {
     }
 
     /// Moonraker keeps reporting the last file after a print ends, so a stale
-    /// file name alone must not resurrect the current-job block.
-    var showsCurrentJob: Bool { isActivelyPrinting }
+    /// file name alone must not resurrect the current-job block. Transitional
+    /// states such as `starting` are excluded: printing or paused only (#3496).
+    var showsCurrentJob: Bool {
+        PrinterControlsViewModel.isRunningPrint(state: printer?.state)
+    }
 
     var canShowLivestream: Bool {
         isActivelyPrinting && cameraPreviewMode == .mjpegStream

@@ -14,15 +14,27 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   disclosure, and the four page-indicator dots under the
   Status/Control/Filament/Queue picker. The X/Y/Z position readout now
   appears only on the Move panel, and is hidden when the printer does not
-  report a homed position for every axis. Control commands on Move, Heat and
-  Tune are now silent on success: the "Command pending" label and the
+  report any position (unhomed or unknown axes read "—"). Control commands on
+  Move, Heat and Tune are now silent on success: the "Command pending" label and the
   "Matching telemetry received…" / "Command accepted…" / "Request
   accepted…" notices are gone, and only actionable failures or unknown
-  outcomes are shown. The Control › Tune segment is disabled (VoiceOver hint
-  "Available while printing") unless the printer is printing or paused, and
-  falls back to Move when a print ends. The camera card now puts the
+  outcomes are shown; the tapped control shows a spinner and a VoiceOver
+  "Pending" value instead, and the "Stop waiting for command" button is
+  gone. The Control › Tune segment is disabled (VoiceOver hint
+  "Available while printing") unless the printer is printing or paused (not
+  starting), and falls back to Move when a print ends; writable sensor
+  controls moved to Heat so they stay reachable while idle. Tune shows nozzle
+  and bed steppers only when the printer accepts temperature changes during a
+  print, and Heat/Move no longer show "Unavailable while printing" text. The
+  iPad jog pad is capped at 480 pt and centred. The camera card now puts the
   "Camera" title and rotate/refresh buttons in a header row above
-  full-width, aspect-preserving media. Idle printers that still report the
+  full-width, aspect-preserving media whose height is capped relative to the
+  screen (including quarter-turn rotation and the MJPEG livestream). The card
+  is titled "Print preview" when it shows the sliced-model preview, and
+  collapses to a one-line "No camera available" header when there is no
+  media. The Layer cell is omitted when the printer reports no layers, the
+  state chip reads "Idle" for ready printers, and the Filament tab states the
+  remaining weight once with a full-width meter. Idle printers that still report the
   last file name (Moonraker) now show "No active print" instead of a stale
   job heading with "Layer --".
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the

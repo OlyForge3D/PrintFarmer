@@ -173,15 +173,9 @@ struct PrinterControlCommandFeedback: View {
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if viewModel.pendingCommand != nil {
-                    ControlActionButton(
-                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
-                        hint: "Does not stop the printer. Physical execution may continue."
-                    ) { viewModel.cancelPendingCommand() }
-                }
             }
             .foregroundStyle(Color.pfTextPrimary)
-            .padding(.bottom, viewModel.pendingCommand != nil || viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
+            .padding(.bottom, viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.\(section.rawValue).feedback")
         }

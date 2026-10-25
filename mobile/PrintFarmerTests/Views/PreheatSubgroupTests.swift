@@ -109,15 +109,12 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         XCTAssertTrue(model.isExecuting)
-        let pendingControls = nativeControls(controller.view)
-        let stop = try XCTUnwrap(pendingControls.first {
-            $0.accessibilityIdentifier == "printer.controls.stop-waiting"
-        })
-        XCTAssertTrue(stop.isEnabled, "Card-local observation cancellation remains available")
-        let commandControls = pendingControls.filter { $0 !== stop }
+        let commandControls = nativeControls(controller.view)
+        XCTAssertFalse(commandControls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                       "Pending is silent: no Stop waiting button (#3496)")
         XCTAssertEqual(commandControls.count, 3, "Both target fields and the setter remain mounted")
         XCTAssertTrue(commandControls.allSatisfy { !$0.isEnabled })
-        stop.sendActions(for: .touchUpInside)
+        model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         try await settle(controller)
         field.text = ""
