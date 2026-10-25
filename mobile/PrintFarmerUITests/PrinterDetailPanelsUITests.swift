@@ -1091,6 +1091,39 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
+    /// Idle printers keep Speed/Flow visible with their readback but disabled (#3476).
+    override func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        tune.tap()
+
+        for (id, title, label) in [("speed", "Speed", "Speed 100 percent"), ("flow", "Flow", "Flow 98 percent")] {
+            let value = app.staticTexts["printer.controls.runtime.\(id)-factor.value"]
+            XCTAssertTrue(value.waitForExistence(timeout: 8), "\(title) stays visible while idle")
+            XCTAssertEqual(value.label, label)
+            for direction in ["increase", "decrease"] {
+                let button = app.buttons["printer.controls.runtime.\(id)-factor.\(direction)"]
+                XCTAssertTrue(button.waitForExistence(timeout: 5))
+                XCTAssertFalse(button.isEnabled, "\(title) \(direction) is disabled while idle")
+            }
+            let reason = app.staticTexts["printer.controls.runtime.\(id)-factor.reason"]
+            XCTAssertTrue(reason.waitForExistence(timeout: 5))
+            XCTAssertEqual(reason.label, "\(title) can be tuned only while printing or paused.")
+        }
+        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled, "Babystep is not restricted")
+        attachScreen("control-tune-speed-flow-idle-disabled")
+    }
+
     func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
