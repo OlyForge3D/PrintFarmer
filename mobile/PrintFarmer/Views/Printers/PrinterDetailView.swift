@@ -134,10 +134,6 @@ struct PrinterDetailView: View {
         )
     }
 
-    private var statusHeroHeight: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 180 : 156
-    }
-
     init(printerId: UUID) {
         self.init(viewModel: PrinterDetailViewModel(printerId: printerId))
     }
@@ -634,7 +630,9 @@ struct PrinterDetailView: View {
                 .accessibilityIdentifier("printer.detail.filament.unload")
             }
 
-            if !viewModel.isActivelyPrinting, let reason = loadReason ?? unloadReason {
+            if !viewModel.isActivelyPrinting,
+               let reason = [loadReason, unloadReason].compactMap({ $0 })
+                .first(where: { $0 != PrinterDetailViewModel.unsupportedFilamentCommandReason }) {
                 Text(reason)
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
@@ -950,7 +948,7 @@ struct PrinterDetailView: View {
     private func currentJobBlock(_ printer: Printer) -> some View {
         let jobName = printer.fileName ?? printer.jobName ?? viewModel.currentJob?.jobName
         VStack(alignment: .leading, spacing: 8) {
-            if viewModel.isActivelyPrinting || jobName != nil {
+            if viewModel.showsCurrentJob {
                 currentJobHeading(printer, jobName: jobName)
 
                 // Progress (bar here, percent in the heading) shows only while
@@ -1274,30 +1272,11 @@ struct PrinterDetailView: View {
         let hasCamera = hasUsableCamera(for: printer)
         let previewPath = viewModel.currentJobThumbnailUrl
         let previewRequest = "\(printer.id.uuidString)|\(printer.state ?? "")|\(previewPath ?? "")|\(hasCamera)"
-        return ZStack(alignment: .top) {
-            Group {
-                if !hasCamera {
-                    if let printPreviewImage, printPreviewPath == previewPath {
-                        Image(uiImage: printPreviewImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .accessibilityLabel("Current print preview")
-                    } else {
-                        noCameraPlaceholder()
-                    }
-                } else {
-                    cameraPreview(printer)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text("Camera")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.pfTextPrimary)
                 if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                     Text(viewModel.showLivestream && viewModel.canShowLivestream ? "LIVE" : "SNAPSHOT")
                         .font(.caption2.weight(.bold))
@@ -1310,7 +1289,7 @@ struct PrinterDetailView: View {
                         )
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 if viewModel.canShowLivestream {
                     Button {
@@ -1319,7 +1298,7 @@ struct PrinterDetailView: View {
                         Image(systemName: viewModel.showLivestream ? "photo" : "video.fill")
                             .font(.subheadline.weight(.semibold))
                             .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
                     .accessibilityIdentifier("printer.detail.camera.livetoggle")
@@ -1333,10 +1312,10 @@ struct PrinterDetailView: View {
                         Image(systemName: "rotate.right")
                             .font(.subheadline.weight(.semibold))
                             .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Rotate camera view")
-                    
+
                     if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
                         Button {
                             let task = Task { _ = await viewModel.refreshSnapshot() }
@@ -1345,18 +1324,36 @@ struct PrinterDetailView: View {
                             Image(systemName: "arrow.clockwise")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(width: 44, height: 44)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .contentShape(Rectangle())
                         }
                         .disabled(viewModel.isLoadingSnapshot)
                         .accessibilityLabel("Refresh camera snapshot")
                     }
                 }
             }
-            .padding(8)
+            .frame(minHeight: 44)
+            .padding(.leading, 12)
+            .padding(.trailing, 4)
             .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+
+            Group {
+                if !hasCamera {
+                    if let printPreviewImage, printPreviewPath == previewPath {
+                        Image(uiImage: printPreviewImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .accessibilityLabel("Current print preview")
+                    } else {
+                        noCameraPlaceholder()
+                    }
+                } else {
+                    cameraPreview(printer)
+                }
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(height: statusHeroHeight)
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -1485,11 +1482,28 @@ struct PrinterDetailView: View {
     private func snapshotImage(from data: Data) -> some View {
         Group {
             if let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .rotationEffect(.degrees(Double(viewModel.cameraRotation)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                let rotation = viewModel.cameraRotation
+                let quarterTurn = PrinterDetailCameraLayout.isQuarterTurn(rotation)
+                Color.clear
+                    .aspectRatio(
+                        PrinterDetailCameraLayout.aspectRatio(imageSize: uiImage.size, rotation: rotation),
+                        contentMode: .fit
+                    )
+                    .frame(maxWidth: .infinity)
+                    .overlay {
+                        GeometryReader { geometry in
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(
+                                    width: quarterTurn ? geometry.size.height : geometry.size.width,
+                                    height: quarterTurn ? geometry.size.width : geometry.size.height
+                                )
+                                .rotationEffect(.degrees(Double(rotation)))
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                        }
+                    }
+                    .clipped()
             } else {
                 snapshotUnavailable()
             }

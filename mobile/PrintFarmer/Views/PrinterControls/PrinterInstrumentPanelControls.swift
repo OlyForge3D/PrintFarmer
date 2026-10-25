@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Printer detail Control tab: a position readout over Move / Heat / Tune
-/// segments. Presentation only; the detail host owns the command model, access
-/// gating and the pinned Emergency Stop.
+/// Printer detail Control tab: Move / Heat / Tune segments, with a position
+/// readout on Move. Presentation only; the detail host owns the command model,
+/// access gating and the pinned Emergency Stop.
 struct PrinterInstrumentPanelControls: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
@@ -54,21 +54,27 @@ struct PrinterInstrumentPanelControls: View {
 
     /// Move and Heat lock during a job (mockup B): presets would change
     /// temperatures mid-print, and Tune already carries the hotend/bed targets.
+    /// Tune (speed, flow, babystep) only applies to a running or paused print
+    /// (#3496), so it is disabled while idle.
     static func isAvailable(_ segment: Segment, isPrinting: Bool) -> Bool {
         switch segment {
-        case .tune: true
+        case .tune: isPrinting
         case .heat, .move: !isPrinting
         }
     }
 
     static func resolvedSegment(_ selected: Segment, isPrinting: Bool) -> Segment {
-        isAvailable(selected, isPrinting: isPrinting) ? selected : .tune
+        isAvailable(selected, isPrinting: isPrinting) ? selected : (isPrinting ? .tune : .move)
     }
 
     /// Entering Control mid-print, or a print starting while it is open,
-    /// selects Tune; when the print ends the selection stays put.
+    /// selects Tune; when the print ends a Tune selection falls back to Move.
     static func selection(afterPrintingChange selected: Segment, isPrinting: Bool) -> Segment {
-        isPrinting ? resolvedSegment(selected, isPrinting: true) : selected
+        resolvedSegment(selected, isPrinting: isPrinting)
+    }
+
+    static func unavailableHint(_ segment: Segment) -> String {
+        segment == .tune ? "Available while printing" : "Unavailable while printing"
     }
 
     static func babystepText(_ offset: Double?) -> String {
@@ -116,7 +122,6 @@ struct PrinterInstrumentPanelControls: View {
                         .accessibilityLabel(reason)
                         .accessibilityIdentifier("printer.controls.blocked-reason")
                 }
-                positionReadout
                 segmentPicker
                 Group {
                     switch segment {
@@ -174,6 +179,15 @@ struct PrinterInstrumentPanelControls: View {
 
     // MARK: - Position readout
 
+    /// The Move readout appears only when every axis has a reported value it
+    /// can show; otherwise it is omitted rather than filled with placeholders.
+    static func showsPositionReadout(x: Double?, y: Double?, z: Double?, homedAxes: String?) -> Bool {
+        [("X", x), ("Y", y), ("Z", z)].allSatisfy { axis, value in
+            JogSubgroup.positionDisplay(axis: axis, value: value, homedAxes: homedAxes).text
+                != PrinterDetailViewModel.missingValuePlaceholder
+        }
+    }
+
     private var positionReadout: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -186,9 +200,10 @@ struct PrinterInstrumentPanelControls: View {
             readoutDivider(vertical: !accessible)
             readoutColumn("Z", value: viewModel.printer.z)
         }
-        .padding(12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .overlay { RoundedRectangle(cornerRadius: Self.cornerRadius).strokeBorder(Color.pfBorder) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.position")
     }
@@ -237,6 +252,7 @@ struct PrinterInstrumentPanelControls: View {
                     minimumHeight: 44
                 ) { selectedSegment = option }
                 .disabled(!available)
+                .accessibilityHint(available ? "" : Self.unavailableHint(option))
                 .accessibilityAddTraits(segment == option ? .isSelected : [])
             }
         }
@@ -253,6 +269,12 @@ struct PrinterInstrumentPanelControls: View {
 
     private var movePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if Self.showsPositionReadout(
+                x: viewModel.printer.x, y: viewModel.printer.y, z: viewModel.printer.z,
+                homedAxes: viewModel.printer.homedAxes
+            ) {
+                positionReadout
+            }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             if JogSubgroup.isHidden(for: viewModel.capabilities) {
                 HStack(spacing: 8) {
@@ -516,13 +538,6 @@ struct PrinterInstrumentPanelControls: View {
                 stepper
             }
             .frame(minHeight: 48)
-            if let reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("\(identifier).reason")
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)

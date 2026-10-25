@@ -1220,7 +1220,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(command)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: command)
+                commandNotice = nil
             }
         }
     }
@@ -1250,7 +1250,7 @@ final class PrinterControlsViewModel: ObservableObject {
         telemetryConfirmed = true
         if commandTask == nil {
             pendingCommand = nil
-            commandNotice = "Matching readback received. This reports the backend value, not a physical inspection."
+            commandNotice = nil
         }
     }
 
@@ -1685,7 +1685,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(pending)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: pending)
+                commandNotice = nil
             }
         }
     }
@@ -1990,9 +1990,9 @@ final class PrinterControlsViewModel: ObservableObject {
             switch command.kind {
             case .home, .jog, .moveTo:
                 pendingCommand = nil
-                commandNotice = "Command accepted. Physical completion is not confirmed; check the printer before another action."
+                commandNotice = nil
             default:
-                commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+                commandNotice = nil
             }
         case .failure(let error):
             if error is CancellationError {
@@ -2023,9 +2023,8 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     confirmation domain — e.g. a same-preset preheat on a printer already
     ///     at the requested targets, an already-zero cool-down, or a confirming
     ///     snapshot that landed before the HTTP response — where waiting for a
-    ///     further delta would hang forever, so we clear now. Only a fresh
-    ///     post-dispatch snapshot permits telemetry wording; cached matches
-    ///     report request acceptance without physical confirmation.
+    ///     further delta would hang forever, so we clear now. Success is silent
+    ///     (#3496); only actionable failures or unknown outcomes post a notice.
     /// HTTP settlement alone cannot unlock another owner while this command
     /// still awaits telemetry. Pending-state cleanup releases the matching token.
     private func endCommand(_ command: ControlCommand) {
@@ -2046,10 +2045,10 @@ final class PrinterControlsViewModel: ObservableObject {
         if telemetryConfirmed {
             confirmCalibration(command)
             pendingCommand = nil
-            commandNotice = Self.confirmationNotice(for: command)
+            commandNotice = nil
         } else if Self.transition(from: printer, to: printer, resolves: command) {
             pendingCommand = nil
-            commandNotice = "Request accepted. Previously reported values already match; fresh physical completion is not confirmed. Check the machine before further setup."
+            commandNotice = nil
         }
     }
 
@@ -2057,17 +2056,6 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity else { return }
         commandLeases.release(identity, token: command.id)
         if commandLease?.id == command.id { commandLease = nil }
-    }
-
-    private static func confirmationNotice(for command: ControlCommand) -> String {
-        switch command.kind {
-        case .preheat, .heater, .heaterTargets:
-            return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .transientZOffset, .sensorControl, .runtimeFactor:
-            return "Matching readback received. This reports the backend value, not a physical inspection."
-        default:
-            return "Matching telemetry received. Check the machine before further setup."
-        }
     }
 
     private func setError(command: ControlCommand, error: Error) {

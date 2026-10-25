@@ -167,19 +167,11 @@ struct PrinterControlCommandFeedback: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let error = viewModel.lastError {
                     errorBanner(error)
-                } else {
-                    if viewModel.pendingCommand != nil {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text("Command pending").font(.footnote.weight(.semibold))
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let notice = viewModel.commandNotice {
-                        Label(notice, systemImage: "info.circle")
-                            .font(.footnote)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                } else if let notice = viewModel.commandNotice {
+                    // Success is silent (#3496); the tapped control carries the spinner.
+                    Label(notice, systemImage: "info.circle")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if viewModel.pendingCommand != nil {
                     ControlActionButton(

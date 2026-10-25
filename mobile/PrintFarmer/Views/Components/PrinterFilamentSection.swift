@@ -68,27 +68,11 @@ struct PrinterFilamentSection: View {
                     .accessibilityIdentifier("printer.filament.attention")
             }
             if !embedded {
-                if showsAllActions {
-                    Text("Assignment does not verify physical loading.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("printer.filament.assignment-disclaimer")
-                }
                 if let action = primaryAction {
                     if !showsAllActions { actionButton(action) }
                 }
                 if showsAllActions {
                     filamentDetailActions
-                    if presentation.rows.contains(where: { $0.coverage != nil }) {
-                        DisclosureGroup(isExpanded: $detailsExpanded) {
-                            details
-                        } label: {
-                            Text("Coverage details")
-                                .font(.caption.weight(.medium))
-                                .frame(minHeight: 44, alignment: .leading)
-                                .accessibilityIdentifier("printer.filament.disclosure")
-                        }
-                    }
                 }
                 if !showsAllActions {
                     DisclosureGroup(isExpanded: $detailsExpanded) {

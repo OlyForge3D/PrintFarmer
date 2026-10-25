@@ -78,7 +78,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await command.value
         XCTAssertNil(model.pendingCommand)
         XCTAssertFalse(model.isExecuting)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
     }
 
     func test_directMotionTimeoutIsActionableAndReactivationNeverReplays() async throws {
@@ -151,7 +151,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         model.handlePrinterUpdate(printer)
         XCTAssertNil(model.pendingCommand)
         XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
 
         mockService.errorToThrow = NetworkError.timeout
         await model.setHeaterTarget(.hotend, target: 200)
@@ -167,7 +167,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
 
         await model.extrude(distanceMm: 2, speedMmPerSecond: 1)
         XCTAssertEqual(model.feedbackSection, .material)
@@ -892,7 +892,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(original.commandNotice, "Request canceled before dispatch. No printer command was sent.")
         await observer.jog(axis: "X", distanceMm: 1)
         XCTAssertNil(observer.pendingCommand)
-        XCTAssertTrue(observer.commandNotice?.contains("Command accepted") == true)
+        XCTAssertNil(observer.commandNotice, "Success is silent (#3496)")
     }
 
     func test_unconfiguredServerAccessHasAnExplicitBlockedReason() async throws {
@@ -1166,7 +1166,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 if heater == .hotend { reported.hotendTarget = target } else { reported.bedTarget = target }
                 vm.handlePrinterUpdate(reported)
                 XCTAssertNil(vm.pendingCommand)
-                XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+                XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
             }
 
         }
@@ -1239,7 +1239,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             reported.z = 10
             vm.handlePrinterUpdate(reported)
             XCTAssertNil(vm.pendingCommand)
-            XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+            XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         }
     }
 
@@ -1259,7 +1259,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         barrier.release()
         await command.value
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_freshAbsoluteTelemetryBeforeResponse_cannotConfirmPhysicalCompletion() async throws {
@@ -1288,7 +1288,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await command.value
         XCTAssertNil(vm.pendingCommand)
         XCTAssertNil(vm.lastError)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_delayedCapabilities_surviveInitialStateAndReadinessChanges() async throws {
@@ -1432,9 +1432,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 }
                 XCTAssertNil(vm.pendingCommand)
                 XCTAssertNil(vm.lastError)
-                XCTAssertTrue(vm.commandNotice?.contains("Command accepted") == true)
-                XCTAssertTrue(vm.commandNotice?.contains("Physical completion is not confirmed") == true)
-                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+                XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
                 XCTAssertEqual(vm.printer.homedAxes, "xyz")
             }
         }
@@ -1524,7 +1522,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
         await vm.homeAll()
-        XCTAssertNotNil(vm.commandNotice)
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         vm.deactivate()
         await vm.homeZ()
         XCTAssertNotNil(vm.lastError)
@@ -1541,15 +1539,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadCapabilities()
         await vm.moveTo(x: try XCTUnwrap(printer.x), y: 0, z: 10, feedrateMmMin: nil)
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertTrue(vm.commandNotice?.hasPrefix("Command accepted.") == true)
-        XCTAssertTrue(vm.commandNotice?.contains("Physical completion is not confirmed") == true)
-        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         await vm.jog(axis: "X", distanceMm: 10)
         var moved = printer
         moved.x = (printer.x ?? 0) + 10
         vm.handlePrinterUpdate(moved)
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_freshHomingTelemetryBeforeResponse_keepsSlotThenReportsAcceptance() async throws {
@@ -1569,7 +1565,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         barrier.release()
         await command.value
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_individualHeaters_preserveOmissionAndZero() async throws {

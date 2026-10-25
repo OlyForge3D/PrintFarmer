@@ -6,6 +6,25 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Printer detail clutter (#3496)** — Removed the visible "Speed/Flow can be
+  tuned only while printing or paused." lines under the disabled Tune
+  steppers (VoiceOver hints keep the reason), the Filament tab's
+  "Assignment does not verify physical loading." and unsupported
+  filament-command captions, the Filament tab's **Coverage details**
+  disclosure, and the four page-indicator dots under the
+  Status/Control/Filament/Queue picker. The X/Y/Z position readout now
+  appears only on the Move panel, and is hidden when the printer does not
+  report a homed position for every axis. Control commands on Move, Heat and
+  Tune are now silent on success: the "Command pending" label and the
+  "Matching telemetry received…" / "Command accepted…" / "Request
+  accepted…" notices are gone, and only actionable failures or unknown
+  outcomes are shown. The Control › Tune segment is disabled (VoiceOver hint
+  "Available while printing") unless the printer is printing or paused, and
+  falls back to Move when a print ends. The camera card now puts the
+  "Camera" title and rotate/refresh buttons in a header row above
+  full-width, aspect-preserving media. Idle printers that still report the
+  last file name (Moonraker) now show "No active print" instead of a stale
+  job heading with "Layer --".
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the
   unreachable Advanced printer controls screen and its navigation destination,
   the per-server **Settings → Printer Safety → Advanced printer controls**

@@ -1057,6 +1057,80 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         captureApprovedMockupScreens()
     }
 
+    /// The "Camera" header sits above the media, which spans the card width (#3496).
+    func testCameraHeaderSitsAboveFullWidthMedia() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let content = app.descendants(matching: .any)["printer.detail.status.content"]
+        // The card's hero identifier propagates to its children, so match by label.
+        let title = app.staticTexts
+            .matching(identifier: "printer.detail.hero")
+            .matching(NSPredicate(format: "label == %@", "Camera"))
+            .firstMatch
+        let preview = app.images
+            .matching(identifier: "printer.detail.hero")
+            .matching(NSPredicate(format: "label == %@", "Current print preview"))
+            .firstMatch
+        XCTAssertTrue(content.waitForExistence(timeout: 8))
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        XCTAssertEqual(title.label, "Camera")
+        XCTAssertLessThanOrEqual(title.frame.maxY, preview.frame.minY + 1, "The header row sits above the media")
+        XCTAssertLessThan(title.frame.midX, preview.frame.midX, "Camera sits at the top left")
+        XCTAssertGreaterThanOrEqual(
+            preview.frame.width, content.frame.width - 40,
+            "The media spans the card width instead of sharing a row with the header"
+        )
+        attachScreen("status-camera-header-full-width-media")
+    }
+
+    /// Tune is selected mid-print; when the print ends Tune disables and
+    /// Control falls back to Move (#3496).
+    func testTuneSegmentFallsBackToMoveWhenPrintEnds() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        let move = app.buttons["printer.controls.segment.move"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        XCTAssertTrue(tune.isEnabled, "Tune is enabled while printing")
+        XCTAssertTrue(tune.isSelected, "Control opens on Tune while printing")
+        XCTAssertFalse(move.isEnabled)
+
+        selector.buttons["Status"].tap()
+        let page = app.descendants(matching: .any)["printer.detail.panel.status"]
+        let cancel = app.buttons["printer.detail.control.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 8))
+        for _ in 0..<8 where !cancel.isHittable {
+            page.swipeUp()
+        }
+        cancel.tap()
+        let confirm = app.alerts.buttons["Confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+
+        selector.buttons["Control"].tap()
+        let tuneDisabled = NSPredicate(format: "isEnabled == false")
+        expectation(for: tuneDisabled, evaluatedWith: tune)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(move.isEnabled)
+        XCTAssertTrue(move.isSelected, "Tune falls back to Move when the print ends")
+        XCTAssertFalse(app.otherElements["printer.controls.runtime"].exists)
+        attachScreen("control-tune-fallback-after-print-ends")
+    }
+
     func testRetryFailedQueueJobUsesAuthenticatedRerunEndpoint() {
         let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
         XCTAssertTrue(queue.waitForExistence(timeout: 8))
@@ -1091,8 +1165,39 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
-    /// Idle printers keep Speed/Flow visible with their readback but disabled (#3476).
+    /// Speed, Flow and babystep only apply to a running print, so the Tune
+    /// segment is disabled while idle and Control stays on Move (#3496).
     override func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
+        assertTuneSegmentDisabledWhileIdle()
+        attachScreen("control-tune-segment-idle-disabled")
+    }
+
+    override func testRuntimeControlsUseAuthenticatedCommandsAndServerReadback() {
+        assertTuneSegmentDisabledWhileIdle()
+    }
+
+    func testIdleStatusIgnoresStaleFileNameAndShowsNoActivePrint() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let status = app.descendants(matching: .any)["printer.detail.panel.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["No active print"].waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "gear_set")).firstMatch.exists,
+            "A stale Moonraker file name must not render as the current job"
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists
+        )
+        attachScreen("status-idle-no-active-print")
+    }
+
+    private func assertTuneSegmentDisabledWhileIdle() {
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
@@ -1104,24 +1209,20 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
         let tune = app.buttons["printer.controls.segment.tune"]
+        let move = app.buttons["printer.controls.segment.move"]
         XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        XCTAssertFalse(tune.isEnabled, "Tune is disabled while the printer is not printing")
+        XCTAssertTrue(move.isEnabled)
+        XCTAssertTrue(move.isSelected, "Control opens on Move while idle")
         tune.tap()
-
-        for (id, title, label) in [("speed", "Speed", "Speed 100 percent"), ("flow", "Flow", "Flow 98 percent")] {
-            let value = app.staticTexts["printer.controls.runtime.\(id)-factor.value"]
-            XCTAssertTrue(value.waitForExistence(timeout: 8), "\(title) stays visible while idle")
-            XCTAssertEqual(value.label, label)
-            for direction in ["increase", "decrease"] {
-                let button = app.buttons["printer.controls.runtime.\(id)-factor.\(direction)"]
-                XCTAssertTrue(button.waitForExistence(timeout: 5))
-                XCTAssertFalse(button.isEnabled, "\(title) \(direction) is disabled while idle")
-            }
-            let reason = app.staticTexts["printer.controls.runtime.\(id)-factor.reason"]
-            XCTAssertTrue(reason.waitForExistence(timeout: 5))
-            XCTAssertEqual(reason.label, "\(title) can be tuned only while printing or paused.")
-        }
-        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled, "Babystep is not restricted")
-        attachScreen("control-tune-speed-flow-idle-disabled")
+        XCTAssertTrue(move.isSelected, "A disabled Tune segment cannot be selected")
+        XCTAssertFalse(app.otherElements["printer.controls.runtime"].exists)
+        XCTAssertFalse(app.buttons["printer.controls.runtime.z-offset.increase"].exists)
+        XCTAssertFalse(app.staticTexts["printer.controls.runtime.speed-factor.value"].exists)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "while printing")).firstMatch.exists,
+            "The disabled segment carries no visible explanation"
+        )
     }
 
     func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
@@ -1145,16 +1246,14 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let apply = app.buttons["printer.controls.heat.set-targets"]
         XCTAssertTrue(apply.waitForExistence(timeout: 5))
         apply.tap()
-        let accepted = app.staticTexts.matching(
-            NSPredicate(
-                format: "label == %@",
-                "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+        // Success is silent (#3496): no progress or confirmation text, and no error banner.
+        XCTAssertFalse(app.buttons["printer.controls.dismiss-error"].waitForExistence(timeout: 3))
+        for phrase in ["Command pending", "Request accepted", "Matching telemetry", "Command accepted"] {
+            XCTAssertFalse(
+                app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch.exists,
+                "\(phrase) must not be shown after a successful command"
             )
-        ).firstMatch
-        XCTAssertTrue(
-            accepted.waitForExistence(timeout: 8),
-            "The authenticated temperature API must accept the guarded stepper draft without claiming physical completion."
-        )
+        }
     }
 
     func testHeatPresetRowOffersMoreMenuWhileIdle() {
@@ -1295,16 +1394,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
         attachScreen("\(device)-\(size)-printer-control-idle")
 
-        app.buttons["printer.controls.segment.tune"].tap()
-        let runtime = app.otherElements["printer.controls.runtime"]
-        XCTAssertTrue(runtime.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)
-        for _ in 0..<4 where !runtime.isHittable {
-            controlPage.swipeUp()
-        }
-        XCTAssertTrue(runtime.isHittable, "Z babystep controls must be visibly reachable.")
-        XCTAssertFalse(app.buttons["printer.controls.runtime.fan.increase"].exists, "Tune has no fan controls.")
-        attachScreen("\(device)-\(size)-printer-control-idle-runtime")
+        XCTAssertFalse(app.buttons["printer.controls.segment.tune"].isEnabled, "Tune is print-only (#3496)")
 
         selector.buttons["Filament"].tap()
         let filamentPage = app.descendants(matching: .any)["printer.detail.panel.filament"]

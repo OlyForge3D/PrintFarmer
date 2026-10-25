@@ -2154,6 +2154,10 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
+    /// Hint-only reason: the disabled buttons already say enough on screen.
+    static let unsupportedFilamentCommandReason =
+        "This printer backend does not report support for that filament command."
+
     func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
         guard printerService != nil else { return "Printer service is not available." }
         guard let printer else { return "Printer status is unavailable." }
@@ -2178,7 +2182,7 @@ final class PrinterDetailViewModel {
             ? capabilities.supportsFilamentLoad
             : capabilities.supportsFilamentUnload
         guard isSupported else {
-            return "This printer backend does not report support for that filament command."
+            return Self.unsupportedFilamentCommandReason
         }
         return PhysicalFilamentCommandEligibility.blockedReason(
             for: operation,
@@ -2400,6 +2404,10 @@ final class PrinterDetailViewModel {
         guard let state = printer?.state?.lowercased() else { return false }
         return ["printing", "starting", "paused"].contains(state)
     }
+
+    /// Moonraker keeps reporting the last file after a print ends, so a stale
+    /// file name alone must not resurrect the current-job block.
+    var showsCurrentJob: Bool { isActivelyPrinting }
 
     var canShowLivestream: Bool {
         isActivelyPrinting && cameraPreviewMode == .mjpegStream

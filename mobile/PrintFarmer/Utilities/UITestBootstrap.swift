@@ -638,7 +638,8 @@ enum UITestBootstrap {
             printer.currentLayer = nil
             printer.totalLayers = nil
             printer.jobName = nil
-            printer.fileName = nil
+            // Moonraker keeps the last file after a print ends (#3496).
+            printer.fileName = "gear_set_v3.gcode"
             printer.currentJobThumbnailUrl = nil
             printer.hotendTemp = 24
             printer.bedTemp = 23
@@ -1088,14 +1089,14 @@ enum UITestBootstrap {
 
     private final class Issue3259VisualAcceptanceURLProtocol: URLProtocol, @unchecked Sendable {
         private struct FixtureState: Sendable {
-            let printersData: Data
-            let printersByID: [String: Data]
+            var printersData: Data
+            var printersByID: [String: Data]
             let currentJobThumbnailUrlsByID: [String: String]
             let currentJobThumbnailDataByID: [String: Data]
             let queueThumbnailDataByJobID: [String: Data]
             var statusData: Data
             let additionalStatusDataByID: [String: Data]
-            let detailsDataByID: [String: Data]
+            var detailsDataByID: [String: Data]
             let attentionData: Data
             let capabilitiesDataByID: [String: Data]
             let assignedQueueDataByID: [String: Data]
@@ -1736,6 +1737,8 @@ enum UITestBootstrap {
                 let jobID = String(path.dropFirst("/api/gcode-files/thumbnail/".count)).lowercased()
                 result = fixture.queueThumbnailDataByJobID[jobID].map { (200, "image/png", $0) }
                     ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            case ("POST", "/api/printers/\(printerID)/cancel"):
+                result = cancelPrint(&fixture)
             case ("POST", "/api/printers/\(printerID)/temps"):
                 result = updateTemperatures(&fixture, request: request)
             case ("POST", "/api/printers/\(printerID)/fan"):
@@ -1802,6 +1805,38 @@ enum UITestBootstrap {
                 return (200, "application/json", try JSONEncoder().encode(command))
             } catch {
                 return (500, "application/json", Data(#"{"error":"fixture-temperature-command-failed"}"#.utf8))
+            }
+        }
+
+        /// Ends the fixture print so UI tests can observe the printing → idle
+        /// transition (#3496 Tune fallback).
+        private static func cancelPrint(_ fixture: inout FixtureState) -> (Int, String, Data) {
+            func idle(_ data: Data) throws -> Data {
+                let object = try JSONSerialization.jsonObject(with: data)
+                if var printers = object as? [[String: Any]] {
+                    for index in printers.indices
+                        where (printers[index]["id"] as? String)?.lowercased() == printerID {
+                        printers[index]["state"] = "Idle"
+                    }
+                    return try JSONSerialization.data(withJSONObject: printers)
+                }
+                guard var single = object as? [String: Any] else { return data }
+                single["state"] = "Idle"
+                return try JSONSerialization.data(withJSONObject: single)
+            }
+            do {
+                fixture.statusData = try idle(fixture.statusData)
+                fixture.printersData = try idle(fixture.printersData)
+                if let printer = fixture.printersByID[printerID] {
+                    fixture.printersByID[printerID] = try idle(printer)
+                }
+                if let details = fixture.detailsDataByID[printerID] {
+                    fixture.detailsDataByID[printerID] = try idle(details)
+                }
+                let command = CommandResult(success: true, message: "Print cancelled by visual-acceptance API fixture.")
+                return (200, "application/json", try JSONEncoder().encode(command))
+            } catch {
+                return (500, "application/json", Data(#"{"error":"fixture-cancel-failed"}"#.utf8))
             }
         }
 

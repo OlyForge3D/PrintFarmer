@@ -2703,6 +2703,23 @@ extension PrinterDetailViewModelTests {
         XCTAssertNil(vm.formattedTimeRemaining)
     }
 
+    func testIdlePrinterWithStaleFileNameDoesNotShowCurrentJob() throws {
+        let vm = makeOperatorViewModel()
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.fileName = "gear_set_v3.gcode"
+        for state in ["idle", "ready", "standby", "complete", "cancelled", "error"] {
+            printer.state = state
+            vm.printer = printer
+            XCTAssertFalse(vm.showsCurrentJob, "A stale file name on a \(state) printer must show No active print.")
+        }
+        for state in ["printing", "starting", "paused"] {
+            printer.state = state
+            vm.printer = printer
+            XCTAssertTrue(vm.showsCurrentJob, "\(state) printers show the current job.")
+        }
+    }
+
     // MARK: Odometer due logic
 
     func testOdometerRowsDeriveThresholdAndDueState() {

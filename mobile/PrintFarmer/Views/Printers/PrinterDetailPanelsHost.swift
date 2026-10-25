@@ -74,7 +74,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                     PrinterDetailPanelPicker(selection: $selection)
                     .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     .frame(maxWidth: .infinity)
-                    pageIndicator
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, inset)
@@ -96,26 +95,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         .onChange(of: controlsAvailable) { _, newValue in
             selection = Self.resolvedSelection(current: selection, controlsAvailable: newValue)
         }
-    }
-
-    private var pageIndicator: some View {
-        HStack(spacing: 0) {
-            ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
-                Button { selection = panel } label: {
-                    Circle()
-                        .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
-                        .frame(width: 6, height: 6)
-                        .frame(width: 44, height: PrinterDetailLayout.pageIndicatorHeight)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(panel.title)
-                .accessibilityValue(selection == panel ? "Selected" : "")
-                .accessibilityAddTraits(selection == panel ? .isSelected : [])
-                .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private struct PrinterDetailPanelPicker: View {
@@ -568,6 +547,20 @@ enum PrinterDetailLayout {
     }
 }
 
+/// Camera media fills the card width; a quarter-turn swaps the image's aspect ratio.
+enum PrinterDetailCameraLayout {
+    static func isQuarterTurn(_ rotation: Int) -> Bool {
+        ((rotation % 360) + 360) % 180 == 90
+    }
+
+    static func aspectRatio(imageSize: CGSize, rotation: Int) -> CGFloat? {
+        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+        return isQuarterTurn(rotation)
+            ? imageSize.height / imageSize.width
+            : imageSize.width / imageSize.height
+    }
+}
+
 struct PrinterDetailTemperatureReading: Equatable {
     let measured: Double?
     let target: Double?
@@ -713,10 +706,4 @@ struct PrinterDetailTemperatureStrip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
-}
-
-extension PrinterDetailLayout {
-    /// Compact dot strip; the segmented picker above is the primary
-    /// 44 pt navigation target, so the dots don't need a full-height row.
-    static let pageIndicatorHeight: CGFloat = 16
 }

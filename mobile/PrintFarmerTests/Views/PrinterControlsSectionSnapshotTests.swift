@@ -1227,7 +1227,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             try await layout()
             XCTAssertNil(model.pendingCommand)
             XCTAssertEqual(model.feedbackSection, .motion)
-            XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+            XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
             XCTAssertEqual(try button("home.xy").configuration?.showsActivityIndicator, false)
             try await capture("confirmed")
         }

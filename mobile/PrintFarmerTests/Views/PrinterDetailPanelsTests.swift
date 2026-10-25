@@ -16,8 +16,15 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    func testPageIndicatorUsesCompactHeight() {
-        XCTAssertLessThanOrEqual(PrinterDetailLayout.pageIndicatorHeight, 20)
+    func testMovePositionReadoutShowsOnlyWhenEveryAxisIsReported() {
+        let show = PrinterInstrumentPanelControls.showsPositionReadout
+        XCTAssertTrue(show(0, 0, 5, "xyz"))
+        XCTAssertTrue(show(10, 20, 0.2, nil), "Backends without homing data still report coordinates")
+        XCTAssertFalse(show(nil, nil, nil, nil), "No position reported")
+        XCTAssertFalse(show(0, 0, nil, "xyz"), "Partial position")
+        XCTAssertFalse(show(0, .nan, 5, "xyz"), "Non-finite coordinate")
+        XCTAssertFalse(show(0, 0, 5, ""), "Unhomed coordinates are stale")
+        XCTAssertFalse(show(0, 0, 5, "xy"), "Z not homed")
     }
 
     func testMoveEmptyStateUsesAValidSFSymbol() {
@@ -151,7 +158,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
-        let fixture = try detailHostFixture()
+        // Tune is only selectable while printing or paused (#3496).
+        let fixture = try detailHostFixture(printerState: "printing")
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
@@ -190,7 +198,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         signal.simulatePrinterUpdate(PrinterStatusUpdate(
             id: fixture.printer.id,
             isOnline: true,
-            state: "idle",
+            state: "printing",
             progress: nil,
             fanSpeedPercent: nil,
             liveZOffsetMm: 0.005,
@@ -290,18 +298,15 @@ final class PrinterDetailPanelsTests: XCTestCase {
                        "A speed step never writes flow")
     }
 
-    func testTuneKeepsSpeedAndFlowVisibleButDisabledWhenNotPrinting() async throws {
-        let tune = try await hostedTunePanel(runtimeFactors: true)
+    func testTuneSegmentIsDisabledAndUnreachableWhenNotPrinting() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "idle")
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        try await waitForHost("Babystep must render enabled while idle", in: tune.controller.view) {
-            tune.button("printer.controls.runtime.z-offset.increase")?.isEnabled == true
+        try await waitForHost("Tune segment must render disabled while idle", in: tune.controller.view) {
+            tune.find("printer.controls.segment.tune")?.isEnabled == false
         }
+        XCTAssertNil(tune.button("printer.controls.runtime.z-offset.increase"), "Babystep is unreachable while idle")
         for factor in RuntimeFactor.allCases {
-            for direction in ["increase", "decrease"] {
-                let button = try XCTUnwrap(tune.button("printer.controls.runtime.\(factor.rawValue)-factor.\(direction)"))
-                XCTAssertFalse(button.isEnabled, "\(factor.title) \(direction) is disabled outside printing or paused")
-                XCTAssertEqual(button.accessibilityHint, "\(factor.title) can be tuned only while printing or paused.")
-            }
+            XCTAssertNil(tune.find("printer.controls.runtime.\(factor.rawValue)-factor.increase"))
         }
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
     }
@@ -363,13 +368,15 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let printerId: UUID
         let window: UIWindow
         let button: (String) -> UIButton?
+        /// Lookup without tapping the Tune segment first.
+        let find: (String) -> UIButton?
     }
 
     /// Hosts the detail Control tab on Tune with writable fans and a chamber heater.
     /// Callers hide the returned window when done.
     private func hostedTunePanel(
         runtimeFactors: Bool = false,
-        printerState: String = "idle",
+        printerState: String = "printing",
         factorValues: (speed: Double?, flow: Double?) = (100, 98)
     ) async throws -> HostedTunePanel {
         let auxiliaryFan = PrinterSensor(
@@ -408,7 +415,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             }
             return find(identifier)
         }
-        return HostedTunePanel(controller: controller, api: fixture.api, printerId: fixture.printer.id, window: window, button: button)
+        return HostedTunePanel(controller: controller, api: fixture.api, printerId: fixture.printer.id, window: window, button: button, find: { find($0) })
     }
 
     private static let deviceTokensPath = "/api/notifications/device-tokens"
@@ -915,24 +922,28 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(Panel.isAvailable(.move, isPrinting: true))
         XCTAssertFalse(Panel.isAvailable(.heat, isPrinting: true))
         XCTAssertTrue(Panel.isAvailable(.tune, isPrinting: true))
-        XCTAssertTrue(Panel.Segment.allCases.allSatisfy { Panel.isAvailable($0, isPrinting: false) })
+        XCTAssertTrue(Panel.isAvailable(.move, isPrinting: false))
+        XCTAssertTrue(Panel.isAvailable(.heat, isPrinting: false))
+        XCTAssertFalse(Panel.isAvailable(.tune, isPrinting: false), "Tune is print-only (#3496)")
         XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: false), .heat)
+        XCTAssertEqual(Panel.resolvedSegment(.tune, isPrinting: false), .move)
+        XCTAssertEqual(Panel.unavailableHint(.tune), "Available while printing")
         XCTAssertEqual(Panel.Segment.allCases.map(\.title), ["Move", "Heat", "Tune"])
     }
 
     /// Entering Control mid-print or a print starting selects Tune; the print
-    /// ending re-enables Move/Heat but keeps Tune selected.
-    func testInstrumentPanelSelectsTuneOnPrintStartAndKeepsItAfterwards() {
+    /// ending disables Tune and falls back to Move (#3496).
+    func testInstrumentPanelSelectsTuneOnPrintStartAndFallsBackToMoveAfterwards() {
         typealias Panel = PrinterInstrumentPanelControls
         for selected in Panel.Segment.allCases {
             XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: true), .tune, "\(selected)")
-            XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: false), selected, "\(selected)")
         }
+        XCTAssertEqual(Panel.selection(afterPrintingChange: .move, isPrinting: false), .move)
+        XCTAssertEqual(Panel.selection(afterPrintingChange: .heat, isPrinting: false), .heat)
         let duringPrint = Panel.selection(afterPrintingChange: .heat, isPrinting: true)
-        XCTAssertEqual(Panel.selection(afterPrintingChange: duringPrint, isPrinting: false), .tune)
-        XCTAssertTrue(Panel.Segment.allCases.allSatisfy { Panel.isAvailable($0, isPrinting: false) })
+        XCTAssertEqual(Panel.selection(afterPrintingChange: duringPrint, isPrinting: false), .move)
     }
 
     func testInstrumentPanelSharesPrintingStatesWithControlsViewModel() {
@@ -1545,6 +1556,16 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     // MARK: - Camera lifecycle mapping (Hicks review finding 19)
+
+    func testCameraMediaAspectRatioSwapsOnQuarterTurns() {
+        let size = CGSize(width: 1600, height: 900)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 0)!, 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 90)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 180)!, 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 270)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: -90)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertNil(PrinterDetailCameraLayout.aspectRatio(imageSize: .zero, rotation: 0))
+    }
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
         XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
