@@ -899,6 +899,79 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         Assert.True(state.PhysicalControlRequiresReconciliation);
     }
 
+    [Theory]
+    [InlineData("set_temperature")]
+    [InlineData("set_fan_speed")]
+    [InlineData("set_speed_factor")]
+    [InlineData("set_flow_factor")]
+    public async Task MarkDirectUnknownAsync_IdleSetpoint_ReleasesFenceSoNextPresetSucceeds(string operation)
+    {
+        // Issue #3495: an unknown idle set_temperature retained the barrier forever, so the next
+        // Heat preset failed with "Another physical operation owns the printer barrier."
+        await using AppDbContext db = CreateContext();
+        PrinterPhysicalActuationService actuation = CreateActuation(db);
+        PrinterActuationResult first = await actuation.AcquireDirectAsync(printerId, userId.ToString(), operation);
+        Assert.NotNull(first.Lease);
+
+        await actuation.MarkDirectUnknownAsync(first.Lease, "response_lost");
+
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Null(state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        await using AppDbContext nextDb = CreateContext();
+        PrinterActuationResult next = await CreateActuation(nextDb).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+        Assert.True(next.Success);
+    }
+
+    [Theory]
+    [InlineData("set_temperature", "set_temperature")]
+    [InlineData("set_fan_speed", "set_temperature")]
+    [InlineData("set_temperature", "home")]
+    public async Task AcquireDirectAsync_LeakedUnknownSetpointFence_IsReclaimedWithUnknownAudit(
+        string leakedOperation, string nextOperation)
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterActuationLease leaked = await SeedBarrierAsync(db, leakedOperation, DateTime.UtcNow.AddSeconds(-5));
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = true;
+        await db.SaveChangesAsync();
+
+        PrinterActuationResult acquired = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), nextOperation);
+
+        Assert.True(acquired.Success);
+        Assert.NotNull(acquired.Lease);
+        Assert.NotEqual(leaked.CommandId, acquired.Lease.CommandId);
+        Assert.Equal(acquired.Lease.CommandId, state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        QueueOperationAudit audit = Assert.Single(await db.QueueOperationAudits
+            .Where(row => row.ReasonCode == "direct_setpoint_command_reclaimed").ToListAsync());
+        Assert.Equal(QueueAuditOutcomes.Unknown, audit.Outcome);
+    }
+
+    [Theory]
+    [InlineData("in-flight")]
+    [InlineData("attempt-bound")]
+    [InlineData("active-job-pointer")]
+    public async Task AcquireDirectAsync_LiveOrBoundSetpointFence_PreservesOwnership(string condition)
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterActuationLease previous = await SeedBarrierAsync(db, "set_temperature", DateTime.UtcNow,
+            condition == "attempt-bound" ? Guid.NewGuid() : null);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = condition != "in-flight";
+        if (condition == "active-job-pointer")
+        {
+            state.ActiveJobId = Guid.NewGuid();
+        }
+
+        await db.SaveChangesAsync();
+        PrinterActuationResult result = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+
+        Assert.False(result.Success);
+        Assert.Equal(previous.CommandId, state.PhysicalControlCommandId);
+        Assert.False(await db.QueueOperationAudits.AnyAsync(row => row.ReasonCode == "direct_setpoint_command_reclaimed"));
+    }
+
     private async Task AssertBarrierBlocksCompetitorAsync()
     {
         await using AppDbContext db = CreateContext();
