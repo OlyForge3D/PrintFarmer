@@ -477,11 +477,13 @@ struct PrinterInstrumentPanelControls: View {
         let identifier = "printer.controls.runtime.\(factor.rawValue)-factor"
         let stepper = HStack(spacing: 4) {
             runtimeFactorButton(factor, delta: -RuntimeFactor.stepPercent, reason: reason)
-            Text(Self.runtimeFactorText(value))
+            let renderedValue = Self.runtimeFactorText(value)
+            Text(renderedValue)
                 .font(.body.monospacedDigit().weight(.medium))
                 .foregroundStyle(Color.pfTextPrimary)
                 .frame(minWidth: 64)
                 .accessibilityLabel(Self.runtimeFactorAccessibilityLabel(factor, value))
+                .uiTestRenderedValue(renderedValue)
                 .accessibilityIdentifier("\(identifier).value")
             runtimeFactorButton(factor, delta: RuntimeFactor.stepPercent, reason: reason)
         }
@@ -579,5 +581,23 @@ struct PrinterInstrumentPanelControls: View {
             .padding(2)
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
+    }
+}
+
+private extension View {
+    /// UI-test harness only: exposes the visible text as the accessibility value,
+    /// because the spoken `accessibilityLabel` masks it from XCUI. Normal launches
+    /// keep VoiceOver output unchanged.
+    @ViewBuilder
+    func uiTestRenderedValue(_ text: String) -> some View {
+        #if DEBUG
+        if UITestBootstrap.isEnabled {
+            accessibilityValue(text)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }

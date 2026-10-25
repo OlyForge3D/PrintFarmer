@@ -2923,7 +2923,9 @@ public partial class PrintersController(
                 LogSanitizer.Sanitize(operation), printerId, exception.GetType().Name);
             string message = PrinterDirectControl.IsManualMotion(operation)
                 ? "The motion outcome is unknown; check the printer before requesting another move."
-                : "The physical command outcome is unknown; reconciliation is required.";
+                : PrinterDirectControl.IsSetpoint(operation)
+                    ? "The command outcome is unknown; check the printer and retry if needed."
+                    : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 new CommandResult(false, message));

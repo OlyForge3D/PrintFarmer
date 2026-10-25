@@ -876,6 +876,106 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         Assert.True(state.PhysicalControlRequiresReconciliation);
     }
 
+    [Theory]
+    [InlineData("set_temperature")]
+    [InlineData("set_fan_speed")]
+    [InlineData("set_speed_factor")]
+    [InlineData("set_flow_factor")]
+    public async Task MarkDirectUnknownAsync_IdleSetpoint_ReleasesFenceSoNextPresetSucceeds(string operation)
+    {
+        // Issue #3495: an unknown idle set_temperature retained the barrier forever, so the next
+        // Heat preset failed with "Another physical operation owns the printer barrier."
+        await using AppDbContext db = CreateContext();
+        PrinterPhysicalActuationService actuation = CreateActuation(db);
+        PrinterActuationResult first = await actuation.AcquireDirectAsync(printerId, userId.ToString(), operation);
+        Assert.NotNull(first.Lease);
+
+        await actuation.MarkDirectUnknownAsync(first.Lease, "response_lost");
+
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Null(state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        await using AppDbContext nextDb = CreateContext();
+        PrinterActuationResult next = await CreateActuation(nextDb).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+        Assert.True(next.Success);
+    }
+
+    [Theory]
+    [InlineData("set_temperature", "set_temperature", true)]
+    [InlineData("set_fan_speed", "set_temperature", true)]
+    [InlineData("set_speed_factor", "set_temperature", true)]
+    [InlineData("set_flow_factor", "set_temperature", true)]
+    [InlineData("set_temperature", "home", true)]
+    [InlineData("set_temperature", "set_temperature", false)]
+    [InlineData("set_fan_speed", "set_temperature", false)]
+    [InlineData("set_speed_factor", "set_temperature", false)]
+    [InlineData("set_flow_factor", "set_temperature", false)]
+    public async Task AcquireDirectAsync_LeakedUnknownSetpointFence_IsReclaimedWithUnknownAudit(
+        string leakedOperation, string nextOperation, bool settled)
+    {
+        await using AppDbContext db = CreateContext();
+        DateTime started = settled ? DateTime.UtcNow.AddSeconds(-5) : DateTime.UtcNow.AddMinutes(-6);
+        PrinterActuationLease leaked = await SeedBarrierAsync(db, leakedOperation, started);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = settled;
+        await db.SaveChangesAsync();
+
+        PrinterActuationResult acquired = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), nextOperation);
+
+        Assert.True(acquired.Success);
+        Assert.NotNull(acquired.Lease);
+        Assert.NotEqual(leaked.CommandId, acquired.Lease.CommandId);
+        Assert.Equal(acquired.Lease.CommandId, state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        QueueOperationAudit audit = Assert.Single(await db.QueueOperationAudits
+            .Where(row => row.ReasonCode == "direct_setpoint_command_reclaimed").ToListAsync());
+        Assert.Equal(QueueAuditOutcomes.Unknown, audit.Outcome);
+        Assert.Single(await db.QueueDispatchOutbox.Where(row => row.EventType == PrinterPhysicalActuationService.EventTypeStarted).ToListAsync());
+        Assert.False(await db.QueueDispatchOutbox.AnyAsync(row =>
+            row.EventType == PrinterPhysicalActuationService.EventTypeCompleted ||
+            row.EventType == PrinterPhysicalActuationService.EventTypeUnknown));
+    }
+
+    [Theory]
+    [InlineData("in-flight")]
+    [InlineData("attempt-bound")]
+    [InlineData("active-attempt")]
+    [InlineData("active-job-pointer")]
+    [InlineData("active-job")]
+    public async Task AcquireDirectAsync_LiveOrBoundSetpointFence_PreservesOwnership(string condition)
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterActuationLease previous = await SeedBarrierAsync(db, "set_temperature", DateTime.UtcNow,
+            condition == "attempt-bound" ? Guid.NewGuid() : null);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = condition != "in-flight";
+        if (condition == "active-job-pointer")
+        {
+            state.ActiveJobId = Guid.NewGuid();
+        }
+        else if (condition == "active-attempt")
+        {
+            state.ActiveDispatchAttemptId = Guid.NewGuid();
+        }
+        else if (condition == "active-job")
+        {
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "Active job",
+                AssignedPrinterId = printerId,
+                Status = PrintJobStatus.Printing,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        PrinterActuationResult result = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+
+        Assert.False(result.Success);
+        Assert.Equal(previous.CommandId, state.PhysicalControlCommandId);
+        Assert.False(await db.QueueOperationAudits.AnyAsync(row => row.ReasonCode == "direct_setpoint_command_reclaimed"));
+    }
+
     private async Task AssertBarrierBlocksCompetitorAsync()
     {
         await using AppDbContext db = CreateContext();

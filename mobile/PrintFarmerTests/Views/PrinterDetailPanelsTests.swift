@@ -307,22 +307,37 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     func testTuneSupportedSpeedWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
-        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing", factorValues: (nil, 98))
+        try await assertMissingRuntimeFactorTelemetry(.speed)
+    }
+
+    func testTuneSupportedFlowWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
+        try await assertMissingRuntimeFactorTelemetry(.flow)
+    }
+
+    private func assertMissingRuntimeFactorTelemetry(_ missing: RuntimeFactor) async throws {
+        let known: RuntimeFactor = missing == .speed ? .flow : .speed
+        let values: (Double?, Double?) = missing == .speed ? (nil, 98) : (100, nil)
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing", factorValues: values)
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        try await waitForHost("Flow with known telemetry must render enabled", in: tune.controller.view) {
-            tune.button("printer.controls.runtime.flow-factor.increase")?.isEnabled == true
+        try await waitForHost("\(known.title) with known telemetry must render enabled", in: tune.controller.view) {
+            tune.button("printer.controls.runtime.\(known.rawValue)-factor.increase")?.isEnabled == true
         }
         for direction in ["increase", "decrease"] {
             let button = try XCTUnwrap(
-                tune.button("printer.controls.runtime.speed-factor.\(direction)"),
-                "Supported Speed stays visible when telemetry is missing"
+                tune.button("printer.controls.runtime.\(missing.rawValue)-factor.\(direction)"),
+                "Supported \(missing.title) stays visible when telemetry is missing"
             )
-            XCTAssertFalse(button.isEnabled, "Speed \(direction) is disabled without readback")
-            XCTAssertEqual(button.accessibilityHint, "Speed readback is unknown; controls are disabled.")
+            XCTAssertFalse(button.isEnabled, "\(missing.title) \(direction) is disabled without readback")
+            XCTAssertEqual(button.accessibilityHint, "\(missing.title) readback is unknown; controls are disabled.")
         }
-        // The value Text renders runtimeFactorText(percent) with this VoiceOver label.
+        // SwiftUI exposes no Text nodes to a unit-test host; the rendered value
+        // row's "not reported" label and "--" text are asserted in
+        // Issue3484MissingRuntimeFactorsUITests (with an element screenshot of the "--").
         XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(nil), "--")
-        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, nil), "Speed not reported")
+        XCTAssertEqual(
+            PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(missing, nil),
+            "\(missing.title) not reported"
+        )
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
     }
 
