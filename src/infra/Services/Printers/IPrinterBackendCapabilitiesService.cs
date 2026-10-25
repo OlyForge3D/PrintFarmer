@@ -21,6 +21,12 @@ public interface IPrinterBackendCapabilitiesService
     /// <returns>Backend capabilities for the printer, or null if printer not found</returns>
     Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct);
 
+    /// <summary>Gets implemented interactive controls without querying printer safety discovery.</summary>
+    /// <param name="printerId">The printer identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Native control capabilities, or null if the printer was not found.</returns>
+    Task<PrinterBackendCapabilitiesDto?> GetControlCapabilitiesAsync(Guid printerId, CancellationToken ct);
+
     /// <summary>
     /// Get backend capabilities for all printers.
     /// </summary>

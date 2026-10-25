@@ -218,32 +218,15 @@ spool rings.
 ### QidiBox filament controls
 
 QidiBox Load, Unload, and Eject use the MMU gate-action endpoint with the
-zero-based box gate index (for example, gate 1 is 1B). Unload and Eject retain
-physical filament-unload safety validation before any firmware command is sent.
-Fresh measured hotend temperature must reach at least 220 °C, or the higher
-verified backend minimum. A requested heater target is not measured temperature.
+zero-based box gate index (for example, gate 1 is 1B). QidiBox, AFC, and
+Happy Hare interactive actions send the typed native command once, without
+PrintFarmer temperature preflight, automatic heating, or warm-up polling.
+Native firmware/macros own any required heating and readiness sequence.
+No firmware macros or printer configuration are modified.
 
-For a QidiBox or AFC **Unload** rejected solely for a cold hotend, the backend
-heats automatically under the same exclusive physical-control lease. It chooses
-the requested gate's assigned Spoolman filament print temperature, then its
-material's configured default, then the guard minimum. The target is never below
-the verified safety minimum; exceeding installed hotend/nozzle ratings rejects
-before heating (300 °C ceiling when ratings are unavailable). Another gate's or
-the primary's spool is not substituted for a missing box-gate binding.
-
-The server waits for fresh measured temperature within 1 °C of that target and
-requires the unchanged safety guard to pass, then revalidates the lease before
-sending the original unload exactly once. Warm-up is bounded to four minutes;
-the overall request is bounded to five minutes. Web unload requests allow six
-minutes for the server response. Already-hot unloads do not change temperature.
-Load/Eject and other safety failures do not initiate automatic heating.
-
-The MMU panel preserves actionable server error messages. Timeout, cancellation,
-stale telemetry, or lease loss prevents unloading; an accepted heater target
-remains set, so check the printer/target before explicitly retrying. An uncertain
-heater write retains reconciliation protection and is never automatically
-replayed. No firmware macros or printer configuration are modified. Backend
-orchestration gives every client of the shared endpoint the same behavior.
+The MMU panel preserves server errors. Request timeouts and lost responses are
+uncertain outcomes, never permission to replay a command. Access control,
+lease revalidation, and active print-attempt ownership still apply.
 
 ### Direct manual-motion control
 
@@ -258,7 +241,7 @@ Pending UI is bounded by the request. Errors, cancellation, and timeouts remain
 visible, and a lost response is not proof that no motion occurred. Neither
 clients nor plugins automatically replay an uncertain write. Another movement
 requires a new explicit operator request. Guided/Expert web presentation
-remains independent of permissions, safety validation, and command semantics.
+remains independent of permissions, native firmware rules, and command semantics.
 
 There is no tracked-motion admission service, worker, command channel, journal,
 receipt, operation ID, result polling, or recovery workflow. All
@@ -268,29 +251,20 @@ are removed (`404`). Printer DTOs omit `physicalControl`, and the
 
 **Moonraker transport and protection:** the plugin sends each command once over
 ordinary HTTP using the configured credentials. Jog and absolute movement save
-and restore G-code state without a restore move. Movement uses one fresh
-authenticated safety snapshot of position, homed axes, and the effective frame,
-not full composite status enrichment. No tracking admission, receipt, polling,
-or worker hops and no artificial waits precede the direct send. Cached UI
-coordinates are not safety evidence. The effective offset
-includes G92 (`gcode_move.position - gcode_move.gcode_position`), not just
-`homing_origin`.
-
-All XYZ axes must be homed, and both current position and resulting target must
-fit the verified travel envelope, including for sparse single-axis requests.
-Missing, stale, nonfinite, unhomed, or out-of-envelope evidence prevents sending.
-Manual jog/absolute positioning does not require automated minimum Z clearance:
-Moonraker cannot authoritatively discover that clearance, and approaching the bed
-is a legitimate manual action. Configured firmware bounds, including negative Z
-minima, remain enforced. This does not enable unhomed or out-of-envelope recovery
-motion or prove an obstacle-free path. Unrelated automated clearance policies and
-attempt-bound lifecycle safeguards remain unchanged.
+and restore G-code state without a restore move. No position, homing, geometry,
+clearance, or temperature snapshot precedes an interactive command. Klipper
+decides whether motion is executable against its current state and configuration.
+Static native capabilities enable controls; telemetry remains observational,
+not an admission requirement. Relative jogging does not require absolute
+movement support. This is not a claim of collision-free motion or correct
+firmware configuration. Automated and calibration workflows retain their
+separate evidence requirements and attempt-bound lifecycle safeguards.
 
 **Database coordination remains:** the generic physical-actuation barrier
 serializes direct commands against other controls and print dispatch. An
-uncertain manual outcome releases only after backend I/O settles and remains
+uncertain direct interactive outcome releases only after backend I/O settles and remains
 `Unknown` in the audit; release never implies successful motion or physical
-stopping. A new explicit direct admission can reclaim a crashed direct manual
+stopping. A new explicit direct admission can reclaim a crashed direct interactive
 barrier after its five-minute deadline plus a 45-second grace. It never replays
 the abandoned command. Exact-owner fencing prevents late settlement from
 releasing a successor's barrier. Print-job and attempt-bound dispatch ownership

@@ -657,8 +657,8 @@ enum UITestBootstrap {
             printer.jobName = nil
             printer.fileName = nil
             printer.currentJobThumbnailUrl = nil
-            printer.hotendTemp = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
-            printer.hotendTarget = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.hotendTemp = 220
+            printer.hotendTarget = 220
             printer.bedTemp = 23
             printer.bedTarget = 0
         }

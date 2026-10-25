@@ -767,16 +767,16 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.actionError)
     }
 
-    func testPhysicalFilamentCommandsRequireFreshMeasuredTemperatureAtPolicyFloor() async throws {
+    func testPhysicalFilamentCommandsDoNotRequireMeasuredTemperatureEvidence() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         printer.isOnline = true
-        printer.state = "ready"
+        printer.state = nil
         mockService.printerToReturn = printer
         mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
         var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
         capabilities.supportsFilamentLoad = true
         capabilities.supportsFilamentUnload = true
-        capabilities.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        capabilities.verifiedSafety = nil
         mockService.capabilitiesToReturn = capabilities
         var status = VerifiedSafetyFixtures.status(id: printer.id)
         status.safetyTelemetry?.measuredHotendTemperatureC.value = 219.9
@@ -784,11 +784,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.loadPrinter()
         await viewModel.loadFilamentCommandCapabilities()
 
-        XCTAssertTrue(
-            viewModel.physicalFilamentCommandBlockedReason(for: .load)?.contains("220 °C") == true
-        )
+        XCTAssertNil(viewModel.physicalFilamentCommandBlockedReason(for: .load))
         await viewModel.loadPhysicalFilament()
-        XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load"])
 
         status.safetyTelemetry?.measuredHotendTemperatureC.value = 220
         status.safetyTelemetry?.measuredHotendTemperatureC.observedAtUtc = Date()
@@ -796,7 +794,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.loadPrinter()
         XCTAssertNil(viewModel.physicalFilamentCommandBlockedReason(for: .load))
         await viewModel.loadPhysicalFilament()
-        XCTAssertEqual(mockService.physicalFilamentCalls, ["load"])
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load", "load"])
     }
 
     func testPhysicalFilamentCommandsFailClosedWhilePrintingOrWithoutBackendSupport() async throws {

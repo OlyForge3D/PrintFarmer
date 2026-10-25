@@ -27,6 +27,7 @@ import { PrinterDetailsSidebar } from "@/features/printers/components/PrinterDet
 const mockExecute = vi.fn();
 const mockSpeedFactor = vi.fn();
 const mockFlowFactor = vi.fn();
+const mockExtrude = vi.fn();
 const mockToastError = vi.fn();
 let mockBlocked = false;
 let mockSpoolmanReady = false;
@@ -141,6 +142,7 @@ vi.mock("@/services/api", () => ({
   apiClient: {
     setPrinterSpeedFactor: (...args: unknown[]) => mockSpeedFactor(...args),
     setPrinterFlowFactor: (...args: unknown[]) => mockFlowFactor(...args),
+    extrudeFilament: (...args: unknown[]) => mockExtrude(...args),
     put: async (_url: string, body: unknown) => ({
       data: { userId: "motion-user", rowVersion: "v2", ...(body as object) },
     }),
@@ -173,6 +175,9 @@ const printer: Printer = {
 const capabilities = {
   printerId: printer.id,
   supportsMovement: true,
+  supportsRelativeMovement: true,
+  supportsAbsoluteMovement: true,
+  supportsExtrusion: true,
   supportsControlOperations: true,
   supportsTemperatureControl: true,
   supportsFilamentControl: false,
@@ -181,7 +186,7 @@ const capabilities = {
 type Surface = "detail" | "sidebar";
 function Controls({ surface, overrides = {}, movement = true, factors = false }: { surface: Surface; overrides?: Partial<Printer & { mmuStatus: MmuStatus }>; movement?: boolean; factors?: boolean }) {
   const current = { ...printer, ...overrides };
-  const support = { ...capabilities, supportsMovement: movement, supportsSpeedFactorControl: factors, supportsFlowFactorControl: factors };
+  const support = { ...capabilities, supportsMovement: movement, supportsRelativeMovement: movement, supportsSpeedFactorControl: factors, supportsFlowFactorControl: factors };
   return surface === "detail" ? (
     <DetailedPrinterCard printer={current} backendCapabilities={support} />
   ) : (
@@ -232,6 +237,7 @@ beforeEach(() => {
   mockExecute.mockReset();
   mockSpeedFactor.mockReset().mockResolvedValue({ success: true });
   mockFlowFactor.mockReset().mockResolvedValue({ success: true });
+  mockExtrude.mockReset().mockResolvedValue({ success: true });
   mockToastError.mockReset();
 });
 
@@ -357,24 +363,24 @@ describe.each<Surface>(["detail", "sidebar"])(
       expect(mockFlowFactor).not.toHaveBeenCalled();
     });
 
-    it.each(['Idle', 'Paused', 'Starting', 'Completed', 'Unknown'])('disables Tuning while %s on this surface', state => {
+    it.each(['Idle', 'Paused', 'Starting', 'Completed', 'Unknown'])('allows supported Tuning while %s on this surface', state => {
       render(<Controls surface={surface} factors overrides={{ state }} />);
-      expect(screen.getByRole('slider', { name: 'Speed %' })).toBeDisabled();
-      expect(screen.getByRole('slider', { name: 'Flow %' })).toBeDisabled();
+      expect(screen.getByRole('slider', { name: 'Speed %' })).toBeEnabled();
+      expect(screen.getByRole('slider', { name: 'Flow %' })).toBeEnabled();
       expect(mockSpeedFactor).not.toHaveBeenCalled();
       expect(mockFlowFactor).not.toHaveBeenCalled();
     });
 
     it.each([
-      { isOnline: false }, { isEnabled: false }, { homedAxes: undefined }, { homedAxes: '' },
-      { homedAxes: 'xy' }, { homedAxes: 'x' }, { homedAxes: 'unknown' },
+      { isOnline: false }, { isEnabled: false },
       { state: 'Printing' }, { state: 'Shutdown' },
     ])('locks coordinate fields for %j', overrides => {
       render(<Controls surface={surface} overrides={overrides} />);
       for (const input of screen.getAllByRole('spinbutton', { name: /absolute target/ })) expect(input).toBeDisabled();
     });
 
-    it.each(['Absolute', 'Relative'])('discards a dirty %s edit if any required homing is lost on the actual surface', mode => {
+    it.each(['Absolute', 'Relative'])('submits a deliberate %s edit even when homing telemetry is absent', async mode => {
+      mockExecute.mockResolvedValue({ success: true });
       const { client, rerender } = render(<Controls surface={surface} />);
       fireEvent.click(screen.getByRole('button', { name: mode }));
       const name = mode === 'Absolute' ? 'X absolute target' : 'X movement amount';
@@ -382,12 +388,27 @@ describe.each<Surface>(["detail", "sidebar"])(
       fireEvent.focus(field);
       fireEvent.change(field, { target: { value: '25' } });
       rerender(<QueryClientProvider client={client}><Controls surface={surface} overrides={{ homedAxes: 'xy' }} /></QueryClientProvider>);
-      expect(screen.getByLabelText(name)).toBeDisabled();
-      expect(screen.getByLabelText(name)).toHaveValue(null);
-      rerender(<QueryClientProvider client={client}><Controls surface={surface} /></QueryClientProvider>);
+      expect(screen.getByLabelText(name)).toBeEnabled();
+      expect(screen.getByLabelText(name)).toHaveValue(25);
       fireEvent.keyDown(screen.getByLabelText(name), { key: 'Enter' });
       fireEvent.blur(screen.getByLabelText(name));
-      expect(mockExecute).not.toHaveBeenCalled();
+      await waitFor(() => expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: mode === 'Absolute' ? 'MoveTo' : 'Jog', x: 25 }));
+    });
+
+    it.each([undefined, 0, 25])('allows extrusion with native support and hotend reading %s', async hotendTemp => {
+      render(<Controls surface={surface} overrides={{ homedAxes: undefined, hotendTemp }} />);
+      const extrude = screen.getByRole('button', { name: /Extrude 10mm at 5mm\/s/ });
+      expect(extrude).toBeEnabled();
+      fireEvent.click(extrude);
+      await waitFor(() => expect(mockExtrude).toHaveBeenCalledExactlyOnceWith(printer.id, 10, 300));
+    });
+
+    it('shows a native extrusion rejection without replaying it', async () => {
+      mockExtrude.mockResolvedValue({ success: false, message: 'Firmware rejected cold extrusion' });
+      render(<Controls surface={surface} overrides={{ hotendTemp: undefined }} />);
+      fireEvent.click(screen.getByRole('button', { name: /Extrude 10mm at 5mm\/s/ }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Firmware rejected cold extrusion'));
+      expect(mockExtrude).toHaveBeenCalledTimes(1);
     });
 
     it.each(['permission', 'capability', 'pending'])('locks coordinate fields without %s', gate => {

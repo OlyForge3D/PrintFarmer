@@ -339,10 +339,14 @@ describe('PrinterSensorsPanel', () => {
     },
   );
 
-  it('marks unavailable sensors and disables their control', () => {
+  it('marks unavailable readback without disabling descriptor-authorized writes', async () => {
     renderPanel([{ ...fan, available: false }], { canControl: true });
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton')).toBeDisabled();
+    const target = screen.getByRole('spinbutton');
+    expect(target).toBeEnabled();
+    fireEvent.change(target, { target: { value: '50' } });
+    fireEvent.keyDown(target, { key: 'Enter' });
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', fan.id, { quantity: 'FanSpeed', value: 50 }));
   });
 
   it('hides redundant RPM quantity labels on both shared surfaces while retaining accessible context and other labels', () => {
@@ -822,9 +826,9 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByTestId('sensor-chamber').querySelectorAll('td')[1]).toBeEmptyDOMElement();
   });
 
-  it.each(['permission', 'offline', 'unavailable', 'missing reading'] as const)('does not send binary commands with %s', async gate => {
+  it.each(['permission', 'offline', 'missing reading'] as const)('does not send binary commands with %s', async gate => {
     const user = userEvent.setup();
-    const light: PrinterSensor = { id: 'light', displayName: 'Case light', kind: 'Other', available: gate !== 'unavailable',
+    const light: PrinterSensor = { id: 'light', displayName: 'Case light', kind: 'Other', available: true,
       readings: gate === 'missing reading' ? [] : [{ quantity: 'Power', value: 0, unit: 'None' }],
       writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] };
     renderPanel([light], { canControl: gate !== 'permission', isOnline: gate !== 'offline' });

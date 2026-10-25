@@ -234,6 +234,7 @@ function capabilities(
     supportsControlOperations: true,
     supportsFileMetadata: true,
     supportsMovement: true,
+    supportsAbsoluteMovement: true,
     supportsTemperatureControl: true,
     supportsPrinterInformation: true,
     supportsHistory: true,
@@ -293,10 +294,10 @@ describe("PrinterDetailsSidebar", () => {
     expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 
-  it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
+  it('allows the native Moonraker hotend command when REST omits its identity', () => {
     render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, backend: PrinterBackend.Moonraker }}
       backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />);
-    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
   });
 
   it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {
@@ -341,7 +342,7 @@ describe("PrinterDetailsSidebar", () => {
     rerender(contents({ ...hot, activeExtruderId: null, hotendTemp: undefined, bedTemp: undefined }));
     expect(thermal()).not.toHaveTextContent('205.0°C');
     expect(thermal()).not.toHaveTextContent('60.0°C');
-    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
     expect(mockSetTemperatures).not.toHaveBeenCalled();
   });
 
@@ -365,7 +366,7 @@ describe("PrinterDetailsSidebar", () => {
           <PrinterDetailsSidebar
             printerId={moonraker.id}
             printer={moonraker}
-            backendCapabilities={capabilities({ backend })}
+            backendCapabilities={capabilities({ backend, supportsAbsoluteMovement: backend === PrinterBackend.Moonraker })}
             onClose={vi.fn()}
           />
         </AuthContext.Provider>,
@@ -392,6 +393,16 @@ describe("PrinterDetailsSidebar", () => {
           y: 10,
         }),
       );
+      if (backend !== PrinterBackend.Moonraker) {
+        expect(screen.getByRole('button', { name: 'Absolute' })).toBeDisabled();
+        const input = screen.getByLabelText('X movement amount');
+        await waitFor(() => expect(input).toBeEnabled());
+        fireEvent.change(input, { target: { value: '-5' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        await waitFor(() => expect(mockMovePrinter).toHaveBeenLastCalledWith(moonraker.id, { x: -5 }));
+        expect(mockMovePrinterTo).not.toHaveBeenCalled();
+        return;
+      }
       await waitFor(() =>
         expect(screen.getByLabelText("X absolute target")).toBeEnabled(),
       );
@@ -490,11 +501,11 @@ describe("PrinterDetailsSidebar", () => {
 
     for (const role of ['spinbutton', 'slider'] as const) {
       const input = screen.getByRole(role, { name: /^Set Part Fan/ });
-      if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
+      if (allowed && enabled && online && control) expect(input).toBeEnabled();
       else expect(input).toBeDisabled();
     }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toHaveProperty(
-      'disabled', !(allowed && enabled && online && available && control),
+      'disabled', !(allowed && enabled && online && control),
     );
   });
 

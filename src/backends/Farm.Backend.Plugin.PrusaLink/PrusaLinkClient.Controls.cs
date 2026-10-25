@@ -11,6 +11,7 @@ public partial class PrusaLinkClient : ISupportsPrinterControlCapabilities
         SupportsHomingZ = true,
         SupportsHotendTemperature = true,
         SupportsBedTemperature = true,
+        SupportsTemperatureControlDuringPrint = true,
         SupportedAxes = Array.AsReadOnly(new[] { "x", "y", "z" }),
     };
 }

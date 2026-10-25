@@ -889,7 +889,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(Editor.steppedTarget(draft: "2", current: 200, maximum: 260, delta: -5), 0)
         XCTAssertNil(Editor.steppedTarget(draft: "invalid", current: 200, maximum: 260, delta: 5))
         XCTAssertNil(Editor.steppedTarget(draft: "", current: nil, maximum: 260, delta: 5))
-        XCTAssertNil(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5))
+        XCTAssertEqual(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5), 205)
         XCTAssertNil(Editor.steppedTarget(draft: "260", current: 200, maximum: 260, delta: 5))
         XCTAssertNil(Editor.steppedTarget(draft: "nan", current: 200, maximum: 260, delta: 5))
     }
