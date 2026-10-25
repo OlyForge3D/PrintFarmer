@@ -47,35 +47,69 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.count(for: .idle), 1)
     }
 
-    func testFilteredPrintersPreserveFarmOrderAcrossStatusGroups() throws {
-        func printer(id: String, state: String, isOnline: Bool = true) throws -> Printer {
-            let json = TestJSON.printerMinimal.replacingOccurrences(
-                of: "660e8400-29b-41d4-a716-446655440001",
-                with: id
-            )
-            var printer = try TestData.decodePrinter(from: json)
-            printer.state = state
-            printer.isOnline = isOnline
-            return printer
+    private func makePrinter(
+        _ suffix: String,
+        name: String,
+        state: String,
+        isOnline: Bool = true,
+        inMaintenance: Bool = false
+    ) throws -> Printer {
+        let json = """
+        {
+            "id": "660e8400-e29b-41d4-a716-4466554400\(suffix)",
+            "rowVersion": "AQIDBA==",
+            "name": "\(name)",
+            "backend": "Moonraker",
+            "backendPort": 7125,
+            "inMaintenance": \(inMaintenance),
+            "isEnabled": true,
+            "isOnline": \(isOnline)
         }
+        """
+        var printer = try TestData.decodePrinter(from: json)
+        printer.state = state
+        return printer
+    }
 
-        let printing = try printer(id: "660e8400-29b-41d4-a716-446655440010", state: "printing")
-        let failed = try printer(id: "660e8400-29b-41d4-a716-446655440011", state: "error")
-        let bedClear = try printer(id: "660e8400-29b-41d4-a716-446655440012", state: "completed")
-        let paused = try printer(id: "660e8400-29b-41d4-a716-446655440013", state: "paused")
-        let idle = try printer(id: "660e8400-29b-41d4-a716-446655440014", state: "idle")
-        let offline = try printer(
-            id: "660e8400-29b-41d4-a716-446655440015",
-            state: "offline",
-            isOnline: false
-        )
-        let ordered = [printing, failed, bedClear, paused, idle, offline]
+    func testAllViewSortsByStateGroupThenName() throws {
+        let offlineA = try makePrinter("10", name: "alpha", state: "printing", isOnline: false)
+        let readyZ = try makePrinter("11", name: "Zeta", state: "idle")
+        let maintenance = try makePrinter("12", name: "Bravo", state: "idle", inMaintenance: true)
+        let pausedC = try makePrinter("13", name: "charlie", state: "paused")
+        let readyB = try makePrinter("14", name: "bravo 2", state: "ready")
+        let failed = try makePrinter("15", name: "Delta", state: "error")
+        let printingA = try makePrinter("16", name: "Alpha", state: "printing")
+        let bedClear = try makePrinter("17", name: "Echo", state: "printing")
+        let offlineB = try makePrinter("18", name: "Beta", state: "idle", isOnline: false)
+
+        let source = [offlineA, readyZ, maintenance, pausedC, readyB, failed, printingA, bedClear, offlineB]
         let viewModel = PrinterListViewModel(
-            initialPrinters: ordered,
+            initialPrinters: source,
             pendingReadyPrinterIDs: [bedClear.id]
         )
 
-        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), ordered.map(\.id))
+        let expected = [printingA, pausedC, bedClear, failed, readyB, readyZ, maintenance, offlineA, offlineB]
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name), expected.map(\.name))
+
+        // Stable: reshuffled input (e.g. a SignalR refresh) yields the same order.
+        viewModel.setFarmData(source.reversed(), pendingReadyPrinterIDs: [bedClear.id])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name), expected.map(\.name))
+
+        // A real state change moves the card to its new group.
+        var finished = printingA
+        finished.state = "idle"
+        viewModel.setFarmData(source.map { $0.id == finished.id ? finished : $0 },
+                              pendingReadyPrinterIDs: [bedClear.id])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name).prefix(6),
+                       ["charlie", "Echo", "Delta", "Alpha", "bravo 2", "Zeta"])
+    }
+
+    func testNonAllFiltersKeepSourceOrder() throws {
+        let zeta = try makePrinter("20", name: "Zeta", state: "idle")
+        let alpha = try makePrinter("21", name: "Alpha", state: "idle")
+        let viewModel = PrinterListViewModel(initialPrinters: [zeta, alpha])
+        viewModel.selectedStatus = .idle
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name), ["Zeta", "Alpha"])
     }
 
     func testNeedsAttentionIncludesPendingReadyAndFeedPrintersButNotPausedPrinters() throws {

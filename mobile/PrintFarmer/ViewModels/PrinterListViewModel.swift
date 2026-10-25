@@ -31,8 +31,32 @@ final class PrinterListViewModel {
     }
 
     var filteredPrinters: [Printer] {
-        printers.filter { printer in
+        let matches = printers.filter { printer in
             matchesSearch(printer) && matchesStatus(printer)
+        }
+        guard selectedStatus == .all else { return matches }
+        return matches.sorted(by: farmOrder)
+    }
+
+    /// Farm "All" ordering: active → ready to harvest → error → ready to seed → maintenance → offline,
+    /// then name.
+    func stateGroup(_ printer: Printer) -> Int {
+        guard printer.isOnline else { return 5 }
+        if isPendingReady(printer) { return 1 }
+        let state = printer.state?.lowercased() ?? ""
+        if ["printing", "paused"].contains(state) { return 0 }
+        if state == "error" { return 2 }
+        if printer.inMaintenance { return 4 }
+        return 3
+    }
+
+    private func farmOrder(_ lhs: Printer, _ rhs: Printer) -> Bool {
+        let lhsGroup = stateGroup(lhs), rhsGroup = stateGroup(rhs)
+        if lhsGroup != rhsGroup { return lhsGroup < rhsGroup }
+        switch lhs.name.localizedCaseInsensitiveCompare(rhs.name) {
+        case .orderedAscending: return true
+        case .orderedDescending: return false
+        case .orderedSame: return lhs.id.uuidString < rhs.id.uuidString
         }
     }
 

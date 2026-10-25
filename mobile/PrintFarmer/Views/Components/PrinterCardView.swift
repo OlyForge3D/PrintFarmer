@@ -267,9 +267,13 @@ struct PrinterCardPresentation {
     }
 
     var jobLabel: String {
-        if isPendingReady { return "Finished · Clear bed to continue" }
-        guard isActiveJob || hasFailureJobContext else { return "Ready for the next job" }
-        return printer.jobName ?? printer.fileName ?? "Job name unavailable"
+        if isPendingReady { return "Ready to harvest" }
+        if isActiveJob || hasFailureJobContext {
+            return printer.jobName ?? printer.fileName ?? "Job name unavailable"
+        }
+        if !printer.isOnline { return "Offline" }
+        if printer.inMaintenance { return "In maintenance" }
+        return "Ready to seed"
     }
 
     var progressLabel: String {
