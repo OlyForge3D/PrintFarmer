@@ -77,7 +77,7 @@ export function sdkPolicyErrors(files) {
         errors.push(`${path}:${lineNumber}: independent SDK selector; derive it from global.json`);
       }
     }
-    if (path.includes('Dockerfile') && /mcr\.microsoft\.com\/dotnet\/sdk:/.test(content)) {
+    if (path.includes('Dockerfile') && content.includes('mcr.microsoft.com/dotnet/sdk:')) {
       if (!/^ARG SDK_TAG\s*$/m.test(content) || !/COPY global\.json\b/.test(content) ||
           !/dotnet --version/.test(content)) {
         errors.push(`${path}: SDK stages require SDK_TAG without a default, global.json and dotnet --version`);
