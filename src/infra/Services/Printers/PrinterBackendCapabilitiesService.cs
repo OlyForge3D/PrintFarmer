@@ -113,6 +113,9 @@ public class PrinterBackendCapabilitiesService(
 
         PrinterVerifiedSafetyDto verifiedSafety =
             await GetVerifiedSafetyAsync(printer, backend, ct);
+        bool absoluteMovementVerified =
+            verifiedSafety.Operations.AbsoluteMovement.Support ==
+            VerifiedSafetySupport.Supported;
 
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
@@ -132,12 +135,14 @@ public class PrinterBackendCapabilitiesService(
             SupportsFilamentControl: (capabilities & BackendCapabilities.FilamentControl) == BackendCapabilities.FilamentControl,
             SupportsObjectExclusion: (capabilities & BackendCapabilities.ObjectExclusion) == BackendCapabilities.ObjectExclusion)
         {
-            // Relative jog still lacks a verified per-printer safety contract.
-            // Absolute movement is projected only from authoritative discovery.
-            SupportsRelativeMovement = false,
-            SupportsAbsoluteMovement =
-                verifiedSafety.Operations.AbsoluteMovement.Support ==
-                VerifiedSafetySupport.Supported,
+            // Relative jog is advertised only where the server preflights each move
+            // against the observed position and the verified travel envelope, and
+            // that envelope is authoritatively discovered (same gate as MoveTo).
+            SupportsRelativeMovement =
+                movement &&
+                PrinterDirectControl.HasObservedManualMotionPreflight(backend) &&
+                absoluteMovementVerified,
+            SupportsAbsoluteMovement = absoluteMovementVerified,
 
             SupportsDisableMotors = controls.SupportsDisableMotors && controlClient is ISupportsMotorControl,
             SupportsExtrusion = controls.SupportsExtrusion && controlClient is ISupportsExtrusionControl,

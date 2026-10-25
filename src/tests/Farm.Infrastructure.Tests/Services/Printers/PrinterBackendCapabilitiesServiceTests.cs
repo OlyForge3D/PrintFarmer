@@ -396,6 +396,7 @@ public class PrinterBackendCapabilitiesServiceTests
                     CancellationToken.None));
 
         Assert.True(result.SupportsAbsoluteMovement);
+        Assert.False(result.SupportsRelativeMovement); // no movement client
         Assert.True(result.SupportsFilamentLoad);
         Assert.True(result.SupportsFilamentUnload);
         Assert.False(result.SupportsFilamentChange);
@@ -403,6 +404,67 @@ public class PrinterBackendCapabilitiesServiceTests
             VerifiedSafetyFactState.Unknown,
             result.VerifiedSafety.Extrusion.MinimumSafeMeasuredHotendTemperatureC.State);
         Assert.Same(discovered, result.VerifiedSafety);
+    }
+
+    [Theory]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Supported, true)]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Unknown, false)]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Unsupported, false)]
+    [InlineData(PrinterBackend.OctoPrint, VerifiedSafetySupport.Supported, false)]
+    [InlineData(PrinterBackend.PrusaLink, VerifiedSafetySupport.Supported, false)]
+    public async Task GetByPrinterIdAsync_RelativeMovement_RequiresPreflightedBackendAndVerifiedEnvelope(
+        PrinterBackend backend,
+        VerifiedSafetySupport absoluteSupport,
+        bool expectedRelative)
+    {
+        PrinterVerifiedSafetyDto discovered = PrinterVerifiedSafetyDto.Unknown(
+            discoveryState: VerifiedSafetyDiscoveryState.Verified) with
+        {
+            Operations = PrinterVerifiedSafetyDto.Unknown().Operations with
+            {
+                AbsoluteMovement = new VerifiedSafetyOperationCapabilityDto(
+                    absoluteSupport, "test.discovery", DateTime.UtcNow),
+            },
+        };
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsPrinterControlCapabilities>()
+            .SetupGet(value => value.ControlCapabilities)
+            .Returns(new PrinterControlCapabilities
+            {
+                SupportsHoming = true,
+                SupportsHomingXY = true,
+                SupportsHomingZ = true,
+                SupportedAxes = ["x", "y", "z"],
+            });
+        client.As<ISupportsVerifiedSafetyDiscovery>()
+            .Setup(value => value.DiscoverVerifiedSafetyAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(discovered);
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(backend)).Returns(client.Object);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)backend,
+            ServerUrl = "http://printer.local",
+            BackendPort = 7125,
+            FrontendPort = 80,
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object, Mock.Of<IBackendCapabilityFactory>(), clients.Object);
+
+        PrinterBackendCapabilitiesDto result = Assert.IsType<PrinterBackendCapabilitiesDto>(
+            await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
+
+        Assert.Equal(expectedRelative, result.SupportsRelativeMovement);
+        Assert.Equal(absoluteSupport == VerifiedSafetySupport.Supported, result.SupportsAbsoluteMovement);
+        Assert.Equal(["x", "y", "z"], result.SupportedAxes);
     }
 
     [Fact]
@@ -571,6 +633,15 @@ public class PrinterBackendCapabilitiesServiceTests
             await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
 
         Assert.True(result.SupportsAbsoluteMovement);
+        // Issue #3494: verified Klipper geometry must enable relative jog for mobile Move controls.
+        Assert.True(result.SupportsRelativeMovement);
+        Assert.True(result.SupportsHoming);
+        Assert.Equal(["x", "y", "z"], result.SupportedAxes);
+        using (JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web))))
+        {
+            Assert.True(json.RootElement.GetProperty("supportsRelativeMovement").GetBoolean());
+        }
+
         Assert.Equal(VerifiedSafetyFactState.Verified, result.VerifiedSafety.Positioning.TravelEnvelopeMm.State);
         Assert.Equal(new SafetyVector3Dto(225, 232, 230), result.VerifiedSafety.Positioning.TravelEnvelopeMm.Value!.Maximum);
         Assert.Equal(new SafetyVector3Dto(0, 0, 0), result.VerifiedSafety.Positioning.CoordinateOriginMm.Value);

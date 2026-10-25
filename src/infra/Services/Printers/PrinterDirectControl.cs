@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Bounds ordinary manual commands without retaining operation receipts.</summary>
 public static class PrinterDirectControl
@@ -18,4 +20,11 @@ public static class PrinterDirectControl
     /// <summary>Idle direct operations whose barrier is released (not retained) on an unknown outcome.</summary>
     public static bool ReleasesBarrierOnUnknown([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? operation) =>
         IsManualMotion(operation) || IsSetpoint(operation);
+
+    /// <summary>
+    /// Backends whose manual motion is preflighted against a fresh observed position and the
+    /// verified travel envelope before dispatch. Relative jog is only advertised for these.
+    /// </summary>
+    public static bool HasObservedManualMotionPreflight(PrinterBackend backend) =>
+        backend == PrinterBackend.Moonraker;
 }

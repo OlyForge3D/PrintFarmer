@@ -3199,7 +3199,8 @@ public partial class PrintersController(
         {
             ct.ThrowIfCancellationRequested();
             if (PrinterDirectControl.IsManualMotion(lease.Operation) &&
-                await _printersService.FindByIdAsync(lease.PrinterId, ct) is { Backend: (int)PrinterBackend.Moonraker } printer)
+                await _printersService.FindByIdAsync(lease.PrinterId, ct) is { } printer &&
+                PrinterDirectControl.HasObservedManualMotionPreflight((PrinterBackend)printer.Backend))
             {
                 PrinterStatusDto observed = await _printersService.GetMovementStatusAsync(printer, ct);
                 PrinterSafetyValidationResult manualSafety;
