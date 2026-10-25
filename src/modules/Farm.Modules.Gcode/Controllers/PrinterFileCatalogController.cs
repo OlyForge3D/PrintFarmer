@@ -177,7 +177,15 @@ public sealed class PrinterFileCatalogController(
         }
 
         state.NextScanAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { code = "scan_state_changed" });
+        }
+
         return Accepted(new { code = "refresh_requested" });
     }
 
@@ -208,7 +216,15 @@ public sealed class PrinterFileCatalogController(
 
         state.Enabled = request.Enabled;
         state.NextScanAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { code = "scan_state_changed" });
+        }
+
         return Ok(new { state.Enabled });
     }
 

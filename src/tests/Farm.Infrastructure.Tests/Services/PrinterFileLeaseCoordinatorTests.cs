@@ -15,6 +15,21 @@ namespace Farm.Infrastructure.Tests.Services;
 public sealed class PrinterFileLeaseCoordinatorTests
 {
     [Fact]
+    public async Task RenewalAsync_UnexpectedFailureCancelsOwnershipAndDisposeDoesNotMaskOutcome()
+    {
+        await using var fixture = await Fixture.CreateAsync(1);
+        IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireAsync(fixture.First, true);
+        Assert.NotNull(lease);
+        Mock.Get(fixture.Factory).Setup(x => x.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated unexpected context factory failure"));
+        TaskCompletionSource lost = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = lease.Token.Register(() => lost.TrySetResult());
+        await lost.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(lease.Token.IsCancellationRequested);
+        await lease.DisposeAsync();
+    }
+
+    [Fact]
     public async Task AcquireAsync_SharesFiniteSlotsAndExcludesSamePrinter()
     {
         await using var fixture = await Fixture.CreateAsync(1);
@@ -106,6 +121,24 @@ public sealed class PrinterFileLeaseCoordinatorTests
         await db.PrinterFileScanStates.ExecuteUpdateAsync(s =>
             s.SetProperty(x => x.NextScanAtUtc, DateTime.UtcNow.AddDays(-1)));
         Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, false));
+        Assert.Empty(await db.PrinterFileIoSlots.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task AcquireAsync_BusyDeferralMovesDueTimeWithoutRefreshingObservation()
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        await fixture.Coordinator.TryAcquireAsync(fixture.First, false);
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        DateTime previousSeen = DateTime.UtcNow.AddHours(-1);
+        await db.PrinterFileScanStates.ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.NextScanAtUtc, DateTime.UtcNow.AddMinutes(-1))
+            .SetProperty(x => x.LastCompleteScanAtUtc, previousSeen));
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, false));
+        PrinterFileScanState deferred = await db.PrinterFileScanStates.AsNoTracking().SingleAsync();
+        Assert.True(deferred.NextScanAtUtc > DateTime.UtcNow);
+        Assert.Equal("waiting_for_confirmed_idle", deferred.ReasonCode);
+        Assert.Equal(previousSeen, deferred.LastCompleteScanAtUtc);
         Assert.Empty(await db.PrinterFileIoSlots.ToArrayAsync());
     }
 

@@ -7,6 +7,8 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -14,6 +16,57 @@ namespace Farm.Modules.Gcode.Tests.Gcode;
 
 public sealed class PrinterFileCatalogTests
 {
+    [Fact]
+    public async Task RunBatchAsync_UnexpectedPerPrinterFailureIsIsolatedAndBackedOff()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            Printer printer = await db.Printers.SingleAsync();
+            printer.IsEnabled = true;
+            PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync();
+            state.ConfigurationFingerprint = PrinterFileIndexPolicy.ConfigurationFingerprint(printer);
+            state.NextScanAtUtc = DateTime.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+        }
+
+        var scopes = new Mock<IServiceScopeFactory>();
+        scopes.Setup(x => x.CreateScope()).Throws(new InvalidOperationException("simulated unexpected scan failure"));
+        var worker = new PrinterFileIndexWorker(scopes.Object, fixture.Factory, NullLogger<PrinterFileIndexWorker>.Instance);
+        await worker.RunBatchAsync();
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        PrinterFileScanState saved = await current.PrinterFileScanStates.SingleAsync();
+        Assert.Equal(PrinterFileScanOutcome.Unavailable, saved.Outcome);
+        Assert.Equal("scan_failed", saved.ReasonCode);
+        Assert.Equal(1, saved.ConsecutiveFailures);
+        Assert.True(saved.NextScanAtUtc > DateTime.UtcNow);
+        Assert.Null(saved.LastCompleteScanAtUtc);
+        await worker.RunBatchAsync();
+        scopes.Verify(x => x.CreateScope(), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(PrinterFileInventoryOutcome.Unavailable, PrinterFileInventoryReason.AuthenticationRequired,
+        PrinterFileScanOutcome.AuthenticationRequired)]
+    [InlineData(PrinterFileInventoryOutcome.Unsupported, PrinterFileInventoryReason.Unsupported,
+        PrinterFileScanOutcome.Unsupported)]
+    public async Task PublishAsync_PausedScanWritesFiniteUtcTimestamp(
+        PrinterFileInventoryOutcome outcome, PrinterFileInventoryReason reason, PrinterFileScanOutcome scanOutcome)
+    {
+        ScanDateObserver observer = new();
+        await using Fixture fixture = await Fixture.CreateAsync(observer);
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object,
+            new(outcome, reason, [], [])));
+        Assert.NotNull(observer.PausedDate);
+        Assert.Equal(DateTimeKind.Utc, observer.PausedDate.Value.Kind);
+        Assert.InRange(observer.PausedDate.Value, DateTime.UtcNow.AddYears(1), DateTime.MaxValue.AddSeconds(-1));
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileScanState saved = await db.PrinterFileScanStates.SingleAsync();
+        Assert.Equal(scanOutcome, saved.Outcome);
+        Assert.Equal(observer.PausedDate.Value.Ticks, saved.NextScanAtUtc.Ticks);
+        Assert.False(saved.NextScanAtUtc <= DateTime.UtcNow);
+    }
+
     [Fact]
     public async Task PublishAsync_PartialWithoutCoverageKeepsUnobservedLocations()
     {
@@ -181,11 +234,17 @@ public sealed class PrinterFileCatalogTests
 
         public PrinterFileCatalogService Service { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+            var builder = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection);
+            if (interceptor is not null)
+            {
+                builder.AddInterceptors(interceptor);
+            }
+
+            var options = builder.Options;
             var factory = new Mock<IDbContextFactory<AppDbContext>>();
             factory.Setup(x => x.CreateDbContext()).Returns(() => new AppDbContext(options));
             factory.Setup(x => x.CreateDbContextAsync(It.IsAny<CancellationToken>()))
@@ -234,5 +293,19 @@ public sealed class PrinterFileCatalogTests
         }
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    }
+
+    private sealed class ScanDateObserver : SaveChangesInterceptor
+    {
+        public DateTime? PausedDate { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            PausedDate = eventData.Context!.ChangeTracker.Entries<PrinterFileScanState>()
+                .Where(x => x.Entity.Outcome is PrinterFileScanOutcome.AuthenticationRequired or PrinterFileScanOutcome.Unsupported)
+                .Select(x => (DateTime?)x.Entity.NextScanAtUtc).SingleOrDefault() ?? PausedDate;
+            return ValueTask.FromResult(result);
+        }
     }
 }

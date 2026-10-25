@@ -74,12 +74,21 @@ public sealed class PrinterFileLeaseCoordinator(
             }
 
             bool occupied = state.LeaseOwner.HasValue && state.LeaseExpiresAtUtc > now;
+            bool confirmedIdle = interactive || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
             bool deferred = !interactive && (!settings.Enabled || !state.Enabled ||
                 state.NextScanAtUtc > now ||
                 state.InteractiveRequestedAtUtc > now.AddMinutes(-2) ||
-                !PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now));
+                !confirmedIdle);
             if (occupied || deferred)
             {
+                if (!occupied && !interactive && settings.Enabled && state.Enabled &&
+                    state.NextScanAtUtc <= now && !confirmedIdle)
+                {
+                    state.NextScanAtUtc = now + TimeSpan.FromSeconds(30) +
+                        PrinterFileIndexPolicy.InitialJitter(printerId, settings);
+                    state.ReasonCode = "waiting_for_confirmed_idle";
+                }
+
                 await db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
                 return null;
@@ -290,7 +299,7 @@ public sealed class PrinterFileLeaseCoordinator(
             catch (OperationCanceledException) when (Token.IsCancellationRequested)
             {
             }
-            catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException)
+            catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Printer file lease renewal failed for {PrinterId}", PrinterId);
                 await _lifetime.CancelAsync();
@@ -306,7 +315,14 @@ public sealed class PrinterFileLeaseCoordinator(
 
             await _lifetime.CancelAsync();
 #pragma warning disable VSTHRD003 // This owned background task has no foreground or synchronization-context dependency.
-            await _renewal;
+            try
+            {
+                await _renewal;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Printer file lease renewal stopped unexpectedly for {PrinterId}", PrinterId);
+            }
 #pragma warning restore VSTHRD003
             try
             {
@@ -324,7 +340,7 @@ public sealed class PrinterFileLeaseCoordinator(
                         .SetProperty(x => x.Revision, x => x.Revision + 1));
                 await transaction.CommitAsync();
             }
-            catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException)
+            catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Printer file lease release failed for {PrinterId}; expiry will release ownership", PrinterId);
             }

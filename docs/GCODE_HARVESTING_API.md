@@ -196,6 +196,13 @@ refreshing last-seen timestamps. Disabling the global index or one printer's
 index retains observations, origins, and owned local files; it does not disable
 explicit Copy or Queue actions.
 
+Busy or unknown sources receive a jittered next-attempt time without advancing
+last-seen or complete-scan evidence, so they cannot monopolize the due batch.
+Unexpected per-printer scan failures are isolated, logged with a safe failure
+type, and backed off without changing file availability. A control write that
+races scan ownership returns `409` with `scan_state_changed`; refresh state and
+retry the deliberate Refresh or enable/disable action.
+
 Database-backed, renewable ownership shares two aggregate I/O slots by default
 and permits only one feature operation per printer. Configuration, registration,
 policy, and ownership are fenced again in the publication transaction. No
@@ -213,6 +220,13 @@ Listing accepts `printerId`, `search` (at most 200 characters), `availability`
 (1-200, default 50). Source authorization is applied before counts,
 pagination, filtering, origins, and scan status. Responses contain canonical
 root/path observations, not credentials or printer URLs.
+
+Search follows the database provider's collation and can have different case
+matching across deployments; location identity remains strictly ordinal.
+Current-authority checks scale with the number of enabled printers, including
+printer choices outside the current file page. Large farms should measure
+catalog polling load before rollout; no constant-time authorization or
+large-farm throughput guarantee is claimed.
 
 Read access requires current `printer_files:read` and source-printer View.
 Refresh and per-printer control additionally require source Manage. Copy
@@ -306,6 +320,14 @@ authorization run again before admission; no printer network call occurs in
 that transaction. Committed jobs remain independent of later remote changes.
 An admission failure can retain its local asset and valid confirmation for
 retry; it never silently substitutes another capture.
+
+Copy publication retries a database race at most three times using the same
+capture, then exposes `Failed` / `publication_failed` and releases its quota
+reservation rather than automatically downloading forever. Queue storage
+conflicts expose `Blocked` / `queue_storage_conflict`, retain the captured bytes
+and valid consent, and require explicit admission retry. Pinned catalog jobs
+are rechecked at claim and their actual opened upload stream is rehashed and
+size-checked before either upload path sends any bytes.
 
 ### Safe single-location Delete
 

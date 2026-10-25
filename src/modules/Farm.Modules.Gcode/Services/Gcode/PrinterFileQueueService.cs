@@ -228,6 +228,10 @@ public sealed class PrinterFileQueueService(
         {
             return await BlockAsync(actorId, operationId, failure.Reason, ct);
         }
+        catch (Exception failure) when (failure is DbUpdateException or System.Data.Common.DbException)
+        {
+            return await BlockAsync(actorId, operationId, "queue_storage_conflict", ct);
+        }
     }
 
     private async Task<PrinterFileCopyOperation?> BlockAsync(Guid actorId, Guid operationId, string reason, CancellationToken ct)

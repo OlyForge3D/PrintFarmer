@@ -5668,6 +5668,8 @@ public class PrintersService(
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>
+    /// <remarks>Legacy backend seam only; catalog and HTTP deletion must use
+    /// IPrinterFileDeleteService so they cannot bypass consent or the send boundary.</remarks>
     /// <param name="id">Unique printer identifier (GUID)</param>
     /// <param name="filename">Filename of gcode file to delete (backend-specific path format)</param>
     /// <param name="ct">Cancellation token for async operation</param>

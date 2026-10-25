@@ -14,6 +14,7 @@ using Farm.Modules.Gcode.Controllers;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
@@ -22,6 +23,58 @@ namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 
 public sealed class PrinterFileCopyServiceTests
 {
+    [Fact]
+    public async Task PublicationFailure_StopsAfterThreeLocalAttemptsAndRefundsWithoutRedownloadAsync()
+    {
+        PublicationFailureInterceptor failure = new();
+        await using Fixture test = await Fixture.CreateAsync(interceptor: failure);
+        await test.CreateCommandAsync("poison-publication");
+        await test.ProcessAsync();
+        await using AsyncServiceScope scope = test.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        PrinterFileOperation saved = await db.PrinterFileOperations.SingleAsync();
+        Assert.Equal(3, failure.Attempts);
+        Assert.Equal(PrinterFileOperationState.Failed, saved.State);
+        Assert.Equal("publication_failed", saved.ReasonCode);
+        Assert.Equal(0, saved.ReservedBytes);
+        Assert.Null(saved.WorkerId);
+        Assert.Empty(await db.GcodeFiles.ToArrayAsync());
+        Assert.Empty(await db.PrinterFileOrigins.ToArrayAsync());
+        Assert.False(await scope.ServiceProvider.GetRequiredService<PrinterFileCopyProcessor>()
+            .ProcessNextAsync(CancellationToken.None));
+        Assert.Equal(1, test.Backend.Copies);
+        Assert.Empty(Directory.EnumerateFiles(test.Root, "*.gcode"));
+        Assert.Empty(Directory.EnumerateFiles(Path.Join(test.Root, ".printer-file-staging")));
+    }
+
+    [Fact]
+    public async Task Dedup_HeartbeatsWhileSlowLocalValidationOutlastsRemainingWorkerLeaseAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync();
+        await test.CreateCommandAsync("winner");
+        await test.ProcessAsync();
+        PrinterFileCopyOperation second = await test.CreateCommandAsync("slow-dedup");
+        test.Access.BeforeLocalCheck = async () =>
+        {
+            test.Access.BeforeLocalCheck = null;
+            await using AsyncServiceScope scope = test.Services.CreateAsyncScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.PrinterFileOperations.Where(x => x.Id == second.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.WorkerLeaseExpiresAtUtc, DateTime.UtcNow.AddSeconds(1)));
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        };
+        await test.ProcessAsync();
+        await using AsyncServiceScope verify = test.Services.CreateAsyncScope();
+        AppDbContext current = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        PrinterFileOperation saved = await current.PrinterFileOperations.SingleAsync(x => x.Id == second.Id);
+        Assert.Equal(PrinterFileOperationState.LocalReady, saved.State);
+        Assert.Equal(0, saved.ReservedBytes);
+        Assert.Equal(1, saved.WorkerFence);
+        Assert.Equal(2, test.Backend.Copies);
+        Assert.Single(await current.GcodeFiles.ToArrayAsync());
+        Assert.Equal(2, await current.PrinterFileOrigins.CountAsync());
+    }
+
     [Fact]
     public async Task Copy_PublishesActualBytesAndIndependentOrigin_WithoutJobsAsync()
     {
@@ -580,7 +633,7 @@ public sealed class PrinterFileCopyServiceTests
         public GcodeUploadSettings UploadPolicy { get; } = new() { DailyUploadLimitBytes = 500_000_000 };
         public int LocalPathResolutions { get; private set; }
 
-        public static async Task<Fixture> CreateAsync(bool unknownSize = false)
+        public static async Task<Fixture> CreateAsync(bool unknownSize = false, IInterceptor? interceptor = null)
         {
             Fixture test = new();
             Directory.CreateDirectory(test.Root);
@@ -637,7 +690,13 @@ public sealed class PrinterFileCopyServiceTests
                     });
             ServiceCollection services = new();
             services.AddDbContext<AppDbContext>(options =>
-                options.UseSqlite($"Data Source={Path.Join(test.Root, "copy.db")}"));
+            {
+                options.UseSqlite($"Data Source={Path.Join(test.Root, "copy.db")}");
+                if (interceptor is not null)
+                {
+                    options.AddInterceptors(interceptor);
+                }
+            });
             services.AddSingleton<IPrinterFileAccessService>(test.Access);
             services.AddSingleton(settings.Object);
             services.AddSingleton(storage.Object);
@@ -721,17 +780,40 @@ public sealed class PrinterFileCopyServiceTests
         public bool LocalAllowed { get; set; } = true;
         public Dictionary<Guid, PrinterGroupAccessLevel?> LocalAssetGrants { get; } = [];
         public List<(Guid AssetId, PrinterGroupAccessLevel MinimumAccess)> LocalChecks { get; } = [];
+        public Func<Task>? BeforeLocalCheck { get; set; }
         public Task<bool> CanReadAsync(Guid actorId, Guid printerId, CancellationToken ct = default) =>
             Task.FromResult(Allowed && actorId == actor && printerId == source);
         public Task<bool> CanActAsync(Guid actorId, Guid printerId, PrinterFileAction action,
             Guid? destinationPrinterId = null, CancellationToken ct = default) => CanReadAsync(actorId, printerId, ct);
-        public Task<bool> CanAccessLocalAsync(Guid actorId, Guid gcodeFileId,
+        public async Task<bool> CanAccessLocalAsync(Guid actorId, Guid gcodeFileId,
             PrinterGroupAccessLevel minimumAccess = PrinterGroupAccessLevel.View, CancellationToken ct = default)
         {
+            if (BeforeLocalCheck is not null)
+            {
+                await BeforeLocalCheck();
+            }
+
             LocalChecks.Add((gcodeFileId, minimumAccess));
             bool groupAllowed = !LocalAssetGrants.TryGetValue(gcodeFileId, out PrinterGroupAccessLevel? granted) ||
                 (granted.HasValue && granted.Value >= minimumAccess);
-            return Task.FromResult(Allowed && LocalAllowed && actorId == actor && groupAllowed);
+            return Allowed && LocalAllowed && actorId == actor && groupAllowed;
+        }
+    }
+
+    private sealed class PublicationFailureInterceptor : SaveChangesInterceptor
+    {
+        public int Attempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context!.ChangeTracker.Entries<PrinterFileOrigin>().Any(x => x.State == EntityState.Added))
+            {
+                Attempts++;
+                throw new DbUpdateException("simulated deterministic publication failure");
+            }
+
+            return ValueTask.FromResult(result);
         }
     }
 

@@ -27,7 +27,7 @@ public sealed class PrinterFileIndexWorker(
             {
                 break;
             }
-            catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException)
+            catch (Exception ex)
             {
                 logger.LogError(ex, "Printer file index batch could not access its durable state");
             }
@@ -69,9 +69,39 @@ public sealed class PrinterFileIndexWorker(
                 {
                     logger.LogInformation("Printer file scan lost authority for {PrinterId}", id);
                 }
-                catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException or HttpRequestException)
+                catch (Exception ex) when (!token.IsCancellationRequested)
                 {
-                    logger.LogWarning(ex, "Printer file scan failed for {PrinterId}", id);
+                    logger.LogWarning("Printer file scan failed for {PrinterId}: {FailureType}", id, ex.GetType().Name);
+                    try
+                    {
+                        await using AppDbContext failureDb = await dbFactory.CreateDbContextAsync(token);
+                        PrinterFileScanState? failed = await failureDb.PrinterFileScanStates.AsNoTracking()
+                            .SingleOrDefaultAsync(x => x.SourcePrinterId == id, token);
+                        string fingerprint = PrinterFileIndexPolicy.ConfigurationFingerprint(printers.Single(x => x.Id == id));
+                        if (failed is not null && failed.ConfigurationFingerprint == fingerprint)
+                        {
+                            int failures = Math.Min(30, failed.ConsecutiveFailures + 1);
+                            DateTime failedAt = DateTime.UtcNow;
+                            DateTime next = failedAt + PrinterFileIndexPolicy.NextDelay(id, failures, settings);
+                            await failureDb.PrinterFileScanStates.Where(x => x.Id == failed.Id &&
+                                x.Revision == failed.Revision && x.ConfigurationFingerprint == fingerprint &&
+                                (!x.LeaseOwner.HasValue || x.LeaseExpiresAtUtc <= failedAt))
+                                .ExecuteUpdateAsync(
+                                    update => update
+                                    .SetProperty(x => x.Outcome, PrinterFileScanOutcome.Unavailable)
+                                    .SetProperty(x => x.ReasonCode, "scan_failed")
+                                    .SetProperty(x => x.ConsecutiveFailures, failures)
+                                    .SetProperty(x => x.LastAttemptAtUtc, failedAt)
+                                    .SetProperty(x => x.NextScanAtUtc, next)
+                                    .SetProperty(x => x.Revision, x => x.Revision + 1), token);
+                        }
+                    }
+                    catch (Exception recordingFailure) when (!token.IsCancellationRequested)
+                    {
+                        logger.LogWarning(
+                            "Printer file scan failure could not be recorded for {PrinterId}: {FailureType}",
+                            id, recordingFailure.GetType().Name);
+                    }
                 }
             });
     }

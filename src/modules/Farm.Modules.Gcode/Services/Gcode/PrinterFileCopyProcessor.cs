@@ -180,7 +180,21 @@ public sealed class PrinterFileCopyProcessor(
                 {
                     try
                     {
-                        Guid? validatedWinner = await ValidateDedupWinnerAsync(operation, received, token);
+                        Guid? validatedWinner;
+                        using (CancellationTokenSource validationStop = new())
+                        {
+                            Task validationMonitor = MonitorAsync(operation.Id, workerId, workerFence, deadline, validationStop.Token);
+                            try
+                            {
+                                validatedWinner = await ValidateDedupWinnerAsync(operation, received, token);
+                            }
+                            finally
+                            {
+                                await validationStop.CancelAsync();
+                                await validationMonitor;
+                            }
+                        }
+
                         published = await PublishAsync(operation.Id, workerId, workerFence, lease,
                             snapshot, candidate, received, validatedWinner, token);
                         break;
@@ -222,10 +236,10 @@ public sealed class PrinterFileCopyProcessor(
         }
         catch (DbUpdateException)
         {
-            // Includes dedup/serialization races. Nothing was bound; a durable retry revalidates
-            // the original observation rather than silently substituting a new source.
+            // Publication already retried locally. A deterministic storage failure must not
+            // become an unbounded automatic download loop; explicit retry retains the observation.
             await FinishAttemptAsync(operation.Id, workerId, workerFence,
-                PrinterFileOperationState.Pending, "publication_retry", false, CancellationToken.None);
+                PrinterFileOperationState.Failed, "publication_failed", true, CancellationToken.None);
         }
         catch (Exception)
         {

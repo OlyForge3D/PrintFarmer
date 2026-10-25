@@ -223,7 +223,7 @@ public sealed class PrinterFileCatalogService(
         }
 
         state.NextScanAtUtc = state.Outcome is PrinterFileScanOutcome.AuthenticationRequired or PrinterFileScanOutcome.Unsupported
-            ? DateTime.MaxValue
+            ? new DateTime(9999, 12, 31, 0, 0, 0, DateTimeKind.Utc)
             : now + PrinterFileIndexPolicy.NextDelay(lease.PrinterId, state.ConsecutiveFailures, settings);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

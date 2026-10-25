@@ -10,12 +10,31 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 
 namespace Farm.Modules.Gcode.Tests.Controllers;
 
 public sealed class PrinterFileCatalogControllerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ControlsAsync_ConcurrentScanWriteReturnsConflictRatherThanServerError(bool toggle)
+    {
+        ScanWriteConflictInterceptor interceptor = new();
+        await using Fixture fixture = await Fixture.CreateAsync(interceptor);
+        fixture.Resources.Setup(x => x.CanActorAccessPrinterAsync(fixture.Actor.ToString(), fixture.Visible,
+            PrinterGroupAccessLevel.Manage, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        interceptor.Fail = true;
+        IActionResult result = toggle
+            ? await fixture.Controller.SetEnabledAsync(fixture.Visible, new(false), CancellationToken.None)
+            : await fixture.Controller.RefreshAsync(fixture.Visible, CancellationToken.None);
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(409, conflict.StatusCode);
+        Assert.Contains("scan_state_changed", JsonSerializer.Serialize(conflict.Value));
+    }
+
     [Fact]
     public async Task ListAsync_FiltersSourcesBeforeCountsPagingOriginsAndScanStatus()
     {
@@ -104,7 +123,7 @@ public sealed class PrinterFileCatalogControllerTests
             _connection = connection;
             Db = db;
             Access.Setup(x => x.CanReadAsync(Actor, Visible, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-            Controller = new PrinterFileCatalogController(db, Access.Object, Mock.Of<IQueueResourceAuthorizationService>())
+            Controller = new PrinterFileCatalogController(db, Access.Object, Resources.Object)
             {
                 ControllerContext = new ControllerContext
                 {
@@ -127,13 +146,21 @@ public sealed class PrinterFileCatalogControllerTests
 
         public Mock<IPrinterFileAccessService> Access { get; } = new();
 
+        public Mock<IQueueResourceAuthorizationService> Resources { get; } = new();
+
         public PrinterFileCatalogController Controller { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
             await connection.OpenAsync();
-            var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection);
+            if (interceptor is not null)
+            {
+                options.AddInterceptors(interceptor);
+            }
+
+            var db = new AppDbContext(options.Options);
             var fixture = new Fixture(connection, db);
             await db.Database.EnsureCreatedAsync();
             var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "API test" };
@@ -178,6 +205,22 @@ public sealed class PrinterFileCatalogControllerTests
         {
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class ScanWriteConflictInterceptor : SaveChangesInterceptor
+    {
+        public bool Fail { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Fail)
+            {
+                throw new DbUpdateConcurrencyException("simulated scan lease revision conflict");
+            }
+
+            return ValueTask.FromResult(result);
         }
     }
 }

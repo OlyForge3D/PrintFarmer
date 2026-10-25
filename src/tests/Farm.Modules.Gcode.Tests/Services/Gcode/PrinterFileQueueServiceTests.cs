@@ -23,6 +23,29 @@ namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 
 public sealed class PrinterFileQueueServiceTests
 {
+    [Fact]
+    public async Task StorageFailure_BlocksAutomaticAdmissionWithoutLosingCaptureOrCreatingJobsAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync();
+        await test.CreateService().ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
+        PrinterFileCopyOperation? blocked = await test.CreateService(storageFailure: true)
+            .AdmitAsync(test.Actor, test.OperationId, default);
+        Assert.Equal(PrinterFileOperationState.Blocked, blocked!.State);
+        Assert.Equal("queue_storage_conflict", blocked.ReasonCode);
+        Assert.Equal(test.AssetId, blocked.GcodeFileId);
+        Assert.Equal(test.Digest, blocked.ContentSha256);
+        test.Db.ChangeTracker.Clear();
+        Assert.Empty(await test.Db.PrintJobs.ToArrayAsync());
+        Assert.Empty(await test.Db.PrinterFileOperationJobs.ToArrayAsync());
+        Assert.Empty(await test.Db.QueueDispatchOutbox.ToArrayAsync());
+        Assert.Empty(await test.Db.PrinterFileOperations.Where(x =>
+            x.Action == PrinterFileAction.Queue && x.State == PrinterFileOperationState.LocalReady).ToArrayAsync());
+        PrinterFileCopyOperation? retried = await test.CreateService().AdmitAsync(test.Actor, test.OperationId, default);
+        Assert.Equal(PrinterFileOperationState.Queued, retried!.State);
+        Assert.Single(await test.Db.PrintJobs.ToArrayAsync());
+        Assert.Equal(test.Bytes, await File.ReadAllBytesAsync(test.Path));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
@@ -329,7 +352,7 @@ public sealed class PrinterFileQueueServiceTests
         public AppDbContext CreateContext() => new(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite($"Data Source={System.IO.Path.Join(Root, "queue.db")}").Options);
 
-        public PrinterFileQueueService CreateService(bool crashAfterSave = false, AppDbContext? context = null)
+        public PrinterFileQueueService CreateService(bool crashAfterSave = false, AppDbContext? context = null, bool storageFailure = false)
         {
             AppDbContext db = context ?? Db;
             var access = new Mock<IPrinterFileAccessService>();
@@ -353,7 +376,8 @@ public sealed class PrinterFileQueueServiceTests
             JobQueueService queue = new(new EfQueueRepository(db), data.Object,
                 NullLogger<JobQueueService>.Instance, db: db,
                 sequenceAllocator: new DbOutboxSequenceAllocator(), positionAllocator: new QueuePositionAllocator(db));
-            IPrinterFileQueueAdmission writer = crashAfterSave ? new CrashAfterSave(queue) : queue;
+            IPrinterFileQueueAdmission writer = crashAfterSave || storageFailure
+                ? new CrashAfterSave(queue, storageFailure) : queue;
             return new(db, access.Object, files.Object, printers.Object,
                 new GcodeSafetyValidator(), targets.Object, writer);
         }
@@ -366,11 +390,16 @@ public sealed class PrinterFileQueueServiceTests
         }
     }
 
-    private sealed class CrashAfterSave(IPrinterFileQueueAdmission inner) : IPrinterFileQueueAdmission
+    private sealed class CrashAfterSave(IPrinterFileQueueAdmission inner, bool storageFailure = false) : IPrinterFileQueueAdmission
     {
         public async Task<JobQueuePrintJobDto?> AddAsync(PrinterFileOperation operation, QueuePrintJobDto request, CancellationToken ct)
         {
             _ = await inner.AddAsync(operation, request, ct);
+            if (storageFailure)
+            {
+                throw new DbUpdateException("simulated deterministic queue storage failure");
+            }
+
             throw new InvalidOperationException("simulated process failure before operation transaction commit");
         }
 
