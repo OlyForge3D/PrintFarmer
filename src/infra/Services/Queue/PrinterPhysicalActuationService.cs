@@ -170,6 +170,26 @@ public sealed class PrinterPhysicalActuationService(
             ClearBarrier(state);
         }
 
+        if (state.PhysicalControlCommandId.HasValue &&
+            state.PhysicalControlAttemptId is null &&
+            PrinterDirectControl.IsSetpoint(state.PhysicalControlOperation) &&
+            (state.PhysicalControlRequiresReconciliation ||
+             (state.PhysicalControlStartedAtUtc is DateTime setpointStarted &&
+              setpointStarted <= _timeProvider.GetUtcNow().UtcDateTime - PrinterDirectControl.CommandTimeout - TimeSpan.FromSeconds(45))))
+        {
+            // Issue #3495: a settled-unknown (or abandoned) idle setpoint write has no reconciler,
+            // so retaining its barrier permanently fenced the printer. A new setpoint supersedes it.
+            _logger.LogWarning(
+                "Reclaiming unresolved direct setpoint command {CommandId} ({Operation}) on printer {PrinterId}; its physical outcome remains unknown",
+                state.PhysicalControlCommandId, state.PhysicalControlOperation, printerId);
+            _ = QueueAuditWriter.Add(_db, actorSubject, AuditOperation(state.PhysicalControlOperation),
+                QueueAuditOutcomes.Unknown, nameof(Printer), resourceId: printerId, printerId: printerId,
+                reasonCode: "direct_setpoint_command_reclaimed",
+                detail: new { commandId = state.PhysicalControlCommandId },
+                timeProvider: _timeProvider);
+            ClearBarrier(state);
+        }
+
         if (state.PhysicalControlCommandId.HasValue)
         {
             await WriteDeniedAsync(
@@ -426,7 +446,7 @@ public sealed class PrinterPhysicalActuationService(
             QueueAuditOutcomes.Unknown,
             EventTypeUnknown,
             failureCode,
-            retainBarrier: lease.AttemptId.HasValue || !PrinterDirectControl.IsManualMotion(lease.Operation),
+            retainBarrier: lease.AttemptId.HasValue || !PrinterDirectControl.ReleasesBarrierOnUnknown(lease.Operation),
             ct);
 
     /// <inheritdoc />
@@ -632,7 +652,7 @@ public sealed class PrinterPhysicalActuationService(
             return;
         }
 
-        if (!lease.AttemptId.HasValue && PrinterDirectControl.IsManualMotion(lease.Operation) &&
+        if (!lease.AttemptId.HasValue && PrinterDirectControl.ReleasesBarrierOnUnknown(lease.Operation) &&
             (state.ActiveDispatchAttemptId.HasValue || state.ActiveJobId.HasValue ||
              await _db.PrintJobs.WhereOccupiesPrinter().AnyAsync(j => j.AssignedPrinterId == lease.PrinterId, ct)))
         {

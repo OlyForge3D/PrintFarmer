@@ -140,6 +140,9 @@ enum UITestBootstrap {
         }
         return image.jpegData(compressionQuality: 0.8) ?? Data()
     }()
+    /// Drops Speed/Flow readback so XCUI can assert the rendered "not reported" rows (#3484).
+    static let issue3484MissingRuntimeFactorsLaunchArgument =
+        "--uitesting-issue3484-missing-runtime-factors"
     #endif
 
     #if DEBUG
@@ -680,6 +683,10 @@ enum UITestBootstrap {
             printer.cameraStreamUrl = "http://127.0.0.1:9/webcam/?action=stream"
             printer.cameraSnapshotUrl = nil
         }
+        if ProcessInfo.processInfo.arguments.contains(issue3484MissingRuntimeFactorsLaunchArgument) {
+            printer.speedFactorPercent = nil
+            printer.flowFactorPercent = nil
+        }
         if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
             printer.state = "ready"
             printer.progress = nil
@@ -863,8 +870,8 @@ enum UITestBootstrap {
             totalLayers: printer.totalLayers,
             fanSpeedPercent: 60,
             liveZOffsetMm: 0.025,
-            speedFactorPercent: 100,
-            flowFactorPercent: 98,
+            speedFactorPercent: printer.speedFactorPercent,
+            flowFactorPercent: printer.flowFactorPercent,
             jobName: printer.jobName,
             thumbnailUrl: printer.thumbnailUrl,
             cameraStreamUrl: printer.cameraStreamUrl,

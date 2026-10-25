@@ -775,15 +775,24 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 let statusContent = app.descendants(matching: .any)
                     .matching(identifier: "printer.detail.status.content").firstMatch
                 XCTAssertTrue(statusContent.exists)
-                if statusContent.frame.maxY > page.frame.maxY {
-                    app.swipeUp()
-                    XCTAssertLessThan(readingColumn.frame.minY, beforeScroll, "The reading column must actually scroll")
-                } else {
-                    // Regular-width iPads fit the whole Status page at AX sizes,
-                    // so prove nothing is clipped instead of demanding a scroll.
-                    XCTAssertGreaterThanOrEqual(statusContent.frame.minY, page.frame.minY)
-                    XCTAssertLessThanOrEqual(statusContent.frame.maxY, page.frame.maxY)
+                XCTAssertGreaterThanOrEqual(statusContent.frame.minY, page.frame.minY, "Status content starts inside the page")
+                // Contract: the whole Status content either fits (regular-width
+                // iPads at AX sizes) or scrolling brings its end into the page.
+                // Clipped, unreachable content leaves maxY below the page and fails.
+                var swipes = 0
+                while statusContent.frame.maxY > page.frame.maxY + 1, swipes < 10 {
+                    let before = readingColumn.frame.minY
+                    page.swipeUp()
+                    swipes += 1
+                    if readingColumn.frame.minY >= before { break }
                 }
+                if swipes > 0 {
+                    XCTAssertLessThan(readingColumn.frame.minY, beforeScroll, "The reading column must actually scroll")
+                }
+                XCTAssertLessThanOrEqual(
+                    statusContent.frame.maxY, page.frame.maxY + 1,
+                    "The end of the Status content must fit or be reachable by scrolling"
+                )
             }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             if title == "Control" {
@@ -1267,9 +1276,11 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             let card = printerCard.frame
             return farmScroll.frame.contains(CGPoint(x: card.midX, y: card.midY))
         }
+        // Drag inside the list itself: window-relative offsets can land in the
+        // iPad split view's detail column instead of the Farm list.
         for _ in 0..<12 where !cardIsVisible() {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+            farmScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.1, thenDragTo: farmScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
         }
         XCTAssertTrue(cardIsVisible(), "The idle printer card centre must be on screen before tapping")
         printerCard.tap()
@@ -1472,6 +1483,67 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(unloadConfirmation.waitForExistence(timeout: 5))
         unloadConfirmation.tap()
         XCTAssertFalse(app.alerts["Action Failed"].waitForExistence(timeout: 2))
+    }
+}
+
+@MainActor
+final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    /// Runs only the Speed/Flow override; the inherited Z-offset runtime test
+    /// is already covered by the base capture classes.
+    override class var defaultTestSuite: XCTestSuite {
+        let suite = XCTestSuite(name: String(describing: self))
+        for test in super.defaultTestSuite.tests
+        where test.name.contains("testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback") {
+            suite.addTest(test)
+        }
+        return suite
+    }
+
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-issue3484-missing-runtime-factors"]
+    }
+
+    /// Supported Speed/Flow without readback render the "--" placeholder that
+    /// VoiceOver reads as "not reported", with disabled steppers.
+    override func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        tune.tap()
+
+        for (id, title) in [("speed", "Speed"), ("flow", "Flow")] {
+            let value = app.staticTexts["printer.controls.runtime.\(id)-factor.value"]
+            XCTAssertTrue(value.waitForExistence(timeout: 8), "\(title) stays visible without readback")
+            // Wait for the fixture status refresh; the row can briefly show an earlier snapshot.
+            let notReported = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", "\(title) not reported"),
+                object: value
+            )
+            XCTAssertEqual(XCTWaiter().wait(for: [notReported], timeout: 8), .completed)
+            XCTAssertEqual(value.label, "\(title) not reported")
+            // The spoken label masks the Text; the UI-test harness mirrors the
+            // rendered glyph into the accessibility value.
+            XCTAssertEqual(value.value as? String, "--", "\(title) renders the placeholder, not a number")
+            let row = XCTAttachment(screenshot: value.screenshot())
+            row.name = "\(id)-factor-value-placeholder"
+            row.lifetime = .keepAlways
+            add(row)
+            for direction in ["increase", "decrease"] {
+                let button = app.buttons["printer.controls.runtime.\(id)-factor.\(direction)"]
+                XCTAssertTrue(button.waitForExistence(timeout: 5))
+                XCTAssertFalse(button.isEnabled, "\(title) \(direction) is disabled without readback")
+            }
+        }
+        attachScreen("control-tune-speed-flow-not-reported")
     }
 }
 
