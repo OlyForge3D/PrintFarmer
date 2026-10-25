@@ -438,6 +438,12 @@ permissions without paying for a second artifact compression pass.
   through their `--filter`. The `dotnet-test-providers` job executes those
   categories on the same ordinary .NET PR runs whenever
   `want_dotnet_test=true`.
+- When the infrastructure test project is selected, the provider job separately
+  runs the catalog's two populated upgrade cases against PostgreSQL and SQL
+  Server, using newly named isolated databases. Its TRX guard requires both
+  cases to pass with no skips; the API
+  assembly's generic provider results do not substitute for this evidence.
+  The configured CI accounts need create/drop database rights for these tests.
 
 ## `dotnet-format` CI gate (#2978)
 

@@ -47,6 +47,7 @@ public sealed class FilamentFallbackGroupsResourceAuthorizationTests : IDisposab
         _db.PrinterGroups.AddRange(
             new PrinterGroup { Id = allowedGroup, Name = "Allowed" },
             new PrinterGroup { Id = deniedGroup, Name = "Denied" });
+        _db.Roles.Add(new Role { Id = roleId, Name = "Fallback operator", IsActive = true });
         _db.UserRoles.Add(new UserRole { UserId = userId, RoleId = roleId, IsActive = true });
         _db.PrinterGroupAccesses.AddRange(
             new PrinterGroupAccess { PrinterGroupId = allowedGroup, RoleId = roleId, AccessLevel = PrinterGroupAccessLevel.View },

@@ -1269,6 +1269,13 @@ jobs:
           name: Farm.Migrations.SqlServer
           path: src/migrations/Farm.Migrations.SqlServer/bin/Debug/net10.0
 
+      - name: Download catalog provider test build
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        uses: actions/download-artifact@v8
+        with:
+          name: Farm.Infrastructure.Tests
+          path: src/tests/Farm.Infrastructure.Tests/bin/Debug/net10.0
+
       # The local restore above regenerates portable `obj/` metadata for EF.
       # These project-scoped artifacts supply only the compiled outputs; no
       # consumer downloads the measured ~4 GiB full solution bin tree.
@@ -1337,6 +1344,33 @@ jobs:
             --logger "trx;LogFileName=provider-tests.trx" \
             --results-directory TestResults
 
+      - name: Run populated catalog upgrades on both production providers
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        working-directory: src
+        run: |
+          set -euo pipefail
+          assembly=tests/Farm.Infrastructure.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Infrastructure.Tests.dll
+          test -f "$assembly"
+          dotnet test "$assembly" \
+            --filter "FullyQualifiedName~PrinterFileCatalogPersistenceTests&Category=DbHeavy" \
+            --settings ./vstest.runsettings \
+            --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini \
+            --logger "trx;LogFileName=catalog-provider-tests.trx" \
+            --results-directory TestResults
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("TestResults/catalog-provider-tests.trx").getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          results = root.findall(f"{ns}Results/{ns}UnitTestResult")
+          if len(results) != 2 or any(r.get("outcome") != "Passed" for r in results):
+              raise SystemExit("Expected two passing populated catalog provider cases, with no skips")
+          for provider in ("postgres", "sqlserver"):
+              if not any(provider in r.get("testName", "").lower() for r in results):
+                  raise SystemExit(f"Missing catalog provider case: {provider}")
+          print("Catalog populated PostgreSQL and SQL Server upgrades: 2 passed, 0 skipped")
+          PY
+
       - name: Assert non-zero provider test execution
         working-directory: src
         run: |
@@ -1376,7 +1410,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dotnet-test-results-provider
-          path: src/TestResults/provider-tests.trx
+          path: |
+            src/TestResults/provider-tests.trx
+            src/TestResults/catalog-provider-tests.trx
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------

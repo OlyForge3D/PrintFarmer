@@ -38,7 +38,7 @@ public sealed class GcodeApiModule : IApiModule
         // Gcode library service: queries, retrieval, deletion of harvested gcode files.
         _ = services.AddScoped<IGcodeFilesService, GcodeFilesService>();
         _ = services.AddScoped<IPrinterFileAccessService, PrinterFileAccessService>();
-        _ = services.AddSingleton<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
+        _ = services.AddScoped<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
         _ = services.AddScoped<PrinterFileCatalogService>();
         _ = services.AddHostedService<PrinterFileIndexWorker>();
         _ = services.AddScoped<PrinterFileCopyService>();

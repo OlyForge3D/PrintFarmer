@@ -22,7 +22,7 @@ public sealed class PrinterFileIndexSettings : IAppSetting, IValidatableSetting
     public int ScanIntervalMinutes { get; set; } = 15;
 
     [JsonPropertyName("maxConcurrentIo")]
-    [SettingDisplay(Name = "Aggregate feature I/O", Description = "Deployment-wide slots shared by scans, copies and remote deletion. Each printer remains exclusive.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 16)]
+    [SettingDisplay(Name = "Concurrent printer file operations", Description = "Deployment-wide slots shared by scans, copies and remote deletion. Each printer remains exclusive.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 16)]
     public int MaxConcurrentIo { get; set; } = 2;
 
     [JsonPropertyName("scanTimeoutSeconds")]

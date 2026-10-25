@@ -11,7 +11,6 @@ namespace Farm.Modules.Gcode.Services.Gcode;
 /// <summary>Enrolls registered printers and dispatches bounded idle scans.</summary>
 public sealed class PrinterFileIndexWorker(
     IServiceScopeFactory scopes,
-    IDbContextFactory<AppDbContext> dbFactory,
     ILogger<PrinterFileIndexWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,6 +36,9 @@ public sealed class PrinterFileIndexWorker(
 
     public async Task RunBatchAsync(CancellationToken ct = default)
     {
+        await using AsyncServiceScope batchScope = scopes.CreateAsyncScope();
+        IDbContextFactory<AppDbContext> dbFactory =
+            batchScope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
         var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
         if (!settings.Enabled)

@@ -30,9 +30,21 @@ public sealed class PrinterFileCatalogTests
             await db.SaveChangesAsync();
         }
 
-        var scopes = new Mock<IServiceScopeFactory>();
-        scopes.Setup(x => x.CreateScope()).Throws(new InvalidOperationException("simulated unexpected scan failure"));
-        var worker = new PrinterFileIndexWorker(scopes.Object, fixture.Factory, NullLogger<PrinterFileIndexWorker>.Instance);
+        int attempts = 0;
+        var services = new ServiceCollection();
+        services.AddScoped(_ => fixture.Factory);
+        services.AddScoped<PrinterFileCatalogService>(_ =>
+        {
+            attempts++;
+            throw new InvalidOperationException("simulated unexpected scan failure");
+        });
+        using ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true,
+            ValidateOnBuild = true,
+        });
+        var worker = new PrinterFileIndexWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<PrinterFileIndexWorker>.Instance);
         await worker.RunBatchAsync();
         await using AppDbContext current = fixture.Factory.CreateDbContext();
         PrinterFileScanState saved = await current.PrinterFileScanStates.SingleAsync();
@@ -42,7 +54,7 @@ public sealed class PrinterFileCatalogTests
         Assert.True(saved.NextScanAtUtc > DateTime.UtcNow);
         Assert.Null(saved.LastCompleteScanAtUtc);
         await worker.RunBatchAsync();
-        scopes.Verify(x => x.CreateScope(), Times.Once);
+        Assert.Equal(1, attempts);
     }
 
     [Theory]
