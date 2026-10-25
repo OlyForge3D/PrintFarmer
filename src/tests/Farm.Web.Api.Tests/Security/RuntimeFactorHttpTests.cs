@@ -71,7 +71,7 @@ public sealed class RuntimeFactorHttpTests : IAsyncLifetime, IDisposable
     [InlineData(false, "printing")]
     public async Task SetFactor_AdapterOwnedTimeout_Returns503UnknownAndSettlesLeaseOnce(bool speed, string state)
     {
-        _factory.ConfigureOnlinePrinter(state);
+        _factory.ConfigurePrinter(state);
         using var handler = new PendingControlHandler();
         using var backendHttp = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         var backend = new MoonrakerClient(backendHttp, NullLogger<MoonrakerClient>.Instance,
@@ -107,15 +107,17 @@ public sealed class RuntimeFactorHttpTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         CommandResult result = Assert.IsType<CommandResult>(await response.Content.ReadFromJsonAsync<CommandResult>());
         Assert.False(result.Success);
-        Assert.Equal(state == "idle"
-            ? "The backend did not prove whether the physical command was applied; reconciliation is required."
-            : "The runtime override outcome is unknown; read status before retrying.", result.Message);
+        Assert.Equal("The backend did not prove whether the physical command was applied; reconciliation is required.", result.Message);
         Assert.False(requestCancellation.IsCancellationRequested);
         Assert.True(handler.CommandCancellation.IsCancellationRequested);
         Assert.Equal(1, handler.Requests);
         Assert.Equal(speed ? "M220 S125" : "M221 S125", handler.Script);
         _factory.Actuation.Verify(service => service.MarkDirectUnknownAsync(
-            It.IsAny<PrinterActuationLease>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<PrinterActuationLease>(lease =>
+                lease.PrinterId == _factory.PrinterId &&
+                lease.Operation == (speed ? "set_speed_factor" : "set_flow_factor") &&
+                lease.AttemptId.HasValue == (state == "printing")),
+            "backend_control_outcome_unknown", It.IsAny<CancellationToken>()), Times.Once);
         _factory.Actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         _factory.Printers.Verify(service => service.SetSpeedFactorAsync(
@@ -124,10 +126,15 @@ public sealed class RuntimeFactorHttpTests : IAsyncLifetime, IDisposable
             _factory.PrinterId, 125, It.IsAny<CancellationToken>()), speed ? Times.Never() : Times.Once());
         _factory.Actuation.Verify(service => service.AcquireDirectAsync(
             _factory.PrinterId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            state == "idle" ? Times.Once() : Times.Never());
+            Times.Once());
         _factory.Actuation.Verify(service => service.AcquireActiveAsync(
             _factory.PrinterId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             state == "printing" ? Times.Once() : Times.Never());
+        _factory.Actuation.Verify(service => service.RevalidateDirectAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<CancellationToken>()),
+            state == "idle" ? Times.Once() : Times.Never());
+        _factory.Printers.Verify(service => service.GetStatusDtoAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 
     private sealed class PendingControlHandler : HttpMessageHandler
@@ -164,13 +171,11 @@ public sealed class RuntimeFactorHttpTests : IAsyncLifetime, IDisposable
         private readonly Mock<IPrinterBackendCapabilitiesService> _capabilities = new();
         private readonly Mock<IQueueResourceAuthorizationService> _authorization = new();
 
-        public void ConfigureOnlinePrinter(string state)
+        public void ConfigurePrinter(string state)
         {
             Printers.Setup(service => service.FindByIdAsync(PrinterId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Printer { Id = PrinterId });
-            Printers.Setup(service => service.GetStatusDtoAsync(PrinterId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new PrinterStatusDto(PrinterId, true, state));
-            _capabilities.Setup(service => service.GetByPrinterIdAsync(PrinterId, It.IsAny<CancellationToken>()))
+            _capabilities.Setup(service => service.GetControlCapabilitiesAsync(PrinterId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PrinterBackendCapabilitiesDto(PrinterId, "fixture", PrinterBackend.Moonraker)
                 {
                     SupportsSpeedFactorControl = true,
@@ -183,8 +188,10 @@ public sealed class RuntimeFactorHttpTests : IAsyncLifetime, IDisposable
             Actuation.Setup(service => service.AcquireDirectAsync(
                     PrinterId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid id, string actor, string operation, CancellationToken _) =>
-                    new PrinterActuationResult(PrinterActuationResultCode.Accepted,
-                        new PrinterActuationLease(Guid.NewGuid(), id, null, operation, actor)));
+                    state == "printing"
+                        ? new PrinterActuationResult(PrinterActuationResultCode.PrinterBusy)
+                        : new PrinterActuationResult(PrinterActuationResultCode.Accepted,
+                            new PrinterActuationLease(Guid.NewGuid(), id, null, operation, actor)));
             Actuation.Setup(service => service.AcquireActiveAsync(
                     PrinterId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid id, string actor, string operation, CancellationToken _) =>
