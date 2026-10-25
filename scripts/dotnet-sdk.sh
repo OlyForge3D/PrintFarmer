@@ -7,7 +7,7 @@ DOTNET_SDK_PYTHON="$(resolve_python_cmd)" || return 1
 DOTNET_SDK_VERSION="$("$DOTNET_SDK_PYTHON" "$DOTNET_SDK_SCRIPT_DIR/dotnet-sdk.py" version)" || return 1
 
 ensure_dotnet_sdk() {
-    local selected user_home
+    local selected user_home install_dir="${1:-}"
     if [[ "$(id -u)" == 0 && -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
         user_home="$(sudo -H -u "$SUDO_USER" sh -c 'printf "%s" "$HOME"')" || return 1
         log_info "Ensuring approved .NET SDK $DOTNET_SDK_VERSION for $SUDO_USER"
@@ -18,12 +18,18 @@ ensure_dotnet_sdk() {
         "$DOTNET_SDK_PYTHON" "$DOTNET_SDK_SCRIPT_DIR/dotnet-sdk.py" verify
         return
     fi
-    selected="$(cd "$DOTNET_SDK_SCRIPT_DIR/.." && dotnet --version 2>/dev/null)" || selected=""
+    if [[ -n "$install_dir" ]]; then
+        export DOTNET_ROOT="$install_dir"
+        export PATH="$DOTNET_ROOT:$PATH"
+        selected="$(cd "$DOTNET_SDK_SCRIPT_DIR/.." && "$DOTNET_ROOT/dotnet" --version 2>/dev/null)" || selected=""
+    else
+        selected="$(cd "$DOTNET_SDK_SCRIPT_DIR/.." && dotnet --version 2>/dev/null)" || selected=""
+    fi
     if [[ "$selected" != "$DOTNET_SDK_VERSION" ]]; then
         log_info "Installing approved .NET SDK $DOTNET_SDK_VERSION from global.json"
         bash "$DOTNET_SDK_SCRIPT_DIR/dotnet-install.sh" \
-            --version "$DOTNET_SDK_VERSION" --install-dir "$HOME/.dotnet" || return 1
-        export DOTNET_ROOT="$HOME/.dotnet"
+            --version "$DOTNET_SDK_VERSION" --install-dir "${install_dir:-$HOME/.dotnet}" || return 1
+        export DOTNET_ROOT="${install_dir:-$HOME/.dotnet}"
         export PATH="$DOTNET_ROOT:$PATH"
     fi
     "$DOTNET_SDK_PYTHON" "$DOTNET_SDK_SCRIPT_DIR/dotnet-sdk.py" verify

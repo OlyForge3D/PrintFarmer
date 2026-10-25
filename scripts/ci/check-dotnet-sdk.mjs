@@ -3,21 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import yaml from 'js-yaml';
+import { approvedSdkVersion, validateSdk } from './dotnet-sdk-policy.mjs';
 
-export function validateSdk(globalJson) {
-  const sdk = globalJson.sdk;
-  if (!/^10\.0\.\d{3}$/.test(sdk?.version ?? '') || Number(sdk.version.split('.')[2]) < 200) {
-    throw new Error('global.json must approve a stable .NET 10 SDK >=10.0.200');
-  }
-  if (sdk.rollForward !== 'disable' || sdk.allowPrerelease !== false) {
-    throw new Error('global.json requires rollForward:disable and allowPrerelease:false');
-  }
-  return sdk.version;
-}
-
-export function approvedSdkVersion(root) {
-  return validateSdk(JSON.parse(readFileSync(join(root, 'global.json'), 'utf8')));
-}
+export { approvedSdkVersion, validateSdk };
 
 export function sdkPolicyErrors(files) {
   const errors = [];
@@ -37,21 +25,26 @@ export function sdkPolicyErrors(files) {
         continue;
       }
       const stepLists = [
-        ...Object.values(document?.jobs ?? {}).map(job => job.steps ?? []),
-        document?.runs?.steps ?? [],
+        ...Object.entries(document?.jobs ?? {}).map(([jobName, job]) => ({
+          steps: job.steps ?? [],
+          source: path === '.github/workflows/consolidated-release.yml' && jobName === 'build',
+        })),
+        { steps: document?.runs?.steps ?? [], source: false },
       ];
-      for (const steps of stepLists) {
+      for (const { steps, source } of stepLists) {
+        const globalJson = source ? 'source/global.json' : 'global.json';
+        const verification = `python3 scripts/dotnet-sdk.py verify${source ? ' --root source' : ''}`;
         for (const [index, step] of steps.entries()) {
           if (!step.uses?.startsWith('actions/setup-dotnet@')) continue;
           const inputs = step.with ?? {};
-          if (inputs['global-json-file'] !== 'global.json' ||
+          if (inputs['global-json-file'] !== globalJson ||
               'dotnet-version' in inputs || 'dotnet-quality' in inputs) {
-            errors.push(`${path}: setup-dotnet must use only global-json-file: global.json for SDK selection`);
+            errors.push(`${path}: setup-dotnet must use only global-json-file: ${globalJson} for SDK selection`);
           }
           const verify = steps[index + 1];
-          if (verify?.run !== 'python3 scripts/dotnet-sdk.py verify' ||
+          if (verify?.run !== verification ||
               verify.if !== step.if || verify['continue-on-error'] || verify['working-directory']) {
-            errors.push(`${path}: setup-dotnet must immediately verify/log the selected SDK from repo root`);
+            errors.push(`${path}: setup-dotnet must immediately verify/log the selected SDK using ${globalJson}`);
           }
         }
       }
@@ -64,18 +57,24 @@ export function sdkPolicyErrors(files) {
       /(?:\.(?:sh|ps1|conf|ya?ml|json|mjs|cjs|js)|(?:^|\/)Dockerfile(?:\.[^/]+)?)$/.test(path);
     if (!executableConfig || /(?:^|\/)(?:tests|fixtures)\//.test(path) ||
         path.endsWith('/dotnet-install.sh') || path === 'scripts/ci/check-dotnet-sdk.mjs') continue;
-    for (const [index, line] of content.split(/\r?\n/).entries()) {
+    const lines = content.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const lineNumber = index + 1;
+      let line = lines[index];
+      while (/[\\`]$/.test(line) && index + 1 < lines.length) {
+        line = `${line.slice(0, -1)} ${lines[++index].trimStart()}`;
+      }
       if (/^\s*#/.test(line)) continue;
       const imageTags = [...line.matchAll(/\b(?:mcr\.microsoft\.com\/dotnet\/)?sdk:([^\s"'|,;]+)/gi)];
       const literalImage = imageTags.some(([, tag]) =>
         !(tag === '*' && /\[\[.*==\s+sdk:\*/.test(line)) &&
         !/^(?:\$\{SDK_TAG\}|\$SDK_TAG|\$SdkTag)(?:-upgraded)?$/.test(tag));
       const literalSelector = /\b(?:DOTNET_VERSION|DOTNET_SDK_VERSION|REQ_DOTNET_VERSION|SDK_VERSION|SDK_TAG|sdkVersion|sdkTag)\s*[:=]\s*["'`]?(?:\d|latest)/i.test(line);
-      const installSelector = /dotnet-install[^\n]*--(?:channel|version)\s+["']?\d/.test(line);
+      const installSelector = /dotnet-install[^\n]*(?:--(?:channel|version)|-(?:Channel|Version))\s+["']?\d/i.test(line);
       const override = /\$env:DOTNET_VERSION|\$\{DOTNET_VERSION[:-]/.test(line);
       if (literalImage || literalSelector || installSelector || override ||
           line.includes('ghcr.io/devcontainers/features/dotnet:')) {
-        errors.push(`${path}:${index + 1}: independent SDK selector; derive it from global.json`);
+        errors.push(`${path}:${lineNumber}: independent SDK selector; derive it from global.json`);
       }
     }
     if (path.includes('Dockerfile') && /mcr\.microsoft\.com\/dotnet\/sdk:/.test(content)) {

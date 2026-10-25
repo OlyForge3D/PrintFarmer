@@ -179,6 +179,7 @@ function Show-Help {
 # Define base images to manage
 . (Join-Path $PSScriptRoot 'dotnet-sdk.ps1')
 $SdkTag = Get-ApprovedDotnetSdkTag
+$env:SDK_TAG = $SdkTag
 $script:BaseImages = @(
     # .NET SDK for build stages (required for multi-stage builds during docker compose up)
     "mcr.microsoft.com/dotnet/sdk:$SdkTag",

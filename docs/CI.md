@@ -481,8 +481,12 @@ The unconditional `ci-tools` job runs
 The gate rejects nested `global.json` selectors, independent CI/bootstrap/Docker
 SDK pins, floating installer channels, and setup steps that do not immediately
 verify and log `dotnet --version`. Negative fixtures exercise each failure.
-Every `actions/setup-dotnet` uses `global-json-file: global.json`; the following
+`actions/setup-dotnet` uses `global-json-file: global.json`; the following
 `python3 scripts/dotnet-sdk.py verify` fails if the selected version differs.
+The release build instead reads `source/global.json` and verifies with
+`--root source`, binding host restore and Docker builds to the selected application
+revision rather than the separate release-tooling checkout. Release entry points
+read the SDK policy without requiring the CI YAML checker's npm dependencies.
 
 Dependabot's `dotnet-sdk` ecosystem proposes weekly root `global.json` patch
 updates, including feature-band changes. Major/minor framework transitions remain

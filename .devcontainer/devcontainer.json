@@ -101,6 +101,10 @@
   "VITE_SIGNALR_PRINTERS_URL": "http://localhost:5245/hubs/printers",
   "VITE_SIGNALR_HARVEST_URL": "http://localhost:5245/hubs/harvest"
   },
+  "remoteEnv": {
+    "DOTNET_ROOT": "/home/node/.dotnet",
+    "PATH": "/home/node/.dotnet:${containerEnv:PATH}"
+  },
   "remoteUser": "node",
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "forwardPorts": [

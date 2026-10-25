@@ -16,7 +16,7 @@ import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
 import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
-import { approvedSdkVersion } from './check-dotnet-sdk.mjs';
+import { approvedSdkVersion } from './dotnet-sdk-policy.mjs';
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);

@@ -31,7 +31,7 @@ fi
 
 # A cached image may predate global.json; provision the exact SDK before restore.
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/dotnet-sdk.sh"
-ensure_dotnet_sdk
+ensure_dotnet_sdk "$HOME/.dotnet"
 
 if [ "${SKIP_GLOBAL_NPM:-0}" != "1" ]; then
     # Ensure latest npm and install global packages

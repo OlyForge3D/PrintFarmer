@@ -78,11 +78,17 @@ restoring/building. Release and daily-image builds pass the same derived tag.
 Build the devcontainer with `docker build -f .devcontainer/Dockerfile .`;
 its installer reads the copied `global.json`, and post-create provisioning
 repairs stale cached devcontainer SDKs before any restore.
+The devcontainer provisions the node user's SDK directory and persists its
+`DOTNET_ROOT` and `PATH` through `remoteEnv`, so new terminals and editor processes
+select the repaired SDK too.
 
 ### CI and updates
 
-All `actions/setup-dotnet` steps use `global-json-file: global.json` and immediately
-run `python3 scripts/dotnet-sdk.py verify`. The unconditional SDK consistency gate
+`actions/setup-dotnet` steps use `global-json-file: global.json` and immediately
+run `python3 scripts/dotnet-sdk.py verify`. The release build uses
+`source/global.json` and verification with `--root source`, because its selected
+application revision may differ from the release-tooling checkout.
+The unconditional SDK consistency gate
 rejects conflicting selectors. See [CI SDK controls](./CI.md#sdk-consistency-gate).
 
 Dependabot uses the supported
