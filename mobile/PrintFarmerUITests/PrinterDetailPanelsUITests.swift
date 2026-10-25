@@ -1430,6 +1430,12 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
         for (id, title) in [("speed", "Speed"), ("flow", "Flow")] {
             let value = app.staticTexts["printer.controls.runtime.\(id)-factor.value"]
             XCTAssertTrue(value.waitForExistence(timeout: 8), "\(title) stays visible without readback")
+            // Wait for the fixture status refresh; the row can briefly show an earlier snapshot.
+            let notReported = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", "\(title) not reported"),
+                object: value
+            )
+            XCTAssertEqual(XCTWaiter().wait(for: [notReported], timeout: 8), .completed)
             XCTAssertEqual(value.label, "\(title) not reported")
             // The label masks the Text, so XCUI cannot read the "--" glyph; keep
             // the rendered row as evidence beside the runtimeFactorText(nil) unit check.
