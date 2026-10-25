@@ -1238,7 +1238,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         }
     }
 
-    func test_failedOrWrongPrinterLimitsRefresh_doesNotRetainHeatingAuthority() async throws {
+    func test_failedOrWrongPrinterLimitsRefresh_reportsErrorWithoutBlockingNativeHeating() async throws {
         let printer = try idlePrinter()
         let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
@@ -1247,9 +1247,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadHardware()
         XCTAssertNotNil(vm.hardwareLoadError)
         XCTAssertNil(vm.maximum(for: .hotend))
-        await vm.setHeaterTarget(.hotend, target: 200)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
         mockService.errorToThrow = nil
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 1)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+        XCTAssertNil(vm.lastError)
+        vm.cancelPendingCommand()
         mockService.detailsToReturn = PrinterDetails(
             id: UUID(), name: printer.name, backend: printer.backend,
             capabilities: PrinterDetails.controlsLimitsFixture(for: printer).capabilities
@@ -1257,13 +1261,18 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadHardware()
         XCTAssertTrue(vm.hardwareLoadError?.contains("different printer") == true)
         XCTAssertNil(vm.maximum(for: .hotend))
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 1)
         await vm.preheat(.pla)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 2)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, PreheatPreset.pla.hotend)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, PreheatPreset.pla.bed)
+        XCTAssertNil(vm.lastError)
+        vm.cancelPendingCommand()
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
         await vm.loadHardware()
         XCTAssertNil(vm.hardwareLoadError)
         XCTAssertEqual(vm.maximum(for: .hotend), 280)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 2, "Refreshing limits never replays a command")
     }
 
     func test_coordinatePrecision_rejectsExcessOnEveryAxisAndRelativeJog() async throws {

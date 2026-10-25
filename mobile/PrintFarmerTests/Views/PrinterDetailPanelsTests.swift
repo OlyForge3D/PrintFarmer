@@ -290,7 +290,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
                        "A speed step never writes flow")
     }
 
-    func testTuneKeepsSpeedAndFlowVisibleButDisabledWhenNotPrinting() async throws {
+    func testTuneKeepsSpeedAndFlowEnabledWhileIdleAndDispatchesOnlyExplicitSpeedChange() async throws {
         let tune = try await hostedTunePanel(runtimeFactors: true)
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
         try await waitForHost("Babystep must render enabled while idle", in: tune.controller.view) {
@@ -299,11 +299,22 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for factor in RuntimeFactor.allCases {
             for direction in ["increase", "decrease"] {
                 let button = try XCTUnwrap(tune.button("printer.controls.runtime.\(factor.rawValue)-factor.\(direction)"))
-                XCTAssertFalse(button.isEnabled, "\(factor.title) \(direction) is disabled outside printing or paused")
-                XCTAssertEqual(button.accessibilityHint, "\(factor.title) can be tuned only while printing or paused.")
+                XCTAssertTrue(button.isEnabled, "\(factor.title) \(direction) remains available while idle")
+                XCTAssertEqual(button.accessibilityHint, "Sends a new \(factor.rawValue) percentage to the printer.")
             }
         }
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
+        try XCTUnwrap(tune.button("printer.controls.runtime.speed-factor.increase"))
+            .sendActions(for: .touchUpInside)
+        let path = "/api/printers/\(tune.printerId)/speed-factor"
+        try await waitForHost("Idle speed step must reach the shared factor API", in: tune.controller.view) {
+            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == path }
+        }
+        let requests = tune.api.capturedRequests.filter { $0.httpMethod == "POST" && $0.url?.path == path }
+        XCTAssertEqual(requests.count, 1)
+        let body = try XCTUnwrap(try XCTUnwrap(requests.first).capturedHTTPBody())
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: body) as? [String: Double], ["percent": 105])
+        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("/flow-factor") == true })
     }
 
     func testTuneSupportedSpeedWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
