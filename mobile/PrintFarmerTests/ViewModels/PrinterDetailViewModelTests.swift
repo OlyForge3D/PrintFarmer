@@ -27,7 +27,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
     // MARK: - Load Printer Detail
 
     func testEveryDetailPageTransitionStopsAndRestartsStatusCameraPolling() async throws {
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true
+        mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
             streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
@@ -56,6 +58,97 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.getPrinterCalledWith, TestData.testUUID)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    // MARK: - Instant render from cached printer (#3507)
+
+    func testCachedPrinterRendersBeforeCanonicalGetResolves() async throws {
+        let cached = try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Cached MK4")
+        )
+        let canonical = try TestData.decodePrinter()
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+
+        viewModel.seedCachedPrinter(cached)
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "Cached content must render with no network wait")
+        XCTAssertTrue(viewModel.isShowingCachedPrinter)
+
+        let request = Task { await viewModel.loadPrinter() }
+        await script.waitForCallCount(1)
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "The pending canonical load must not blank the page")
+        XCTAssertTrue(viewModel.isLoading)
+
+        await gate.succeed(canonical)
+        await request.value
+
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4")
+        XCTAssertFalse(viewModel.isShowingCachedPrinter)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testSeedIgnoresMismatchedPrinterAndCanonicalContent() async throws {
+        viewModel.seedCachedPrinter(try TestData.decodePrinter(from: TestJSON.printerMinimal))
+        XCTAssertNil(viewModel.printer, "A different printer's cached summary must never seed this page")
+
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        viewModel.seedCachedPrinter(try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Stale")
+        ))
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4", "Seeding must not overwrite canonical content")
+    }
+
+    func testFailedBackgroundRefreshKeepsCachedPrinter() async throws {
+        let cached = try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Cached MK4")
+        )
+        mockService.errorToThrow = NetworkError.invalidResponse
+
+        viewModel.seedCachedPrinter(cached)
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "A failed refresh must not replace shown content")
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCanonicalPrinterPublishesBeforeSlowStatusResolves() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        let statusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        let statusScript = ScriptedCanonicalResult<PrinterStatusDetail>([.gated(statusGate)])
+        mockService.statusHandler = { _ in try await statusScript.next() }
+
+        let request = Task { await viewModel.loadPrinter() }
+        await statusScript.waitForCallCount(1)
+
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4", "The printer must publish as soon as get returns")
+        XCTAssertTrue(viewModel.isLoading, "Remaining canonical data is still loading in the background")
+
+        await statusGate.fail(.forced("offline backend timeout"))
+        await request.value
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4")
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testOfflinePrinterSkipsCameraMetadataAndSnapshotFetches() async throws {
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID2)
+        vm.configure(printerService: mockService)
+        let offline = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        XCTAssertFalse(offline.isOnline)
+        mockService.printerToReturn = offline
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
+            streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+
+        await vm.loadPrinter()
+
+        XCTAssertEqual(vm.printer?.name, "Ender 3")
+        XCTAssertNil(mockService.getCameraUrlCalledWith, "Offline printers must not wait on camera metadata")
+        XCTAssertEqual(mockService.getSnapshotCallCount, 0, "Offline printers must not fetch a snapshot")
+        XCTAssertFalse(vm.isSnapshotPollingActive, "Offline printers must not poll snapshots")
+        vm.stopSnapshotPolling()
     }
 
     func testCanonicalUnknownStatusStateReplacesStaleReadyStateAndFailsClosed() async throws {
@@ -377,7 +470,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
             .gated(oldPollGate)
         ])
         mockService.snapshotHandler = { _ in try await oldSnapshotScript.next() }
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var mockServicePrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockServicePrinter.isOnline = true  // Snapshot fetches are skipped while offline (#3507).
+        mockService.printerToReturn = mockServicePrinter
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: nil,
@@ -394,7 +489,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         viewModel.setSnapshotPollingAllowed(false)
         viewModel.isViewActive = false
         let newService = MockPrinterService()
-        newService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var newServicePrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        newServicePrinter.isOnline = true  // Snapshot fetches are skipped while offline (#3507).
+        newService.printerToReturn = newServicePrinter
         newService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: nil,
@@ -461,7 +558,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     // MARK: - Camera Branching
 
     func testSnapshotOnlyCameraStartsPollingSnapshots() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -490,7 +588,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testSnapshotOnlyDirectUrlUsesDirectSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -507,7 +606,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testStreamAndSnapshotSnapmakerStrategyWithoutUrlPollsSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -545,7 +645,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testUnsupportedStreamWithSnapshotUrlUsesDirectSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: "rtsp://printer.local/live",
@@ -562,7 +663,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testUnsupportedStreamCameraUsesUnsupportedPreviewMode() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: "rtsp://printer.local/live",
@@ -602,7 +704,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testRelativeSnapshotOnlyProxyRouteLoadsSnapshotThroughAuthenticatedService() async throws {
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
+        mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: snapshotProxyPath,
@@ -2069,7 +2173,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
         await callbackQueue.waitForCount(1)
         await callbackQueue.runNext()
-        XCTAssertNil(vm.printer, "The initial canonical response is still in flight.")
+        XCTAssertNotNil(vm.printer, "The canonical printer publishes before its status fan-out resolves (#3507).")
         XCTAssertEqual(vm.statusDetail?.sensors, liveSensors)
 
         await staleStatusGate.succeed(

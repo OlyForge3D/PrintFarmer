@@ -28,6 +28,15 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Printer detail no longer blocks on offline printers** — Opening a printer
+  from the farm list renders its last-known details immediately instead of a
+  multi-second "Loading printer…" spinner. The canonical printer, status and
+  job details then fill in progressively in the background, and a failed
+  background refresh keeps the shown content. Camera metadata and snapshot
+  fetches are skipped while the printer is offline and resume once it reports
+  online. The full-screen spinner appears only when no cached printer is
+  available (#3507).
+
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm
   snapshot writes now use the same launch-scoped logical order as the feature

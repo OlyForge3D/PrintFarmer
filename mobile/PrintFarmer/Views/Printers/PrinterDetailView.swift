@@ -400,6 +400,10 @@ struct PrinterDetailView: View {
 
     private func configureDetail() async {
         let generation = services.activeServerGeneration
+        // #3507: render the farm list's last-known printer immediately.
+        if let cached = services.printerSummaryCache.printer(id: printerId, generation: generation) {
+            viewModel.seedCachedPrinter(cached)
+        }
         await services.awaitActiveServerSettled()
         guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
 
@@ -421,7 +425,7 @@ struct PrinterDetailView: View {
             maintenanceService: services.maintenanceService
         )
         await viewModel.loadPrinter()
-        if let printer = viewModel.printer {
+        if let printer = viewModel.printer, !viewModel.isShowingCachedPrinter {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
         await viewModel.loadOperatorSections()

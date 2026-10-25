@@ -20,6 +20,12 @@ struct DashboardView: View {
                 await viewModel.hydrateFromCache()
                 await viewModel.loadDashboard()
             }
+            .onChange(of: viewModel.farmDataRevision, initial: true) {
+                services.printerSummaryCache.replace(
+                    with: viewModel.printers,
+                    generation: services.activeServerGeneration
+                )
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 retryTask = Task { await viewModel.loadDashboard() }
             }
