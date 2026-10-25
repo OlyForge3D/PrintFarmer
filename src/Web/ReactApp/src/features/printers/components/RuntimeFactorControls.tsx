@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useIsMutating, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Button, Input } from '@/common/components/ui';
+import { Input } from '@/common/components/ui';
 import { getAuthEpoch } from '@/common/auth/authEpoch';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
@@ -16,7 +16,10 @@ interface RuntimeFactorControlsProps {
   backendCapabilities?: PrinterBackendCapabilitiesDto;
 }
 
-const allowedStates = new Set(['idle', 'ready', 'standby', 'complete', 'completed', 'cancelled', 'printing', 'paused']);
+const MIN_PERCENT = 1;
+const MAX_PERCENT = 200;
+const PERCENT_STEP = 0.01;
+const SLIDER_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 const inFlight = new WeakMap<QueryClient, Set<string>>();
 
 export function RuntimeFactorControls({ printer, backendCapabilities }: RuntimeFactorControlsProps) {
@@ -35,17 +38,15 @@ function RuntimeFactors({ printer, speed, flow }: { printer: Printer; speed: boo
     : printer.isEnabled === false ? 'Printer is disabled'
     : printer.inMaintenance ? 'Printer is in maintenance'
     : !telemetry.status ? 'Waiting for current printer status'
-    : !allowedStates.has((printer.state ?? '').toLowerCase()) || !allowedStates.has((telemetry.status.state ?? '').toLowerCase())
-      ? 'Printer state does not allow runtime overrides'
+    : printer.state?.toLowerCase() !== 'printing' || telemetry.status.state?.toLowerCase() !== 'printing'
+      ? 'Tuning is available while printing'
     : '';
-  return <section aria-label="Runtime overrides" className="my-2 space-y-2 border-t border-pf-border pt-2">
-    <h4 className="text-xs font-medium text-pf-text-secondary">Runtime overrides</h4>
-    <p className="text-xs text-pf-text-secondary">Observed values are live readback, not command acknowledgements. 100% is normal.</p>
+  return <section aria-label="Tuning" className="my-2 space-y-2 border-t border-pf-border pt-2">
+    <h4 className="text-xs font-medium text-pf-text-secondary">Tuning</h4>
     {speed && <RuntimeFactorRow key={`speed-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="speed"
       observed={telemetry.speedFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
     {flow && <RuntimeFactorRow key={`flow-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="flow"
       observed={telemetry.flowFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
-    {blocked && <p className="text-xs text-pf-text-secondary">{blocked}. Submit access and queue ownership are also checked by the server.</p>}
     {telemetry.error && <p role="alert" className="text-xs text-pf-error">Live readback unavailable: {telemetry.error}</p>}
   </section>;
 }
@@ -55,11 +56,13 @@ function RuntimeFactorRow({ printerId, kind, observed, blocked, refresh }: {
 }) {
   const label = kind === 'speed' ? 'Speed' : 'Flow';
   const id = useId();
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState<number | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
   const mounted = useRef(true);
   const busy = useRef(false);
+  const dirty = useRef(false);
+  const pointer = useRef(false);
   const queryClient = useQueryClient();
   const mutationKey = ['printer-runtime-factor', printerId];
   const pending = useIsMutating({ mutationKey }) > 0;
@@ -85,11 +88,19 @@ function RuntimeFactorRow({ printerId, kind, observed, blocked, refresh }: {
       } finally { active.delete(printerId); }
     },
   });
-  const send = async () => {
+  const discard = () => {
+    dirty.current = false;
+    pointer.current = false;
+    setDraft(null);
+    setError(false);
+    setMessage('');
+  };
+  const send = async (percent: number) => {
+    dirty.current = false;
+    pointer.current = false;
     if (blocked || pending || busy.current) return;
-    const percent = Number(draft);
-    if (!draft.trim() || !Number.isFinite(percent) || percent < 1 || percent > 200 ||
-      !/^\d+(?:\.\d{1,2})?$/.test(draft.trim())) {
+    if (!Number.isFinite(percent) || percent < MIN_PERCENT || percent > MAX_PERCENT ||
+      Math.abs(percent * 100 - Math.round(percent * 100)) > 1e-6) {
       setError(true);
       setMessage('Enter 1 to 200%, with at most two decimal places. Nothing sent.');
       return;
@@ -101,35 +112,63 @@ function RuntimeFactorRow({ printerId, kind, observed, blocked, refresh }: {
     try {
       await mutation.mutateAsync(percent);
       if (!mounted.current || authEpoch !== getAuthEpoch()) return;
-      setDraft('');
-      setMessage(`Acknowledged ${percent}%. Awaiting live readback; observed value is not inferred.`);
+      setDraft(null);
+      setMessage(`Acknowledged ${percent}%. Awaiting live readback.`);
       void queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       refresh();
     } catch (cause) {
       if (!mounted.current || authEpoch !== getAuthEpoch()) return;
       const detail = mutationErrorMessage(cause, `Failed to set ${label.toLowerCase()}`);
       setError(true);
-      setMessage(`${detail}. Outcome may be unknown. Check live readback and the printer before manually applying again. Nothing is retried automatically.`);
+      setMessage(`${detail}. Outcome may be unknown. Check live readback and the printer before adjusting again. Nothing is retried automatically.`);
       toast.error(detail);
       refresh();
     } finally { busy.current = false; }
   };
+  const value = Math.max(MIN_PERCENT, Math.min(MAX_PERCENT, draft ?? observed ?? MIN_PERCENT));
   return <div className="space-y-1">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <label htmlFor={id} className="text-xs font-medium text-pf-text-primary">{label} %</label>
-      <output aria-label={`Observed ${label.toLowerCase()}`} aria-live="polite" className="text-xs text-pf-text-secondary">
-        Observed: {observed === null ? 'Unknown' : `${observed}%`}
-      </output>
+      <div className="flex items-center gap-2">
+        {draft !== null && <output aria-label={`Selected ${label.toLowerCase()}`} className="text-xs text-pf-text-primary">{draft}%</output>}
+        <output aria-label={`Observed ${label.toLowerCase()}`} aria-live="polite" className="text-xs text-pf-text-secondary">
+          Observed: {observed === null ? 'Unknown' : `${observed}%`}
+        </output>
+      </div>
     </div>
-    <form className="flex items-center gap-2" noValidate onSubmit={event => { event.preventDefault(); void send(); }}>
-      <Input id={id} type="number" min={1} max={200} step={0.01} value={draft}
-        placeholder="New %" disabled={!!blocked || pending} aria-invalid={error || undefined}
-        aria-describedby={`${id}-help ${id}-status`} className="min-w-0 flex-1 text-xs!"
-        onChange={event => { setDraft(event.target.value); setError(false); setMessage(''); }} />
-      <Button type="submit" size="sm" variant="secondary" disabled={!!blocked || pending}
-        aria-label={`Apply ${label.toLowerCase()} percentage`}>Apply</Button>
-    </form>
-    <p id={`${id}-help`} className="text-xs text-pf-text-secondary">New value: 1-200%, up to 2 decimals. Apply sends only {label.toLowerCase()}.</p>
+    <Input id={id} type="range" min={MIN_PERCENT} max={MAX_PERCENT} step={PERCENT_STEP} value={value}
+      disabled={!!blocked || pending} title={blocked || undefined} aria-invalid={error || undefined}
+      aria-valuetext={draft !== null ? `${draft}%` : observed === null ? 'Unknown' : `${observed}% observed`}
+      aria-describedby={`${id}-status`}
+      className="h-8! min-h-8! w-full min-w-0 cursor-pointer accent-pf-accent border-0! bg-transparent! p-0!"
+      onPointerDown={event => {
+        pointer.current = true;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }}
+      onChange={event => {
+        dirty.current = true;
+        setDraft(Number(event.target.value));
+        setError(false);
+        setMessage('');
+      }}
+      onPointerUp={event => {
+        if (pointer.current && dirty.current) void send(Number(event.currentTarget.value));
+        pointer.current = false;
+      }}
+      onPointerCancel={discard}
+      onLostPointerCapture={() => { if (pointer.current) discard(); }}
+      onKeyUp={event => {
+        if (SLIDER_KEYS.has(event.key) && dirty.current) void send(Number(event.currentTarget.value));
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); discard(); }
+      }}
+      onBlur={event => {
+        if (dirty.current && !pointer.current) void send(Number(event.currentTarget.value));
+      }} />
+    <div aria-hidden="true" className="flex justify-between text-xs text-pf-text-secondary">
+      <span>{MIN_PERCENT}%</span><span>{MAX_PERCENT}%</span>
+    </div>
     <p id={`${id}-status`} role={error ? 'alert' : 'status'} className={`empty:hidden text-xs ${error ? 'text-pf-error' : 'text-pf-text-secondary'}`}>{message}</p>
   </div>;
 }

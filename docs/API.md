@@ -236,20 +236,25 @@ factor observations or invalidations.
 Changes from Mainsail, macros, tool changes and other operators use the same authoritative
 pipeline; command submission itself never fabricates telemetry.
 
-### Web runtime controls
+### Web tuning controls
 
 The detailed printer card and printer sidebar expose independent **Speed %**
-and **Flow %** controls only when their respective operation capability is
+and **Flow %** sliders in **Tuning** only when their respective operation capability is
 explicitly true for that printer. Older servers and unsupported backends hide
 them. Queue.Start permission, a live connection, enabled/non-maintenance status
-and a known allowed printer state are required. The server remains authoritative
+and **Printing** in both the printer and fresh live status are required. Idle,
+paused and terminal states disable tuning. This web restriction does not change
+the API's state policy. The server remains authoritative
 for printer Submit access and active-print queue ownership/fences.
 
-Each row separates **Observed** readback from the **New value** input.
+Each row separates **Observed** readback from the selected slider value.
 Unknown or explicitly cleared telemetry displays **Unknown**, never an assumed
 100%; external observations outside the write range are shown unchanged.
-Type a percentage and choose **Apply** (or press Enter); editing or leaving an
-input does not send a command. Speed and flow are separate operations.
+Sliders show their 1-200% endpoints and accept 0.01% increments. Releasing a mouse,
+touch or pen drag sends its final value once; intermediate movements do not send.
+Keyboard adjustments commit on key release, or blur for an unfinished keyboard
+edit. Escape or pointer cancellation discards the edit. There are no Apply
+buttons. Speed and flow remain separate operations.
 An acknowledgement does not change the observed value. Reconnects and
 printer/server/identity changes discard old observations and drafts until fresh
 status arrives. Live external changes update the observation, not an unsent edit.
@@ -258,7 +263,7 @@ Writes are not automatically retried or queued for a later connection.
 An HTTP `401` never replays a runtime override, including after successful
 token renewal or a switch to another signed-in operator. Authentication may
 renew for future requests; the failed command still requires a fresh,
-deliberate **Apply** after reviewing the printer and current value.
+deliberate slider adjustment after reviewing the printer and current value.
 For failures, especially `503`/timeouts with an unknown physical outcome, inspect
 the live readback and printer before deliberately applying another value.
 These overrides affect the current runtime, not a saved slicer profile; reverting
@@ -287,9 +292,9 @@ reported, never inferred from heater state. Mapped primary heater readings appea
 once; extra nozzles and independent temperatures are retained. **Miscellaneous**
 contains only outputs with a writable descriptor; it is hidden when none exist.
 Read-only nonthermal sensors are hidden, while environmental measurements stay
-with their thermal sensor row under **Temperatures**. Filament sensors appear in
-**Miscellaneous** only when they advertise an `Enabled` switch. This changes
-runout monitoring, not filament loading or the detected-filament reading.
+with their thermal sensor row under **Temperatures**. Filament sensors are hidden
+from the web UI, including writable monitoring switches; their telemetry and
+targeted API contract are unchanged.
 
 Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
 Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and
@@ -297,8 +302,9 @@ disabled values do not send commands. Errors roll back optimistic values and sho
 an explicit notification. Sensor writes require queue/start permission,
 sensor-control capability, an enabled online printer and an available sensor with
 a writable descriptor. `Enabled` writes use JSON booleans, not numeric 0/1;
-other writable quantities use numbers. Empty optional sections are hidden; a telemetry-capable
-printer reporting no sensors shows “No sensors reported.”
+other writable quantities use numbers. Empty optional sections are hidden,
+including when a telemetry-capable printer reports no sensors; no placeholder
+message is rendered.
 
 ```json
 {

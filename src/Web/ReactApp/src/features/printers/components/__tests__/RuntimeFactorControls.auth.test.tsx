@@ -60,11 +60,11 @@ function mount() {
   const view = render(tree());
   return { ...view, updateIdentity: () => { bumpAuthEpoch(); view.rerender(tree()); } };
 }
-const input = (kind: 'speed' | 'flow') => screen.getByRole('spinbutton', { name: kind === 'speed' ? 'Speed %' : 'Flow %' });
-const applyButton = (kind: 'speed' | 'flow') => screen.getByRole('button', { name: `Apply ${kind} percentage` });
+const input = (kind: 'speed' | 'flow') => screen.getByRole('slider', { name: kind === 'speed' ? 'Speed %' : 'Flow %' });
 function apply(kind: 'speed' | 'flow', percent: string) {
+  fireEvent.pointerDown(input(kind));
   fireEvent.change(input(kind), { target: { value: percent } });
-  fireEvent.click(applyButton(kind));
+  fireEvent.pointerUp(input(kind));
 }
 function expectNoFabricatedReadback() {
   expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
@@ -110,9 +110,9 @@ afterEach(() => {
 });
 
 describe.each(['speed', 'flow'] as const)('%s physical command authentication boundary', kind => {
-  it('never replays A intent under B after a delayed 401; only a fresh B Apply may dispatch', async () => {
+  it('never replays A intent under B after a delayed 401; only a fresh B slider gesture may dispatch', async () => {
     const view = mount();
-    await waitFor(() => expect(applyButton(kind)).toBeEnabled());
+    await waitFor(() => expect(input(kind)).toBeEnabled());
     apply(kind, '140');
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]).toMatchObject({
@@ -123,7 +123,7 @@ describe.each(['speed', 'flow'] as const)('%s physical command authentication bo
     localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'operator-b-refresh');
     view.updateIdentity();
     await act(async () => rejectCommand(failure(requests[0].config, 401, 'Authentication required')));
-    await waitFor(() => expect(applyButton(kind)).toBeEnabled());
+    await waitFor(() => expect(input(kind)).toBeEnabled());
     expect(requests).toHaveLength(1);
     expect(refreshCount).toBe(0);
     expect(expired).not.toHaveBeenCalled();
@@ -140,10 +140,10 @@ describe.each(['speed', 'flow'] as const)('%s physical command authentication bo
     expectNoFabricatedReadback();
   });
 
-  it('renews the same identity but rejects the old physical intent until a fresh manual Apply', async () => {
+  it('renews the same identity but rejects the old physical intent until a fresh slider gesture', async () => {
     localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'operator-a-refresh');
     mount();
-    await waitFor(() => expect(applyButton(kind)).toBeEnabled());
+    await waitFor(() => expect(input(kind)).toBeEnabled());
     apply(kind, '140');
     await waitFor(() => expect(requests).toHaveLength(1));
     await act(async () => rejectCommand(failure(requests[0].config, 401, 'Authentication required')));
@@ -167,7 +167,7 @@ describe.each(['speed', 'flow'] as const)('%s physical command authentication bo
     localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, 'operator-a-refresh');
     refreshFails = true;
     mount();
-    await waitFor(() => expect(applyButton(kind)).toBeEnabled());
+    await waitFor(() => expect(input(kind)).toBeEnabled());
     apply(kind, '140');
     await waitFor(() => expect(requests).toHaveLength(1));
     await act(async () => rejectCommand(failure(requests[0].config, 401, 'Sign in again')));
@@ -183,7 +183,7 @@ describe.each(['speed', 'flow'] as const)('%s physical command authentication bo
 
   it.each(['503', 'timeout'] as const)('does not replay %s at the real transport, and permits deliberate manual recovery', async outcome => {
     mount();
-    await waitFor(() => expect(applyButton(kind)).toBeEnabled());
+    await waitFor(() => expect(input(kind)).toBeEnabled());
     apply(kind, '140');
     await waitFor(() => expect(requests).toHaveLength(1));
     const error = outcome === '503'
