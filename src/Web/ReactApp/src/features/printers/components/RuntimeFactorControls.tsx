@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useIsMutating, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Input } from '@/common/components/ui';
+import { CollapsibleSection, Input } from '@/common/components/ui';
 import { getAuthEpoch } from '@/common/auth/authEpoch';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
@@ -41,14 +41,17 @@ function RuntimeFactors({ printer, speed, flow }: { printer: Printer; speed: boo
     : printer.state?.toLowerCase() !== 'printing' || telemetry.status.state?.toLowerCase() !== 'printing'
       ? 'Tuning is available while printing'
     : '';
-  return <section aria-label="Tuning" className="my-2 space-y-2 border-t border-pf-border pt-2">
-    <h4 className="text-xs font-medium text-pf-text-secondary">Tuning</h4>
-    {speed && <RuntimeFactorRow key={`speed-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="speed"
-      observed={telemetry.speedFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
-    {flow && <RuntimeFactorRow key={`flow-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="flow"
-      observed={telemetry.flowFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
-    {telemetry.error && <p role="alert" className="text-xs text-pf-error">Live readback unavailable: {telemetry.error}</p>}
-  </section>;
+  return <div className="my-2">
+    <CollapsibleSection title="Tuning" keepMounted>
+      <div className="space-y-2">
+        {speed && <RuntimeFactorRow key={`speed-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="speed"
+          observed={telemetry.speedFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
+        {flow && <RuntimeFactorRow key={`flow-${telemetry.epoch}-${blocked}`} printerId={printer.id} kind="flow"
+          observed={telemetry.flowFactorPercent} blocked={blocked} refresh={telemetry.refresh} />}
+        {telemetry.error && <p role="alert" className="text-xs text-pf-error">Live readback unavailable: {telemetry.error}</p>}
+      </div>
+    </CollapsibleSection>
+  </div>;
 }
 
 function RuntimeFactorRow({ printerId, kind, observed, blocked, refresh }: {

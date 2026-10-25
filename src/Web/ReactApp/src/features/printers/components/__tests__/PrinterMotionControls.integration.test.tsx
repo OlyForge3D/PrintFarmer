@@ -1,6 +1,7 @@
 let allowed = true;
 vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => allowed }) }));
 import type { ReactElement } from "react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { USER_SETTINGS_KEY } from "@/features/settings/hooks/useUserSettings";
 import {
@@ -14,8 +15,11 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PrinterBackend,
+  MmuGateStatus,
   type Printer,
   type PrinterBackendCapabilitiesDto,
+  type MmuStatus,
+  type ToolheadDto,
 } from "@/types/api";
 import { DetailedPrinterCard } from "@/features/printers/components/DetailedPrinterCard";
 import { PrinterDetailsSidebar } from "@/features/printers/components/PrinterDetailsSidebar";
@@ -25,6 +29,8 @@ const mockSpeedFactor = vi.fn();
 const mockFlowFactor = vi.fn();
 const mockToastError = vi.fn();
 let mockBlocked = false;
+let mockSpoolmanReady = false;
+let mockToolheads: ToolheadDto[] | undefined;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: () => ({
     execute: mockExecute,
@@ -42,7 +48,7 @@ vi.mock("@/features/printers/hooks/use-runtime-factors", () => ({
 }));
 vi.mock("@/common/hooks/useApi", () => ({
   usePrinter: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
-  usePrinterDetails: () => ({ data: undefined, isLoading: false }),
+  usePrinterDetails: () => ({ data: mockToolheads ? { toolheads: mockToolheads } : undefined, isLoading: false }),
   usePrintJobObjects: () => ({
     data: undefined,
     isLoading: false,
@@ -55,7 +61,7 @@ vi.mock("@/common/hooks/useApi", () => ({
 }));
 
 vi.mock("@/common/hooks/useSpoolmanConfigured", () => ({
-  useSpoolmanConfigured: () => ({ ready: false }),
+  useSpoolmanConfigured: () => ({ ready: mockSpoolmanReady }),
 }));
 
 vi.mock("@/services/maintenanceService", () => ({
@@ -101,6 +107,9 @@ vi.mock("@/features/printers/components/SpoolPickerModal", () => ({
 }));
 vi.mock("@/features/printers/components/MaterialLoadout", () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
+}));
+vi.mock("@/features/printers/components/MmuControlBox", () => ({
+  MmuControlBox: () => <div data-testid="mmu-controls" />,
 }));
 vi.mock("@/features/printers/components/TemperatureControlSection", () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,
@@ -170,7 +179,7 @@ const capabilities = {
   supportsObjectExclusion: false,
 } as PrinterBackendCapabilitiesDto;
 type Surface = "detail" | "sidebar";
-function Controls({ surface, overrides = {}, movement = true, factors = false }: { surface: Surface; overrides?: Partial<Printer>; movement?: boolean; factors?: boolean }) {
+function Controls({ surface, overrides = {}, movement = true, factors = false }: { surface: Surface; overrides?: Partial<Printer & { mmuStatus: MmuStatus }>; movement?: boolean; factors?: boolean }) {
   const current = { ...printer, ...overrides };
   const support = { ...capabilities, supportsMovement: movement, supportsSpeedFactorControl: factors, supportsFlowFactorControl: factors };
   return surface === "detail" ? (
@@ -218,6 +227,8 @@ beforeEach(() => {
   allowed = true;
   accountMode = "Guided";
   mockBlocked = false;
+  mockSpoolmanReady = false;
+  mockToolheads = undefined;
   mockExecute.mockReset();
   mockSpeedFactor.mockReset().mockResolvedValue({ success: true });
   mockFlowFactor.mockReset().mockResolvedValue({ success: true });
@@ -231,7 +242,7 @@ describe.each<Surface>(["detail", "sidebar"])(
       render(<Controls surface={surface} factors overrides={{ state: 'Printing' }} />);
       expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
       expect(screen.getByLabelText('Observed flow')).toHaveTextContent('87.5%');
-      const tuning = within(screen.getByRole('region', { name: 'Tuning' }));
+      const tuning = within(screen.getByText('Tuning').closest('section')!);
       expect(tuning.queryByRole('spinbutton')).not.toBeInTheDocument();
       expect(tuning.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument();
       const slider = tuning.getByRole('slider', { name: 'Speed %' });
@@ -243,6 +254,90 @@ describe.each<Surface>(["detail", "sidebar"])(
       await waitFor(() => expect(mockSpeedFactor).toHaveBeenCalledExactlyOnceWith(printer.id, 130.25));
       expect(mockFlowFactor).not.toHaveBeenCalled();
       expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
+    });
+
+    it('collapses and reopens Tuning without resetting or replaying a pending command', async () => {
+      const user = userEvent.setup();
+      let finish!: (result: { success: boolean }) => void;
+      mockSpeedFactor.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+      render(<Controls surface={surface} factors overrides={{ state: 'Printing' }} />);
+      const speed = screen.getByRole('slider', { name: 'Speed %' });
+      fireEvent.pointerDown(speed);
+      fireEvent.change(speed, { target: { value: '131.5' } });
+      fireEvent.pointerUp(speed);
+      await waitFor(() => expect(mockSpeedFactor).toHaveBeenCalledExactlyOnceWith(printer.id, 131.5));
+      const toggle = screen.getByRole('button', { name: /Collapse Tuning/ });
+      await user.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(speed).toBeInTheDocument();
+      expect(speed).not.toBeVisible();
+      expect(screen.queryByRole('slider', { name: 'Speed %' })).not.toBeInTheDocument();
+      await user.keyboard('{Enter}');
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('slider', { name: 'Speed %' })).toBe(speed);
+      expect(speed).toBeDisabled();
+      expect(screen.getByText('Sending...')).toBeVisible();
+      await user.keyboard(' ');
+      expect(speed).not.toBeVisible();
+      await act(async () => finish({ success: true }));
+      await user.keyboard('{Enter}');
+      expect(speed).toBeVisible();
+      expect(speed).toBeEnabled();
+      expect(screen.getByText('Acknowledged 131.5%. Awaiting live readback.')).toBeVisible();
+      expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
+      expect(mockSpeedFactor).toHaveBeenCalledTimes(1);
+      expect(mockFlowFactor).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it.each(['spool', 'configured-empty', 'scalar-spool', 'toolheads', 'mmu', 'empty-mmu'] as const)(
+      'uses a functional Materials disclosure for %s without remounting its content',
+      async variant => {
+        const user = userEvent.setup();
+        mockSpoolmanReady = variant === 'configured-empty' || variant === 'empty-mmu';
+        if (variant === 'toolheads') mockToolheads = [
+          { id: 't0', index: 0, isPrimary: true, toolheadType: 'Physical' },
+          { id: 't1', index: 1, isPrimary: false, toolheadType: 'Physical' },
+        ];
+        const mmu: MmuStatus = {
+          enabled: true, isHomed: true, activeTool: 0, activeGate: 0, numGates: 4,
+          hasBypass: false, endlessSpool: false, clogDetection: false, mmuType: 'HappyHare',
+          gates: variant === 'empty-mmu' ? [] : [{ index: 0, status: MmuGateStatus.Available, spoolId: -1, material: 'PLA' }],
+        };
+        const overrides = variant === 'mmu' || variant === 'empty-mmu' ? { mmuStatus: mmu }
+          : variant === 'spool' ? { spoolInfo: { hasActiveSpool: true, activeSpoolId: 7, material: 'PLA' } }
+          : variant === 'scalar-spool' ? { currentSpoolId: 7 } : {};
+        render(<Controls surface={surface} factors overrides={{ ...overrides, state: 'Printing' }} />);
+        const toggle = screen.getByRole('button', { name: /Collapse Materials/ });
+        const panel = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+        const body = panel.firstElementChild;
+        expect(panel).toBeVisible();
+        expect(screen.queryByText('Spool', { exact: true })).not.toBeInTheDocument();
+        if (variant.includes('mmu')) {
+          expect(screen.getByTestId('mmu-controls')).toBeVisible();
+          expect(screen.queryByTestId('material-loadout')).not.toBeInTheDocument();
+        } else if (variant === 'toolheads') expect(screen.getByTestId('material-loadout')).toBeVisible();
+        await user.click(toggle);
+        expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        expect(panel).not.toBeVisible();
+        expect(panel).toBeInTheDocument();
+        expect(screen.getByRole('slider', { name: 'Speed %' })).toBeVisible();
+        await user.keyboard('{Enter}');
+        expect(panel).toBeVisible();
+        await user.keyboard(' ');
+        expect(panel).not.toBeVisible();
+        await user.keyboard('{Enter}');
+        expect(panel.firstElementChild).toBe(body);
+        expect(panel).toBeVisible();
+        expect(mockSpeedFactor).not.toHaveBeenCalled();
+        expect(mockFlowFactor).not.toHaveBeenCalled();
+        expect(mockExecute).not.toHaveBeenCalled();
+      },
+    );
+
+    it('omits Materials when there is no material content or Spoolman integration', () => {
+      render(<Controls surface={surface} />);
+      expect(screen.queryByText('Materials', { exact: true })).not.toBeInTheDocument();
     });
 
     it('keeps runtime controls hidden without operation capability on this surface', () => {

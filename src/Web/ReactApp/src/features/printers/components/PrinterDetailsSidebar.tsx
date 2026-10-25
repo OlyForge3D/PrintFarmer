@@ -222,7 +222,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isControlExpanded, setIsControlExpanded] = useState(true);
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
 
-  const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
@@ -1233,7 +1232,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}
         {showMmuControlBox && displayPrinter?.mmuStatus && (
-          <CollapsibleSection title="Materials" expanded={true}>
+          <CollapsibleSection title="Materials" keepMounted>
             <MmuControlBox
               printerId={printer.id}
               mmuStatus={displayPrinter.mmuStatus}
@@ -1254,7 +1253,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             coverage rings and the assignment drawer. Suppressed when the MMU
             control box already shows the slots so there is exactly one view. */}
         {materialLoadout && !showMmuControlBox && (
-          <CollapsibleSection title="Materials" expanded={true}>
+          <CollapsibleSection title="Materials" keepMounted>
             <MaterialLoadout
               printerId={printer.id}
               mmuStatus={displayPrinter?.mmuStatus}
@@ -1275,13 +1274,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Single-spool printers keep the classic spool card; multi-slot printers are
             fully described by the materials module above. */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          if (materialLoadout) return null;
+          if (materialLoadout || showMmuControlBox) return null;
 
           return (
             <CollapsibleSection
-              title="Spool"
-              expanded={isSpoolExpanded}
-              onToggle={setIsSpoolExpanded}
+              title="Materials"
+              keepMounted
               headerActions={
                 <div className="flex items-center gap-0.5">
                   {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (

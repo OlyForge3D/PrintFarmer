@@ -38,6 +38,10 @@
 
 ### Fixes
 
+- Align the detailed printer card and sidebar with working **Materials** and
+  **Tuning** disclosures. Group filament slots and single-spool details under
+  Materials and retain pending control state while collapsed (#3489).
+
 - Replace web speed/flow inputs with print-only **Tuning** sliders that send once
   when an adjustment ends, without Apply buttons or redundant help text. Hide
   all filament sensor rows and empty sensor messages while retaining live

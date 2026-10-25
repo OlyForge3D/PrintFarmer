@@ -239,7 +239,7 @@ pipeline; command submission itself never fabricates telemetry.
 ### Web tuning controls
 
 The detailed printer card and printer sidebar expose independent **Speed %**
-and **Flow %** sliders in **Tuning** only when their respective operation capability is
+and **Flow %** sliders in a collapsible **Tuning** group only when their respective operation capability is
 explicitly true for that printer. Older servers and unsupported backends hide
 them. Queue.Start permission, a live connection, enabled/non-maintenance status
 and **Printing** in both the printer and fresh live status are required. Idle,
