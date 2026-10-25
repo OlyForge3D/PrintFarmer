@@ -2721,7 +2721,10 @@ _check_drift_full_job_snapshot() {
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Install dotnet-ef
         run: |

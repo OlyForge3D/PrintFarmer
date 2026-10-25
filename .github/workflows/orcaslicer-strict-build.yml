@@ -111,6 +111,7 @@ jobs:
 
           echo "Building OrcaSlicer worker version=${ORCASLICER_VERSION} ALLOW_STUB=${ALLOW_STUB} using Dockerfile.multistage"
           docker build --platform linux/amd64 \
+            --build-arg "SDK_TAG=$(python3 scripts/dotnet-sdk.py tag)" \
             $( [ -f preseed/orca.AppImage ] && printf -- "--secret id=orca,src=preseed/orca.AppImage " || true) \
             --build-arg ORCASLICER_VERSION=${ORCASLICER_VERSION} \
             --build-arg ORCASLICER_SHA256=${ORCASLICER_SHA256} \
@@ -290,6 +291,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Log in to GHCR
         uses: docker/login-action@v4

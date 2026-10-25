@@ -6,6 +6,7 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+source scripts/docker/container-versions.conf
 
 REGISTRY_HOST="${DOCKER_REGISTRY:-localhost:5001}"
 
@@ -18,7 +19,7 @@ declare -a DOCKERFILES=(
     "dockerfiles/Dockerfile.base-nginx"
     "dockerfiles/Dockerfile.base-node"
     "dockerfiles/Dockerfile.base-postgres"
-    "dockerfiles/Dockerfile.base-sdk"
+    "scripts/docker/dockerfiles/Dockerfile.base-sdk"
     "dockerfiles/Dockerfile.base-aspnet"
     "dockerfiles/Dockerfile.base-ubuntu"
 )
@@ -27,7 +28,7 @@ declare -a IMAGES=(
     "nginx:alpine-upgraded"
     "node:24-alpine-upgraded"
     "postgres:17-alpine-upgraded"
-    "sdk:10.0.101-alpine-upgraded"
+    "sdk:${SDK_TAG}-upgraded"
     "aspnet:10.0.1-alpine-upgraded"
     "ubuntu:24.04-upgraded"
 )
@@ -44,6 +45,7 @@ for i in "${!DOCKERFILES[@]}"; do
     
     # Build locally for amd64
     if DOCKER_BUILDKIT=1 docker build \
+        --build-arg "SDK_TAG=$SDK_TAG" \
         --platform linux/amd64 \
         --file "${dockerfile}" \
         --tag "${registry_image}" \

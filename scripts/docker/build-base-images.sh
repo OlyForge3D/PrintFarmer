@@ -5,6 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/container-versions.conf"
 DOCKER_DIR="$SCRIPT_DIR/dockerfiles"
 CACHE_DIR="${CACHE_DIR:-./.docker-cache}"
 
@@ -24,7 +25,7 @@ declare -a IMAGES=(
     "ubuntu:24.04|Dockerfile.base-ubuntu|ubuntu-24.04-upgraded"
     "node:24-alpine|Dockerfile.base-node|node-24-alpine-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:10.0-noble|Dockerfile.base-aspnet|aspnet-10.0-noble-upgraded"
-    "mcr.microsoft.com/dotnet/sdk:10.0-noble|Dockerfile.base-sdk|dotnet-sdk-10.0-noble-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG}|Dockerfile.base-sdk|dotnet-sdk-${SDK_TAG}-upgraded"
     "postgres:16-alpine|Dockerfile.base-postgres|postgres-16-alpine-upgraded"
     "nginx:alpine|Dockerfile.base-nginx|nginx-alpine-upgraded"
 )
@@ -42,6 +43,7 @@ for image_config in "${IMAGES[@]}"; do
     echo "=========================================="
     
     if docker build \
+        --build-arg "SDK_TAG=$SDK_TAG" \
         -f "$DOCKER_DIR/$dockerfile" \
         -t "$tag" \
         --label="printfarmer-precache=true" \
@@ -83,7 +85,7 @@ echo "  1. Transfer all .tar files from $CACHE_DIR to offline system"
 echo "  2. Run: docker load -i ubuntu-24.04-upgraded.tar"
 echo "  3. Run: docker load -i node-24-alpine-upgraded.tar"
 echo "  4. Run: docker load -i aspnet-10.0-noble-upgraded.tar"
-echo "  5. Run: docker load -i dotnet-sdk-10.0-noble-upgraded.tar"
+echo "  5. Run: docker load -i dotnet-sdk-${SDK_TAG}-upgraded.tar"
 echo "  6. Run: docker load -i postgres-16-alpine-upgraded.tar"
 echo "  7. Run: docker load -i nginx-alpine-upgraded.tar"
 echo "  8. Then deploy: ./scripts/deploy-docker.sh --pull=missing"

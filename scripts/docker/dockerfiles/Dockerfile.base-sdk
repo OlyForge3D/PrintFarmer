@@ -1,9 +1,11 @@
 # Dockerfile for pre-caching upgraded .NET SDK base image
-# Usage: docker build -f Dockerfile.base-sdk -t mcr.microsoft.com/dotnet/sdk:10.0-noble-upgraded .
-# Then: docker save -o dotnet-sdk-10.0-noble-upgraded.tar mcr.microsoft.com/dotnet/sdk:10.0-noble-upgraded
+# Use scripts/docker/build-base-images.sh or .ps1 to supply the approved SDK tag.
 # This image is used as base for shared-build stage in multi-stage builds
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble
+ARG SDK_TAG
+FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG}
+COPY global.json /global.json
+RUN cd / && dotnet --version
 
 # Cache-busting argument: change this to force fresh apt updates
 # Usage: docker build --build-arg CACHE_BUST=$(date +%s) ...
