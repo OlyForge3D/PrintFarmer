@@ -3281,6 +3281,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
             mockService.errorToThrow = nil
             mockService.commandResultToReturn = .init(success: true, message: nil)
+            if case NetworkError.serverError(501)? = error {
+                XCTAssertFalse(model.supportsRuntimeFactor(.flow), "501 hides the unsupported factor")
+                XCTAssertTrue(model.supportsRuntimeFactor(.speed), "501 for flow leaves speed untouched")
+                await model.stepRuntimeFactor(.flow, by: 5)
+                XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, "No further writes after 501")
+                continue
+            }
             await model.stepRuntimeFactor(.flow, by: 5)
             XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 2, "Recovery: the next tap dispatches")
             XCTAssertEqual(mockService.setRuntimeFactorCalls.map(\.factor), [.flow, .flow])
@@ -3321,6 +3328,33 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
     }
 
+    func test_runtimeFactorDisabledOutsidePrintingOrPaused() async throws {
+        for state in ["idle", "ready", "complete", "cancelled"] {
+            mockService.reset()
+            let model = try makeViewModel(printer: try factorPrinter(state: state), capabilities: Self.factorCaps())
+            await model.loadCapabilities()
+            XCTAssertTrue(model.supportsRuntimeFactor(.speed), "\(state): row stays visible")
+            XCTAssertEqual(model.runtimeFactorPercent(.speed), 100, "\(state): value is still known")
+            for factor in RuntimeFactor.allCases {
+                XCTAssertEqual(
+                    model.runtimeFactorUnavailableReason(factor),
+                    "\(factor.title) can be tuned only while printing or paused.",
+                    state
+                )
+                XCTAssertFalse(model.canStepRuntimeFactor(factor, by: 5), state)
+                XCTAssertFalse(model.canStepRuntimeFactor(factor, by: -5), state)
+                await model.stepRuntimeFactor(factor, by: 5)
+                await model.setRuntimeFactor(factor, percent: 120)
+                XCTAssertEqual(
+                    model.lastError?.message, "\(factor.title) can be tuned only while printing or paused.", state
+                )
+            }
+            XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty, "\(state): no request is sent")
+            XCTAssertNil(model.pendingCommand, state)
+            XCTAssertTrue(model.canAdjustRuntimeControls, "\(state): other runtime controls are not restricted")
+        }
+    }
+
     func test_runtimeFactorLiveStatusReconcilesExternalChangesMissingTelemetryAndReconnects() async throws {
         let printer = try factorPrinter()
         let model = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
@@ -3348,27 +3382,60 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_runtimeFactorLateResponseAfterServerSwitchCannotConfirmOrReport() async throws {
-        let printer = try factorPrinter()
-        let model = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
-        await model.loadCapabilities()
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        mockService.beforeSetRuntimeFactor = { await barrier.arriveAndWait() }
-        let request = Task { await model.stepRuntimeFactor(.speed, by: 5) }
-        await barrier.waitUntilArrived()
+        let outcomes: [(String, Error?)] = [("success", nil), ("failure", NetworkError.serverError(503))]
+        for (label, lateError) in outcomes {
+            mockService.reset()
+            let printer = try factorPrinter()
+            let original = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
+            await original.loadCapabilities()
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            mockService.beforeSetRuntimeFactor = { await barrier.arriveAndWait() }
+            let request = Task { await original.stepRuntimeFactor(.speed, by: 5) }
+            await barrier.waitUntilArrived()
 
-        model.deactivate()
-        barrier.release()
-        await request.value
-        XCTAssertNil(model.pendingCommand)
-        XCTAssertFalse(model.commandNotice?.contains("confirmed") == true)
+            // Switch to a replacement model for a different registered server.
+            let replacementService = MockPrinterService()
+            replacementService.capabilitiesToReturn = Self.factorCaps()
+            replacementService.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let replacementServerID = UUID()
+            XCTAssertNotEqual(replacementServerID, original.registeredServerID)
+            original.configureAccess(serverID: replacementServerID) { nil }
+            let replacement = PrinterControlsViewModel.configuredForTests(
+                printerService: replacementService, printer: printer, serverID: replacementServerID
+            )
+            await replacement.loadCapabilities()
+            XCTAssertTrue(replacement.canStepRuntimeFactor(.speed, by: 5), label)
+            let before = (
+                speed: replacement.runtimeFactorPercent(.speed),
+                flow: replacement.runtimeFactorPercent(.flow),
+                notice: replacement.commandNotice
+            )
 
-        var lateReadback = printer
-        lateReadback.speedFactorPercent = 105
-        model.handlePrinterUpdate(lateReadback)
-        XCTAssertNil(model.pendingCommand)
-        XCTAssertNil(model.lastError)
-        XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1)
+            mockService.errorToThrow = lateError
+            barrier.release()
+            await request.value
+
+            XCTAssertNil(original.pendingCommand, label)
+            XCTAssertFalse(original.commandNotice?.contains("confirmed") == true, label)
+            XCTAssertFalse(
+                original.lastError?.message.contains("Outcome may be unknown") == true,
+                "\(label): a late failure is not reported as this request's error"
+            )
+            var lateReadback = printer
+            lateReadback.speedFactorPercent = 105
+            original.handlePrinterUpdate(lateReadback)
+            XCTAssertEqual(original.runtimeFactorPercent(.speed), 100, "\(label): retired model ignores late readback")
+            XCTAssertNil(original.pendingCommand, label)
+
+            XCTAssertEqual(replacement.runtimeFactorPercent(.speed), before.speed, label)
+            XCTAssertEqual(replacement.runtimeFactorPercent(.flow), before.flow, label)
+            XCTAssertNil(replacement.pendingCommand, label)
+            XCTAssertEqual(replacement.commandNotice, before.notice, label)
+            XCTAssertNil(replacement.lastError, label)
+            XCTAssertTrue(replacementService.setRuntimeFactorCalls.isEmpty, label)
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, label)
+        }
     }
 
     func test_runtimeCancellationRetainsSharedLeaseUntilDispatchedZOffsetRequestSettles() async throws {

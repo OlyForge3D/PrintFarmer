@@ -516,7 +516,7 @@ struct PrinterInstrumentPanelControls: View {
                 stepper
             }
             .frame(minHeight: 48)
-            if let reason, value == nil {
+            if let reason {
                 Text(reason)
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)

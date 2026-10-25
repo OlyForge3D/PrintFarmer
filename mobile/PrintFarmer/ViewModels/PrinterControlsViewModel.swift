@@ -375,6 +375,9 @@ final class PrinterControlsViewModel: ObservableObject {
     static let zFeedrateMmMin: Int = 600
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
+    /// Set once a different registered server replaces this model; late
+    /// readbacks for the old server must never update it.
+    private var isRetired = false
     @Published private(set) var lastError: ControlsError?
     @Published private(set) var pendingCommand: ControlCommand? {
         didSet {
@@ -666,6 +669,8 @@ final class PrinterControlsViewModel: ObservableObject {
         _ check: @escaping @MainActor () -> String?
     ) {
         guard let serverID, composition != nil, registeredServerID == serverID else {
+            // A different registered server can never become this model's server again.
+            if serverID != nil { isRetired = true }
             deactivate()
             return
         }
@@ -1365,10 +1370,14 @@ final class PrinterControlsViewModel: ObservableObject {
         guard supportsRuntimeFactor(factor) else {
             return "\(factor.title) control is not supported on this printer."
         }
+        if let reason = runtimeControlAccessReason { return reason }
+        guard isPrintingOrPaused, runtimePrinterStateIsSupported else {
+            return "\(factor.title) can be tuned only while printing or paused."
+        }
         guard runtimeFactorPercent(factor) != nil else {
             return "\(factor.title) readback is unknown; controls are disabled."
         }
-        return runtimeControlAccessReason
+        return nil
     }
 
     func canStepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) -> Bool {
@@ -1394,13 +1403,15 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             return
         }
-        await perform(command) { [printerService, printer] in
+        let generation = lifecycleGeneration
+        await perform(command) { [weak self, printerService, printer] in
             do {
                 let result = try await printerService.setRuntimeFactor(
                     printerId: printer.id, factor: factor, percent: percent
                 )
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
             } catch NetworkError.serverError(501) {
+                self?.markRuntimeFactorUnsupported(factor, generation: generation)
                 throw PrinterControlError.rejected(
                     "\(factor.title) control is not supported by this printer. No command was sent."
                 )
@@ -1408,6 +1419,16 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
+    }
+
+    /// A 501 proves the backend cannot apply this factor, so hide it until
+    /// capabilities are reloaded.
+    private func markRuntimeFactorUnsupported(_ factor: RuntimeFactor, generation: Int) {
+        guard !isRetired, generation == lifecycleGeneration else { return }
+        switch factor {
+        case .speed: capabilities?.supportsSpeedFactorControl = false
+        case .flow: capabilities?.supportsFlowFactorControl = false
+        }
     }
 
     func adjustLiveZOffset(by deltaMm: Double) async {
@@ -1633,7 +1654,7 @@ final class PrinterControlsViewModel: ObservableObject {
     /// position and homing changes. Direct motion settles at the HTTP response;
     /// ordinary telemetry never establishes correlated physical completion.
     func handlePrinterUpdate(_ updated: Printer) {
-        guard updated.id == printer.id else { return }
+        guard !isRetired, updated.id == printer.id else { return }
         let previous = printer
         printer = updated
         if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
@@ -1828,6 +1849,9 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
+        if case .runtimeFactor = command.kind {
+            return isPrintingOrPaused && runtimePrinterStateIsSupported
+        }
         if permitsActivePrint {
             return runtimePrinterStateIsSupported
         }
@@ -1892,9 +1916,15 @@ final class PrinterControlsViewModel: ObservableObject {
         guard canExecute(command) else {
             feedbackSection = command.section
             commandNotice = nil
+            let reason: String?
+            if case .runtimeFactor(let factor, _) = command.kind {
+                reason = runtimeFactorUnavailableReason(factor)
+            } else {
+                reason = blockedReason
+            }
             lastError = ControlsError(
                 command: command,
-                message: blockedReason ?? "Controls are unavailable.",
+                message: reason ?? "Controls are unavailable.",
                 isRetryable: false
             )
             return false

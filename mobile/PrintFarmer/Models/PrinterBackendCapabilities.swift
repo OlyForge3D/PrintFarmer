@@ -85,11 +85,8 @@ extension PrinterBackendCapabilities {
     }
 }
 
-// MARK: - Wire DTO
+// MARK: - Runtime factors
 
-/// Mirrors backend `PrinterBackendCapabilitiesDto`. Decoded from
-/// `/api/printers/{id}/backend-capabilities`. Optional operation flags allow
-/// old servers to decode without optimistically enabling physical commands.
 /// Live speed/flow percentage overrides published by backend #3474.
 enum RuntimeFactor: String, CaseIterable, Identifiable, Sendable {
     case speed, flow
@@ -150,6 +147,11 @@ private extension Decimal {
     }
 }
 
+// MARK: - Wire DTO
+
+/// Mirrors backend `PrinterBackendCapabilitiesDto`. Decoded from
+/// `/api/printers/{id}/backend-capabilities`. Optional operation flags allow
+/// old servers to decode without optimistically enabling physical commands.
 struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let printerId: UUID
     let printerName: String?
