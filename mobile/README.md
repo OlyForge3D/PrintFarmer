@@ -231,7 +231,7 @@ restriction (for example, the printer is offline or the account lacks permission
 Selection is retained when access changes; visibility does not grant permission.
 The controls model, and with it the capability fetch, is built only when the
 printer is online, except for offline Moonraker printers, whose capabilities are
-always fetched so durable motion can be built (#2678). This construction gate
+always built so durable motion stays available (#2678). This construction gate
 checks connectivity only; the fetch itself is then skipped until the sign-in,
 server-readiness and Queue.Start access check passes.
 

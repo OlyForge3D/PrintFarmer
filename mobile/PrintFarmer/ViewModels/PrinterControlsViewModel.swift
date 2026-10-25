@@ -386,7 +386,8 @@ final class PrinterControlsViewModel: ObservableObject {
     /// always passes this model's own `registeredServerID`, so it never sets
     /// this flag. A production server switch is instead blocked by the access
     /// check ("Server changed. Reopen this printer."), which cancels pending
-    /// work, and the detail builds a fresh model for the new composition. The
+    /// work and leaves the open detail blocked; a fresh model for the new
+    /// composition is built only when the user reopens the printer. The
     /// latch is kept, and covered by `PrinterControlsViewModelTests`, so any
     /// future caller that passes the live selected server cannot let a stale
     /// model absorb another server's responses.

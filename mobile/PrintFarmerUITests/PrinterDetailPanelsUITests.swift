@@ -1406,6 +1406,17 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
 
 @MainActor
 final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    /// Runs only the Speed/Flow override; the inherited Z-offset runtime test
+    /// is already covered by the base capture classes.
+    override class var defaultTestSuite: XCTestSuite {
+        let suite = XCTestSuite(name: String(describing: self))
+        for test in super.defaultTestSuite.tests
+        where test.name.contains("testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback") {
+            suite.addTest(test)
+        }
+        return suite
+    }
+
     override var additionalLaunchArguments: [String] {
         super.additionalLaunchArguments + ["--uitesting-issue3484-missing-runtime-factors"]
     }
@@ -1437,8 +1448,9 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
             )
             XCTAssertEqual(XCTWaiter().wait(for: [notReported], timeout: 8), .completed)
             XCTAssertEqual(value.label, "\(title) not reported")
-            // The label masks the Text, so XCUI cannot read the "--" glyph; keep
-            // the rendered row as evidence beside the runtimeFactorText(nil) unit check.
+            // The spoken label masks the Text; the UI-test harness mirrors the
+            // rendered glyph into the accessibility value.
+            XCTAssertEqual(value.value as? String, "--", "\(title) renders the placeholder, not a number")
             let row = XCTAttachment(screenshot: value.screenshot())
             row.name = "\(id)-factor-value-placeholder"
             row.lifetime = .keepAlways
