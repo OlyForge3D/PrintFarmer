@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
@@ -55,6 +56,12 @@ public sealed class PrusaLinkCommandRejectedException : Exception
 /// </summary>
 public interface IPrusaLinkApiClient
 {
+    /// <summary>Native bounded inventory; custom clients without authority fail closed.</summary>
+    Task<PrinterFileInventoryResult> GetFileInventoryAsync(
+        string baseUrl, PrinterCredential? credential = null,
+        PrinterFileInventoryOptions? options = null, CancellationToken ct = default) =>
+        Task.FromResult(PrinterFileInventoryResult.Unsupported());
+
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
     /// <summary>Gets API version information.</summary>

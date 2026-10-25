@@ -138,8 +138,47 @@ Cancellation attempts return HTTP 200 with `true` if successful, `400` if the op
 Operation progress & completion events are broadcast through the existing printers SignalR hub. The client merges updates into local state.
 
 ## Development Notes
-- Schema managed by `EnsureCreated()` (no active migrations). A temporary migration was generated and removed (2025-09-06) to maintain rapid iteration.
+- AppDbContext schema is migration-managed for SQLite, PostgreSQL, and SQL Server.
+  SQLite API startup uses `ProviderAwareMigrationRunner`; new catalog schema must
+  be migrated on existing installations as well as new databases.
 - Duplicate handling is enforced during worker processing when a file hash / name indicates an existing library entry.
+
+## Durable printer-file catalog
+
+The catalog is independent of harvest-operation history. A remote location
+identifies one registered printer, storage root, and backend-canonical relative
+path. It is not a library asset: `GcodeFile` continues to represent owned local
+bytes. Nested equal filenames, distinct storage roots, and case-distinct paths
+on case-sensitive backends remain separate locations regardless of database
+collation.
+
+Catalog provenance records the captured source observation separately from the
+deduplicated local asset. Multiple origins may refer to one asset. Removing a
+printer, remote location, or local asset does not erase the captured source
+snapshot or cascade deletion into another copy. Queue-operation job IDs remain
+recorded even if ordinary queue-history cleanup removes a job.
+
+Inventory completeness is explicit. Only complete coverage of a root or subtree
+can establish that an unseen file is missing. Partial, cancelled, unsupported,
+malformed, and failed listings must not be interpreted as empty storage.
+Size, modification time, and provider version evidence may be unknown; a local
+digest identifies captured bytes but does not prove an unchanged remote source.
+
+| Backend | Catalog coverage | Source-version assurance |
+| --- | --- | --- |
+| Moonraker | Native metadata-only `gcodes` listing | Reported metadata only; no conditional snapshot guarantee |
+| OctoPrint | Recursive `local` listing, including nested children | Reported metadata only; no conditional snapshot guarantee |
+| PrusaLink | Declared available roots, with bounded directory traversal | Reported metadata only; no conditional snapshot guarantee |
+| SDCP | Unsupported until recursive scope and ACK completeness are proven | None |
+| FlashForge / unknown | Unsupported | None |
+
+Catalog support is independent of legacy file-list support, authenticated
+streaming copy, and safe remote-delete support. A successful inventory does not
+grant any of those mutation capabilities. A complete empty listing differs from
+an HTTP/authentication/protocol failure; bounds or malformed responses never
+produce invented complete emptiness. Inventory traversal is capped at 100
+requests, 10,000 entries, depth 16, and 120 seconds, without G-code body,
+per-file header, or thumbnail requests.
 
 ## Future Enhancements (Roadmap)
 - Pagination & server-side filtering for discovered files
