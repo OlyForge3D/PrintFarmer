@@ -39,14 +39,14 @@ final class PrinterListViewModel {
     }
 
     /// Farm "All" ordering: active → ready to harvest → error → ready to seed → maintenance → offline,
-    /// then name.
+    /// then name. Mirrors PrinterCardPresentation.jobLabel precedence (maintenance outranks error).
     func stateGroup(_ printer: Printer) -> Int {
         guard printer.isOnline else { return 5 }
         if isPendingReady(printer) { return 1 }
         let state = printer.state?.lowercased() ?? ""
         if ["printing", "paused"].contains(state) { return 0 }
-        if state == "error" { return 2 }
         if printer.inMaintenance { return 4 }
+        if state == "error" { return 2 }
         return 3
     }
 

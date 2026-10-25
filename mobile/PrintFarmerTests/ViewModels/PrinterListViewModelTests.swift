@@ -100,8 +100,36 @@ final class PrinterListViewModelTests: XCTestCase {
         finished.state = "idle"
         viewModel.setFarmData(source.map { $0.id == finished.id ? finished : $0 },
                               pendingReadyPrinterIDs: [bedClear.id])
-        XCTAssertEqual(viewModel.filteredPrinters.map(\.name).prefix(6),
-                       ["charlie", "Echo", "Delta", "Alpha", "bravo 2", "Zeta"])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name),
+                       ["charlie", "Echo", "Delta", "Alpha", "bravo 2", "Zeta", "Bravo", "alpha", "Beta"])
+    }
+
+    func testAllViewBreaksDuplicateNameTiesById() throws {
+        let second = try makePrinter("31", name: "Twin", state: "idle")
+        let first = try makePrinter("30", name: "twin", state: "idle")
+        let viewModel = PrinterListViewModel(initialPrinters: [second, first])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [first.id, second.id])
+        viewModel.setFarmData([first, second], pendingReadyPrinterIDs: [])
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.id), [first.id, second.id])
+    }
+
+    func testAllViewGroupsMaintenanceUnknownAndCompletedStates() throws {
+        let errorMaintenance = try makePrinter("40", name: "A error maint", state: "error", inMaintenance: true)
+        let pausedMaintenance = try makePrinter("41", name: "B paused maint", state: "paused", inMaintenance: true)
+        let unknown = try makePrinter("42", name: "C unknown", state: "calibrating")
+        let completed = try makePrinter("43", name: "D completed", state: "completed")
+        let error = try makePrinter("44", name: "E error", state: "error")
+        let viewModel = PrinterListViewModel(
+            initialPrinters: [errorMaintenance, pausedMaintenance, unknown, completed, error]
+        )
+
+        XCTAssertEqual(viewModel.stateGroup(pausedMaintenance), 0)
+        XCTAssertEqual(viewModel.stateGroup(error), 2)
+        XCTAssertEqual(viewModel.stateGroup(unknown), 3)
+        XCTAssertEqual(viewModel.stateGroup(completed), 3)
+        XCTAssertEqual(viewModel.stateGroup(errorMaintenance), 4)
+        XCTAssertEqual(viewModel.filteredPrinters.map(\.name),
+                       ["B paused maint", "E error", "C unknown", "D completed", "A error maint"])
     }
 
     func testNonAllFiltersKeepSourceOrder() throws {
