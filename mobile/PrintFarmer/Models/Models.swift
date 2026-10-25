@@ -172,6 +172,9 @@ struct Printer: Codable, Identifiable, Sendable {
     var totalLayers: Int?
     var fanSpeedPercent: Double?
     var liveZOffsetMm: Double?
+    /// Observed runtime speed/flow overrides in percent; nil is unknown, never 100.
+    var speedFactorPercent: Double?
+    var flowFactorPercent: Double?
     var sensors: [PrinterSensor]
     var jobName: String?
     var fileName: String?
@@ -210,6 +213,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
         case isOnline, state, progress, currentLayer, totalLayers, fanSpeedPercent, liveZOffsetMm, sensors
+        case speedFactorPercent, flowFactorPercent
         case jobName, fileName, thumbnailUrl, currentJobThumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
@@ -255,6 +259,8 @@ struct Printer: Codable, Identifiable, Sendable {
         totalLayers = try c.decodeIfPresent(Int.self, forKey: .totalLayers)
         fanSpeedPercent = try c.decodeIfPresent(Double.self, forKey: .fanSpeedPercent)
         liveZOffsetMm = try c.decodeIfPresent(Double.self, forKey: .liveZOffsetMm)
+        speedFactorPercent = try c.decodeIfPresent(Double.self, forKey: .speedFactorPercent)
+        flowFactorPercent = try c.decodeIfPresent(Double.self, forKey: .flowFactorPercent)
         sensors = try c.decodeIfPresent([PrinterSensor].self, forKey: .sensors) ?? []
         jobName = try c.decodeIfPresent(String.self, forKey: .jobName)
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
@@ -433,6 +439,10 @@ struct PrinterStatusDetail: Codable, Sendable {
     let totalLayers: Int?
     let fanSpeedPercent: Double?
     let liveZOffsetMm: Double?
+    /// Observed runtime overrides in percent. Nil (absent or null) is unknown, never 100;
+    /// readback may exceed the 1–200 write bounds and is never clamped.
+    var speedFactorPercent: Double? = nil
+    var flowFactorPercent: Double? = nil
     /// Nil when an older server omits `sensors`.
     var sensors: [PrinterSensor]?
     let jobName: String?
@@ -464,6 +474,8 @@ struct PrinterStatusDetail: Codable, Sendable {
         totalLayers: Int? = nil,
         fanSpeedPercent: Double? = nil,
         liveZOffsetMm: Double? = nil,
+        speedFactorPercent: Double? = nil,
+        flowFactorPercent: Double? = nil,
         sensors: [PrinterSensor]? = nil,
         jobName: String?,
         thumbnailUrl: String?,
@@ -492,6 +504,8 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.totalLayers = totalLayers
         self.fanSpeedPercent = fanSpeedPercent
         self.liveZOffsetMm = liveZOffsetMm
+        self.speedFactorPercent = speedFactorPercent
+        self.flowFactorPercent = flowFactorPercent
         self.sensors = sensors
         self.jobName = jobName
         self.thumbnailUrl = thumbnailUrl

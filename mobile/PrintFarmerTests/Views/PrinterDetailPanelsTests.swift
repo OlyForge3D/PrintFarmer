@@ -259,6 +259,104 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
     }
 
+    func testTuneShowsSpeedAndFlowAboveBabystepAndPostsFactorAPI() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing")
+        defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
+        let speedIncrease = "printer.controls.runtime.speed-factor.increase"
+        try await waitForHost("Supported Speed must render enabled in Tune", in: tune.controller.view) {
+            tune.button(speedIncrease)?.isEnabled == true
+                && tune.button("printer.controls.runtime.flow-factor.decrease")?.isEnabled == true
+        }
+        let speed = try XCTUnwrap(tune.button(speedIncrease))
+        let flow = try XCTUnwrap(tune.button("printer.controls.runtime.flow-factor.increase"))
+        let babystep = try XCTUnwrap(tune.button("printer.controls.runtime.z-offset.increase"))
+        let speedY = speed.convert(speed.bounds, to: nil).minY
+        let flowY = flow.convert(flow.bounds, to: nil).minY
+        let babystepY = babystep.convert(babystep.bounds, to: nil).minY
+        XCTAssertLessThan(speedY, flowY, "Speed precedes Flow (mockup B)")
+        XCTAssertLessThan(flowY, babystepY, "Speed and Flow sit above babystep (mockup B)")
+        XCTAssertEqual(speed.accessibilityLabel, "Increase speed by 5 percent")
+        XCTAssertGreaterThanOrEqual(speed.bounds.height, 44)
+
+        speed.sendActions(for: .touchUpInside)
+        let path = "/api/printers/\(tune.printerId)/speed-factor"
+        try await waitForHost("Speed step must reach the shared factor API", in: tune.controller.view) {
+            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == path }
+        }
+        let request = try XCTUnwrap(tune.api.capturedRequests.first { $0.url?.path == path })
+        let body = try XCTUnwrap(request.capturedHTTPBody())
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: body) as? [String: Double], ["percent": 105])
+        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("/flow-factor") == true },
+                       "A speed step never writes flow")
+    }
+
+    func testTuneKeepsSpeedAndFlowVisibleButDisabledWhenNotPrinting() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true)
+        defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
+        try await waitForHost("Babystep must render enabled while idle", in: tune.controller.view) {
+            tune.button("printer.controls.runtime.z-offset.increase")?.isEnabled == true
+        }
+        for factor in RuntimeFactor.allCases {
+            for direction in ["increase", "decrease"] {
+                let button = try XCTUnwrap(tune.button("printer.controls.runtime.\(factor.rawValue)-factor.\(direction)"))
+                XCTAssertFalse(button.isEnabled, "\(factor.title) \(direction) is disabled outside printing or paused")
+                XCTAssertEqual(button.accessibilityHint, "\(factor.title) can be tuned only while printing or paused.")
+            }
+        }
+        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
+    }
+
+    func testTuneSupportedSpeedWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing", factorValues: (nil, 98))
+        defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
+        try await waitForHost("Flow with known telemetry must render enabled", in: tune.controller.view) {
+            tune.button("printer.controls.runtime.flow-factor.increase")?.isEnabled == true
+        }
+        for direction in ["increase", "decrease"] {
+            let button = try XCTUnwrap(
+                tune.button("printer.controls.runtime.speed-factor.\(direction)"),
+                "Supported Speed stays visible when telemetry is missing"
+            )
+            XCTAssertFalse(button.isEnabled, "Speed \(direction) is disabled without readback")
+            XCTAssertEqual(button.accessibilityHint, "Speed readback is unknown; controls are disabled.")
+        }
+        // The value Text renders runtimeFactorText(percent) with this VoiceOver label.
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(nil), "--")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, nil), "Speed not reported")
+        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
+    }
+
+    func testTuneHidesSpeedAndFlowWhenCapabilitiesAreAbsent() async throws {
+        let tune = try await hostedTunePanel()
+        defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
+        try await waitForHost("Babystep must still render", in: tune.controller.view) {
+            tune.button("printer.controls.runtime.z-offset.increase")?.isEnabled == true
+        }
+        for identifier in [
+            "printer.controls.runtime.speed-factor.increase", "printer.controls.runtime.speed-factor.decrease",
+            "printer.controls.runtime.flow-factor.increase", "printer.controls.runtime.flow-factor.decrease"
+        ] {
+            XCTAssertNil(tune.button(identifier), "\(identifier) must be hidden on older servers")
+        }
+    }
+
+    func testRuntimeFactorTextAndVoiceOverNeverClaimUnavailable() {
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(nil), "--")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(.nan), "--")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(125), "125%")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(87.5), "87.5%")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, 125), "Speed 125 percent")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.flow, 87.5), "Flow 87.5 percent")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.flow, nil), "Flow not reported")
+        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, nil), "Speed not reported")
+        for text in [
+            PrinterInstrumentPanelControls.runtimeFactorText(nil),
+            PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, nil)
+        ] {
+            XCTAssertFalse(text.localizedCaseInsensitiveContains("unavailable"))
+        }
+    }
+
     private struct HostedTunePanel {
         let controller: UIViewController
         let api: MockAPIClient
@@ -269,7 +367,11 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     /// Hosts the detail Control tab on Tune with writable fans and a chamber heater.
     /// Callers hide the returned window when done.
-    private func hostedTunePanel() async throws -> HostedTunePanel {
+    private func hostedTunePanel(
+        runtimeFactors: Bool = false,
+        printerState: String = "idle",
+        factorValues: (speed: Double?, flow: Double?) = (100, 98)
+    ) async throws -> HostedTunePanel {
         let auxiliaryFan = PrinterSensor(
             id: "aux-fan", displayName: "Auxiliary fan", kind: .fan, fanRole: .auxiliary,
             readings: [SensorReading(quantity: .fanSpeed, value: .number(40), unit: .percent)],
@@ -285,7 +387,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
             readings: [SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius)],
             writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)]
         )
-        let fixture = try detailHostFixture(writableSensors: [auxiliaryFan, temperatureFan, chamber])
+        let fixture = try detailHostFixture(
+            writableSensors: [auxiliaryFan, temperatureFan, chamber], runtimeFactors: runtimeFactors,
+            printerState: printerState, factorValues: factorValues
+        )
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
@@ -451,7 +556,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
     private func detailHostFixture(
         verifiedMaterial: Bool = false,
         capabilityBarrier: AsyncBarrier? = nil,
-        writableSensors: [PrinterSensor] = []
+        writableSensors: [PrinterSensor] = [],
+        runtimeFactors: Bool = false,
+        printerState: String = "idle",
+        factorValues: (speed: Double?, flow: Double?) = (100, 98)
     ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
@@ -469,18 +577,22 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let first = try registry.add(displayName: "A", baseURL: URL(string: "https://detail-a.example.com")!)
         let second = try registry.add(displayName: "B", baseURL: URL(string: "https://detail-b.example.com")!)
         var printer = try TestData.decodePrinter()
-        printer.state = "idle"
+        printer.state = printerState
         printer.isOnline = true
         printer.fanSpeedPercent = 25
         printer.liveZOffsetMm = 0
         printer.sensors = writableSensors
+        if runtimeFactors {
+            printer.speedFactorPercent = factorValues.speed
+            printer.flowFactorPercent = factorValues.flow
+        }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let printerData = try encoder.encode(printer)
         var status = PrinterStatusDetail(
             id: printer.id,
             isOnline: true,
-            state: "idle",
+            state: printerState,
             progress: nil,
             fanSpeedPercent: 25,
             liveZOffsetMm: 0,
@@ -499,8 +611,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
             spoolInfo: nil,
             mmuStatus: nil
         )
-        status.safetyTelemetry = VerifiedSafetyFixtures.status(id: printer.id, state: "idle").safetyTelemetry
+        status.safetyTelemetry = VerifiedSafetyFixtures.status(id: printer.id, state: printerState).safetyTelemetry
         status.sensors = writableSensors
+        status.speedFactorPercent = printer.speedFactorPercent
+        status.flowFactorPercent = printer.flowFactorPercent
         let statusData = try encoder.encode(status)
         let details = try encoder.encode(PrinterDetails.controlsLimitsFixture(for: printer))
         let printerPath = "/api/printers/\(printer.id)"
@@ -510,6 +624,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
          "supportsHotendTemperature":true,"supportsBedTemperature":true,
          "supportsFanControl":true,"supportsFanSpeedReadback":true,
          "supportsZOffsetAdjustment":true,"supportsZOffsetReadback":true,
+         "supportsSpeedFactorControl":\(runtimeFactors),"supportsFlowFactorControl":\(runtimeFactors),
          "supportsSensorControl":\(!writableSensors.isEmpty)}
         """.utf8)
         let api = MockAPIClient()

@@ -59,6 +59,17 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Speed and Flow steppers in Tune** — Control → Tune shows Speed % and
+  Flow % steppers (±5%) above babystep while a job is printing or paused
+  (#3476). Rows appear only when the backend reports
+  `supportsSpeedFactorControl` / `supportsFlowFactorControl`; missing or false
+  capabilities hide them. Each step posts `{"percent":N}` (1–200%) to
+  `/api/printers/{id}/speed-factor` or `/flow-factor` and stays pending until
+  live status reports the new value. Unreported readback shows `--` (VoiceOver
+  "not reported") and is never assumed to be 100%. 501 explains that no command
+  was sent; 503 warns that the outcome may be unknown. Nothing is retried
+  automatically.
+
 - **Essential Controls alignment** — Restore owner-selected concept 1: one
   Heat group with paired inputs and Set targets, compact presets and Cool down,
   grouped directional Move & home, and compact Filament tools. Paired readings

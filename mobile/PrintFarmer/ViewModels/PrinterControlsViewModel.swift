@@ -57,7 +57,7 @@ struct ControlCommand: Equatable, Sendable {
             return .motion
         case .extrusion, .filament:
             return .material
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             return .runtime
         }
     }
@@ -83,6 +83,7 @@ struct ControlCommand: Equatable, Sendable {
         case calibrationSave(offsetMm: Double)
         case transientZOffset(targetMm: Double, deltaMm: Double)
         case sensorControl(sensorId: String, quantity: SensorQuantity, value: Double)
+        case runtimeFactor(RuntimeFactor, percent: Double)
     }
 }
 
@@ -374,6 +375,9 @@ final class PrinterControlsViewModel: ObservableObject {
     static let zFeedrateMmMin: Int = 600
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
+    /// Set once a different registered server replaces this model; late
+    /// readbacks for the old server must never update it.
+    private var isRetired = false
     @Published private(set) var lastError: ControlsError?
     @Published private(set) var pendingCommand: ControlCommand? {
         didSet {
@@ -561,6 +565,8 @@ final class PrinterControlsViewModel: ObservableObject {
             printer.state = status.state
             printer.fanSpeedPercent = status.fanSpeedPercent
             printer.liveZOffsetMm = status.liveZOffsetMm
+            printer.speedFactorPercent = status.speedFactorPercent
+            printer.flowFactorPercent = status.flowFactorPercent
             if let sensors = status.sensors { printer.sensors = sensors }
             safetyCheckedAt = clock()
             safetyReadError = nil
@@ -663,6 +669,8 @@ final class PrinterControlsViewModel: ObservableObject {
         _ check: @escaping @MainActor () -> String?
     ) {
         guard let serverID, composition != nil, registeredServerID == serverID else {
+            // A different registered server can never become this model's server again.
+            if serverID != nil { isRetired = true }
             deactivate()
             return
         }
@@ -1232,6 +1240,9 @@ final class PrinterControlsViewModel: ObservableObject {
             guard let actual = status.sensors?.first(where: { $0.id == sensorId })?
                 .reading(quantity)?.value.number else { return }
             matches = abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: status) else { return }
+            matches = abs(actual - percent) < RuntimeFactor.readbackTolerance
         default:
             return
         }
@@ -1344,6 +1355,80 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
+    }
+
+    func runtimeFactorPercent(_ factor: RuntimeFactor) -> Double? {
+        factor.percent(of: printer)
+    }
+
+    /// Missing or false capabilities hide the control; it never sends a request.
+    func supportsRuntimeFactor(_ factor: RuntimeFactor) -> Bool {
+        factor.isSupported(by: capabilities)
+    }
+
+    func runtimeFactorUnavailableReason(_ factor: RuntimeFactor) -> String? {
+        guard supportsRuntimeFactor(factor) else {
+            return "\(factor.title) control is not supported on this printer."
+        }
+        if let reason = runtimeControlAccessReason { return reason }
+        guard isPrintingOrPaused, runtimePrinterStateIsSupported else {
+            return "\(factor.title) can be tuned only while printing or paused."
+        }
+        guard runtimeFactorPercent(factor) != nil else {
+            return "\(factor.title) readback is unknown; controls are disabled."
+        }
+        return nil
+    }
+
+    func canStepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) -> Bool {
+        runtimeFactorUnavailableReason(factor) == nil && canAdjustRuntimeControls
+            && RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) != nil
+    }
+
+    /// Steps from the authoritative readback, never from an unconfirmed local value.
+    func stepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) async {
+        guard let target = RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) else { return }
+        await setRuntimeFactor(factor, percent: target)
+    }
+
+    func setRuntimeFactor(_ factor: RuntimeFactor, percent: Double) async {
+        let command = ControlCommand(kind: .runtimeFactor(factor, percent: percent), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard supportsRuntimeFactor(factor), RuntimeFactor.isValidPercent(percent) else {
+            setError(
+                command: command,
+                message: "\(factor.title) requires confirmed backend support and a value from 1 to 200 percent.",
+                isRetryable: false
+            )
+            return
+        }
+        let generation = lifecycleGeneration
+        await perform(command) { [weak self, printerService, printer] in
+            do {
+                let result = try await printerService.setRuntimeFactor(
+                    printerId: printer.id, factor: factor, percent: percent
+                )
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+            } catch NetworkError.serverError(501) {
+                self?.markRuntimeFactorUnsupported(factor, generation: generation)
+                throw PrinterControlError.rejected(
+                    "\(factor.title) control is not supported by this printer. No command was sent."
+                )
+            }
+        }
+        guard pendingCommand == command, lastError == nil else { return }
+        await refreshSafetyEvidence(refreshDiscovery: false)
+    }
+
+    /// A 501 proves the backend cannot apply this factor, so hide it until
+    /// capabilities are reloaded.
+    private func markRuntimeFactorUnsupported(_ factor: RuntimeFactor, generation: Int) {
+        guard !isRetired, generation == lifecycleGeneration else { return }
+        switch factor {
+        case .speed: capabilities?.supportsSpeedFactorControl = false
+        case .flow: capabilities?.supportsFlowFactorControl = false
+        }
     }
 
     func adjustLiveZOffset(by deltaMm: Double) async {
@@ -1569,7 +1654,7 @@ final class PrinterControlsViewModel: ObservableObject {
     /// position and homing changes. Direct motion settles at the HTTP response;
     /// ordinary telemetry never establishes correlated physical completion.
     func handlePrinterUpdate(_ updated: Printer) {
-        guard updated.id == printer.id else { return }
+        guard !isRetired, updated.id == printer.id else { return }
         let previous = printer
         printer = updated
         if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
@@ -1645,6 +1730,10 @@ final class PrinterControlsViewModel: ObservableObject {
             let read = { (p: Printer) in p.sensors.first(where: { $0.id == sensorId })?.reading(quantity)?.value.number }
             guard let actual = read(updated), read(previous) != actual else { return false }
             return abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: updated),
+                  factor.percent(of: previous) != actual else { return false }
+            return abs(actual - percent) < RuntimeFactor.readbackTolerance
         case .disableMotors, .extrusion, .filament, .calibrationSave:
             return false
         case .calibrationHome, .calibrationPosition, .calibrationAdjust:
@@ -1749,7 +1838,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private func canExecute(_ command: ControlCommand) -> Bool {
         let permitsActivePrint: Bool
         switch command.kind {
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             permitsActivePrint = true
         case .preheat:
             permitsActivePrint = false
@@ -1760,6 +1849,9 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
+        if case .runtimeFactor = command.kind {
+            return isPrintingOrPaused && runtimePrinterStateIsSupported
+        }
         if permitsActivePrint {
             return runtimePrinterStateIsSupported
         }
@@ -1824,9 +1916,15 @@ final class PrinterControlsViewModel: ObservableObject {
         guard canExecute(command) else {
             feedbackSection = command.section
             commandNotice = nil
+            let reason: String?
+            if case .runtimeFactor(let factor, _) = command.kind {
+                reason = runtimeFactorUnavailableReason(factor)
+            } else {
+                reason = blockedReason
+            }
             lastError = ControlsError(
                 command: command,
-                message: blockedReason ?? "Controls are unavailable.",
+                message: reason ?? "Controls are unavailable.",
                 isRetryable: false
             )
             return false
@@ -1965,7 +2063,7 @@ final class PrinterControlsViewModel: ObservableObject {
         switch command.kind {
         case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             return "Matching readback received. This reports the backend value, not a physical inspection."
         default:
             return "Matching telemetry received. Check the machine before further setup."

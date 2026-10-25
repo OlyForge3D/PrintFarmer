@@ -324,7 +324,12 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   idle-only. Mid-print temperature edits happen only on Tune and require
   `supportsTemperatureControlDuringPrint`. While printing, Move and Heat
   segments are disabled and Tune is auto-selected; it stays selected when the
-  print ends. Cool Down is idle-only, with no
+  print ends. Tune lists Speed % and Flow % steppers (±5%, 1–200%) above
+  babystep, hidden unless `supportsSpeedFactorControl` /
+  `supportsFlowFactorControl` is true. They are enabled only while printing or
+  paused, online and authorised, with no other command pending. A step stays
+  pending until changed matching live readback; null readback shows `--`.
+  Cool Down is idle-only, with no
   confirmation; Emergency stop covers stopping an active print.
 - The paired editors send only entered, supported heaters in one request.
   Zero explicitly turns that heater off; blank is not zero. Both requested

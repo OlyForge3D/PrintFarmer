@@ -414,6 +414,7 @@ struct PrinterInstrumentPanelControls: View {
         let canAdjust = reason == nil && viewModel.canAdjustRuntimeControls
         return VStack(alignment: .leading, spacing: 12) {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .runtime)
+            runtimeFactorRows
             babystepHeaderRow
             if let reason {
                 Text(reason)
@@ -472,6 +473,85 @@ struct PrinterInstrumentPanelControls: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime.temperatures")
+    }
+
+    /// Mockup B: Speed and Flow percentage steppers above babystep. Each is
+    /// shown only when the backend confirms support for that factor.
+    @ViewBuilder
+    private var runtimeFactorRows: some View {
+        let factors = RuntimeFactor.allCases.filter(viewModel.supportsRuntimeFactor)
+        if !factors.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(factors) { runtimeFactorRow($0) }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.controls.runtime.factors")
+        }
+    }
+
+    private func runtimeFactorRow(_ factor: RuntimeFactor) -> some View {
+        let value = viewModel.runtimeFactorPercent(factor)
+        let reason = viewModel.runtimeFactorUnavailableReason(factor)
+        let identifier = "printer.controls.runtime.\(factor.rawValue)-factor"
+        let stepper = HStack(spacing: 4) {
+            runtimeFactorButton(factor, delta: -RuntimeFactor.stepPercent, reason: reason)
+            Text(Self.runtimeFactorText(value))
+                .font(.body.monospacedDigit().weight(.medium))
+                .foregroundStyle(Color.pfTextPrimary)
+                .frame(minWidth: 64)
+                .accessibilityLabel(Self.runtimeFactorAccessibilityLabel(factor, value))
+                .accessibilityIdentifier("\(identifier).value")
+            runtimeFactorButton(factor, delta: RuntimeFactor.stepPercent, reason: reason)
+        }
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return VStack(alignment: .leading, spacing: 4) {
+            layout {
+                Text(factor.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                stepper
+            }
+            .frame(minHeight: 48)
+            if let reason {
+                Text(reason)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("\(identifier).reason")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func runtimeFactorButton(_ factor: RuntimeFactor, delta: Double, reason: String?) -> some View {
+        let increase = delta > 0
+        let step = RuntimeFactor.stepPercent.formatted()
+        return ControlActionButton(
+            title: "",
+            identifier: "printer.controls.runtime.\(factor.rawValue)-factor.\(increase ? "increase" : "decrease")",
+            accessibilityTitle: "\(increase ? "Increase" : "Decrease") \(factor.title.lowercased()) by \(step) percent",
+            hint: reason ?? "Sends a new \(factor.title.lowercased()) percentage to the printer.",
+            compact: true,
+            systemImage: increase ? "plus" : "minus",
+            minimumHeight: 44
+        ) { Task { await viewModel.stepRuntimeFactor(factor, by: delta) } }
+        .frame(width: 44, height: 44)
+        .disabled(!viewModel.canStepRuntimeFactor(factor, by: delta))
+    }
+
+    static func runtimeFactorText(_ percent: Double?) -> String {
+        guard let percent, percent.isFinite else { return PrinterDetailViewModel.missingValuePlaceholder }
+        return "\(percent.formatted(.number.precision(.fractionLength(0...2))))%"
+    }
+
+    static func runtimeFactorAccessibilityLabel(_ factor: RuntimeFactor, _ percent: Double?) -> String {
+        guard let percent, percent.isFinite else { return "\(factor.title) not reported" }
+        return "\(factor.title) \(percent.formatted(.number.precision(.fractionLength(0...2)))) percent"
     }
 
     private func babystepButton(raise: Bool, reason: String?) -> some View {

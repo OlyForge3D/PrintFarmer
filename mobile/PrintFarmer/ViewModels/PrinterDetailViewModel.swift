@@ -550,6 +550,8 @@ final class PrinterDetailViewModel {
             }
             p.fanSpeedPercent = update.fanSpeedPercent
             p.liveZOffsetMm = update.liveZOffsetMm
+            p.speedFactorPercent = update.speedFactorPercent
+            p.flowFactorPercent = update.flowFactorPercent
             if let sensors = update.sensors { p.sensors = sensors }
             if let x = update.x { p.x = x }
             if let y = update.y { p.y = y }
@@ -593,6 +595,8 @@ final class PrinterDetailViewModel {
             totalLayers: update.totalLayers,
             fanSpeedPercent: update.fanSpeedPercent,
             liveZOffsetMm: update.liveZOffsetMm,
+            speedFactorPercent: update.speedFactorPercent,
+            flowFactorPercent: update.flowFactorPercent,
             sensors: update.sensors ?? previousStatusDetail?.sensors,
             jobName: update.jobName ?? previousStatusDetail?.jobName,
             thumbnailUrl: update.thumbnailUrl ?? previousStatusDetail?.thumbnailUrl,
@@ -1802,6 +1806,8 @@ final class PrinterDetailViewModel {
         current.totalLayers = detail.totalLayers
         current.fanSpeedPercent = detail.fanSpeedPercent
         current.liveZOffsetMm = detail.liveZOffsetMm
+        current.speedFactorPercent = detail.speedFactorPercent
+        current.flowFactorPercent = detail.flowFactorPercent
         if let sensors = detail.sensors { current.sensors = sensors }
         current.jobName = detail.jobName
         current.thumbnailUrl = detail.thumbnailUrl

@@ -295,7 +295,12 @@ stay available while printing only when the backend reports
 `supportsTemperatureControlDuringPrint`; the instrument panel's Heat segment is
 disabled while printing because Tune carries those targets. While a job is
 printing or paused, **Tune** also shows the hotend and bed targets with the same
-gating; Tune has no fan controls. Heating presets omit an unconfirmed bed; unknown support never permits a
+gating; Tune has no fan controls. Above babystep, Tune shows **Speed %** and
+**Flow %** steppers (±5%, 1–200%) only when the backend reports
+`supportsSpeedFactorControl` / `supportsFlowFactorControl`. They use the shared
+`POST /api/printers/{id}/speed-factor` and `/flow-factor` API and stay pending
+until live status confirms the new value. Unreported values show `--` and are
+never treated as 100%. A 501 response means no command was sent. Heating presets omit an unconfirmed bed; unknown support never permits a
 speculative command. Missing bed
 support is described as unavailable control, not physically absent hardware.
 Demo mode advertises no physical or persistence capabilities: its no-op commands
