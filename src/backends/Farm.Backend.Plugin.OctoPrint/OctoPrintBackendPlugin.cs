@@ -80,7 +80,7 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
         services.AddScoped<IOctoPrintClient>(provider =>
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            HttpClient httpClient = httpClientFactory.CreateClient();
+            HttpClient httpClient = httpClientFactory.CreateClient("VettedEgress");
 
             // Per-request CTS timeouts (from BackendTimeoutSettings) control actual cancellation;
             // HttpClient.Timeout is just a ceiling to avoid orphaned connections.

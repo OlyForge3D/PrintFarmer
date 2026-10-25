@@ -20,6 +20,8 @@ import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { Modal } from '@/common/components/modals/Modal';
+import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
@@ -453,6 +455,13 @@ export function FilesPage() {
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-files-viewmode');
   const { hasPermission } = useAuth();
   const { data: printers = [] } = usePrinters({ staleTime: 30_000 });
+  const onPrinters = searchParams.get('source') === 'printers';
+  const linkedFileId = onPrinters ? null : searchParams.get('file');
+  const linkedFile = useQuery({
+    queryKey: ['gcode-files', linkedFileId],
+    queryFn: () => apiClient.getGcodeFile(linkedFileId!),
+    enabled: !!linkedFileId,
+  });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
@@ -1066,12 +1075,30 @@ export function FilesPage() {
     <>
       <PageTemplate
         title="Files"
-        subtitle="Browse models and print artifacts together, then narrow the list by file type when you need focus."
+        subtitle="Browse owned local assets or metadata observations on printers. Remote files become local only when you explicitly copy or queue."
         icon={FileIcon}
         actions={headerActions}
       >
+        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="File source">
+          {(['local', 'printers'] as const).map(source => (
+            <Button key={source} size="sm"
+              variant={onPrinters === (source === 'printers') ? 'primary' : 'secondary'}
+              aria-pressed={onPrinters === (source === 'printers')}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                if (source === 'printers') next.set('source', 'printers');
+                else next.delete('source');
+                next.delete('printer');
+                next.delete('file');
+                navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
+                setSelectedIds([]);
+              }}>
+              {source === 'local' ? 'Local library' : 'On printers'}
+            </Button>
+          ))}
+        </div>
         <div className="min-h-[65vh] min-w-0 overflow-hidden">
-          <FileBrowser
+          {onPrinters ? <PrinterFileCatalog /> : <FileBrowser
             ref={fileBrowserRef}
             config={config}
             sortOptions={FILE_BROWSER_SORT_OPTIONS}
@@ -1083,9 +1110,25 @@ export function FilesPage() {
             extraToolbarActions={toolbarActions}
             viewMode={viewMode}
             onViewModeChange={setViewMode}
-          />
+          />}
         </div>
       </PageTemplate>
+
+      <Modal isOpen={!!linkedFileId} title="Owned local G-code" onClose={() => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('file');
+        navigate(`/files${next.size ? `?${next.toString()}` : ''}`, { replace: true });
+      }}>
+        {linkedFile.isLoading && <p role="status">Loading local asset metadata...</p>}
+        {linkedFile.error && <p role="alert" className="text-pf-error">Failed to load local asset: {linkedFile.error.message}</p>}
+        {linkedFile.data && <GcodeFileCard file={linkedFile.data} onDownload={async () => {
+          try {
+            await apiClient.downloadGcodeFileById(linkedFile.data.id, linkedFile.data.name);
+          } catch (error) {
+            toast.error(`Failed to download: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }} />}
+      </Modal>
 
       <ModelUploadModal
         isOpen={showModelUploadModal}

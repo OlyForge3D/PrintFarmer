@@ -589,6 +589,122 @@ export class ApiClient {
   }
 
   // ===== Harvest/discovered file API methods =====
+  async getPrinterFileCatalog(
+    query: {
+      printerId?: string; search?: string; page?: number; pageSize?: number;
+      availability?: import("@/types/api").PrinterFileAvailability; stale?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<import("@/types/api").PrinterFileCatalogPage> {
+    const response = await this.client.get<import("@/types/api").PrinterFileCatalogPage>(
+      "/printer-files", { params: query, signal },
+    );
+    return response.data;
+  }
+
+  async refreshPrinterFileIndex(printerId: string): Promise<void> {
+    await this.client.post(`/printer-files/printers/${encodeURIComponent(printerId)}/refresh`);
+  }
+
+  async setPrinterFileIndexEnabled(printerId: string, enabled: boolean): Promise<void> {
+    await this.client.put(`/printer-files/printers/${encodeURIComponent(printerId)}/index`, { enabled });
+  }
+
+  async copyIndexedPrinterFile(
+    locationId: string, observationRevision: number, key: string,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/copy`, { observationRevision },
+      { headers: { "Idempotency-Key": key } },
+    );
+    return response.data;
+  }
+
+  async queueIndexedPrinterFile(
+    locationId: string, observationRevision: number, destinationPrinterId: string,
+    options: import("@/types/api").PrinterFileQueueOptions, key: string,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/queue`,
+      { observationRevision, destinationPrinterId, options }, { headers: { "Idempotency-Key": key } },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileOperation(id: string, signal?: AbortSignal): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.get<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}`, { signal },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileOperations(signal?: AbortSignal): Promise<import("@/types/api").PrinterFileOperation[]> {
+    const response = await this.client.get<import("@/types/api").PrinterFileOperation[]>(
+      "/printer-file-index/operations", { signal },
+    );
+    return response.data;
+  }
+
+  async confirmPrinterFileSnapshot(
+    id: string, confirmation: import("@/types/api").PrinterFileSnapshotConfirmation,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/confirm-snapshot`, confirmation,
+    );
+    return response.data;
+  }
+
+  async retryPrinterFileOperation(
+    id: string, admissionOnly: boolean,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/${admissionOnly ? "enqueue" : "retry"}`,
+    );
+    return response.data;
+  }
+
+  async cancelPrinterFileOperation(id: string): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/cancel`,
+    );
+    return response.data;
+  }
+
+  async prepareIndexedPrinterFileDelete(
+    locationId: string, observationRevision: number, key: string,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/delete`, { observationRevision },
+      { headers: { "Idempotency-Key": key } },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileDeleteOperation(
+    id: string, signal?: AbortSignal,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.get<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}`, { signal },
+    );
+    return response.data;
+  }
+
+  async confirmPrinterFileDelete(
+    id: string, confirmation: import("@/types/api").PrinterFileDeleteConfirmation,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}/confirm`, confirmation,
+    );
+    return response.data;
+  }
+
+  async reconcilePrinterFileDelete(id: string): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}/reconcile`,
+    );
+    return response.data;
+  }
+
   // Get discovered G-code files for a harvest operation
   async getDiscoveredGcodeFiles(
     harvestOperationId: string
@@ -3160,20 +3276,6 @@ export class ApiClient {
     );
     if (!response.data.success) {
       throw new Error(response.data.message || response.data.error || 'Failed to start print');
-    }
-    return true;
-  }
-
-  async deletePrinterFile(
-    printerId: string,
-    fileName: string
-  ): Promise<boolean> {
-    const response = await this.client.delete<CommandResult>(
-      `/printers/${printerId}/files`,
-      { data: { fileName } }
-    );
-    if (!response.data.success) {
-      throw new Error(response.data.message || response.data.error || 'Failed to delete file');
     }
     return true;
   }

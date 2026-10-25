@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>Availability of one observed remote path, independent of local copies.</summary>
 public enum PrinterFileAvailability

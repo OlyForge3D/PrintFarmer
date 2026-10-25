@@ -5426,74 +5426,23 @@ public partial class PrintersController(
     }
 
     [HttpDelete("{id:guid}/files")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
-    [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(typeof(CommandResult), 500)]
+    [RequirePermission(PrintFarmerPermissions.PrinterFiles.Delete)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
     public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(request?.FileName))
-        {
-            return BadRequest(new CommandResult(false, "fileName is required"));
-        }
-
         if (!await CanAccessPrinterAsync(
                 id,
-                PrinterGroupAccessLevel.Submit,
+                PrinterGroupAccessLevel.Manage,
                 ct))
         {
             return NotFound(new CommandResult(false, "Printer not found."));
         }
 
-        PrinterActuationResult begin = await BeginPhysicalControlAsync(
-            id,
-            "printer_file_delete",
-            ct);
-        if (!begin.Success || begin.Lease is null)
-        {
-            return MapActuationDenial(begin);
-        }
-
-        try
-        {
-            bool success = await _printersService.DeletePrinterFileAsync(
-                id,
-                request.FileName,
-                ct);
-            await _physicalActuationService!.CompleteDirectAsync(
-                begin.Lease,
-                accepted: success,
-                failureCode: success ? null : "printer_file_delete_rejected",
-                ct: ct);
-            return success
-                ? Ok(new CommandResult(true, "File deleted successfully"))
-                : Conflict(new CommandResult(
-                    false,
-                    "The printer did not accept the file deletion."));
-        }
-        catch (OperationCanceledException)
-        {
-            await _physicalActuationService!.MarkDirectUnknownAsync(
-                begin.Lease,
-                "printer_file_delete_cancelled_after_send",
-                CancellationToken.None);
-            throw;
-        }
-        catch (Exception exception) when (!ct.IsCancellationRequested)
-        {
-            await _physicalActuationService!.MarkDirectUnknownAsync(
-                begin.Lease,
-                "printer_file_delete_outcome_unknown",
-                CancellationToken.None);
-            _logger.LogWarning(
-                exception,
-                "Printer file deletion outcome unknown for {PrinterId}",
-                id);
-            return StatusCode(
-                StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The file deletion outcome is unknown; reconciliation is required."));
-        }
+        // A fileName cannot identify a registered root, observation or irreversible consent.
+        // Keep this route fail-closed for old clients; never fall back to legacy boolean delete.
+        return Conflict(new CommandResult(
+            false,
+            "safe_delete_intent_required: use the printer-file catalog location delete and confirmation flow."));
     }
 
     /// <summary>

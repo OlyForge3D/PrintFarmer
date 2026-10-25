@@ -304,10 +304,6 @@ export const printerService = {
     return apiClient.startPrintFromFile(printerId, fileName);
   },
 
-  async deletePrinterFile(printerId: string, fileName: string): Promise<boolean> {
-    return apiClient.deletePrinterFile(printerId, fileName);
-  },
-
   // ── Print Job Status ──────────────────────────────────────────────────
 
   async getPrintJobStatus(printerId: string): Promise<PrintJobStatusDto | null> {

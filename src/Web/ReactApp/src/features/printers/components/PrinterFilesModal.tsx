@@ -30,10 +30,9 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [selectedThumbnail, setSelectedThumbnail] = useState<{ fileName: string; thumbnailUrl: string } | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
   const [harvestProgress, setHarvestProgress] = useState<Record<string, FileHarvestProgress>>({});
-  const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{ type: 'print'; file: PrinterFileDto } | null>(null);
   const [visibleFileNames, setVisibleFileNames] = useState<Set<string>>(new Set());
   const thumbnailObserverRef = useRef<IntersectionObserver | null>(null);
   const observedRowsRef = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -276,34 +275,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     }
   };
 
-  const handleDeleteFile = async (fileName: string) => {
-    const file = files.find(f => f.fileName === fileName);
-    if (file) {
-      setConfirmDialog({ type: 'delete', file });
-    }
-  };
-
-  const confirmDeleteFile = async (fileName: string) => {
-    setConfirmDialog(null);
-    try {
-      setIsDeleting(fileName);
-      const success = await apiClient.deletePrinterFile(printer.id, fileName);
-      if (success) {
-        toast.success(`Deleted: ${fileName}`);
-        // Reload the file list after deletion
-        await loadFiles();
-      } else {
-        toast.error('Failed to delete file');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to delete file';
-      toast.error(errorMessage);
-      console.error('Error deleting file:', err);
-    } finally {
-      setIsDeleting(null);
-    }
-    };
-
   const getSortedFiles = () => {
     const sorted = [...files];
 
@@ -532,16 +503,11 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                               type="button"
                               variant="subtle"
                               size="sm"
-                              onClick={() => handleDeleteFile(file.fileName)}
-                              disabled={isDeleting === file.fileName}
+                              disabled
                               className="!p-2 !h-auto text-pf-error-text enabled:hover:bg-pf-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                              aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
-                              iconCenter={isDeleting === file.fileName ? (
-                                <div className="h-4 w-4 border-2 border-pf-error border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <DeleteIcon className="h-4 w-4" />
-                              )}
+                              title="Use the printer-file catalog to safely delete a confirmed location"
+                              aria-label="Delete requires the printer-file catalog"
+                              iconCenter={<DeleteIcon className="h-4 w-4" />}
                             ></Button>
                           </div>
                         </div>
@@ -572,7 +538,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
 
   // Confirmation dialog using generic ConfirmationModal component
   const printConfirmDialog = confirmDialog?.type === 'print' ? confirmDialog : null;
-  const deleteConfirmDialog = confirmDialog?.type === 'delete' ? confirmDialog : null;
 
   return (
     <>
@@ -616,39 +581,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
               <div>
                 <p className="text-pf-text-secondary">Modified:</p>
                 <p className="text-pf-text-primary">{formatModifiedDate(printConfirmDialog.file.modified)}</p>
-              </div>
-            )}
-          </div>
-        </ConfirmationModal>
-      )}
-
-      {/* Delete Confirmation */}
-      {deleteConfirmDialog && (
-        <ConfirmationModal
-          isOpen={!!deleteConfirmDialog}
-          title="Delete File?"
-          message="Delete this file? This action cannot be undone."
-          confirmButtonText="Delete"
-          cancelButtonText="Cancel"
-          isDangerous={true}
-          onConfirm={() => confirmDeleteFile(deleteConfirmDialog.file.fileName)}
-          onCancel={() => setConfirmDialog(null)}
-        >
-          <div className="bg-pf-bg-2 rounded-sm p-3 space-y-2 text-sm">
-            <div>
-              <p className="text-pf-text-secondary">File:</p>
-              <p className="text-pf-text-primary font-medium break-all">{deleteConfirmDialog.file.fileName}</p>
-            </div>
-            {deleteConfirmDialog.file.sizeBytes && (
-              <div>
-                <p className="text-pf-text-secondary">Size:</p>
-                <p className="text-pf-text-primary">{formatFileSize(deleteConfirmDialog.file.sizeBytes)}</p>
-              </div>
-            )}
-            {deleteConfirmDialog.file.modified && (
-              <div>
-                <p className="text-pf-text-secondary">Modified:</p>
-                <p className="text-pf-text-primary">{formatModifiedDate(deleteConfirmDialog.file.modified)}</p>
               </div>
             )}
           </div>
