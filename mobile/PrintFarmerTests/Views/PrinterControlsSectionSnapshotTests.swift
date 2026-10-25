@@ -74,11 +74,69 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertEqual(presentation(60).etaLabel, "1m left · Paused")
         printer.isOnline = false
         XCTAssertEqual(presentation(60).stateLabel, "Offline")
+        XCTAssertEqual(presentation(60).jobLabel, "Offline")
         XCTAssertFalse(presentation(60).isActiveJob)
+        printer.isOnline = true
+        printer.state = "idle"
+        XCTAssertEqual(presentation(nil).jobLabel, "Ready to seed")
+        let maintenanceJSON = TestJSON.printerMinimal
+            .replacingOccurrences(of: "\"inMaintenance\": false", with: "\"inMaintenance\": true")
+            .replacingOccurrences(of: "\"isOnline\": false", with: "\"isOnline\": true")
+        let maintenance = PrinterCardPresentation(
+            printer: try TestData.decodePrinter(from: maintenanceJSON), isPendingReady: false,
+            attentionCount: nil, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(maintenance.jobLabel, "In maintenance")
+        printer.isOnline = false
+        let offlineBed = PrinterCardPresentation(printer: printer, isPendingReady: true,
+                                                attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(offlineBed.stateLabel, "Offline")
+        XCTAssertEqual(offlineBed.jobLabel, "Offline")
+        XCTAssertFalse(offlineBed.accessibilityLabel.contains("Ready to harvest"))
+        XCTAssertFalse(offlineBed.accessibilityLabel.contains("Bed clear"))
+        printer.isOnline = true
         let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
                                          attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
         XCTAssertEqual(bed.stateLabel, "Bed clear")
-        XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
+        XCTAssertEqual(bed.jobLabel, "Ready to harvest")
+    }
+
+    func testOnlineErrorWithoutJobContextNeverReadsReadyToSeed() throws {
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "error"
+        printer.jobName = nil
+        printer.fileName = nil
+        for reason in [nil, "Spaghetti detected"] as [String?] {
+            let card = PrinterCardPresentation(printer: printer, isPendingReady: false, attentionCount: nil,
+                                               failureReason: reason, printTimeLeftSeconds: nil)
+            XCTAssertEqual(card.jobLabel, "Error")
+            XCTAssertFalse(card.accessibilityLabel.contains("Ready to seed"))
+        }
+    }
+
+    func testMaintenanceUnknownAndCompletedStatePrecedence() throws {
+        func card(state: String, inMaintenance: Bool) throws -> PrinterCardPresentation {
+            let json = TestJSON.printerMinimal
+                .replacingOccurrences(of: "\"inMaintenance\": false", with: "\"inMaintenance\": \(inMaintenance)")
+                .replacingOccurrences(of: "\"isOnline\": false", with: "\"isOnline\": true")
+            var printer = try TestData.decodePrinter(from: json)
+            printer.state = state
+            printer.jobName = "part.gcode"
+            return PrinterCardPresentation(printer: printer, isPendingReady: false, attentionCount: nil,
+                                           failureReason: nil, printTimeLeftSeconds: nil)
+        }
+        let errorMaintenance = try card(state: "error", inMaintenance: true)
+        XCTAssertEqual(errorMaintenance.stateLabel, "Maintenance")
+        XCTAssertEqual(errorMaintenance.jobLabel, "In maintenance")
+        let pausedMaintenance = try card(state: "paused", inMaintenance: true)
+        XCTAssertEqual(pausedMaintenance.stateLabel, "Maintenance")
+        XCTAssertEqual(pausedMaintenance.jobLabel, "part.gcode")
+        let unknown = try card(state: "calibrating", inMaintenance: false)
+        XCTAssertEqual(unknown.stateLabel, "Calibrating")
+        XCTAssertEqual(unknown.jobLabel, "Ready to seed")
+        let completed = try card(state: "completed", inMaintenance: false)
+        XCTAssertEqual(completed.stateLabel, "Completed")
+        XCTAssertEqual(completed.jobLabel, "Ready to seed")
     }
 
     func testMissingTemperaturesReadAsNotReportedInVoiceOver() throws {
@@ -112,7 +170,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertFalse(presentation.showsJobProgress)
         XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
         XCTAssertFalse(presentation.accessibilityLabel.contains("ETA unavailable"))
-        XCTAssertTrue(presentation.jobLabel.contains("Clear bed"))
+        XCTAssertEqual(presentation.jobLabel, "Ready to harvest")
     }
 
     func testFailureCardRetainsKnownJobProgressAndOnlyShowsServerReportedETA() throws {

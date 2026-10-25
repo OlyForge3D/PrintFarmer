@@ -131,7 +131,7 @@ final class PendingReadyMonitor {
             let name = nameMap[printerId] ?? printerId.uuidString.prefix(8).description
             let content = UNMutableNotificationContent()
             content.title = "Bed Clear Required"
-            content.body = "\(name) is ready for the next job — clear the bed to continue."
+            content.body = "\(name) is ready to harvest — clear the bed to continue."
             content.sound = .default
             content.categoryIdentifier = Self.notificationCategory
             content.badge = NSNumber(value: pendingReadyCount)
