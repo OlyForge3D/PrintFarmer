@@ -3,6 +3,75 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SELECTABLE_THEMES } from '../src/design-system/themes/registry';
 
+test('Tuning commits native pointer and keyboard slider gestures once on both printer surfaces', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1200 });
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  await page.goto('/src/test/fixtures/printer-sensors.html?sidebar-online&tuning');
+  const commands = page.locator('[data-fixture-command]');
+  let sent = 0;
+  for (const surface of ['card', 'sidebar']) {
+    const root = page.getByRole('region', { name: surface, exact: true });
+    const tuning = root.getByRole('region', { name: 'Tuning', exact: true });
+    await expect(tuning.getByRole('spinbutton')).toHaveCount(0);
+    await expect(tuning.getByRole('button', { name: /Apply/ })).toHaveCount(0);
+    await expect(tuning.getByText('1%', { exact: true })).toHaveCount(2);
+    await expect(tuning.getByText('200%', { exact: true })).toHaveCount(2);
+    await expect(root.getByTestId('sensor-runout')).toHaveCount(0);
+    await expect(tuning.getByText(/Submit access|Observed values are live readback|100% is normal/)).toHaveCount(0);
+    const speed = tuning.getByRole('slider', { name: 'Speed %', exact: true });
+    await expect(speed).toBeEnabled();
+    await speed.scrollIntoViewIfNeeded();
+    const bounds = await speed.boundingBox();
+    if (!bounds) throw new Error('Speed slider has no rendered bounds');
+    await page.mouse.move(bounds.x + bounds.width * 0.65, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height / 2, { steps: 8 });
+    const speedPercent = Number(await speed.inputValue());
+    await expect(commands).toHaveCount(sent);
+    await page.mouse.up();
+    await expect(commands).toHaveCount(++sent);
+    expect(JSON.parse(await commands.last().textContent() ?? '')).toEqual({
+      printerId: surface === 'card' ? 'sensor-poc-card' : 'sensor-poc-sidebar', kind: 'speed', percent: speedPercent,
+    });
+    await expect(tuning.getByLabel('Observed speed')).toHaveText('Observed: 125%');
+    const flow = tuning.getByRole('slider', { name: 'Flow %', exact: true });
+    await expect(flow).toBeEnabled();
+    await flow.focus();
+    await page.keyboard.down('ArrowRight');
+    await page.keyboard.down('ArrowRight');
+    const flowPercent = Number(await flow.inputValue());
+    await expect(commands).toHaveCount(sent);
+    await page.keyboard.up('ArrowRight');
+    await page.keyboard.press('Tab');
+    await expect(commands).toHaveCount(++sent);
+    expect(JSON.parse(await commands.last().textContent() ?? '')).toEqual({
+      printerId: surface === 'card' ? 'sensor-poc-card' : 'sensor-poc-sidebar', kind: 'flow', percent: flowPercent,
+    });
+    await expect(tuning.getByLabel('Observed flow')).toHaveText('Observed: 87.5%');
+  }
+});
+
+test('Tuning is print-only and empty sensor copy stays absent at narrow widths', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),
+    route => route.fulfill({ status: 503, json: { message: 'Isolated fixture: hardware access blocked' } }));
+  for (const state of ['Idle', 'Paused', 'Starting', 'Completed', 'Printing']) {
+    await page.goto(`/src/test/fixtures/printer-sensors.html?sidebar-online&tuning&empty-sensors&tuning-state=${state}`);
+    for (const surface of ['card', 'sidebar']) {
+      const tuning = page.getByRole('region', { name: surface, exact: true }).getByRole('region', { name: 'Tuning', exact: true });
+      for (const label of ['Speed %', 'Flow %']) {
+        const slider = tuning.getByRole('slider', { name: label, exact: true });
+        if (state === 'Printing') await expect(slider).toBeEnabled();
+        else await expect(slider).toBeDisabled();
+      }
+      expect(await tuning.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    }
+    await expect(page.getByText('No sensors reported.', { exact: true })).toHaveCount(0);
+    await expect(page.locator('[data-fixture-command]')).toHaveCount(0);
+  }
+});
+
 test('heater glyphs match the actual compact card paths, colors and temperature-driven brightness', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1200 });
   await page.route(url => /^https?:$/.test(url.protocol) && (url.pathname.startsWith('/api/') || !['localhost', '127.0.0.1'].includes(url.hostname)),

@@ -44,9 +44,8 @@ function getSensorGroup(sensor: PrinterSensor): SensorGroup {
 
 function isVisibleSensor(sensor: PrinterSensor): boolean {
   const filament = sensor.kind === 'FilamentRunout' || sensor.readings.some(reading => reading.quantity === 'FilamentDetected');
-  return !isHiddenPrinterSensorId(sensor.id) &&
-    (filament ? (sensor.writable ?? []).some(descriptor => descriptor.quantity === 'Enabled' && isBinaryDescriptor(descriptor)) :
-      isThermalSensor(sensor) || (sensor.writable ?? []).some(isOutputDescriptor));
+  return !filament && !isHiddenPrinterSensorId(sensor.id) &&
+    (isThermalSensor(sensor) || (sensor.writable ?? []).some(isOutputDescriptor));
 }
 
 function isOutputDescriptor(descriptor: PrinterSensorWritable): boolean {
@@ -75,7 +74,7 @@ function formatSensorReading(reading: PrinterSensorReading): string {
 }
 
 export function PrinterSensorsSection({
-  temperatures, supportsTelemetry, children, ...props
+  temperatures, children, ...props
 }: PrinterSensorsPanelProps & { temperatures: PrinterTemperatures; supportsTelemetry?: boolean; children?: (additionalRows: ReactNode) => ReactNode }) {
   const { hasPermission } = useAuth();
   const sensors = additionalPrinterSensors(props.sensors, temperatures).filter(isVisibleSensor);
@@ -83,6 +82,7 @@ export function PrinterSensorsSection({
   const remaining = sensors.filter(sensor => !isThermalSensor(sensor));
   const authorized = { ...props, canControl: props.canControl && hasPermission('queue', 'start') };
   const thermalRows = thermals.length > 0 ? <PrinterSensorsPanel {...authorized} sensors={thermals} layout="thermal-rows" /> : null;
+  if (!children && !sensors.length) return null;
   return <div className="space-y-4">
     {(children || thermals.length > 0) && <SensorSection title="Temperatures">
       {children ? children(thermalRows) : <PrinterThermalTable>{thermalRows}</PrinterThermalTable>}
@@ -93,7 +93,6 @@ export function PrinterSensorsSection({
         <PrinterSensorsPanel {...authorized} sensors={items} layout="plain" />
       </SensorSection>;
     })}
-    {!sensors.length && !props.sensors?.length && supportsTelemetry && <p className="text-sm text-pf-text-secondary">No sensors reported.</p>}
   </div>;
 }
 
@@ -172,7 +171,7 @@ export function PrinterSensorsPanel({
   printerId, sensors, canControl = false, isOnline = true, layout, showThermalHeading = true,
 }: PrinterSensorsPanelProps) {
   const visible = (sensors ?? []).filter(isVisibleSensor);
-  if (!visible.length) return sensors?.length ? null : <p className="text-sm text-pf-text-secondary">No sensors reported.</p>;
+  if (!visible.length) return null;
   const groups = layout ? [{ group: 'Readings', items: visible }] : GROUP_ORDER.map(group => ({
     group, items: visible.filter(sensor => getSensorGroup(sensor) === group),
   })).filter(({ items }) => items.length);

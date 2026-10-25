@@ -8,6 +8,7 @@ import { CompactPrinterCard } from '@/features/printers/components/CompactPrinte
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { client } from '@/services/api/httpClient';
 import { apiClient } from '@/services/api';
+import { printerSignalRService } from '@/services/printer-signalr';
 import { queryKeys } from '@/common/hooks/useApi';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type PrinterDetails, type PrinterSensor } from '@/types/api';
 import '@/index.css';
@@ -46,7 +47,8 @@ const sensors: PrinterSensor[] = [
   { id: 'output', kind: 'Other', displayName: 'Enclosure output', available: true,
     readings: [{ quantity: 'Power', value: 8, unit: 'Watt' }] },
   { id: 'runout', kind: 'FilamentRunout', displayName: 'Filament runout', available: true,
-    readings: [{ quantity: 'FilamentDetected', value: true, unit: 'None' }] },
+    readings: [{ quantity: 'FilamentDetected', value: true, unit: 'None' }],
+    writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
   { id: 'diagnostic', kind: 'Other', displayName: 'Diagnostic reading', available: true,
     readings: [{ quantity: 'Other', value: 7, unit: 'None' }] },
 ];
@@ -69,12 +71,23 @@ export function mountSensors(element: HTMLElement) {
   const sidebarOnline = fixtureOptions.has('sidebar-online');
   const unknownLimits = fixtureOptions.has('unknown-limits');
   const groupParity = fixtureOptions.has('group-parity');
+  const tuning = fixtureOptions.has('tuning');
   const printer: Printer = {
     id: 'sensor-poc-card', name: 'Workshop printer · sensor POC', manufacturerName: 'Fixture maker', backend: PrinterBackend.Moonraker,
     backendUrl: 'http://invalid.local', isOnline: !fixtureOptions.has('offline-heaters'), isEnabled: true, rowVersion: 'poc',
-    state: groupParity ? 'Printing' : 'Idle', homedAxes: 'xyz', x: 100, y: 110, z: 5,
-    hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60, sensors,
+    state: tuning ? fixtureOptions.get('tuning-state') ?? 'Printing' : groupParity ? 'Printing' : 'Idle',
+    homedAxes: 'xyz', x: 100, y: 110, z: 5,
+    hotendTemp: 205, hotendTarget: 210, bedTemp: 59.8, bedTarget: 60,
+    sensors: fixtureOptions.has('empty-sensors') ? [] : sensors,
   };
+  if (tuning) {
+    Object.defineProperty(printerSignalRService, 'isConnected', { get: () => true });
+    printerSignalRService.connect = async () => {};
+    printerSignalRService.subscribeToPrinter = async () => {};
+    apiClient.getPrinterStatus = async id => ({ ...printer, id, speedFactorPercent: 125, flowFactorPercent: 87.5 });
+    apiClient.setPrinterSpeedFactor = async (printerId, percent) => record({ printerId, kind: 'speed', percent });
+    apiClient.setPrinterFlowFactor = async (printerId, percent) => record({ printerId, kind: 'flow', percent });
+  }
   if (fixtureOptions.has('cold-heaters')) {
     printer.hotendTemp = 50;
     printer.bedTemp = 35;
@@ -90,6 +103,7 @@ export function mountSensors(element: HTMLElement) {
     supportsMovement: true, supportsTemperatureControl: true, supportsPrinterInformation: false,
     supportsHistory: false, supportsFilamentControl: false, supportsObjectExclusion: groupParity,
     supportsSensorControl: true, supportsSensorTelemetry: true,
+    supportsSpeedFactorControl: tuning, supportsFlowFactorControl: tuning,
   };
   for (const id of [printer.id, 'sensor-poc-sidebar']) {
     const details: PrinterDetails = { id, name: printer.name, backend: printer.backend, capabilities: {
@@ -121,7 +135,7 @@ export function mountSensors(element: HTMLElement) {
             {surface === 'card' ? <DetailedPrinterCard printer={printer} backendCapabilities={capabilities} />
               : <PrinterDetailsSidebar printerId="sensor-poc-sidebar"
                 printer={{ ...printer, id: 'sensor-poc-sidebar', isOnline: sidebarOnline && printer.isOnline, homedAxes: 'xy' }}
-                backendCapabilities={capabilities} layout="content" onClose={() => {}} />}
+                backendCapabilities={{ ...capabilities, printerId: 'sensor-poc-sidebar' }} layout="content" onClose={() => {}} />}
           </section>
         ))}
         {fixtureOptions.has('glyph-parity') && <section aria-label="compact" className="w-80">

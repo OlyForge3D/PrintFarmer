@@ -75,22 +75,16 @@ describe('PrinterSensorsPanel', () => {
     mocks.setPrinterSensor.mockResolvedValue({ success: true });
   });
 
-  it('shows an empty state when there are no sensors', () => {
-    renderPanel([]);
-    expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
+  it.each([undefined, []])('renders nothing for an absent or empty sensor list (%j)', sensors => {
+    const { container } = renderPanel(sensors);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it.each([true, false])('sends a boolean filament Enabled command and preserves detection when enabled is %s', async enabled => {
-    renderPanel([{ ...runout, readings: [...runout.readings, { quantity: 'Enabled', value: enabled, unit: 'None' }],
+  it.each([true, false])('hides writable filament sensors even when monitoring is enabled=%s', enabled => {
+    const { container } = renderPanel([{ ...runout, readings: [...runout.readings, { quantity: 'Enabled', value: enabled, unit: 'None' }],
       writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] }], { canControl: true });
-    const toggle = screen.getByRole('switch', { name: 'Set Runout Enabled' });
-    expect(toggle).toHaveAttribute('aria-checked', String(enabled));
-    expect(screen.getByLabelText('Runout Filament: Off')).toBeInTheDocument();
-    fireEvent.click(toggle);
-    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', 'runout', {
-      quantity: 'Enabled', value: !enabled,
-    }));
-    expect(screen.getByLabelText('Runout Filament: Off')).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -669,11 +663,11 @@ describe('PrinterSensorsPanel', () => {
       ]);
     });
 
-    it('hides a duplicate-only disclosure but preserves reported-empty and unsupported behavior', () => {
+    it('hides duplicate-only, reported-empty and unsupported sensor sections without placeholder text', () => {
       const { rerender } = render(<PrinterSensorsSection printerId="p1" sensors={[heater('nozzle')]} temperatures={temperatures} supportsTelemetry />);
       expect(screen.queryByText('Sensors & fans')).not.toBeInTheDocument();
       rerender(<PrinterSensorsSection printerId="p1" sensors={[]} temperatures={temperatures} supportsTelemetry />);
-      expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
+      expect(screen.queryByText('No sensors reported.')).not.toBeInTheDocument();
       rerender(<PrinterSensorsSection printerId="p1" sensors={undefined} temperatures={temperatures} />);
       expect(screen.queryByText('Sensors & fans')).not.toBeInTheDocument();
     });
@@ -785,7 +779,10 @@ describe('PrinterSensorsPanel', () => {
     const excluded: PrinterSensor[] = [
       hotendFan, runout,
       { ...runout, id: 'writable-runout', writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { ...runout, id: 'switch-runout', writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { ...runout, id: 'unreported-runout', readings: [], writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
       { ...runout, id: 'generic-runout', kind: 'Other' },
+      { ...runout, id: 'generic-switch-runout', kind: 'Other', writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
       { id: 'diagnostic', displayName: 'Diagnostic', kind: 'Other', available: true,
         readings: [{ quantity: 'Other', value: 7, unit: 'None' }] },
       { id: 'power', displayName: 'Power', kind: 'Other', available: true,

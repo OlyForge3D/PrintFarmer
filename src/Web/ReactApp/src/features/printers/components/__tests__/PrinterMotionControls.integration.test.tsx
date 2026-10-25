@@ -37,7 +37,7 @@ vi.mock("@/common/hooks/usePrinterDisplay", () => ({
 vi.mock("@/features/printers/hooks/use-runtime-factors", () => ({
   useRuntimeFactors: () => ({
     speedFactorPercent: 125, flowFactorPercent: 87.5, connected: true,
-    epoch: 0, error: '', refresh: vi.fn(), status: { isOnline: true, state: 'Idle' },
+    epoch: 0, error: '', refresh: vi.fn(), status: { isOnline: true, state: 'Printing' },
   }),
 }));
 vi.mock("@/common/hooks/useApi", () => ({
@@ -227,12 +227,19 @@ beforeEach(() => {
 describe.each<Surface>(["detail", "sidebar"])(
   "%s initiating motion controls",
   (surface) => {
-    it('renders real runtime controls and sends the independent wire percentage on this surface', async () => {
-      render(<Controls surface={surface} factors />);
+    it('renders Tuning sliders and sends the independent wire percentage once on release on this surface', async () => {
+      render(<Controls surface={surface} factors overrides={{ state: 'Printing' }} />);
       expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
       expect(screen.getByLabelText('Observed flow')).toHaveTextContent('87.5%');
-      fireEvent.change(screen.getByRole('spinbutton', { name: 'Speed %' }), { target: { value: '130.25' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Apply speed percentage' }));
+      const tuning = within(screen.getByRole('region', { name: 'Tuning' }));
+      expect(tuning.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(tuning.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument();
+      const slider = tuning.getByRole('slider', { name: 'Speed %' });
+      fireEvent.pointerDown(slider);
+      fireEvent.change(slider, { target: { value: '130.25' } });
+      expect(mockSpeedFactor).not.toHaveBeenCalled();
+      fireEvent.pointerUp(slider);
+      fireEvent.blur(slider);
       await waitFor(() => expect(mockSpeedFactor).toHaveBeenCalledExactlyOnceWith(printer.id, 130.25));
       expect(mockFlowFactor).not.toHaveBeenCalled();
       expect(screen.getByLabelText('Observed speed')).toHaveTextContent('125%');
@@ -240,17 +247,25 @@ describe.each<Surface>(["detail", "sidebar"])(
 
     it('keeps runtime controls hidden without operation capability on this surface', () => {
       render(<Controls surface={surface} />);
-      expect(screen.queryByRole('spinbutton', { name: 'Speed %' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('spinbutton', { name: 'Flow %' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('slider', { name: 'Speed %' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('slider', { name: 'Flow %' })).not.toBeInTheDocument();
       expect(mockSpeedFactor).not.toHaveBeenCalled();
       expect(mockFlowFactor).not.toHaveBeenCalled();
     });
 
     it('preserves Queue.Start authorization for runtime controls on this surface', () => {
       allowed = false;
-      render(<Controls surface={surface} factors />);
-      expect(screen.getByRole('spinbutton', { name: 'Speed %' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Apply flow percentage' })).toBeDisabled();
+      render(<Controls surface={surface} factors overrides={{ state: 'Printing' }} />);
+      expect(screen.getByRole('slider', { name: 'Speed %' })).toBeDisabled();
+      expect(screen.getByRole('slider', { name: 'Flow %' })).toBeDisabled();
+      expect(mockSpeedFactor).not.toHaveBeenCalled();
+      expect(mockFlowFactor).not.toHaveBeenCalled();
+    });
+
+    it.each(['Idle', 'Paused', 'Starting', 'Completed', 'Unknown'])('disables Tuning while %s on this surface', state => {
+      render(<Controls surface={surface} factors overrides={{ state }} />);
+      expect(screen.getByRole('slider', { name: 'Speed %' })).toBeDisabled();
+      expect(screen.getByRole('slider', { name: 'Flow %' })).toBeDisabled();
       expect(mockSpeedFactor).not.toHaveBeenCalled();
       expect(mockFlowFactor).not.toHaveBeenCalled();
     });

@@ -56,12 +56,15 @@ and pause, while preset menus are disabled. Cooldown explicitly turns off all
 heaters, not just the active nozzle and bed. Filament-monitor enable switches,
 raw gas resistance, measured temperature extrema and authenticated fallback
 telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
+The web UI hides filament sensors (including monitoring switches) and empty
+sensor sections; the underlying API remains available.
 
 ### Moonraker motion controls
 
 The shared API also exposes independent runtime speed and flow overrides for
-Moonraker, with bounded writes and authoritative nullable readback. Client
-controls are separate deliverables; see the
+Moonraker, with bounded writes and authoritative nullable readback. Web **Tuning**
+sliders are enabled only while printing and send once when a drag or keyboard
+adjustment ends, without Apply buttons. See the
 [runtime factor API contract](./docs/API.md#runtime-speed-and-flow-overrides).
 
 Homing, jogging, and absolute movement use direct POST requests to the existing

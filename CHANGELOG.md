@@ -38,6 +38,11 @@
 
 ### Fixes
 
+- Replace web speed/flow inputs with print-only **Tuning** sliders that send once
+  when an adjustment ends, without Apply buttons or redundant help text. Hide
+  all filament sensor rows and empty sensor messages while retaining live
+  readback and authentication no-replay safeguards (#3487).
+
 - Remove generated Sensor/Heater type subtitles from web sensor names and show
   HeaterBox humidity as an indented child with a water-percent glyph and its
   reading in the Current column (#3467).

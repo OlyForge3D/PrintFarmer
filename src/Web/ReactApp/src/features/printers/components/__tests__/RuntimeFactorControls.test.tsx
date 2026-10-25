@@ -64,18 +64,18 @@ function mount(p = printer, caps: PrinterBackendCapabilitiesDto | undefined = ca
   const result = render(tree(p, caps));
   return { ...result, client, update: (nextPrinter = p, nextCaps = caps) => result.rerender(tree(nextPrinter, nextCaps)) };
 }
-const speedInput = () => screen.getByRole('spinbutton', { name: 'Speed %' });
-const flowInput = () => screen.getByRole('spinbutton', { name: 'Flow %' });
-const speedApply = () => screen.getByRole('button', { name: 'Apply speed percentage' });
-const flowApply = () => screen.getByRole('button', { name: 'Apply flow percentage' });
+const speedInput = () => screen.getByRole('slider', { name: 'Speed %' });
+const flowInput = () => screen.getByRole('slider', { name: 'Flow %' });
 const observed = (kind: 'speed' | 'flow') => screen.getByLabelText(`Observed ${kind}`);
-async function ready() { await waitFor(() => expect(speedApply()).toBeEnabled()); }
+async function ready() { await waitFor(() => expect(speedInput()).toBeEnabled()); }
 function draft(value: string, kind: 'speed' | 'flow' = 'speed') {
-  fireEvent.change(kind === 'speed' ? speedInput() : flowInput(), { target: { value } });
+  const slider = kind === 'speed' ? speedInput() : flowInput();
+  fireEvent.pointerDown(slider);
+  fireEvent.change(slider, { target: { value } });
 }
 async function apply(value: string, kind: 'speed' | 'flow' = 'speed') {
   draft(value, kind);
-  fireEvent.click(kind === 'speed' ? speedApply() : flowApply());
+  fireEvent.pointerUp(kind === 'speed' ? speedInput() : flowInput());
   await waitFor(() => expect(kind === 'speed' ? mocks.speed : mocks.flow).toHaveBeenCalled());
 }
 beforeEach(() => {
@@ -100,8 +100,8 @@ describe('runtime percentage controls', () => {
   ])('gates capabilities independently (%s, %s)', async (speed, flow, showSpeed, showFlow) => {
     mount(printer, { ...capabilities, supportsSpeedFactorControl: speed, supportsFlowFactorControl: flow });
     await act(async () => {});
-    expect(!!screen.queryByRole('spinbutton', { name: 'Speed %' })).toBe(showSpeed);
-    expect(!!screen.queryByRole('spinbutton', { name: 'Flow %' })).toBe(showFlow);
+    expect(!!screen.queryByRole('slider', { name: 'Speed %' })).toBe(showSpeed);
+    expect(!!screen.queryByRole('slider', { name: 'Flow %' })).toBe(showFlow);
     if (!showSpeed && !showFlow) expect(mocks.status).not.toHaveBeenCalled();
     expect(mocks.speed).not.toHaveBeenCalled();
     expect(mocks.flow).not.toHaveBeenCalled();
@@ -110,45 +110,47 @@ describe('runtime percentage controls', () => {
   it('hides controls for missing capabilities and for another printer capability response', () => {
     const view = mount(printer, { ...capabilities, supportsSpeedFactorControl: undefined, supportsFlowFactorControl: undefined });
     view.rerender(<QueryClientProvider client={view.client}><RuntimeFactorControls printer={printer} /></QueryClientProvider>);
-    expect(screen.queryByRole('region', { name: 'Runtime overrides' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Tuning' })).not.toBeInTheDocument();
     view.update(printer, { ...capabilities, printerId: 'other' });
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
   it.each([
     { isOnline: false }, { isEnabled: false }, { inMaintenance: true },
     { state: undefined }, { state: 'Error' }, { state: 'Unknown' }, { state: 'Starting' }, { state: 'Shutdown' },
+    { state: 'Idle' }, { state: 'Ready' }, { state: 'Standby' }, { state: 'Complete' },
+    { state: 'Completed' }, { state: 'Cancelled' }, { state: 'Paused' },
   ])('prevents writes in a blocked printer state %j', async patch => {
     mount({ ...printer, ...patch });
     await act(async () => {});
     expect(speedInput()).toBeDisabled();
-    expect(flowApply()).toBeDisabled();
+    expect(flowInput()).toBeDisabled();
     draft('150');
-    fireEvent.submit(speedInput().closest('form')!);
+    fireEvent.pointerUp(speedInput());
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
-  it.each(['Idle', 'Ready', 'Standby', 'Complete', 'Completed', 'Cancelled', 'Printing', 'Paused'])('allows known %s state', async state => {
+  it.each(['Printing', 'printing', 'PRINTING'])('allows only the %s state', async state => {
     mocks.status.mockResolvedValue(live({ state }));
     mount({ ...printer, state });
     await ready();
-    await apply('125');
-    expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 125);
+    await apply('130');
+    expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 130);
   });
 
   it('requires Queue.Start and a live connection before submission', async () => {
     mocks.allowed = false;
     const view = mount();
     await act(async () => {});
-    expect(speedApply()).toBeDisabled();
+    expect(speedInput()).toBeDisabled();
     mocks.allowed = true;
     view.update();
     await ready();
     connection(false);
     expect(speedInput()).toBeDisabled();
     expect(observed('speed')).toHaveTextContent('Unknown');
-    fireEvent.submit(speedInput().closest('form')!);
+    fireEvent.pointerUp(speedInput());
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
@@ -158,48 +160,111 @@ describe('runtime percentage controls', () => {
     await ready();
     expect(observed('speed')).toHaveTextContent('Unknown');
     expect(observed('flow')).toHaveTextContent('Unknown');
-    expect(speedInput()).toHaveValue(null);
+    expect(speedInput()).toHaveAttribute('aria-valuetext', 'Unknown');
     emit(live({ speedFactorPercent: 250.25, flowFactorPercent: 87.5 }));
     draft('120');
     expect(observed('speed')).toHaveTextContent('250.25%');
     expect(observed('flow')).toHaveTextContent('87.5%');
-    expect(speedInput()).toHaveValue(120);
+    expect(speedInput()).toHaveValue('120');
+    expect(screen.getByLabelText('Selected speed')).toHaveTextContent('120%');
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
-  it.each(['', '0', '0.99', '-1', '200.01', '125.001', 'Infinity', 'NaN'])('rejects invalid draft %s without a write', async value => {
+  it('uses labelled bounded sliders without numeric inputs, Apply buttons or redundant explanations', async () => {
     mount();
     await ready();
-    draft(value);
-    fireEvent.click(speedApply());
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter 1 to 200%');
-    expect(speedInput()).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('region', { name: 'Tuning' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument();
+    for (const slider of [speedInput(), flowInput()]) {
+      expect(slider).toHaveAttribute('min', '1');
+      expect(slider).toHaveAttribute('max', '200');
+      expect(slider).toHaveAttribute('step', '0.01');
+    }
+    expect(screen.getAllByText('1%', { exact: true })).toHaveLength(2);
+    expect(screen.getAllByText('200%', { exact: true })).toHaveLength(2);
+    expect(screen.queryByText(/New value:|Submit access|Observed values are live readback|100% is normal/)).not.toBeInTheDocument();
     expect(mocks.speed).not.toHaveBeenCalled();
     expect(mocks.flow).not.toHaveBeenCalled();
   });
 
   it.each(['1', '200', '87.5', '125.01', '100'])('sends exact percentage %s and never calls the other factor', async value => {
+    mocks.status.mockResolvedValue(live({ flowFactorPercent: 90 }));
     mount();
     await ready();
     await apply(value, 'flow');
     expect(mocks.flow).toHaveBeenCalledExactlyOnceWith('p1', Number(value));
     expect(mocks.speed).not.toHaveBeenCalled();
-    expect(observed('flow')).toHaveTextContent('87.5%');
+    expect(observed('flow')).toHaveTextContent('90%');
   });
 
-  it('supports labelled keyboard editing and explicit apply without sending on blur', async () => {
+  it.each(['mouse', 'touch', 'pen'])('sends only the final %s drag value once on release, never on intermediate movement', async pointerType => {
+    mount();
+    await ready();
+    const slider = speedInput();
+    fireEvent.pointerDown(slider, { pointerId: 1, pointerType });
+    for (const value of ['130', '145.25', '160']) {
+      fireEvent.change(slider, { target: { value } });
+    }
+    expect(mocks.speed).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Selected speed')).toHaveTextContent('160%');
+    expect(observed('speed')).toHaveTextContent('125%');
+    fireEvent.pointerUp(slider, { pointerId: 1, pointerType });
+    fireEvent.lostPointerCapture(slider, { pointerId: 1, pointerType });
+    fireEvent.blur(slider);
+    await waitFor(() => expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 160));
+    expect(mocks.flow).not.toHaveBeenCalled();
+  });
+
+  it.each(['pointercancel', 'lostpointercapture', 'escape'])('discards a %s gesture without sending it on the subsequent release or blur', async cancel => {
+    mount();
+    await ready();
+    draft('150');
+    if (cancel === 'pointercancel') fireEvent.pointerCancel(speedInput());
+    if (cancel === 'lostpointercapture') fireEvent.lostPointerCapture(speedInput());
+    if (cancel === 'escape') fireEvent.keyDown(speedInput(), { key: 'Escape' });
+    fireEvent.pointerUp(speedInput());
+    fireEvent.blur(speedInput());
+    expect(speedInput()).toHaveValue('125');
+    expect(screen.queryByLabelText('Selected speed')).not.toBeInTheDocument();
+    expect(mocks.speed).not.toHaveBeenCalled();
+  });
+
+  it('does not send a click, focus change or key release without an adjustment', async () => {
+    mount();
+    await ready();
+    fireEvent.pointerDown(speedInput());
+    fireEvent.pointerUp(speedInput());
+    fireEvent.keyUp(speedInput(), { key: 'ArrowRight' });
+    fireEvent.blur(speedInput());
+    expect(mocks.speed).not.toHaveBeenCalled();
+    expect(mocks.flow).not.toHaveBeenCalled();
+  });
+
+  it('commits an assistive keyboard change on blur once without needing an Apply button', async () => {
+    mount();
+    await ready();
+    fireEvent.change(flowInput(), { target: { value: '95.5' } });
+    expect(mocks.flow).not.toHaveBeenCalled();
+    fireEvent.blur(flowInput());
+    fireEvent.blur(flowInput());
+    await waitFor(() => expect(mocks.flow).toHaveBeenCalledExactlyOnceWith('p1', 95.5));
+  });
+
+  it('commits once when a keyboard adjustment stops, not for intermediate repeats or the following blur', async () => {
     const user = userEvent.setup();
     mount();
     await ready();
     await user.tab();
     expect(speedInput()).toHaveFocus();
-    await user.type(speedInput(), '125.25');
-    await user.tab();
-    expect(speedApply()).toHaveFocus();
+    fireEvent.keyDown(speedInput(), { key: 'ArrowRight' });
+    fireEvent.change(speedInput(), { target: { value: '125.01' } });
+    fireEvent.keyDown(speedInput(), { key: 'ArrowRight', repeat: true });
+    fireEvent.change(speedInput(), { target: { value: '125.25' } });
     expect(mocks.speed).not.toHaveBeenCalled();
-    await user.keyboard('{Enter}');
+    fireEvent.keyUp(speedInput(), { key: 'ArrowRight' });
+    fireEvent.blur(speedInput());
     await waitFor(() => expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 125.25));
-    expect(speedInput()).toHaveAccessibleDescription(/1-200%/);
   });
 
   it('prevents duplicates and cross-factor writes while pending; ACK does not replace observation', async () => {
@@ -208,10 +273,11 @@ describe('runtime percentage controls', () => {
     mount();
     await ready();
     draft('140');
-    fireEvent.submit(speedInput().closest('form')!);
-    fireEvent.submit(speedInput().closest('form')!);
-    await waitFor(() => expect(speedApply()).toBeDisabled());
-    expect(flowApply()).toBeDisabled();
+    fireEvent.pointerUp(speedInput());
+    fireEvent.pointerUp(speedInput());
+    fireEvent.blur(speedInput());
+    await waitFor(() => expect(speedInput()).toBeDisabled());
+    expect(flowInput()).toBeDisabled();
     expect(screen.getByText('Sending...')).toHaveAttribute('role', 'status');
     expect(mocks.speed).toHaveBeenCalledTimes(1);
     expect(observed('speed')).toHaveTextContent('125%');
@@ -232,11 +298,14 @@ describe('runtime percentage controls', () => {
       <RuntimeFactorControls printer={printer} backendCapabilities={capabilities} />
       <RuntimeFactorControls printer={printer} backendCapabilities={capabilities} />
     </QueryClientProvider>);
-    await waitFor(() => screen.getAllByRole('spinbutton', { name: 'Speed %' }).forEach(input => expect(input).toBeEnabled()));
-    const inputs = screen.getAllByRole('spinbutton', { name: 'Speed %' });
-    inputs.forEach(input => fireEvent.change(input, { target: { value: '150' } }));
-    // Submit before React can publish the shared pending count.
-    act(() => inputs.forEach(input => fireEvent.submit(input.closest('form')!)));
+    await waitFor(() => screen.getAllByRole('slider', { name: 'Speed %' }).forEach(input => expect(input).toBeEnabled()));
+    const inputs = screen.getAllByRole('slider', { name: 'Speed %' });
+    inputs.forEach(input => {
+      fireEvent.pointerDown(input);
+      fireEvent.change(input, { target: { value: '150' } });
+    });
+    // Release before React can publish the shared pending count.
+    act(() => inputs.forEach(input => fireEvent.pointerUp(input)));
     await waitFor(() => expect(mocks.speed).toHaveBeenCalledTimes(1));
     expect(mocks.flow).not.toHaveBeenCalled();
     await act(async () => command.resolve({ success: true }));
@@ -255,16 +324,17 @@ describe('runtime percentage controls', () => {
     await ready();
     await apply('140');
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
-    expect(screen.getByRole('alert')).toHaveTextContent(/check live readback.*before manually applying again/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/check live readback.*before adjusting again/i);
     await new Promise(resolve => setTimeout(resolve, 25));
     expect(mocks.speed).toHaveBeenCalledTimes(1);
     expect(observed('speed')).toHaveTextContent('125%');
     expect(observed('flow')).toHaveTextContent('87.5%');
     expect(mocks.toast).toHaveBeenCalledWith(message);
     mocks.speed.mockResolvedValue({ success: true });
-    fireEvent.click(speedApply());
-    await screen.findByText(/Acknowledged 140%/);
+    await apply('145');
+    await screen.findByText(/Acknowledged 145%/);
     expect(mocks.speed).toHaveBeenCalledTimes(2);
+    expect(mocks.speed).toHaveBeenLastCalledWith('p1', 145);
   });
 
   it('does not treat a failed CommandResult as success', async () => {
@@ -284,7 +354,7 @@ describe('runtime percentage controls', () => {
     emit({ id: 'p1', isOnline: true, speedFactorPercent: 130 });
     expect(observed('speed')).toHaveTextContent('130%');
     expect(observed('flow')).toHaveTextContent('87.5%');
-    expect(speedInput()).toHaveValue(150);
+    expect(speedInput()).toHaveValue('150');
     emit({ id: 'p1', isOnline: true, flowFactorPercent: null });
     expect(observed('flow')).toHaveTextContent('Unknown');
     expect(observed('speed')).toHaveTextContent('130%');
@@ -314,7 +384,7 @@ describe('runtime percentage controls', () => {
     await apply('150');
     connection(false);
     expect(observed('speed')).toHaveTextContent('Unknown');
-    expect(speedInput()).toHaveValue(null);
+    expect(speedInput()).toHaveAttribute('aria-valuetext', 'Unknown');
     mocks.status.mockReturnValueOnce(read.promise);
     connection(true);
     expect(observed('flow')).toHaveTextContent('Unknown');
@@ -335,7 +405,7 @@ describe('runtime percentage controls', () => {
     emit({ id: 'p1', isOnline: false, speedFactorPercent: 120, flowFactorPercent: 90 });
     await act(async () => read.resolve(live()));
     expect(observed('speed')).toHaveTextContent('Unknown');
-    expect(speedApply()).toBeDisabled();
+    expect(speedInput()).toBeDisabled();
   });
 
   it('does not resurrect a newly selected printer from its older pending HTTP snapshot', async () => {
@@ -356,7 +426,37 @@ describe('runtime percentage controls', () => {
     await ready();
     emit(live({ state: 'Starting' }));
     expect(speedInput()).toBeDisabled();
-    expect(flowApply()).toBeDisabled();
+    expect(flowInput()).toBeDisabled();
+    expect(mocks.speed).not.toHaveBeenCalled();
+  });
+
+  it.each(['Idle', 'Paused', 'Complete', 'Error'])('discards an in-progress gesture when live state leaves Printing for %s', async state => {
+    mount();
+    await ready();
+    const oldSlider = speedInput();
+    draft('160');
+    emit(live({ state }));
+    expect(speedInput()).toBeDisabled();
+    fireEvent.pointerUp(oldSlider);
+    fireEvent.pointerUp(speedInput());
+    fireEvent.blur(speedInput());
+    expect(mocks.speed).not.toHaveBeenCalled();
+    emit(live({ state: 'Printing' }));
+    await ready();
+    fireEvent.pointerUp(speedInput());
+    fireEvent.blur(speedInput());
+    expect(mocks.speed).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Selected speed')).not.toBeInTheDocument();
+  });
+
+  it.each(['Idle', 'Paused', 'Complete', 'Error', undefined])('requires fresh Printing telemetry rather than trusting the printer prop (%s)', async state => {
+    mocks.status.mockResolvedValue(live({ state }));
+    mount();
+    await act(async () => {});
+    expect(speedInput()).toBeDisabled();
+    expect(flowInput()).toBeDisabled();
+    draft('160');
+    fireEvent.pointerUp(speedInput());
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
@@ -373,7 +473,7 @@ describe('runtime percentage controls', () => {
     if (target === 'identity') bumpAuthEpoch();
     view.update({ ...printer, id }, { ...capabilities, printerId: id });
     expect(observed('speed')).toHaveTextContent('Unknown');
-    expect(speedInput()).toHaveValue(null);
+    expect(speedInput()).toHaveAttribute('aria-valuetext', 'Unknown');
     await act(async () => command.reject({ statusCode: 503, message: 'Old response' }));
     expect(mocks.toast).not.toHaveBeenCalled();
     expect(screen.queryByText(/Old response|Acknowledged/)).not.toBeInTheDocument();
@@ -389,7 +489,7 @@ describe('runtime percentage controls', () => {
     mount();
     expect(await screen.findByRole('alert')).toHaveTextContent('Status unavailable');
     expect(observed('speed')).toHaveTextContent('Unknown');
-    expect(speedApply()).toBeDisabled();
+    expect(speedInput()).toBeDisabled();
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 });
