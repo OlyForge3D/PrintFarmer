@@ -1582,6 +1582,29 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.printer.bedTarget, try idlePrinter().bedTarget, "HTTP must not manufacture telemetry")
     }
 
+    /// R3514-B09: with no visible "Stop waiting" action, leaving the detail
+    /// screen is what clears a command whose telemetry never arrives.
+    func test_leavingDetailClearsStuckPendingCommandAndReenablesControls() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNotNil(vm.pendingCommand, "Accepted target with no matching telemetry stays pending")
+        XCTAssertTrue(vm.isExecuting)
+        XCTAssertNil(vm.commandNotice, "Pending is silent (#3496)")
+
+        vm.deactivate()
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertFalse(vm.isExecuting)
+
+        vm.configureAccess(serverID: vm.registeredServerID) { nil }
+        XCTAssertTrue(vm.canControl)
+        XCTAssertFalse(vm.isExecuting)
+        XCTAssertTrue(vm.commandNotice?.contains("Check the machine") == true,
+                      "Released command reports an unknown outcome")
+        await vm.setHeaterTarget(.bed, target: 60)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 60, "Controls accept a new command")
+    }
+
     func test_heaters_rejectInvalidValuesAndConfiguredMaxima() async throws {
         let printer = try idlePrinter()
         mockService.detailsToReturn = PrinterDetails(

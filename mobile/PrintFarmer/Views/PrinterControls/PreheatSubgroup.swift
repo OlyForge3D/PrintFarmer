@@ -223,7 +223,9 @@ struct ControlActionButton: UIViewRepresentable {
         context.coordinator.action = action
         let fontSize = fontScale / 16 * textSize
         var configuration = UIButton.Configuration.plain()
-        configuration.title = title
+        // An empty title still reserves label space and pushes a lone symbol off-centre.
+        configuration.title = title.isEmpty ? nil : title
+        configuration.titleAlignment = menu == nil ? .center : .leading
         configuration.image = menu == nil ? systemImage.flatMap { UIImage(systemName: $0) } : nil
         configuration.showsActivityIndicator = isPending
         configuration.preferredSymbolConfigurationForImage = .init(pointSize: fontScale, weight: .regular)
@@ -789,7 +791,8 @@ struct PreheatSubgroup: View {
                 guard let next else { return }
                 target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
             }
-            .frame(width: 44, height: 44)
+            .frame(minWidth: 44, minHeight: 44)
+            .fixedSize()
             .disabled(next == nil)
         }
 

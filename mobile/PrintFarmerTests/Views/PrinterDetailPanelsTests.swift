@@ -1715,4 +1715,46 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
     }
 
+
+    // MARK: - #3514 round 3 helpers
+
+    func testTransitionalStateLabelOnlyShowsWhileStarting() {
+        XCTAssertEqual(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: false, isLocked: true), "Starting…")
+        XCTAssertNil(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: true, isLocked: true))
+        XCTAssertNil(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: false, isLocked: false))
+    }
+
+    func testMjpegFrameSizeParsesOnlyPositiveFinitePairs() {
+        XCTAssertEqual(MJPEGStreamView.frameSize(from: [NSNumber(value: 640), NSNumber(value: 480)]), CGSize(width: 640, height: 480))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: [NSNumber(value: 0), NSNumber(value: 480)]))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: [NSNumber(value: 640)]))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: "640x480"))
+    }
+
+    func testMjpegAspectUsesReportedFrameAndSwapsOnQuarterTurn() {
+        let frame = CGSize(width: 640, height: 480)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 0, frameSize: frame), 640.0 / 480.0, accuracy: 0.001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 90, frameSize: frame), 480.0 / 640.0, accuracy: 0.001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 0), 16.0 / 9.0, accuracy: 0.001)
+    }
+
+    func testSurfaceColorReadsOpaqueCornerAndIgnoresTransparency() {
+        func image(_ color: UIColor) -> UIImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = false
+            return UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4), format: format).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+            }
+        }
+        let opaque = PrinterDetailCameraLayout.surfaceColor(of: image(UIColor(red: 1, green: 0, blue: 0, alpha: 1)))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        XCTAssertNotNil(opaque)
+        opaque?.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        XCTAssertEqual(red, 1, accuracy: 0.02)
+        XCTAssertEqual(green, 0, accuracy: 0.02)
+        XCTAssertEqual(alpha, 1, accuracy: 0.001)
+        XCTAssertNil(PrinterDetailCameraLayout.surfaceColor(of: image(.clear)))
+    }
 }

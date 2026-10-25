@@ -81,6 +81,12 @@ struct PrinterInstrumentPanelControls: View {
         resolvedSegment(selected, isPrinting: isPrinting, isLocked: isLocked)
     }
 
+    /// A transitional state (e.g. `starting`) disables every segment; a short
+    /// label names the state without explanatory text (#3496 B10).
+    static func transitionalStateLabel(isPrinting: Bool, isLocked: Bool) -> String? {
+        isLocked && !isPrinting ? "Starting…" : nil
+    }
+
     static func unavailableHint(_ segment: Segment) -> String {
         segment == .tune ? "Available while printing" : "Unavailable while printing"
     }
@@ -133,6 +139,12 @@ struct PrinterInstrumentPanelControls: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(reason)
                         .accessibilityIdentifier("printer.controls.blocked-reason")
+                }
+                if let label = Self.transitionalStateLabel(isPrinting: isPrinting, isLocked: isLocked) {
+                    Text(label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityIdentifier("printer.controls.state-label")
                 }
                 segmentPicker
                 Group {
@@ -208,22 +220,22 @@ struct PrinterInstrumentPanelControls: View {
         return text == PrinterDetailViewModel.missingValuePlaceholder ? readoutPlaceholder : text
     }
 
+    /// One compact row at every text size, capped like the jog pad so it
+    /// never pushes the pad below the fold (#3496 N02/N03).
     private var positionReadout: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-        let accessible = dynamicTypeSize.isAccessibilitySize
-        return layout {
+        HStack(alignment: .center, spacing: 8) {
             readoutColumn("X", value: viewModel.printer.x)
-            readoutDivider(vertical: !accessible)
+            readoutDivider()
             readoutColumn("Y", value: viewModel.printer.y)
-            readoutDivider(vertical: !accessible)
+            readoutDivider()
             readoutColumn("Z", value: viewModel.printer.z)
         }
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         .overlay { RoundedRectangle(cornerRadius: Self.cornerRadius).strokeBorder(Color.pfBorder) }
+        .frame(maxWidth: Self.maximumJogPadWidth)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.position")
     }
@@ -246,17 +258,22 @@ struct PrinterInstrumentPanelControls: View {
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 
-    private func readoutDivider(vertical: Bool) -> some View {
+    private func readoutDivider() -> some View {
         Rectangle()
             .fill(Color.pfBorder)
-            .frame(width: vertical ? 1 / displayScale : nil, height: vertical ? 32 : 1 / displayScale)
+            .frame(width: 1 / displayScale, height: 32)
             .accessibilityHidden(true)
     }
 
     // MARK: - Segments
 
+    /// Accessibility sizes stack the segments as full-width choices so
+    /// "Move" never wraps mid-word (#3496 N01).
     private var segmentPicker: some View {
-        HStack(spacing: 2) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
             ForEach(Segment.allCases) { option in
                 let available = Self.isAvailable(option, isPrinting: isPrinting, isLocked: isLocked)
                 ControlActionButton(
@@ -267,6 +284,7 @@ struct PrinterInstrumentPanelControls: View {
                     segmented: true,
                     minimumHeight: 44
                 ) { selectedSegment = option }
+                .frame(maxWidth: .infinity)
                 .disabled(!available)
                 .accessibilityHint(available ? "" : Self.unavailableHint(option))
                 .accessibilityAddTraits(segment == option ? .isSelected : [])
@@ -365,12 +383,9 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private var jogSafetyNote: String? {
-        guard let axes = viewModel.printer.homedAxes else {
+        // Unhomed axes read "—" in the position readout; no extra text (#3496).
+        guard viewModel.printer.homedAxes != nil else {
             return "Homing status unavailable. Verify axes are homed before moving."
-        }
-        let required = JogSubgroup.visibleAxes(for: viewModel.capabilities)
-        guard required.allSatisfy({ axes.lowercased().contains($0.lowercased()) }) else {
-            return "Not homed. Home all axes before moving."
         }
         return nil
     }
@@ -570,7 +585,8 @@ struct PrinterInstrumentPanelControls: View {
             minimumHeight: 44,
             isPending: pending
         ) { Task { await viewModel.stepRuntimeFactor(factor, by: delta) } }
-        .frame(width: 44, height: 44)
+        .frame(minWidth: 44, minHeight: 44)
+        .fixedSize()
         .disabled(!viewModel.canStepRuntimeFactor(factor, by: delta))
     }
 
@@ -627,7 +643,7 @@ struct PrinterInstrumentPanelControls: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
                 .accessibilityAddTraits(.isHeader)
             HStack(spacing: 2) {
@@ -645,6 +661,9 @@ struct PrinterInstrumentPanelControls: View {
             .padding(2)
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(maxWidth: Self.maximumJogPadWidth)
+        .frame(maxWidth: .infinity)
     }
 }
 

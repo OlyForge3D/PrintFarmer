@@ -126,6 +126,9 @@ enum UITestBootstrap {
     /// Gives the primary visual-acceptance printer an MJPEG livestream camera.
     static let issue3496CameraMjpegLaunchArgument =
         "--uitesting-issue3496-camera-mjpeg"
+    /// Gives the printing primary printer a writable chamber heater and a part fan.
+    static let issue3496TuneSensorsLaunchArgument =
+        "--uitesting-issue3496-tune-sensors"
 
     /// A 4:3 camera frame generated at runtime, so no asset is needed (#3496).
     nonisolated static let issue3496CameraSnapshotData: Data = {
@@ -687,6 +690,22 @@ enum UITestBootstrap {
             printer.speedFactorPercent = nil
             printer.flowFactorPercent = nil
         }
+        if ProcessInfo.processInfo.arguments.contains(issue3496TuneSensorsLaunchArgument) {
+            printer.sensors = [
+                PrinterSensor(
+                    id: "heater_generic chamber", displayName: "chamber", kind: .other,
+                    readings: [
+                        SensorReading(quantity: .temperature, value: .number(38), unit: .celsius),
+                        SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius),
+                    ],
+                    writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 70, step: 1, unit: .celsius)]
+                ),
+                PrinterSensor(
+                    id: "fan", displayName: "part_fan", kind: .fan, fanRole: .partCooling,
+                    readings: [SensorReading(quantity: .fanSpeed, value: .number(60), unit: .percent)]
+                ),
+            ]
+        }
         if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
             printer.state = "ready"
             printer.progress = nil
@@ -1211,6 +1230,9 @@ enum UITestBootstrap {
                     "supportsFilamentUnload": true,
                     "supportsFilamentChange": false,
                     "supportedAxes": ["X", "Y", "Z"],
+                    "supportsSensorControl": ProcessInfo.processInfo.arguments.contains(
+                        UITestBootstrap.issue3496TuneSensorsLaunchArgument
+                    ),
                     "verifiedSafety": safety
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())

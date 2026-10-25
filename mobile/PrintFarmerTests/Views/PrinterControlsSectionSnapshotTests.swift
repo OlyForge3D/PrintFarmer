@@ -1149,7 +1149,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 let button = try XCTUnwrap(homes.first {
                     $0.accessibilityIdentifier == "printer.controls.home.\(id)"
                 })
-                XCTAssertEqual(button.configuration?.title, "")
+                // Glyph-only: no title, so the image stays centred (#3514 N09).
+                XCTAssertNil(button.configuration?.title)
                 XCTAssertNotNil(button.configuration?.image)
                 XCTAssertEqual(button.accessibilityLabel, label)
                 XCTAssertGreaterThanOrEqual(button.bounds.width, 44)

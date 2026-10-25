@@ -189,10 +189,12 @@ struct PrinterFilamentSection: View {
         useConciseRunoutCopy: Bool = false
     ) -> some View {
         if useConciseRunoutCopy, let text = conciseCoverageSummaryText(for: row) {
-            Text(text)
-                .font(.footnote.monospacedDigit())
-                .foregroundStyle(Color.pfWarning)
-                .accessibilityIdentifier("printer.filament.attention")
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
+                Text(text).accessibilityIdentifier("printer.filament.attention")
+            }
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(Color.pfWarning)
         } else {
             coverageQuantities(row)
         }
@@ -220,7 +222,7 @@ struct PrinterFilamentSection: View {
               let demand = quantityValue(row.coverage?.currentJobRequiredGrams) else {
             return nil
         }
-        return "About \(remaining) g left. This job needs about \(demand) g."
+        return "\(remaining) g / needs \(demand) g"
     }
 
     private func quantityText(_ grams: Double?) -> String {

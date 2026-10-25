@@ -69,6 +69,7 @@ struct PrinterDetailView: View {
     // The command owner outlives page visibility and access changes.
     @State private var controlsViewModel: PrinterControlsViewModel?
     @State private var controlsComposition: PrinterControlsComposition?
+    @State private var cameraReloadToken = 0
     @State private var safetyObservationTask: Task<Void, Never>?
     @State private var safetyObservationPanel: PrinterDetailPanel?
 
@@ -607,7 +608,11 @@ struct PrinterDetailView: View {
                     .accessibilityIdentifier("printer.detail.filament.extruder.heading")
                 Spacer(minLength: 8)
             }
-            HStack(spacing: 12) {
+            // Stacks at accessibility sizes so neither label truncates.
+            let buttonLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 12))
+            buttonLayout {
                 Button {
                     showsFilamentLoadConfirmation = true
                 } label: {
@@ -803,6 +808,7 @@ struct PrinterDetailView: View {
                 .accessibilityIdentifier("printer.detail.status.content")
             }
             .accessibilityIdentifier("printer.detail.status.scroll")
+            .background(Color.pfBackground)
         }
     }
 
@@ -824,6 +830,7 @@ struct PrinterDetailView: View {
             .padding()
             .padding(.bottom, 32)
         }
+        .background(Color.pfBackground)
     }
 
     /// Observe the persistent owner, never construct one inside a pager child.
@@ -843,8 +850,7 @@ struct PrinterDetailView: View {
                         }
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
-                        Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
-                            .font(.footnote)
+                        reconnectToControl()
                     } else {
                         ProgressView("Loading controls...")
                     }
@@ -854,10 +860,30 @@ struct PrinterDetailView: View {
                     width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                 ) ? 24 : 16)
                 .padding(.top, 16)
-                .padding(.bottom, 22)
+                // Keeps the last control above the Emergency Stop inset.
+                .padding(.bottom, 22 + PrinterDetailLayout.emergencyStopClearance)
             }
-            .background(Color.pfBackgroundTertiary)
+            .background(Color.pfBackground)
         }
+    }
+
+    /// Short empty state when the server connection has not settled.
+    private func reconnectToControl() -> some View {
+        VStack(spacing: 12) {
+            Text("Reconnect to control")
+                .font(.subheadline.weight(.semibold))
+            Button("Reconnect") {
+                let task = Task { await configureDetail() }
+                activeTasks.append(task)
+            }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("printer.detail.control.reconnect")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.detail.control.reconnectState")
     }
 
     private func controlsUnavailable(_ printer: Printer) -> some View {
@@ -993,11 +1019,18 @@ struct PrinterDetailView: View {
                 Text("No active print")
                     .font(.subheadline)
                     .foregroundStyle(Color.pfTextSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
+                    .accessibilityIdentifier("printer.detail.job.empty")
             }
             PrinterRunActionBar(
                 presentation: statusActions(for: printer),
                 onSelect: { kind in handleRunAction(kind) }
             )
+            // Labels never outgrow the job headline, which caps at xxxLarge.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
         .padding(.horizontal, 2)
         .accessibilityIdentifier("printer.detail.job")
@@ -1110,13 +1143,6 @@ struct PrinterDetailView: View {
                 if !following.isEmpty {
                     queueSectionHeader("Then", count: following.count)
                     ForEach(following) { job in compactQueueRow(job) }
-                }
-                if !queued.isEmpty {
-                    Text("Reorder in the Queue tab.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .padding(.horizontal, 4)
-                        .accessibilityIdentifier("printer.detail.queue.reorderNote")
                 }
             }
         }
@@ -1287,17 +1313,6 @@ struct PrinterDetailView: View {
                     .foregroundStyle(Color.pfTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.camera.title")
-                if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
-                    Text(viewModel.showLivestream && viewModel.canShowLivestream ? "LIVE" : "SNAPSHOT")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(viewModel.showLivestream && viewModel.canShowLivestream ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            viewModel.showLivestream && viewModel.canShowLivestream ? Color.red : Color.pfBorder,
-                            in: Capsule()
-                        )
-                }
 
                 Spacer(minLength: 0)
 
@@ -1308,19 +1323,6 @@ struct PrinterDetailView: View {
                         .foregroundStyle(Color.pfTextSecondary)
                         .padding(.trailing, 8)
                         .accessibilityIdentifier("printer.detail.camera.unavailable")
-                }
-
-                if viewModel.canShowLivestream {
-                    Button {
-                        withAnimation { viewModel.showLivestream.toggle() }
-                    } label: {
-                        Image(systemName: viewModel.showLivestream ? "photo" : "video.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
-                    .accessibilityIdentifier("printer.detail.camera.livetoggle")
                 }
 
                 if viewModel.cameraPreviewMode != .unsupported,
@@ -1338,20 +1340,25 @@ struct PrinterDetailView: View {
                     .accessibilityLabel("Rotate camera view")
                     .accessibilityIdentifier("printer.detail.camera.rotate")
 
-                    if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
-                        Button {
+                    // Same header in every mode: live refresh reconnects the stream.
+                    let refreshesStream = viewModel.showLivestream && viewModel.canShowLivestream
+                        && viewModel.cameraPreviewMode != .snapshotPolling
+                    Button {
+                        if refreshesStream {
+                            cameraReloadToken += 1
+                        } else {
                             let task = Task { _ = await viewModel.refreshSnapshot() }
                             activeTasks.append(task)
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
                         }
-                        .disabled(viewModel.isLoadingSnapshot)
-                        .accessibilityLabel("Refresh camera snapshot")
-                        .accessibilityIdentifier("printer.detail.camera.refresh")
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .disabled(!refreshesStream && viewModel.isLoadingSnapshot)
+                    .accessibilityLabel(refreshesStream ? "Reconnect camera stream" : "Refresh camera snapshot")
+                    .accessibilityIdentifier("printer.detail.camera.refresh")
                 }
             }
             .frame(minHeight: 44)
@@ -1379,10 +1386,14 @@ struct PrinterDetailView: View {
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("printer.detail.camera.media")
+                    .overlay(alignment: .bottomTrailing) { cameraModeToggle() }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .background(
+            previewImage.flatMap(PrinterDetailCameraLayout.surfaceColor(of:)).map(Color.init(uiColor:)) ?? Color.pfCard,
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
@@ -1395,6 +1406,26 @@ struct PrinterDetailView: View {
         .onDisappear {
             printPreviewImage = nil
             printPreviewPath = nil
+        }
+    }
+
+    /// Live/snapshot switch sits on the media so the header stays identical in every mode.
+    @ViewBuilder
+    private func cameraModeToggle() -> some View {
+        if viewModel.canShowLivestream {
+            Button {
+                withAnimation { viewModel.showLivestream.toggle() }
+            } label: {
+                Image(systemName: viewModel.showLivestream ? "photo" : "video.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .contentShape(Circle())
+            }
+            .padding(8)
+            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+            .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
+            .accessibilityIdentifier("printer.detail.camera.livetoggle")
         }
     }
 
@@ -1464,14 +1495,12 @@ struct PrinterDetailView: View {
                 MJPEGStreamContainer(
                     url: streamUrl,
                     rotation: viewModel.cameraRotation,
+                    maxHeight: maxMediaHeight,
                     credentials: { [apiClient = services.apiClient] in
                         await apiClient?.currentCameraCredentials()
                     }
                 )
-                .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(
-                    aspect: MJPEGStreamContainer.aspectRatio(rotation: viewModel.cameraRotation),
-                    maxHeight: maxMediaHeight
-                ))
+                .id(cameraReloadToken)
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
@@ -1536,6 +1565,7 @@ struct PrinterDetailView: View {
                     }
                     .clipped()
                     .frame(maxWidth: .infinity)
+                    .background(Color.pfCard)
             } else {
                 snapshotUnavailable()
             }

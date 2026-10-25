@@ -548,6 +548,9 @@ enum PrinterDetailCameraLifecycleMapping {
 /// Use the actual detail width, not the device family: an iPad split can be
 /// narrower than a phone in landscape. Accessibility text uses one column.
 enum PrinterDetailLayout {
+    /// Bottom space that keeps scrolled content clear of the Emergency Stop bar.
+    static let emergencyStopClearance: CGFloat = 80
+
     static func usesColumns(width: CGFloat, dynamicTypeSize: DynamicTypeSize) -> Bool {
         width >= 760 && !dynamicTypeSize.isAccessibilitySize
     }
@@ -593,6 +596,35 @@ enum PrinterDetailCameraLayout {
         guard let aspect, aspect > 0, maxHeight.isFinite else { return .infinity }
         return maxHeight * aspect
     }
+
+    #if canImport(UIKit)
+    /// The opaque top-left pixel of a slicer thumbnail, used as the print
+    /// preview card's surface so the image never sits in a mismatched inner
+    /// rectangle. Transparent or unreadable images return nil.
+    static func surfaceColor(of image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let drawn: Bool = pixel.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .none
+            // Draw so the image's top-left pixel lands in the 1x1 context.
+            context.draw(cgImage, in: CGRect(
+                x: 0, y: 1 - CGFloat(cgImage.height),
+                width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)
+            ))
+            return true
+        }
+        guard drawn, pixel[3] == 255 else { return nil }
+        return UIColor(
+            red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+            blue: CGFloat(pixel[2]) / 255, alpha: 1
+        )
+    }
+    #endif
 }
 
 struct PrinterDetailTemperatureReading: Equatable {

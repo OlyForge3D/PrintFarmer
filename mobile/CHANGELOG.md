@@ -36,7 +36,19 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   state chip reads "Idle" for ready printers, and the Filament tab states the
   remaining weight once with a full-width meter. Idle printers that still report the
   last file name (Moonraker) now show "No active print" instead of a stale
-  job heading with "Layer --".
+  job heading with "Layer --". Follow-up polish: the Move/Heat/Tune picker,
+  steppers and Filament Load/Unload stack vertically at accessibility text
+  sizes; the X/Y/Z readout and jog-distance selector share the jog pad's width;
+  Control content clears the emergency-stop bar; the "Not homed" sentence and
+  SNAPSHOT/LIVE badges are gone; every camera mode keeps "Camera" with
+  Rotate and Refresh in the header (the live/snapshot toggle sits on the
+  media), MJPEG streams size to the stream's own aspect with a loading
+  placeholder; Status uses the same page background as Control with "No active
+  print" in a card; a disconnected Control tab shows "Reconnect to control"
+  with a Reconnect button; filament shortfall reads "84 g / needs 140 g"; and
+  the Queue tab drops "Reorder in the Queue tab." Leaving the detail screen
+  clears a stuck pending command, and a starting printer shows a "Starting…"
+  label.
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the
   unreachable Advanced printer controls screen and its navigation destination,
   the per-server **Settings → Printer Safety → Advanced printer controls**

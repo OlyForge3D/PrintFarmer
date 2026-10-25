@@ -380,7 +380,8 @@ struct PrinterSensorControlRows: View {
         ) {
             Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
         }
-        .frame(width: 44, height: 44)
+        .frame(minWidth: 44, minHeight: 44)
+        .fixedSize()
         .disabled(viewModel.pendingCommand != nil)
     }
 }
