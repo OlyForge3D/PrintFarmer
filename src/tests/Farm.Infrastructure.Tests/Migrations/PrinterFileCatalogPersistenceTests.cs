@@ -2,14 +2,17 @@
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql;
 
 namespace Farm.Infrastructure.Tests.Migrations;
 
+[Collection(ProviderDatabaseTestCollection.Name)]
 public sealed class PrinterFileCatalogPersistenceTests
 {
     [Theory]
@@ -48,6 +51,39 @@ public sealed class PrinterFileCatalogPersistenceTests
         await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=True");
         await connection.OpenAsync();
         await using AppDbContext context = CreateSqliteContext(connection);
+        await AssertPopulatedUpgradeAsync(context);
+    }
+
+    [Theory]
+    [InlineData("postgres", "PFARM_TEST_POSTGRES_CONN")]
+    [InlineData("sqlserver", "PFARM_TEST_SQLSERVER_CONN")]
+    [Trait("Category", "DbHeavy")]
+    public async Task MigrateAsync_PopulatedProductionProvider_PreservesIdentityAssetsAndOrigins(
+        string provider,
+        string connectionVariable)
+    {
+        string? connectionString = Environment.GetEnvironmentVariable(connectionVariable);
+        Assert.False(string.IsNullOrWhiteSpace(connectionString),
+            $"Catalog provider verification did not run: set {connectionVariable}.");
+        string databaseName = $"pfarm_catalog_{Guid.NewGuid():N}";
+        string isolatedConnection = provider == "postgres"
+            ? new NpgsqlConnectionStringBuilder(connectionString) { Database = databaseName }.ConnectionString
+            : new SqlConnectionStringBuilder(connectionString) { InitialCatalog = databaseName }.ConnectionString;
+        await using AppDbContext context = CreateProviderContext(provider, isolatedConnection);
+        try
+        {
+            await AssertPopulatedUpgradeAsync(context);
+            await AssertDistinctIdentityAsync(context);
+        }
+        finally
+        {
+            // Only this test's newly named database is eligible for cleanup.
+            await context.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private static async Task AssertPopulatedUpgradeAsync(AppDbContext context)
+    {
         string previous = context.Database.GetMigrations()
             .Last(name => !name.EndsWith("_AddPrinterFileCatalog", StringComparison.Ordinal));
         await context.GetService<IMigrator>().MigrateAsync(previous);
@@ -134,6 +170,11 @@ public sealed class PrinterFileCatalogPersistenceTests
         await connection.OpenAsync();
         await using AppDbContext context = CreateSqliteContext(connection);
         await context.Database.MigrateAsync();
+        await AssertDistinctIdentityAsync(context);
+    }
+
+    private static async Task AssertDistinctIdentityAsync(AppDbContext context)
+    {
         Guid printer = Guid.NewGuid();
         PrinterFileLocation[] locations =
         [
@@ -142,10 +183,33 @@ public sealed class PrinterFileCatalogPersistenceTests
             NewLocation(printer, "gcodes", "one/MODEL.gcode"),
             NewLocation(printer, "sdcard", "one/model.gcode"),
             NewLocation(Guid.NewGuid(), "gcodes", "one/model.gcode"),
+            NewLocation(printer, "gcodes", "one/Caf\u00e9.gcode"),
+            NewLocation(printer, "gcodes", "one/Cafe\u0301.gcode"),
         ];
         context.PrinterFileLocations.AddRange(locations);
         await context.SaveChangesAsync();
-        Assert.Equal(5, await context.PrinterFileLocations.CountAsync());
+        context.ChangeTracker.Clear();
+        PrinterFileLocation[] stored = await context.PrinterFileLocations.ToArrayAsync();
+        Assert.Equal(7, stored.Length);
+        foreach (PrinterFileLocation expected in locations)
+        {
+            PrinterFileLocation actual = Assert.Single(stored, x => x.Id == expected.Id);
+            Assert.Equal(expected.SourcePrinterId, actual.SourcePrinterId);
+            Assert.Equal(expected.StorageRoot, actual.StorageRoot);
+            Assert.Equal(expected.RelativePath, actual.RelativePath);
+            Assert.Equal(expected.IdentityKey, actual.IdentityKey);
+        }
+        PrinterFileLocation changed = await context.PrinterFileLocations.SingleAsync(x => x.Id == locations[0].Id);
+        long previousRevision = changed.Revision;
+        changed.ConfigurationGeneration++;
+        changed.ObservationRevision++;
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        PrinterFileLocation retained = await context.PrinterFileLocations.SingleAsync(x => x.Id == changed.Id);
+        Assert.Equal(2, retained.ConfigurationGeneration);
+        Assert.Equal(2, retained.ObservationRevision);
+        Assert.True(retained.Revision > previousRevision);
+        Assert.Equal(locations[0].IdentityKey, retained.IdentityKey);
         context.PrinterFileLocations.Add(NewLocation(printer, "gcodes", "one/model.gcode"));
         await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
     }
@@ -225,7 +289,7 @@ public sealed class PrinterFileCatalogPersistenceTests
         new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connection, provider => provider.MigrationsAssembly("Farm.Migrations.Sqlite")).Options);
 
-    private static AppDbContext CreateProviderContext(string provider)
+    private static AppDbContext CreateProviderContext(string provider, string? connectionString = null)
     {
         DbContextOptionsBuilder<AppDbContext> options = new();
         switch (provider)
@@ -235,11 +299,11 @@ public sealed class PrinterFileCatalogPersistenceTests
                     sql => sql.MigrationsAssembly("Farm.Migrations.Sqlite"));
                 break;
             case "postgres":
-                options.UseNpgsql("Host=localhost;Database=catalog_model;Username=model",
+                options.UseNpgsql(connectionString ?? "Host=localhost;Database=catalog_model;Username=model",
                     sql => sql.MigrationsAssembly("Farm.Migrations.PostgreSQL"));
                 break;
             case "sqlserver":
-                options.UseSqlServer("Server=localhost;Database=catalog_model;Integrated Security=True",
+                options.UseSqlServer(connectionString ?? "Server=localhost;Database=catalog_model;Integrated Security=True",
                     sql => sql.MigrationsAssembly("Farm.Migrations.SqlServer"));
                 break;
             default:
