@@ -374,9 +374,22 @@ final class PrinterControlsViewModel: ObservableObject {
     static let xyFeedrateMmMin: Int = 3000
     static let zFeedrateMmMin: Int = 600
 
+    /// Shared by every blocked reason that reports an in-flight operation.
+    static let operationPendingReason = "Another printer operation is still pending."
+
     @Published private(set) var capabilities: PrinterBackendCapabilities?
-    /// Set once a different registered server replaces this model; late
-    /// readbacks for the old server must never update it.
+    /// Defense-in-depth latch: set when `configureAccess` is handed a
+    /// registered server other than this model's own, after which late
+    /// readbacks and 501 responses for the old server must never update it.
+    ///
+    /// The production lifecycle (`PrinterControlsAccessLifecycle.configure`)
+    /// always passes this model's own `registeredServerID`, so it never sets
+    /// this flag. A production server switch is instead blocked by the access
+    /// check ("Server changed. Reopen this printer."), which cancels pending
+    /// work, and the detail builds a fresh model for the new composition. The
+    /// latch is kept, and covered by `PrinterControlsViewModelTests`, so any
+    /// future caller that passes the live selected server cannot let a stale
+    /// model absorb another server's responses.
     private var isRetired = false
     @Published private(set) var lastError: ControlsError?
     @Published private(set) var pendingCommand: ControlCommand? {
@@ -1802,7 +1815,7 @@ final class PrinterControlsViewModel: ObservableObject {
     /// Why the Heat More menu is disabled, or nil when it is usable.
     var preheatMenuBlockedReason: String? {
         if !canRunPreheat(.pla) { return preheatAccessReason(.pla) ?? "Controls are unavailable." }
-        if isExecuting { return "Another printer operation is still pending." }
+        if isExecuting { return Self.operationPendingReason }
         return nil
     }
 
@@ -1831,7 +1844,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
         if !runtimePrinterStateIsSupported { return "Printer state is unknown or transitioning." }
-        if isExecuting { return "Another printer operation is still pending." }
+        if isExecuting { return Self.operationPendingReason }
         return nil
     }
 
