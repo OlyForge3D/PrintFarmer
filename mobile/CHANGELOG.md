@@ -48,7 +48,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   with a Reconnect button; filament shortfall reads "84 g / needs 140 g"; and
   the Queue tab drops "Reorder in the Queue tab." Leaving the detail screen
   clears a stuck pending command, and a starting printer shows a "Starting…"
-  label.
+  label. Final alignment pass: Raise/Lower nozzle labels stay centred after a
+  command, the Queue tab uses the navy page background, "No active print"
+  aligns with the Camera card, every Tune stepper shares one value-column width
+  and spans the full row, and the Filament shortfall warning replaces the
+  remaining-weight line while Swap/Scan spool stack at equal height.
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the
   unreachable Advanced printer controls screen and its navigation destination,
   the per-server **Settings → Printer Safety → Advanced printer controls**

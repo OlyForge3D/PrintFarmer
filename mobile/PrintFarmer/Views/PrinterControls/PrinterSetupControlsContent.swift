@@ -316,6 +316,8 @@ struct PrinterMaterialControls: View {
 struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
+    /// Tune passes its shared value column so sensor and Speed/Flow steppers align.
+    var valueColumnWidth: CGFloat?
 
     var body: some View {
         let activeExtruderId = viewModel.printer.activeExtruderId
@@ -344,17 +346,20 @@ struct PrinterSensorControlRows: View {
             HStack(spacing: 8) {
                 Text(title).font(.subheadline.weight(.medium))
                 Spacer(minLength: 0)
-                if let current, reason == nil {
-                    stepButton("minus", "Decrease \(title)", id + ".decrease",
-                               increasing: false, current: current, descriptor: descriptor, sensor: sensor)
-                }
-                Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
-                    .font(.subheadline.monospacedDigit())
-                    .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
-                    .accessibilityIdentifier(id + ".value")
-                if let current, reason == nil {
-                    stepButton("plus", "Increase \(title)", id + ".increase",
-                               increasing: true, current: current, descriptor: descriptor, sensor: sensor)
+                HStack(spacing: valueColumnWidth == nil ? 8 : 4) {
+                    if let current, reason == nil {
+                        stepButton("minus", "Decrease \(title)", id + ".decrease",
+                                   increasing: false, current: current, descriptor: descriptor, sensor: sensor)
+                    }
+                    Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
+                        .font(.subheadline.monospacedDigit())
+                        .frame(minWidth: valueColumnWidth)
+                        .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
+                        .accessibilityIdentifier(id + ".value")
+                    if let current, reason == nil {
+                        stepButton("plus", "Increase \(title)", id + ".increase",
+                                   increasing: true, current: current, descriptor: descriptor, sensor: sensor)
+                    }
                 }
             }
             if let reason {

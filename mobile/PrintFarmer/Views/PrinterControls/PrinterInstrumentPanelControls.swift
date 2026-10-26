@@ -47,6 +47,8 @@ struct PrinterInstrumentPanelControls: View {
 
     /// iPad keeps the jog pad at a thumb-sized width, centred in the panel.
     static let maximumJogPadWidth: CGFloat = 480
+    /// Shared Tune stepper value column so every row's − / + buttons line up.
+    static let tuneValueColumnWidth: CGFloat = 64
 
     /// VoiceOver reads position values with their unit, e.g. "X 120.0 millimeters".
     static func readoutAccessibilityLabel(axis: String, value: Double?, homedAxes: String?) -> String {
@@ -432,7 +434,9 @@ struct PrinterInstrumentPanelControls: View {
         VStack(alignment: .leading, spacing: 12) {
             PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
             // Writable sensors stay reachable while idle; Tune carries them mid-print.
-            PrinterSensorControlRows(viewModel: viewModel, compact: true)
+            PrinterSensorControlRows(
+                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
+                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.heat-group")
@@ -487,7 +491,8 @@ struct PrinterInstrumentPanelControls: View {
                 selection: $babystep,
                 identifier: { "printer.controls.runtime.z-offset.step.\($0.formatted())" },
                 label: { Self.babystepOptionLabel($0) },
-                accessibilityLabel: { "Babystep \($0.formatted()) millimeters" }
+                accessibilityLabel: { "Babystep \($0.formatted()) millimeters" },
+                capsWidth: false
             )
             let buttons = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 8))
@@ -496,11 +501,16 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
+            // UIButton keeps a leading-aligned content layout after an
+            // enabled round-trip; rebuild it so labels stay centred (#3496 N09).
+            .id(canAdjust)
             if Self.showsTuneTemperatures(isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint) {
                 Divider()
                 tuneTemperatures
             }
-            PrinterSensorControlRows(viewModel: viewModel, compact: true)
+            PrinterSensorControlRows(
+                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
+                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime")
@@ -543,7 +553,7 @@ struct PrinterInstrumentPanelControls: View {
             Text(renderedValue)
                 .font(.body.monospacedDigit().weight(.medium))
                 .foregroundStyle(Color.pfTextPrimary)
-                .frame(minWidth: 64)
+                .frame(minWidth: Self.tuneValueColumnWidth)
                 .accessibilityLabel(Self.runtimeFactorAccessibilityLabel(factor, value))
                 .uiTestRenderedValue(renderedValue)
                 .accessibilityIdentifier("\(identifier).value")
@@ -639,7 +649,8 @@ struct PrinterInstrumentPanelControls: View {
         selection: Binding<Double>,
         identifier: @escaping (Double) -> String,
         label: @escaping (Double) -> String,
-        accessibilityLabel: @escaping (Double) -> String
+        accessibilityLabel: @escaping (Double) -> String,
+        capsWidth: Bool = true
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
@@ -662,7 +673,8 @@ struct PrinterInstrumentPanelControls: View {
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .frame(maxWidth: Self.maximumJogPadWidth)
+        // Move caps to the jog pad; Tune rows span the full panel width.
+        .frame(maxWidth: capsWidth ? Self.maximumJogPadWidth : .infinity)
         .frame(maxWidth: .infinity)
     }
 }

@@ -156,7 +156,8 @@ struct PrinterFilamentSection: View {
                         coverageSummary(row, useConciseRunoutCopy: true)
                     }
                     if let spoolDetails {
-                        spoolWeightMeter(spoolDetails)
+                        // The runout warning already states the remaining grams (#3496 N13).
+                        spoolWeightMeter(spoolDetails, showsLabel: conciseCoverageSummaryText(for: row) == nil)
                     } else if let spoolLookupMessage, row.spoolID != nil {
                         Text(spoolLookupMessage)
                             .font(.caption)
@@ -236,7 +237,7 @@ struct PrinterFilamentSection: View {
         }
     }
 
-    private func spoolWeightMeter(_ spool: SpoolmanSpool) -> some View {
+    private func spoolWeightMeter(_ spool: SpoolmanSpool, showsLabel: Bool = true) -> some View {
         let meter = SpoolWeightMeter(
             remainingGrams: spool.remainingWeightG,
             initialGrams: spool.initialWeightG
@@ -255,10 +256,13 @@ struct PrinterFilamentSection: View {
                 .accessibilityLabel("Spool remaining")
                 .accessibilityValue(meter.label)
             }
-            Text(meter.label)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.pfTextSecondary)
-                .accessibilityIdentifier("printer.filament.remainingMeter.label")
+            if showsLabel {
+                Text(meter.label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("printer.filament.remainingMeter.label")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -310,12 +314,13 @@ struct PrinterFilamentSection: View {
         }
     }
 
-    private func actionButton(_ action: PrinterFilamentAction) -> some View {
+    private func actionButton(_ action: PrinterFilamentAction, fillsHeight: Bool = false) -> some View {
         Button { select(action) } label: {
             Group {
                 if showsAllActions {
                     Text(actionTitle(action))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 44, maxHeight: fillsHeight ? .infinity : nil)
                         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
                 } else {
@@ -338,9 +343,14 @@ struct PrinterFilamentSection: View {
         let primaryActions = actions.filter { [.set, .change, .scanNFC].contains($0.kind) }
         VStack(spacing: 8) {
             if !primaryActions.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(primaryActions) { action in actionButton(action) }
+                // Stacked at accessibility sizes; siblings share one height (#3496 R04).
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 8))
+                layout {
+                    ForEach(primaryActions) { action in actionButton(action, fillsHeight: true) }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

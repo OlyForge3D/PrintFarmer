@@ -751,6 +751,7 @@ struct PrinterDetailView: View {
             filament: { filamentPage(printer) },
             queue: {
                 ScrollView { queueSection(printer).padding().padding(.bottom, 32) }
+                    .background(Color.pfBackground)
             }
         )
         // Construction remains authorization-gated even though both pages exist.
@@ -1032,7 +1033,6 @@ struct PrinterDetailView: View {
             // Labels never outgrow the job headline, which caps at xxxLarge.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
-        .padding(.horizontal, 2)
         .accessibilityIdentifier("printer.detail.job")
     }
 
