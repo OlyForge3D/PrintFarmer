@@ -167,6 +167,32 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
+    /// The production offline Control page renders no lockout banner or
+    /// explanation, only the hidden VoiceOver element (#3548).
+    func testProductionOfflineControlPageRendersNoLockoutText() async throws {
+        executionTimeAllowance = 60
+        let fixture = try detailHostFixture(isOnline: false)
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        detail.configure(printerService: fixture.services.printerService)
+        await detail.loadPrinter()
+        XCTAssertEqual(detail.printer?.isOnline, false)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        try await waitForHost("The offline Control page must settle", in: controller.view) {
+            !VisibleText.collect(in: controller.view).isEmpty
+        }
+        XCTAssertNil(heaterTarget(in: controller.view), "Offline controls stay hidden")
+        let text = VisibleText.collect(in: controller.view)
+        VisibleText.assertNoLockoutText(text, "production-offline-control-page")
+        for fragment in ["unavailable", "reconnect"] {
+            XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains(fragment) }, "\(fragment): \(text)")
+        }
+    }
+
     // MARK: - #3528 H01: production cached-seed lifecycle
 
     /// The detail host seeds from the farm-list cache only after the active
@@ -789,7 +815,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         factorValues: (speed: Double?, flow: Double?) = (100, 98),
         hotendTarget: Double? = nil,
         printerFailure: OSAllocatedUnfairLock<Bool>? = nil,
-        heatDuringPrint: Bool = false
+        heatDuringPrint: Bool = false,
+        isOnline: Bool = true
     ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
@@ -808,7 +835,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let second = try registry.add(displayName: "B", baseURL: URL(string: "https://detail-b.example.com")!)
         var printer = try TestData.decodePrinter()
         printer.state = printerState
-        printer.isOnline = true
+        printer.isOnline = isOnline
         printer.fanSpeedPercent = 25
         printer.liveZOffsetMm = 0
         printer.sensors = writableSensors
@@ -822,7 +849,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let printerData = try encoder.encode(printer)
         var status = PrinterStatusDetail(
             id: printer.id,
-            isOnline: true,
+            isOnline: isOnline,
             state: printerState,
             progress: nil,
             fanSpeedPercent: 25,

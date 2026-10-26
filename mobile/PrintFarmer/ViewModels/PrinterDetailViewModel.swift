@@ -2638,6 +2638,14 @@ final class PrinterDetailViewModel {
         printer?.isOnline == true && !isActivelyPrinting && !isPerformingAction && !isShowingCachedPrinter
     }
 
+    /// Confirms Eject from the dialog. A state change while the dialog was
+    /// open refuses silently, with no dispatch and no alert (#3548).
+    @discardableResult
+    func confirmEjectFilament() -> Task<Void, Never>? {
+        guard canEjectFilament else { return nil }
+        return Task { await ejectFilament() }
+    }
+
     /// Moonraker keeps reporting the last file after a print ends, so a stale
     /// file name alone must not resurrect the current-job block. Transitional
     /// states such as `starting` are excluded: printing or paused only (#3496).

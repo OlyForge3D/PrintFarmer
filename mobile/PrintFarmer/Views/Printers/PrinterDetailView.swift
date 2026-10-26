@@ -930,10 +930,8 @@ struct PrinterDetailView: View {
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
             .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
                 Button("Eject", role: .destructive) {
-                    // A state change while the dialog was open refuses silently (#3548).
-                    guard viewModel.canEjectFilament else { return }
+                    guard let task = viewModel.confirmEjectFilament() else { return }
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    let task = Task { await viewModel.ejectFilament() }
                     activeTasks.append(task)
                 }
                 Button("Cancel", role: .cancel) {}

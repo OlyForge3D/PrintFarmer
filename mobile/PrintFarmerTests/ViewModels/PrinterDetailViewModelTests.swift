@@ -1725,6 +1725,36 @@ final class PrinterDetailViewModelTests: XCTestCase {
         }
     }
 
+    /// Eject was available when the dialog opened, then the printer changed
+    /// state: confirming must neither dispatch nor raise an alert (#3548).
+    func testRacedEjectConfirmationRefusesSilently() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        for (isOnline, state) in [(false, "idle"), (true, "printing"), (true, "paused")] {
+            printer.isOnline = true
+            printer.state = "idle"
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+            XCTAssertTrue(viewModel.canEjectFilament, "Eject must be available when the dialog opens")
+
+            printer.isOnline = isOnline
+            printer.state = state
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+
+            XCTAssertNil(viewModel.confirmEjectFilament(), "online=\(isOnline) state=\(state): must refuse")
+            XCTAssertNil(mockService.setActiveSpoolCalledWith, "online=\(isOnline) state=\(state): no dispatch")
+            XCTAssertNil(mockService.unloadFilamentCalledWith, "online=\(isOnline) state=\(state): no dispatch")
+            XCTAssertNil(viewModel.actionError, "online=\(isOnline) state=\(state): no blocked-reason alert")
+        }
+
+        printer.isOnline = true
+        printer.state = "idle"
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        await viewModel.confirmEjectFilament()?.value
+        XCTAssertEqual(mockService.unloadFilamentCalledWith, TestData.testUUID, "Idle confirmation still ejects")
+    }
+
     // MARK: - Eject physical-unload safety (Bishop review finding)
 
     /// The physical unload leg of `ejectFilament()` must ALWAYS complete
