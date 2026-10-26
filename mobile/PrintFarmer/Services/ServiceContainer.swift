@@ -20,16 +20,18 @@ enum NavigationIdentityResolution: Equatable, Sendable {
 @MainActor
 final class PrinterSummaryCache {
     private var generation: Int?
-    private var printersById: [UUID: Printer] = [:]
+    private var printers: [Printer] = []
 
+    /// O(1): keeps a copy-on-write reference to the farm list, since this runs
+    /// on every live farm update while lookups happen only on navigation.
     func replace(with printers: [Printer], generation: Int) {
         self.generation = generation
-        printersById = Dictionary(printers.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        self.printers = printers
     }
 
     func printer(id: UUID, generation: Int) -> Printer? {
         guard self.generation == generation else { return nil }
-        return printersById[id]
+        return printers.last { $0.id == id }
     }
 }
 

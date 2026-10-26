@@ -150,6 +150,121 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
+    // MARK: - #3528 H01: production cached-seed lifecycle
+
+    /// The detail host seeds from the farm-list cache only after the active
+    /// server settles; a seed keyed to the previous server never appears.
+    func testProductionDetailHostNeverSeedsPreviousServerPrinterAcrossSwitch() async throws {
+        executionTimeAllowance = 60
+        let fixture = try detailHostFixture()
+        await fixture.services.awaitActiveServerSettled()
+        let previousGeneration = fixture.services.activeServerGeneration
+        var ghost = fixture.printer
+        ghost.state = "paused" // marker: canonical fixture is idle
+        fixture.services.printerSummaryCache.replace(with: [ghost], generation: previousGeneration)
+
+        try fixture.registry.setActive(id: fixture.second.id)
+        await fixture.disconnect.waitUntilArrived()
+        XCTAssertEqual(fixture.services.activeServerGeneration, previousGeneration,
+                       "The detail task captures the pre-switch generation")
+
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await waitForHost("The detail host must mount", in: controller.view) { controller.hasAppeared }
+        XCTAssertNil(detail.printer, "No seed may render before the active server settles")
+        XCTAssertFalse(detail.isShowingCachedPrinter)
+
+        fixture.disconnect.release()
+        await fixture.connect.waitUntilArrived()
+        XCTAssertNotEqual(fixture.services.activeServerGeneration, previousGeneration)
+        XCTAssertNil(detail.printer, "Still unsettled: no seed")
+        fixture.connect.release()
+        await fixture.services.awaitActiveServerSettled()
+        for _ in 0..<20 { await Task.yield() }
+        controller.view.layoutIfNeeded()
+
+        XCTAssertFalse(detail.isShowingCachedPrinter, "A superseded generation must not leave a seed")
+        XCTAssertNotEqual(detail.printer?.state, ghost.state)
+        XCTAssertFalse(detailRequests(fixture.api).contains { $0.url?.path == "/api/printers/\(fixture.printer.id)" },
+                       "The superseded detail task must not load from the new server")
+    }
+
+    /// A detail task cancelled while the canonical load is in flight drops its
+    /// unconfirmed seed instead of leaving the cached printer behind.
+    func testProductionDetailHostCancellationDropsCachedSeed() async throws {
+        executionTimeAllowance = 60
+        let printerBarrier = AsyncBarrier()
+        addTeardownBlock { printerBarrier.close() }
+        let fixture = try detailHostFixture(printerBarrier: printerBarrier)
+        await fixture.services.awaitActiveServerSettled()
+        var cached = fixture.printer
+        cached.state = "paused" // marker: canonical fixture is idle
+        fixture.services.printerSummaryCache.replace(
+            with: [cached], generation: fixture.services.activeServerGeneration
+        )
+
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        await printerBarrier.waitUntilArrived()
+        XCTAssertTrue(detail.isShowingCachedPrinter, "The settled server's cached printer renders immediately")
+        XCTAssertEqual(detail.printer?.state, cached.state)
+
+        window.isHidden = true
+        window.rootViewController = nil
+        printerBarrier.release()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while detail.isShowingCachedPrinter, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(detail.isShowingCachedPrinter, "Cancellation must not leave an unconfirmed seed")
+        XCTAssertNotEqual(detail.printer?.state, cached.state)
+    }
+
+    /// The production controls owner is never built from the cached printer and
+    /// is built exactly once when the canonical printer arrives.
+    func testProductionDetailHostBuildsControlsOwnerOnceAfterCanonicalPrinter() async throws {
+        executionTimeAllowance = 60
+        let printerBarrier = AsyncBarrier()
+        addTeardownBlock { printerBarrier.close() }
+        let fixture = try detailHostFixture(printerBarrier: printerBarrier)
+        await fixture.services.awaitActiveServerSettled()
+        fixture.services.printerSummaryCache.replace(
+            with: [fixture.printer], generation: fixture.services.activeServerGeneration
+        )
+
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await printerBarrier.waitUntilArrived()
+        XCTAssertTrue(detail.isShowingCachedPrinter)
+        try await selectControls(in: controller)
+        XCTAssertTrue(detail.isShowingCachedPrinter, "The canonical load is still parked")
+        XCTAssertTrue(capabilityRequests(fixture.api).isEmpty, "No controls owner may be built from cached data")
+        XCTAssertNotEqual(heaterTarget(in: controller.view)?.isEnabled, true)
+
+        printerBarrier.release()
+        try await waitForHost("The canonical printer must build the controls owner", in: controller.view) {
+            !detail.isShowingCachedPrinter
+                && self.heaterTarget(in: controller.view)?.isEnabled == true
+                && self.capabilityRequests(fixture.api).count == 2
+        }
+        await detail.waitForCanonicalLoadToBecomeIdle()
+        for _ in 0..<20 { await Task.yield() }
+        controller.view.layoutIfNeeded()
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 2,
+                       "Exactly one owner load plus foreground safety discovery")
+    }
+
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
         let fixture = try detailHostFixture()
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
@@ -582,6 +697,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
     private func detailHostFixture(
         verifiedMaterial: Bool = false,
         capabilityBarrier: AsyncBarrier? = nil,
+        printerBarrier: AsyncBarrier? = nil,
         writableSensors: [PrinterSensor] = [],
         runtimeFactors: Bool = false,
         printerState: String = "idle",
@@ -658,6 +774,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             let path = request.url?.path ?? ""
             let data: Data
             if path == printerPath {
+                await printerBarrier?.arriveAndWait()
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
                 await capabilityBarrier?.arriveAndWait()

@@ -262,6 +262,9 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var canonicalPendingRecoveryDemand = false
     @ObservationIgnored private var liveSensorUpdateRevision: UInt64 = 0
     @ObservationIgnored private var liveConnectivityRevision: UInt64 = 0
+    /// Bumped only by SignalR updates that actually report `state`; a nil-state
+    /// update must never let cached or older state override a REST read (#3507).
+    @ObservationIgnored private var liveStateRevision: UInt64 = 0
     @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
     @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
     private var predictiveService: (any PredictiveServiceProtocol)?
@@ -519,6 +522,9 @@ final class PrinterDetailViewModel {
             liveSensorUpdateRevision &+= 1
         }
         liveConnectivityRevision &+= 1
+        if update.state != nil {
+            liveStateRevision &+= 1
+        }
         if var p = printer {
             let jobChanged = update.jobName != nil && update.jobName != p.jobName
             let stateEnded = update.state.map {
@@ -1167,7 +1173,7 @@ final class PrinterDetailViewModel {
             )
             preserved = preservingLiveConnectivity(
                 in: preserved,
-                since: authority.liveConnectivityRevision
+                since: authority
             )
             // A live update saw the printer come online after this pass chose
             // to skip camera metadata; fetch it in a follow-up pass (#3507).
@@ -1194,15 +1200,24 @@ final class PrinterDetailViewModel {
     /// pass's REST reads, so the published snapshot keeps it (#3507).
     private func preservingLiveConnectivity(
         in snapshot: CanonicalSnapshot,
-        since revision: UInt64
+        since authority: CanonicalAuthority
     ) -> CanonicalSnapshot {
-        guard liveConnectivityRevision != revision, let live = printer else {
-            return snapshot
-        }
         var snapshot = snapshot
-        snapshot.printer.isOnline = live.isOnline
-        snapshot.printer.state = live.state
+        applyLiveConnectivity(to: &snapshot.printer, since: authority)
         return snapshot
+    }
+
+    /// Copies only fields SignalR reported after `authority` started: `isOnline`
+    /// on any update, `state` only when an update carried one. Never copies
+    /// state that came from the cached seed or an older snapshot.
+    private func applyLiveConnectivity(to target: inout Printer, since authority: CanonicalAuthority) {
+        guard let live = printer else { return }
+        if liveConnectivityRevision != authority.liveConnectivityRevision {
+            target.isOnline = live.isOnline
+        }
+        if liveStateRevision != authority.liveStateRevision {
+            target.state = live.state
+        }
     }
 
     private func preservingLiveSensorUpdates(
@@ -1402,16 +1417,12 @@ final class PrinterDetailViewModel {
         }
         guard detailSource != .canonical else { return }
         let liveSensorsChanged = liveSensorUpdateRevision != authority.liveSensorUpdateRevision
-        let liveConnectivityChanged = liveConnectivityRevision != authority.liveConnectivityRevision
         switch update {
         case .printer(var loaded):
             if liveSensorsChanged, let liveSensors = printer?.sensors {
                 loaded.sensors = liveSensors
             }
-            if liveConnectivityChanged, let live = printer {
-                loaded.isOnline = live.isOnline
-                loaded.state = live.state
-            }
+            applyLiveConnectivity(to: &loaded, since: authority)
             printer = loaded
             detailSource = .partial
         case .status(var detail):
@@ -1420,10 +1431,7 @@ final class PrinterDetailViewModel {
                 detail.sensors = current.sensors
             }
             var applied = Self.applying(detail, to: current)
-            if liveConnectivityChanged {
-                applied.isOnline = current.isOnline
-                applied.state = current.state
-            }
+            applyLiveConnectivity(to: &applied, since: authority)
             printer = applied
             statusDetail = detail
         case .currentJob(let job):
@@ -1470,6 +1478,7 @@ final class PrinterDetailViewModel {
             lifecycleEpoch: canonicalLifecycleEpoch,
             liveSensorUpdateRevision: liveSensorUpdateRevision,
             liveConnectivityRevision: liveConnectivityRevision,
+            liveStateRevision: liveStateRevision,
             printerServiceIdentity: Self.identity(printerService),
             jobServiceIdentity: Self.identity(jobService),
             maintenanceServiceIdentity: Self.identity(maintenanceService),
@@ -1652,6 +1661,10 @@ final class PrinterDetailViewModel {
 
     func waitForCanonicalLoadToBecomeIdle() async {
         await canonicalTaskTracker.waitForIdle()
+    }
+
+    var hasPendingCanonicalLoadForTesting: Bool {
+        canonicalLoadRequested
     }
 
     func waitForSupersededCanonicalLoads() async {
@@ -1877,6 +1890,7 @@ final class PrinterDetailViewModel {
         let lifecycleEpoch: UInt64
         let liveSensorUpdateRevision: UInt64
         let liveConnectivityRevision: UInt64
+        let liveStateRevision: UInt64
         let printerServiceIdentity: ObjectIdentifier?
         let jobServiceIdentity: ObjectIdentifier?
         let maintenanceServiceIdentity: ObjectIdentifier?

@@ -35,8 +35,12 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   background refresh keeps the shown content. Camera metadata and snapshot
   fetches are skipped while the printer is offline and resume once it reports
   online. The full-screen spinner appears only when no cached printer is
-  available. While only cached details are shown, printer controls stay
-  disabled until the server confirms the printer, except Emergency Stop.
+  available. While only cached details are shown, printer controls, filament
+  actions and Start Next Job stay disabled until the server confirms the
+  printer, except Emergency Stop. NFC "ready" and guided spool-swap deep links
+  opened during that window wait and run once the printer is confirmed. A
+  connectivity-only live update during a refresh no longer lets the cached
+  printer state override the server's current state.
   A failed refresh shows a compact "Showing last known status" note with
   Retry. Switching servers never leaves the previous server's printer on
   screen, and a printer that comes online during a refresh keeps its live

@@ -451,10 +451,16 @@ struct PrinterDetailView: View {
             await viewModel.loadFilamentCommandCapabilities()
         }
         viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        await consumePendingRouterIntents()
+    }
 
+    /// Deep-link intents stay parked on the router while the page shows the
+    /// cached printer; the cached→canonical transition replays them (#3528 B02).
+    private func consumePendingRouterIntents() async {
+        guard !viewModel.isShowingCachedPrinter, viewModel.printer != nil else { return }
         if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
-            await viewModel.prepareReadyConfirmation()
             router.pendingNFCReadyPrinterId = nil
+            await viewModel.prepareReadyConfirmation()
         }
         if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
             router.pendingFilamentSwap = nil
@@ -562,7 +568,7 @@ struct PrinterDetailView: View {
         PrinterDetailFilamentActionMapping.actions(
             printerID: printer.id,
             hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
-            isPerformingAction: viewModel.isPerformingAction,
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             nfcAvailable: services.nfcService?.isAvailable ?? false,
             isOnline: printer.isOnline,
             printerState: printer.state
@@ -774,7 +780,10 @@ struct PrinterDetailView: View {
         }
         .onChange(of: viewModel.isShowingCachedPrinter) { _, isCached in
             guard !isCached else { return }
-            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            let task = Task {
+                await ensureControlsOwnerIfAvailable(for: printer)
+                await consumePendingRouterIntents()
+            }
             activeTasks.append(task)
         }
         .onChange(of: controlsAvailable(for: printer)) { _, isAvailable in
@@ -912,7 +921,7 @@ struct PrinterDetailView: View {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
                 showsEjectConfirmation = true
             }
-            .disabled(viewModel.isPerformingAction)
+            .disabled(viewModel.isPerformingAction || viewModel.isShowingCachedPrinter)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
             .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
@@ -1252,6 +1261,7 @@ struct PrinterDetailView: View {
             .tint(Color.pfSuccess)
             .disabled(!printer.isOnline || !viewModel.isIdle
                       || viewModel.isDispatching || viewModel.isPerformingAction
+                      || viewModel.isShowingCachedPrinter
                       || job.job.rowVersion?.isEmpty != false)
             .disabled(!(authViewModel.currentUser?.permissions.contains("queue:start") == true
                         || authViewModel.currentUser?.roles.contains("farm_admin") == true))
