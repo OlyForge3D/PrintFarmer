@@ -35,7 +35,12 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   background refresh keeps the shown content. Camera metadata and snapshot
   fetches are skipped while the printer is offline and resume once it reports
   online. The full-screen spinner appears only when no cached printer is
-  available (#3507).
+  available. While only cached details are shown, printer controls stay
+  disabled until the server confirms the printer, except Emergency Stop.
+  A failed refresh shows a compact "Showing last known status" note with
+  Retry. Switching servers never leaves the previous server's printer on
+  screen, and a printer that comes online during a refresh keeps its live
+  status and loads its camera (#3507).
 
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm

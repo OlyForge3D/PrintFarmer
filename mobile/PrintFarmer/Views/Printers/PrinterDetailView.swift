@@ -376,6 +376,12 @@ struct PrinterDetailView: View {
                     hasCache: true
                 )
             }
+            if viewModel.isCachedRefreshFailed {
+                PrinterDetailStaleRefreshBanner {
+                    let task = Task { await viewModel.loadPrinter() }
+                    activeTasks.append(task)
+                }
+            }
             Group {
                 if let printer = viewModel.printer {
                     printerContent(printer)
@@ -400,12 +406,15 @@ struct PrinterDetailView: View {
 
     private func configureDetail() async {
         let generation = services.activeServerGeneration
-        // #3507: render the farm list's last-known printer immediately.
+        await services.awaitActiveServerSettled()
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
+        // #3507: render the settled server's last-known printer immediately.
         if let cached = services.printerSummaryCache.printer(id: printerId, generation: generation) {
             viewModel.seedCachedPrinter(cached)
         }
-        await services.awaitActiveServerSettled()
-        guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
 
         let composition = services.printerControlsComposition
         controlsComposition = composition
@@ -425,7 +434,11 @@ struct PrinterDetailView: View {
             maintenanceService: services.maintenanceService
         )
         await viewModel.loadPrinter()
-        if let printer = viewModel.printer, !viewModel.isShowingCachedPrinter {
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
+        if let printer = viewModel.printer {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
         await viewModel.loadOperatorSections()
@@ -684,7 +697,8 @@ struct PrinterDetailView: View {
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
-                || printer.backend == .moonraker
+                || printer.backend == .moonraker,
+            isPrinterConfirmed: !viewModel.isShowingCachedPrinter
         ) else { return }
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
@@ -755,6 +769,11 @@ struct PrinterDetailView: View {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
         .onChange(of: controlsComposition?.identity) { _, _ in
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            activeTasks.append(task)
+        }
+        .onChange(of: viewModel.isShowingCachedPrinter) { _, isCached in
+            guard !isCached else { return }
             let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
             activeTasks.append(task)
         }
@@ -920,7 +939,9 @@ struct PrinterDetailView: View {
             isOnline: printer.isOnline,
             isPrinting: viewModel.isPrinting,
             isPaused: viewModel.isPaused,
-            isPerformingAction: viewModel.isPerformingAction,
+            // #3507: run actions wait for canonical data; Emergency Stop
+            // ignores this input and stays available.
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             pendingKinds: viewModel.pendingRunActionKinds
         )
     }

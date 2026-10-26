@@ -1202,11 +1202,6 @@ final class PrinterDetailViewModel {
         var snapshot = snapshot
         snapshot.printer.isOnline = live.isOnline
         snapshot.printer.state = live.state
-        if var detail = snapshot.statusDetail {
-            detail.isOnline = live.isOnline
-            detail.state = live.state
-            snapshot.statusDetail = detail
-        }
         return snapshot
     }
 
@@ -1407,10 +1402,15 @@ final class PrinterDetailViewModel {
         }
         guard detailSource != .canonical else { return }
         let liveSensorsChanged = liveSensorUpdateRevision != authority.liveSensorUpdateRevision
+        let liveConnectivityChanged = liveConnectivityRevision != authority.liveConnectivityRevision
         switch update {
         case .printer(var loaded):
             if liveSensorsChanged, let liveSensors = printer?.sensors {
                 loaded.sensors = liveSensors
+            }
+            if liveConnectivityChanged, let live = printer {
+                loaded.isOnline = live.isOnline
+                loaded.state = live.state
             }
             printer = loaded
             detailSource = .partial
@@ -1419,7 +1419,12 @@ final class PrinterDetailViewModel {
             if liveSensorsChanged {
                 detail.sensors = current.sensors
             }
-            printer = Self.applying(detail, to: current)
+            var applied = Self.applying(detail, to: current)
+            if liveConnectivityChanged {
+                applied.isOnline = current.isOnline
+                applied.state = current.state
+            }
+            printer = applied
             statusDetail = detail
         case .currentJob(let job):
             guard detailSource == .partial else { return }
@@ -1893,7 +1898,7 @@ final class PrinterDetailViewModel {
         let upcomingMaintenance: [UpcomingMaintenanceTask]
         let history: [PrinterHistoryJob]
         let cameraRotation: Int
-        let cameraMetadataDeferred: Bool
+        var cameraMetadataDeferred: Bool
     }
 
     /// Partial canonical results published before the full pass completes
@@ -2278,16 +2283,18 @@ final class PrinterDetailViewModel {
         showConfirmation = true
     }
 
+    // Emergency Stop stays available on the cached page: it is a fail-safe
+    // that must never be blanket-disabled (epic #2518), unlike every other
+    // mutation, which waits for canonical printer data (#3507).
     func requestEmergencyStop() {
-        guard !isShowingCachedPrinter else { return }
         pendingAction = .emergencyStop
         showConfirmation = true
     }
 
     func confirmAction() async {
-        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let action = pendingAction else { return }
+        guard action == .emergencyStop || !isShowingCachedPrinter else { return }
         showConfirmation = false
         pendingAction = nil
 
@@ -2855,7 +2862,7 @@ final class PrinterDetailViewModel {
         _ kind: PrinterRunActionKind,
         _ action: @escaping (any PrinterServiceProtocol) async throws -> Void
     ) async {
-        guard !isShowingCachedPrinter else { return }
+        guard kind == .emergencyStop || !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)

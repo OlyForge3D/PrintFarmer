@@ -1552,6 +1552,20 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
     }
 
+    func testControlsOwnerMappingNeverBuildsFromUnconfirmedCachedPrinter() {
+        // #3507 R3511-V01/H01: the cached farm-list printer must never seed
+        // the owner; once confirmed, the same ID builds normally.
+        let printerID = UUID()
+        XCTAssertFalse(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: nil, printerID: printerID,
+            controlsAvailable: true, isPrinterConfirmed: false
+        ))
+        XCTAssertTrue(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: nil, printerID: printerID,
+            controlsAvailable: true, isPrinterConfirmed: true
+        ))
+    }
+
     // MARK: - Filament staleness mapping (Hicks review finding 16, reversing
     // the interim fix from Bishop review finding 6)
 

@@ -501,12 +501,17 @@ enum PrinterDetailFilamentCoverageStateMapping {
 /// example, offline) and forward again once more; this function
 /// only ever authorizes a fresh build, never a teardown.
 enum PrinterDetailControlsOwnerMapping {
+    /// - Parameter isPrinterConfirmed: False while the page shows the farm
+    ///   list's unconfirmed cached printer (#3507). The owner is never built
+    ///   from that instance, because a same-ID canonical printer would then
+    ///   be rejected below and leave the owner pinned to cached data.
     static func shouldBuildOwner(
         existingOwnerPrinterID: UUID?,
         printerID: UUID,
-        controlsAvailable: Bool
+        controlsAvailable: Bool,
+        isPrinterConfirmed: Bool = true
     ) -> Bool {
-        guard controlsAvailable else { return false }
+        guard isPrinterConfirmed, controlsAvailable else { return false }
         return existingOwnerPrinterID != printerID
     }
 }
@@ -719,4 +724,33 @@ extension PrinterDetailLayout {
     /// Compact dot strip; the segmented picker above is the primary
     /// 44 pt navigation target, so the dots don't need a full-height row.
     static let pageIndicatorHeight: CGFloat = 16
+}
+
+/// Compact, read-only notice shown while the page still renders the farm
+/// list's last-known printer and the canonical refresh failed (#3507). It
+/// replaces nothing: the cached content stays on screen beneath it.
+struct PrinterDetailStaleRefreshBanner: View {
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.caption)
+                .accessibilityHidden(true)
+            Text("Showing last known status")
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 8)
+            Button("Retry", action: onRetry)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("printer-detail-stale-retry")
+        }
+        .foregroundStyle(Color.pfTextSecondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(Color.pfWarningFill)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer-detail-stale-refresh")
+    }
 }
