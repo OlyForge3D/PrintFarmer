@@ -103,12 +103,23 @@ public sealed class PrinterFilePreviewCache(
         await File.WriteAllBytesAsync(path, bytes, ct);
     }
 
-    private static bool IsValid(PrinterFilePreviewContent? content) =>
-        content is not null && (content.Image is null ? content.ContentType is null :
-            PrinterFilePreviewTransport.IsValidImage(content.Image, content.ContentType)) &&
-        (content.PrintTimeSeconds is null || (double.IsFinite(content.PrintTimeSeconds.Value) &&
-            content.PrintTimeSeconds > 0)) &&
-        (content.LayerHeightMm is null || (double.IsFinite(content.LayerHeightMm.Value) && content.LayerHeightMm > 0));
+    private static bool IsValid(PrinterFilePreviewContent? content)
+    {
+        if (content is null)
+        {
+            return false;
+        }
+
+        bool hasValidImage = content.Image is null
+            ? content.ContentType is null
+            : PrinterFilePreviewTransport.IsValidImage(content.Image, content.ContentType);
+        bool hasValidPrintTime = content.PrintTimeSeconds is null ||
+            (double.IsFinite(content.PrintTimeSeconds.Value) && content.PrintTimeSeconds > 0);
+        bool hasValidLayerHeight = content.LayerHeightMm is null ||
+            (double.IsFinite(content.LayerHeightMm.Value) && content.LayerHeightMm > 0);
+
+        return hasValidImage && hasValidPrintTime && hasValidLayerHeight;
+    }
 
     private string EntryPath(string key)
     {
