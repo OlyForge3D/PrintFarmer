@@ -50,6 +50,20 @@ print_header() { log_header "$@"; }
 # VALIDATION AND CHECKS
 # ============================================================================
 
+# Ignore nonfunctional Windows Store aliases as well as missing interpreters.
+resolve_python_cmd() {
+    local candidate
+    for candidate in python3 python py; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c "import sys; assert sys.version_info >= (3, 8)" >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    log_error "No working Python 3 interpreter found (tried python3, python, py)." >&2
+    return 1
+}
+
 # Check if required command is available
 require_command() {
     local cmd="$1"

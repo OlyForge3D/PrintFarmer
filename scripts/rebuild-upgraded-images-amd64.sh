@@ -4,6 +4,7 @@
 # This creates amd64 images that can be used on Linux servers and pushed to registry
 
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/docker/container-versions.conf"
 
 # Colors for output
 RED='\033[0;31m'
@@ -40,7 +41,7 @@ fi
 
 # List of images to rebuild with their Dockerfile locations and build context
 declare -a IMAGES_TO_BUILD=(
-    "sdk:10.0.101-alpine-upgraded|Dockerfile.base-sdk|dockerfiles"
+    "sdk:${SDK_TAG}-upgraded|scripts/docker/dockerfiles/Dockerfile.base-sdk|."
     "aspnet:10.0.1-alpine-upgraded|Dockerfile.base-aspnet|dockerfiles"
     "ubuntu:24.04-upgraded|Dockerfile.base-ubuntu|dockerfiles"
     "nginx:alpine-upgraded|Dockerfile.base-nginx|dockerfiles"
@@ -59,6 +60,9 @@ for build_spec in "${IMAGES_TO_BUILD[@]}"; do
     
     registry_image="${REGISTRY_HOST}/${image}"
     dockerfile_path="dockerfiles/${dockerfile}"
+    if [[ "$image" == sdk:* ]]; then
+        dockerfile_path="$dockerfile"
+    fi
     
     print_info "Building: ${image}"
     print_info "  Dockerfile: ${dockerfile_path}"
@@ -69,6 +73,7 @@ for build_spec in "${IMAGES_TO_BUILD[@]}"; do
     # Use buildx to build and push directly to registry in one step
     # This ensures proper platform metadata is set
     if docker buildx build \
+        --build-arg "SDK_TAG=$SDK_TAG" \
         --builder "${BUILDER_NAME}" \
         --platform "${DOCKER_BUILDX_PLATFORM}" \
         --file "${dockerfile_path}" \

@@ -7,6 +7,7 @@ ARG GIT_SHA=unknown
 ARG SOURCE_REPOSITORY=""
 ARG SOURCE_ARCHIVE_URL=""
 ARG SBOM_URL=""
+ARG SDK_TAG
 
 # Stage 1: Build React application
 FROM node:24-alpine AS react-build
@@ -25,7 +26,7 @@ COPY src/Web/ReactApp/ ./
 RUN npm run build
 
 # Stage 2: Build .NET API
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
+FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS dotnet-build
 ARG GIT_SHA
 WORKDIR /src
 
@@ -48,7 +49,7 @@ COPY sixlabors.lic /sixlabors.lic
 COPY global.json ./
 
 # Restore dependencies
-RUN dotnet restore ./api/Farm.Web.Api.csproj
+RUN dotnet --version && dotnet restore ./api/Farm.Web.Api.csproj
 
 # Copy source code
 COPY src/ ./

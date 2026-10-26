@@ -1900,7 +1900,7 @@ if (model == null)
 
 ### Prerequisites
 
-- **.NET SDK:** 10.0.101 or later
+- **.NET SDK:** exact version from root `global.json` (no roll-forward)
 - **Node.js:** 18+ with npm
 - **Database:** SQLite (default) or other supported provider
 - **API Running:** <http://localhost:5245>
