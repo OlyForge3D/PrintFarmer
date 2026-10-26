@@ -2344,12 +2344,8 @@ final class PrinterDetailViewModel {
         guard let printer else { return "Printer status is unavailable." }
         guard printer.isOnline else { return "Printer is offline." }
         let state = printer.state?.lowercased()
-        guard let state,
-              ["idle", "ready", "standby", "complete", "completed", "cancelled",
-               "printing", "starting", "paused"].contains(state) else {
-            return "Printer state is unknown or transitioning."
-        }
-        guard !["printing", "starting", "paused"].contains(state) else {
+        guard state != "shutdown" else { return "Printer is shut down." }
+        guard !["printing", "starting", "paused"].contains(state ?? "") else {
             return "Filament load and unload are disabled while a print is active."
         }
         guard !isPerformingAction else { return "Another printer operation is in progress." }
@@ -2367,10 +2363,7 @@ final class PrinterDetailViewModel {
         }
         return PhysicalFilamentCommandEligibility.blockedReason(
             for: operation,
-            capabilities: capabilities,
-            status: statusDetail,
-            configurationRevision: printer.configurationRevision,
-            now: nowProvider()
+            capabilities: capabilities
         )
     }
 

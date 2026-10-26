@@ -230,7 +230,7 @@ public sealed class PrinterSensorNormalizerTests
     [Theory]
     [InlineData("missing", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.UnknownSensor)]
     [InlineData("FAN", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.UnknownSensor)]
-    [InlineData("offline", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.SensorUnavailable)]
+    [InlineData("offline", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.Valid)]
     [InlineData("hotend", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.ReadOnly)]
     [InlineData("fan", PrinterSensorQuantity.TargetTemperature, 50, PrinterSensorControlValidationCode.UnsupportedQuantity)]
     [InlineData("fan", PrinterSensorQuantity.FanSpeed, double.NaN, PrinterSensorControlValidationCode.InvalidValue)]

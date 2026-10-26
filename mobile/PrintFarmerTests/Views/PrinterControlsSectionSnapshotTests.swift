@@ -74,11 +74,69 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertEqual(presentation(60).etaLabel, "1m left · Paused")
         printer.isOnline = false
         XCTAssertEqual(presentation(60).stateLabel, "Offline")
+        XCTAssertEqual(presentation(60).jobLabel, "Offline")
         XCTAssertFalse(presentation(60).isActiveJob)
+        printer.isOnline = true
+        printer.state = "idle"
+        XCTAssertEqual(presentation(nil).jobLabel, "Ready to seed")
+        let maintenanceJSON = TestJSON.printerMinimal
+            .replacingOccurrences(of: "\"inMaintenance\": false", with: "\"inMaintenance\": true")
+            .replacingOccurrences(of: "\"isOnline\": false", with: "\"isOnline\": true")
+        let maintenance = PrinterCardPresentation(
+            printer: try TestData.decodePrinter(from: maintenanceJSON), isPendingReady: false,
+            attentionCount: nil, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(maintenance.jobLabel, "In maintenance")
+        printer.isOnline = false
+        let offlineBed = PrinterCardPresentation(printer: printer, isPendingReady: true,
+                                                attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
+        XCTAssertEqual(offlineBed.stateLabel, "Offline")
+        XCTAssertEqual(offlineBed.jobLabel, "Offline")
+        XCTAssertFalse(offlineBed.accessibilityLabel.contains("Ready to harvest"))
+        XCTAssertFalse(offlineBed.accessibilityLabel.contains("Bed clear"))
+        printer.isOnline = true
         let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
                                          attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
         XCTAssertEqual(bed.stateLabel, "Bed clear")
-        XCTAssertTrue(bed.jobLabel.contains("Clear bed"))
+        XCTAssertEqual(bed.jobLabel, "Ready to harvest")
+    }
+
+    func testOnlineErrorWithoutJobContextNeverReadsReadyToSeed() throws {
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "error"
+        printer.jobName = nil
+        printer.fileName = nil
+        for reason in [nil, "Spaghetti detected"] as [String?] {
+            let card = PrinterCardPresentation(printer: printer, isPendingReady: false, attentionCount: nil,
+                                               failureReason: reason, printTimeLeftSeconds: nil)
+            XCTAssertEqual(card.jobLabel, "Error")
+            XCTAssertFalse(card.accessibilityLabel.contains("Ready to seed"))
+        }
+    }
+
+    func testMaintenanceUnknownAndCompletedStatePrecedence() throws {
+        func card(state: String, inMaintenance: Bool) throws -> PrinterCardPresentation {
+            let json = TestJSON.printerMinimal
+                .replacingOccurrences(of: "\"inMaintenance\": false", with: "\"inMaintenance\": \(inMaintenance)")
+                .replacingOccurrences(of: "\"isOnline\": false", with: "\"isOnline\": true")
+            var printer = try TestData.decodePrinter(from: json)
+            printer.state = state
+            printer.jobName = "part.gcode"
+            return PrinterCardPresentation(printer: printer, isPendingReady: false, attentionCount: nil,
+                                           failureReason: nil, printTimeLeftSeconds: nil)
+        }
+        let errorMaintenance = try card(state: "error", inMaintenance: true)
+        XCTAssertEqual(errorMaintenance.stateLabel, "Maintenance")
+        XCTAssertEqual(errorMaintenance.jobLabel, "In maintenance")
+        let pausedMaintenance = try card(state: "paused", inMaintenance: true)
+        XCTAssertEqual(pausedMaintenance.stateLabel, "Maintenance")
+        XCTAssertEqual(pausedMaintenance.jobLabel, "part.gcode")
+        let unknown = try card(state: "calibrating", inMaintenance: false)
+        XCTAssertEqual(unknown.stateLabel, "Calibrating")
+        XCTAssertEqual(unknown.jobLabel, "Ready to seed")
+        let completed = try card(state: "completed", inMaintenance: false)
+        XCTAssertEqual(completed.stateLabel, "Completed")
+        XCTAssertEqual(completed.jobLabel, "Ready to seed")
     }
 
     func testMissingTemperaturesReadAsNotReportedInVoiceOver() throws {
@@ -112,7 +170,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertFalse(presentation.showsJobProgress)
         XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
         XCTAssertFalse(presentation.accessibilityLabel.contains("ETA unavailable"))
-        XCTAssertTrue(presentation.jobLabel.contains("Clear bed"))
+        XCTAssertEqual(presentation.jobLabel, "Ready to harvest")
     }
 
     func testFailureCardRetainsKnownJobProgressAndOnlyShowsServerReportedETA() throws {
@@ -1321,7 +1379,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
     }
 
-    func test_unknownLimits_editorBlocksHeatingAllowsZeroAndRetryDoesNotReplay() async throws {
+    func test_unknownLimits_editorDispatchesNativeHeatingAndZeroWithoutReplayOnRetry() async throws {
         let printer = try makePrinter(backend: .octoPrint)
         var caps = Self.layoutCaps
         caps.supportsAbsoluteMovement = true
@@ -1345,13 +1403,22 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "200"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
+        let heatingDispatched = expectation(description: "Unknown limits do not block the explicit native target")
+        service.afterSetTemperatures = { heatingDispatched.fulfill() }
+        defer { service.afterSetTemperatures = nil }
         try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
+        await fulfillment(of: [heatingDispatched], timeout: 5)
+        service.afterSetTemperatures = nil
         try await settle(controller)
-        XCTAssertNil(service.setTemperaturesCalledWith)
-        XCTAssertNil(model.lastError, "The editor rejects before VM dispatch")
-        XCTAssertNotNil(model.preheatBlockedReason(.pla))
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        XCTAssertNil(model.lastError)
+        XCTAssertNil(model.preheatBlockedReason(.pla))
         XCTAssertNil(model.preheatBlockedReason(.coolDown))
         XCTAssertNotNil(model.hardwareLoadError)
+        model.cancelPendingCommand()
+        try await settle(controller)
 
         window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
         controller.view.frame = window.bounds
@@ -1360,7 +1427,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "unknown-heater-limits-fail-closed"
+        attachment.name = "unknown-heater-limits-native-controls"
         attachment.lifetime = .keepAlways
         add(attachment)
 
@@ -1369,12 +1436,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let coolDownDispatched = expectation(description: "The UI's asynchronous zero-target command reaches the service")
         service.afterSetTemperatures = { coolDownDispatched.fulfill() }
-        defer { service.afterSetTemperatures = nil }
         try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
         await fulfillment(of: [coolDownDispatched], timeout: 5)
         service.afterSetTemperatures = nil
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         model.cancelPendingCommand()
+        try await settle(controller)
         service.setTemperaturesCalledWith = nil
         service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: 260, bed: 110)
         try control("printer.controls.retry-limits").sendActions(for: .touchUpInside)
@@ -1384,12 +1453,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(model.maximum(for: .hotend), 260)
         XCTAssertNil(model.hardwareLoadError)
         XCTAssertNil(service.setTemperaturesCalledWith, "A read retry never replays a target")
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
         heater.text = "261"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
         try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertEqual(service.setTemperaturesCallCount, 2, "A known maximum still validates explicit input")
         XCTAssertNil(model.lastError)
 
         try await expandAbsolute(controller)
@@ -1505,7 +1576,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.moveToCalledWith?.z, 10)
     }
 
-    func test_absoluteEditorRequiresEveryAxisAndVerifiedSafetyBeforeDispatch() async throws {
+    func test_absoluteEditorAcceptsOptionalAxesWithoutVerifiedSafetyPreflight() async throws {
         let printer = try makePrinter(backend: .octoPrint)
         var caps = Self.layoutCaps
         caps.supportsAbsoluteMovement = true
@@ -1557,7 +1628,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.support = .unknown
         await model.refreshSafetyEvidence()
         try await settle(controller)
-        XCTAssertFalse(move.isEnabled)
+        XCTAssertTrue(move.isEnabled, "Unknown safety evidence does not override native absolute-move support")
         service.capabilitiesToReturn = caps
         await model.refreshSafetyEvidence()
         try await settle(controller)
@@ -1787,7 +1858,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(button.bounds.height, 44, suffix)
             XCTAssertGreaterThanOrEqual(button.bounds.width, 44, suffix)
             XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true, suffix)
-            XCTAssertEqual(button.isEnabled, supported)
+            let isNativeExtrusion = suffix == "extrude" || suffix == "retract"
+            XCTAssertEqual(button.isEnabled, isNativeExtrusion || supported, suffix)
         }
         // Capture actual scroll viewports rather than asking the render server
         // for a many-thousand-point AX surface. Keep native scale and every tile.

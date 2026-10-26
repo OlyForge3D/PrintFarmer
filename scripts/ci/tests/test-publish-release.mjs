@@ -451,6 +451,9 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   const assets = join(root, 'assets');
   mkdirSync(join(source, 'src'), { recursive: true });
   writeFileSync(join(source, 'VERSION'), 'v1.2.3');
+  writeFileSync(join(source, 'global.json'), JSON.stringify({
+    sdk: { version: '10.0.402', rollForward: 'disable', allowPrerelease: false },
+  }));
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
   mkdirSync(join(source, '.release-assets'));
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
@@ -487,6 +490,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     assert.equal(args[args.indexOf('--platform') + 1], component.platforms.join(','));
     assert.ok(args.includes(`GIT_SHA=${sha}`) && args.includes(`VITE_GIT_SHA=${sha}`));
     assert.ok(args.includes(`BUILD_VERSION=${release.version}`));
+    assert.ok(args.includes('SDK_TAG=10.0.402-noble'));
     assert.ok(args.includes('--sbom=true') && args.includes('--provenance=mode=max'));
     assert.ok(!args.includes('--tag'));
   }

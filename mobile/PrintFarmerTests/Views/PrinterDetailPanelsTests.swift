@@ -290,7 +290,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
                        "A speed step never writes flow")
     }
 
-    func testTuneKeepsSpeedAndFlowVisibleButDisabledWhenNotPrinting() async throws {
+    func testTuneKeepsSpeedAndFlowEnabledWhileIdleAndDispatchesOnlyExplicitSpeedChange() async throws {
         let tune = try await hostedTunePanel(runtimeFactors: true)
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
         try await waitForHost("Babystep must render enabled while idle", in: tune.controller.view) {
@@ -299,30 +299,56 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for factor in RuntimeFactor.allCases {
             for direction in ["increase", "decrease"] {
                 let button = try XCTUnwrap(tune.button("printer.controls.runtime.\(factor.rawValue)-factor.\(direction)"))
-                XCTAssertFalse(button.isEnabled, "\(factor.title) \(direction) is disabled outside printing or paused")
-                XCTAssertEqual(button.accessibilityHint, "\(factor.title) can be tuned only while printing or paused.")
+                XCTAssertTrue(button.isEnabled, "\(factor.title) \(direction) remains available while idle")
+                XCTAssertEqual(button.accessibilityHint, "Sends a new \(factor.rawValue) percentage to the printer.")
             }
         }
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
+        try XCTUnwrap(tune.button("printer.controls.runtime.speed-factor.increase"))
+            .sendActions(for: .touchUpInside)
+        let path = "/api/printers/\(tune.printerId)/speed-factor"
+        try await waitForHost("Idle speed step must reach the shared factor API", in: tune.controller.view) {
+            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == path }
+        }
+        let requests = tune.api.capturedRequests.filter { $0.httpMethod == "POST" && $0.url?.path == path }
+        XCTAssertEqual(requests.count, 1)
+        let body = try XCTUnwrap(try XCTUnwrap(requests.first).capturedHTTPBody())
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: body) as? [String: Double], ["percent": 105])
+        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("/flow-factor") == true })
     }
 
     func testTuneSupportedSpeedWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
-        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing", factorValues: (nil, 98))
+        try await assertMissingRuntimeFactorTelemetry(.speed)
+    }
+
+    func testTuneSupportedFlowWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
+        try await assertMissingRuntimeFactorTelemetry(.flow)
+    }
+
+    private func assertMissingRuntimeFactorTelemetry(_ missing: RuntimeFactor) async throws {
+        let known: RuntimeFactor = missing == .speed ? .flow : .speed
+        let values: (Double?, Double?) = missing == .speed ? (nil, 98) : (100, nil)
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing", factorValues: values)
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        try await waitForHost("Flow with known telemetry must render enabled", in: tune.controller.view) {
-            tune.button("printer.controls.runtime.flow-factor.increase")?.isEnabled == true
+        try await waitForHost("\(known.title) with known telemetry must render enabled", in: tune.controller.view) {
+            tune.button("printer.controls.runtime.\(known.rawValue)-factor.increase")?.isEnabled == true
         }
         for direction in ["increase", "decrease"] {
             let button = try XCTUnwrap(
-                tune.button("printer.controls.runtime.speed-factor.\(direction)"),
-                "Supported Speed stays visible when telemetry is missing"
+                tune.button("printer.controls.runtime.\(missing.rawValue)-factor.\(direction)"),
+                "Supported \(missing.title) stays visible when telemetry is missing"
             )
-            XCTAssertFalse(button.isEnabled, "Speed \(direction) is disabled without readback")
-            XCTAssertEqual(button.accessibilityHint, "Speed readback is unknown; controls are disabled.")
+            XCTAssertFalse(button.isEnabled, "\(missing.title) \(direction) is disabled without readback")
+            XCTAssertEqual(button.accessibilityHint, "\(missing.title) readback is unknown; controls are disabled.")
         }
-        // The value Text renders runtimeFactorText(percent) with this VoiceOver label.
+        // SwiftUI exposes no Text nodes to a unit-test host; the rendered value
+        // row's "not reported" label and "--" text are asserted in
+        // Issue3484MissingRuntimeFactorsUITests (with an element screenshot of the "--").
         XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorText(nil), "--")
-        XCTAssertEqual(PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(.speed, nil), "Speed not reported")
+        XCTAssertEqual(
+            PrinterInstrumentPanelControls.runtimeFactorAccessibilityLabel(missing, nil),
+            "\(missing.title) not reported"
+        )
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
     }
 
@@ -889,7 +915,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(Editor.steppedTarget(draft: "2", current: 200, maximum: 260, delta: -5), 0)
         XCTAssertNil(Editor.steppedTarget(draft: "invalid", current: 200, maximum: 260, delta: 5))
         XCTAssertNil(Editor.steppedTarget(draft: "", current: nil, maximum: 260, delta: 5))
-        XCTAssertNil(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5))
+        XCTAssertEqual(Editor.steppedTarget(draft: "", current: 200, maximum: nil, delta: 5), 205)
         XCTAssertNil(Editor.steppedTarget(draft: "260", current: 200, maximum: 260, delta: 5))
         XCTAssertNil(Editor.steppedTarget(draft: "nan", current: 200, maximum: 260, delta: 5))
     }

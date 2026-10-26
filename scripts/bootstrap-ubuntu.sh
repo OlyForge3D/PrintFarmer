@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap script for Ubuntu (20.04/22.04/24.04)
-# Installs prerequisites to build and run PrintFarmer (dotnet 10.0.x, Node.js >=24.13, npm, git, build-essential)
+# Installs prerequisites to build and run PrintFarmer (SDK from global.json, Node.js >=24.13, npm, git, build-essential)
 # Designed to be idempotent and safe to run multiple times.
 
 set -euo pipefail
@@ -31,7 +31,6 @@ done
 # Repository root for smoke-tests
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.x}
 # Default to Node 24.x LTS to match frontend toolchain requirements
 NODE_VERSION=${NODE_VERSION:-24}
 
@@ -123,46 +122,13 @@ else
   print "ruamel.yaml already installed"
 fi
 
-# Install dotnet 9 using the Microsoft package repo and preferred fixed version.
-# If the bundled `dotnet-install.sh` script is present in the repo, fall back to it as a last resort.
-if ! command -v dotnet >/dev/null 2>&1; then
-  print "Installing .NET SDK ${REQ_DOTNET_VERSION} (from Microsoft packages)"
-
-  # Add Microsoft package signing key and feed
-  wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb || true
-  if [ -f /tmp/packages-microsoft-prod.deb ]; then
-    run_priv "dpkg -i /tmp/packages-microsoft-prod.deb || true"
-    run_priv "rm -f /tmp/packages-microsoft-prod.deb"
-  else
-    print "Warning: failed to download Microsoft packages file; falling back to dotnet-install script"
-  fi
-
-  run_priv "apt-get update -y"
-  # Install the SDK (this will pick a matching 10.x package). We try to request the SDK meta-package.
-  if run_priv "apt-get install -y dotnet-sdk-10"; then
-    print ".NET SDK installed from apt (dotnet --info follows)"
-    dotnet --info || true
-  else
-    print "apt install of dotnet-sdk-10 failed; trying manual dotnet-install.sh script"
-    # Fallback to repo-local dotnet-install.sh if present
-    if [ -f "${REPO_ROOT:-/root}/dotnet-install.sh" ]; then
-      print "Using repo-local dotnet-install.sh to install ${REQ_DOTNET_VERSION}"
-      bash "${REPO_ROOT:-/root}/dotnet-install.sh" --version ${REQ_DOTNET_VERSION}
-      export PATH="$HOME/.dotnet:$PATH"
-      dotnet --info || true
-    else
-      print "No dotnet-install.sh available; please install dotnet SDK ${REQ_DOTNET_VERSION} manually or put dotnet-install.sh in repository root."
-      exit 2
-    fi
-  fi
-else
-  print ".NET already present: $(dotnet --info 2>/dev/null | head -n1 || true)"
-fi
+source "$REPO_ROOT/scripts/dotnet-sdk.sh"
+ensure_dotnet_sdk
 
 # Restore project-level dependencies (dotnet + npm)
 print "Restoring .NET dependencies..."
 if [ -f "$REPO_ROOT/src/farm-web.sln" ]; then
-  run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln"
+  run_as_user "export DOTNET_ROOT='${DOTNET_ROOT:-}'; export PATH='$PATH'; cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln"
 else
   print "Warning: farm-web.sln not found at $REPO_ROOT/src — skipping dotnet restore"
 fi
@@ -197,11 +163,11 @@ print "Done."
 # If requested, run verification/smoke tests as the non-root user
 if [ "$VERIFY" = true ]; then
   print "Running verification (--verify) checks as non-root user"
-  run_as_user "export PATH=\"$HOME/.dotnet:$PATH\"; dotnet --info || true; node --version || true; npm --version || true; git --version || true"
+  run_as_user "export PATH='$PATH'; python3 '$REPO_ROOT/scripts/dotnet-sdk.py' verify && node --version && npm --version && git --version"
   # Small smoke test: build the API project and check vitest is available
   if [ -f "$REPO_ROOT/src/api/Farm.Web.Api.csproj" ]; then
     print "Running dotnet build smoke test (API project)"
-    run_as_user "cd '$REPO_ROOT/src' && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
+    run_as_user "export PATH='$PATH'; cd '$REPO_ROOT/src' && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
   else
     print "API project not found for smoke test; skipping build"
   fi

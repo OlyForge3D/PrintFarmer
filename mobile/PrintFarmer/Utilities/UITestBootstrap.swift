@@ -120,6 +120,9 @@ enum UITestBootstrap {
         "--uitesting-issue3259-control-idle"
     static let issue3259SafeFilamentActionsLaunchArgument =
         "--uitesting-issue3259-safe-filament-actions"
+    /// Drops Speed/Flow readback so XCUI can assert the rendered "not reported" rows (#3484).
+    static let issue3484MissingRuntimeFactorsLaunchArgument =
+        "--uitesting-issue3484-missing-runtime-factors"
     #endif
 
     #if DEBUG
@@ -649,6 +652,10 @@ enum UITestBootstrap {
             printer.z = 5
             printer.homedAxes = ""
         }
+        if ProcessInfo.processInfo.arguments.contains(issue3484MissingRuntimeFactorsLaunchArgument) {
+            printer.speedFactorPercent = nil
+            printer.flowFactorPercent = nil
+        }
         if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
             printer.state = "ready"
             printer.progress = nil
@@ -657,8 +664,8 @@ enum UITestBootstrap {
             printer.jobName = nil
             printer.fileName = nil
             printer.currentJobThumbnailUrl = nil
-            printer.hotendTemp = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
-            printer.hotendTarget = PhysicalFilamentCommandEligibility.minimumLoadUnloadTemperatureC
+            printer.hotendTemp = 220
+            printer.hotendTarget = 220
             printer.bedTemp = 23
             printer.bedTarget = 0
         }
@@ -832,8 +839,8 @@ enum UITestBootstrap {
             totalLayers: printer.totalLayers,
             fanSpeedPercent: 60,
             liveZOffsetMm: 0.025,
-            speedFactorPercent: 100,
-            flowFactorPercent: 98,
+            speedFactorPercent: printer.speedFactorPercent,
+            flowFactorPercent: printer.flowFactorPercent,
             jobName: printer.jobName,
             thumbnailUrl: printer.thumbnailUrl,
             cameraStreamUrl: printer.cameraStreamUrl,

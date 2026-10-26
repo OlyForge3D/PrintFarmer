@@ -29,7 +29,7 @@ public partial class PrintersController
             return NotFound();
         }
 
-        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -40,27 +40,13 @@ public partial class PrintersController
             return SensorProblem(501, "Heater shutdown not supported", "This backend does not support all-heater shutdown; no command was sent.");
         }
 
-        (bool useActiveLease, _, ActionResult? failure) = await ResolveFanControlLeaseAsync(id, ct);
-        if (failure is not null)
-        {
-            return failure;
-        }
-
-        if (!useActiveLease)
-        {
-            return await ExecuteDirectBooleanControlAsync(
-                id, "turn_off_heaters", "turn_off_heaters", token => _printersService.TurnOffHeatersAsync(id, token), ct);
-        }
-
-        return await ExecuteActiveCommandControlAsync(
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "turn_off_heaters",
             "turn_off_heaters",
-            async token => await _printersService.TurnOffHeatersAsync(id, token)
-                ? new CommandResult(true, null)
-                : new CommandResult(false, "The backend did not confirm all-heater shutdown."),
+            token => _printersService.TurnOffHeatersAsync(id, token),
             ct,
-            mapUnconfirmedAsUnavailable: true);
+            allowActivePrint: true);
     }
 
     /// <summary>
@@ -103,7 +89,7 @@ public partial class PrintersController
         }
 
         PrinterBackendCapabilitiesDto? capabilities =
-            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+            await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -115,12 +101,6 @@ public partial class PrintersController
                 StatusCodes.Status501NotImplemented,
                 "Sensor control not supported",
                 "This printer backend does not support targeted sensor control; no command was sent.");
-        }
-
-        (bool useActiveLease, _, ActionResult? stateFailure) = await ResolveFanControlLeaseAsync(id, ct);
-        if (stateFailure is not null)
-        {
-            return stateFailure;
         }
 
         IReadOnlyList<PrinterSensorDto> advertised = _printersService.GetLiveSensors(id);
@@ -139,25 +119,13 @@ public partial class PrintersController
 
         string targetId = validation.SensorId!;
         double target = value.Boolean is bool enabled ? enabled ? 1 : 0 : value.Number!.Value;
-        if (!useActiveLease)
-        {
-            return await ExecuteDirectBooleanControlAsync(
-                id,
-                "set_sensor_value",
-                "set_sensor_value",
-                token => _printersService.SetSensorValueAsync(id, targetId, quantity, target, token),
-                ct);
-        }
-
-        return await ExecuteActiveCommandControlAsync(
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "set_sensor_value",
             "set_sensor_value",
-            async token => await _printersService.SetSensorValueAsync(id, targetId, quantity, target, token)
-                ? new CommandResult(true, null)
-                : new CommandResult(false, "The backend did not confirm whether the sensor command was applied."),
+            token => _printersService.SetSensorValueAsync(id, targetId, quantity, target, token),
             ct,
-            mapUnconfirmedAsUnavailable: true);
+            allowActivePrint: true);
     }
 
     private static ObjectResult SensorProblem(int statusCode, string title, string detail) =>

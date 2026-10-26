@@ -24,6 +24,14 @@
 
 ### Breaking changes
 
+- Interactive printer controls now defer motion, homing, and temperature
+  readiness to native firmware/macros instead of PrintFarmer preflight.
+  Filament actions no longer automatically heat or wait. Relative jogging
+  reflects backend transport support independently of absolute movement;
+  missing telemetry does not revoke native API control support.
+  Permissions, typed inputs, no-replay handling and automated/calibration
+  protections remain (#3512).
+
 - Ralph shared host profiles no longer pin deployment workflow UUIDs. IDs remain
   in private configuration; filesystem preflight is non-authorizing and every
   round requires fresh current-execution native identity reconciliation. Existing

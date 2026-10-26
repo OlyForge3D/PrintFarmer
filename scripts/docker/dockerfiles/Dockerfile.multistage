@@ -20,7 +20,7 @@ ARG TARGETPLATFORM
 
 # Base image tags - use Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter compatibility
 # Ubuntu Noble has glibc 2.39 which is compatible with bundled Assimp libraries (built for 2.38)
-ARG SDK_TAG=10.0-noble
+ARG SDK_TAG
 ARG ASPNET_TAG=10.0-noble
 ARG NODE_TAG=24-alpine
 ARG NGINX_TAG=alpine
@@ -160,6 +160,8 @@ COPY --from=build-retry-helper /pf-retry /usr/local/bin/pf-retry
 
 # Set working directory for builds
 WORKDIR /src
+
+RUN dotnet --version
 
 # Restore all dependencies in one go. This list is the UNION of every project
 # graph entry point built below (api, workers, backend plugins, and both

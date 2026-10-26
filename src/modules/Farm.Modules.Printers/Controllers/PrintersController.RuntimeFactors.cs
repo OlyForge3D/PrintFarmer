@@ -61,13 +61,8 @@ public partial class PrintersController
             return NotFound();
         }
 
-        if (!printer.IsEnabled || printer.InMaintenance)
-        {
-            return Conflict(new CommandResult(false, "The printer is disabled or in maintenance; no command was sent."));
-        }
-
         PrinterBackendCapabilitiesDto? capabilities =
-            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+            await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -77,12 +72,6 @@ public partial class PrintersController
         {
             return SensorProblem(501, "Runtime factor control not supported",
                 "This printer backend does not support the requested runtime override; no command was sent.");
-        }
-
-        (bool active, _, ActionResult? failure) = await ResolveFanControlLeaseAsync(id, ct);
-        if (failure is not null)
-        {
-            return failure;
         }
 
         string operation = speed ? "set_speed_factor" : "set_flow_factor";
@@ -104,13 +93,6 @@ public partial class PrintersController
             }
         }
 
-        return active
-            ? await ExecuteActiveCommandControlAsync(
-                id, operation, operation,
-                async token => await SendAsync(token)
-                    ? new CommandResult(true, null)
-                    : new CommandResult(false, "The runtime override outcome is unknown; read status before retrying."),
-                ct, mapUnconfirmedAsUnavailable: true)
-            : await ExecuteDirectBooleanControlAsync(id, operation, operation, SendAsync, ct);
+        return await ExecuteDirectBooleanControlAsync(id, operation, operation, SendAsync, ct, allowActivePrint: true);
     }
 }

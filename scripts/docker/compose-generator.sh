@@ -132,17 +132,6 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # finds it, but invoking it prints "Python was not found; run without
 # arguments to install from the Microsoft Store..." and exits non-zero. Try
 # each candidate in order and confirm it can actually run before accepting it.
-resolve_python_cmd() {
-    local candidate
-    for candidate in python3 python py; do
-        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
 PYTHON_CMD="$(resolve_python_cmd || true)"
 
 postgres_connection_has_password() {

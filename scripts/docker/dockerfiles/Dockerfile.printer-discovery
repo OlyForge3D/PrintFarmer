@@ -3,9 +3,12 @@ ARG VCS_REF=unknown
 ARG SOURCE_REPOSITORY=""
 ARG SOURCE_ARCHIVE_URL=""
 ARG SBOM_URL=""
+ARG SDK_TAG
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS build
 WORKDIR /src
+COPY global.json ./
+RUN dotnet --version
 
 COPY ["src/printer-discovery/PrinterDiscoveryService.csproj", "src/printer-discovery/"]
 

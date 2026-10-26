@@ -51,8 +51,8 @@ do not gain an invented snapshot endpoint.
 ### Moonraker temperature and sensor controls
 
 The primary Hotend follows the active physical tool; additional extruders retain
-their own bounded target controls. Manual targets remain editable during printing
-and pause, while preset menus are disabled. Cooldown explicitly turns off all
+their own target controls. Manual targets and presets remain editable during printing
+and pause. Cooldown explicitly turns off all
 heaters, not just the active nozzle and bed. Filament-monitor enable switches,
 raw gas resistance, measured temperature extrema and authenticated fallback
 telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
@@ -63,7 +63,7 @@ sensor sections; the underlying API remains available.
 
 The shared API also exposes independent runtime speed and flow overrides for
 Moonraker, with bounded writes and authoritative nullable readback. Web **Tuning**
-sliders are enabled only while printing and send once when a drag or keyboard
+sliders use native backend capability rather than a printing-only gate and send once when a drag or keyboard
 adjustment ends, without Apply buttons. Both the detailed printer card and sidebar
 use collapsible **Tuning** and **Materials** groups; Materials contains the
 printer's filament slots or single-spool details. Collapsing a group preserves
@@ -91,11 +91,15 @@ Absolute GO requires explicit, finite X, Y, and Z targets in millimeters.
 Empty, untouched fields are not errors, and current-position labels do not fill
 in omitted targets.
 
-Manual Jog/MoveTo does not require an automated workflow's minimum-clearance
-value, which Moonraker cannot authoritatively discover. Fresh XYZ homing,
-position/frame and travel-envelope checks still apply, as do Klipper's configured
-rules. Automated clearance-protected workflows retain their stricter policy.
-This does not enable unhomed-axis movement or out-of-envelope recovery moves.
+Interactive controls follow each backend's native commands without PrintFarmer
+geometry, homing, temperature-readiness, or telemetry-freshness preflight.
+Klipper or the selected firmware decides whether a command is executable.
+Relative jogging does not require absolute-position support. Missing readback
+remains unknown but does not disable an otherwise supported control. Filament
+commands do not automatically heat or wait; configure native macros when that
+behavior is wanted. Permissions, valid inputs, request coordination and explicit
+errors remain. Automated and calibration workflows keep their separate checks.
+See the [interactive control contract](./docs/API.md#direct-manual-motion).
 
 **Coordinated upgrade required:** stop all old API instances and workers before
 backing up and applying the provider migrations; mixed old/new writers are not
@@ -200,7 +204,8 @@ Database: SQLite / PostgreSQL / SQL Server
 ### Technology Stack
 
 **Backend:**
-- ASP.NET Core 10 (.NET SDK 10.0)
+- ASP.NET Core 10 (exact .NET SDK selected by [`global.json`](./global.json);
+  see [SDK installation](./docs/DOTNET_SDK_INSTALLATION.md))
 - Entity Framework Core (multi-database ORM)
 - SignalR (real-time WebSocket communication)
 - Refit (type-safe HTTP clients)

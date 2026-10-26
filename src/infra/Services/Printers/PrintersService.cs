@@ -3699,7 +3699,8 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is ISupportsMovement movement)
+            if (client is ISupportsMovement movement &&
+                client is ISupportsPrinterControlCapabilities { ControlCapabilities.SupportsAbsoluteMovement: true })
             {
                 bool ok = await movement.MoveToAsync(p.BackendUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
@@ -4064,10 +4065,8 @@ public class PrintersService(
     /// <inheritdoc />
     public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)
     {
-        PrinterStatusCacheSnapshot? snapshot = _statusCache.GetSnapshot(id);
-        return PrinterStatusFreshness.IsSensorFreshOnline(snapshot, DateTime.UtcNow)
-            ? snapshot!.Status.Sensors
-            : [];
+        // Control descriptors describe native targets, not proof of a fresh measured value.
+        return _statusCache.GetSnapshot(id)?.Status.Sensors ?? [];
     }
 
     /// <inheritdoc />

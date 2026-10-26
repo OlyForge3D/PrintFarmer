@@ -7,6 +7,20 @@ namespace Farm.Backend.Plugin.Moonraker;
 
 public partial class MoonrakerClient
 {
+    private async Task<JsonDocument?> TryParseSensorDiscoveryAsync(HttpResponseMessage response, string sensorId, CancellationToken ct)
+    {
+        try
+        {
+            await using Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+        }
+        catch (JsonException exception)
+        {
+            _logger.LogWarning(exception, "Moonraker sensor discovery for {SensorId} returned invalid JSON", sensorId);
+            return null;
+        }
+    }
+
     /// <summary>Queries authenticated sensor/configuration snapshots using the same mapper as subscriptions.</summary>
     internal async Task<MoonrakerSensorTracker?> QuerySensorStateAsync(
         string baseUrl,

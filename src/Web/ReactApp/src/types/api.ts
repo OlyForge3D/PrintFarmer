@@ -560,6 +560,16 @@ export interface PrinterBackendCapabilitiesDto {
   supportsControlOperations: boolean;
   supportsFileMetadata: boolean;
   supportsMovement: boolean;
+  supportsRelativeMovement?: boolean;
+  supportsAbsoluteMovement?: boolean;
+  supportsHoming?: boolean;
+  supportsHomingXY?: boolean;
+  supportsHomingZ?: boolean;
+  supportsDisableMotors?: boolean;
+  supportsExtrusion?: boolean;
+  supportsFilamentLoad?: boolean;
+  supportsFilamentUnload?: boolean;
+  supportsFilamentChange?: boolean;
   supportsTemperatureControl: boolean;
   supportsPrinterInformation: boolean;
   supportsHistory: boolean;

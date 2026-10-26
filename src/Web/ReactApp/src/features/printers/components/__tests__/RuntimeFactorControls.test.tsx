@@ -118,9 +118,7 @@ describe('runtime percentage controls', () => {
 
   it.each([
     { isOnline: false }, { isEnabled: false }, { inMaintenance: true },
-    { state: undefined }, { state: 'Error' }, { state: 'Unknown' }, { state: 'Starting' }, { state: 'Shutdown' },
-    { state: 'Idle' }, { state: 'Ready' }, { state: 'Standby' }, { state: 'Complete' },
-    { state: 'Completed' }, { state: 'Cancelled' }, { state: 'Paused' },
+    { state: 'Shutdown' },
   ])('prevents writes in a blocked printer state %j', async patch => {
     mount({ ...printer, ...patch });
     await act(async () => {});
@@ -131,7 +129,7 @@ describe('runtime percentage controls', () => {
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
-  it.each(['Printing', 'printing', 'PRINTING'])('allows only the %s state', async state => {
+  it.each(['Printing', 'printing', 'PRINTING', 'Idle', 'Ready', 'Paused', 'Completed'])('allows native tuning in the %s state', async state => {
     mocks.status.mockResolvedValue(live({ state }));
     mount({ ...printer, state });
     await ready();
@@ -139,7 +137,7 @@ describe('runtime percentage controls', () => {
     expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 130);
   });
 
-  it('requires Queue.Start and a live connection before submission', async () => {
+  it('requires Queue.Start but not a live readback connection before submission', async () => {
     mocks.allowed = false;
     const view = mount();
     await act(async () => {});
@@ -148,10 +146,10 @@ describe('runtime percentage controls', () => {
     view.update();
     await ready();
     connection(false);
-    expect(speedInput()).toBeDisabled();
+    expect(speedInput()).toBeEnabled();
     expect(observed('speed')).toHaveTextContent('Unknown');
-    fireEvent.pointerUp(speedInput());
-    expect(mocks.speed).not.toHaveBeenCalled();
+    await apply('130');
+    expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 130);
   });
 
   it('keeps missing values unknown, shows percentages without multiplying or clamping, and separates the draft', async () => {
@@ -423,43 +421,43 @@ describe('runtime percentage controls', () => {
     expect(observed('speed')).toHaveTextContent('108%');
   });
 
-  it('locks writes when current telemetry reports a disallowed state despite an older printable prop', async () => {
+  it('does not lock native writes on a synthetic Starting state', async () => {
     mount();
     await ready();
     emit(live({ state: 'Starting' }));
-    expect(speedInput()).toBeDisabled();
-    expect(flowInput()).toBeDisabled();
+    expect(speedInput()).toBeEnabled();
+    expect(flowInput()).toBeEnabled();
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 
-  it.each(['Idle', 'Paused', 'Complete', 'Error'])('discards an in-progress gesture when live state leaves Printing for %s', async state => {
+  it.each(['Idle', 'Paused', 'Complete', 'Error'])('preserves a deliberate gesture when live state changes to %s', async state => {
     mount();
     await ready();
     const oldSlider = speedInput();
     draft('160');
     emit(live({ state }));
-    expect(speedInput()).toBeDisabled();
+    expect(speedInput()).toBeEnabled();
     fireEvent.pointerUp(oldSlider);
     fireEvent.pointerUp(speedInput());
     fireEvent.blur(speedInput());
-    expect(mocks.speed).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 160));
     emit(live({ state: 'Printing' }));
     await ready();
     fireEvent.pointerUp(speedInput());
     fireEvent.blur(speedInput());
-    expect(mocks.speed).not.toHaveBeenCalled();
+    expect(mocks.speed).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText('Selected speed')).not.toBeInTheDocument();
   });
 
-  it.each(['Idle', 'Paused', 'Complete', 'Error', undefined])('requires fresh Printing telemetry rather than trusting the printer prop (%s)', async state => {
+  it.each(['Idle', 'Paused', 'Complete', 'Error', undefined])('allows native writes without fresh Printing telemetry (%s)', async state => {
     mocks.status.mockResolvedValue(live({ state }));
     mount();
     await act(async () => {});
-    expect(speedInput()).toBeDisabled();
-    expect(flowInput()).toBeDisabled();
+    expect(speedInput()).toBeEnabled();
+    expect(flowInput()).toBeEnabled();
     draft('160');
     fireEvent.pointerUp(speedInput());
-    expect(mocks.speed).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.speed).toHaveBeenCalledExactlyOnceWith('p1', 160));
   });
 
   it.each(['printer', 'server', 'identity'] as const)('isolates late completions on %s switch', async target => {
@@ -491,7 +489,7 @@ describe('runtime percentage controls', () => {
     mount();
     expect(await screen.findByRole('alert')).toHaveTextContent('Status unavailable');
     expect(observed('speed')).toHaveTextContent('Unknown');
-    expect(speedInput()).toBeDisabled();
+    expect(speedInput()).toBeEnabled();
     expect(mocks.speed).not.toHaveBeenCalled();
   });
 });

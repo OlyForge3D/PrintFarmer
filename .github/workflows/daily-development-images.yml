@@ -66,6 +66,11 @@ jobs:
           ref: ${{ needs.source.outputs.commit_sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@v4
+      - name: Resolve approved SDK image tag
+        id: sdk
+        run: |
+          tag="$(python3 scripts/dotnet-sdk.py tag)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Build validation image (never a release identity)
         uses: docker/build-push-action@v7
         with:
@@ -77,6 +82,7 @@ jobs:
           push: false
           tags: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
           build-args: |
+            SDK_TAG=${{ steps.sdk.outputs.tag }}
             GIT_SHA=${{ needs.source.outputs.commit_sha }}
             VITE_GIT_SHA=${{ needs.source.outputs.commit_sha }}
             VCS_REF=${{ needs.source.outputs.commit_sha }}
