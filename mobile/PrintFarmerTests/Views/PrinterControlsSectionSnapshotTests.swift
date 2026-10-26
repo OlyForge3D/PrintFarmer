@@ -478,7 +478,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
         let editor = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
-        XCTAssertFalse(editor.isEnabled)
+        // #3555 B02: heat rows stay editable; a queued target waits in the view model for the lease.
+        XCTAssertTrue(editor.isEnabled)
         XCTAssertTrue(model.blockedReason?.contains("Another controls view") == true)
         XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                        "A replacement must not offer a no-op Stop waiting for someone else's request")
@@ -805,7 +806,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
-            XCTAssertEqual(up.minY, tablet ? 166.09375 : 611, accuracy: 4)
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 603, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")
@@ -1312,7 +1313,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                            "Pending is silent: no Stop waiting button (#3496)")
             let originID = section == .heat ? "hotend.increase" : "filament-load"
             let origin = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.\(originID)" })
-            XCTAssertFalse(origin.isEnabled, "The originating control stays disabled while in flight")
+            if section == .heat {
+                XCTAssertTrue(origin.isEnabled, "Heat ± stays live while in flight; taps queue in the view model (#3555)")
+            } else {
+                XCTAssertFalse(origin.isEnabled, "The originating control stays disabled while in flight")
+            }
             if section == .material {
                 barrier.release()
                 await request?.value
@@ -1623,7 +1628,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
     }
 
-    func test_pendingCommand_disablesNativeActionsSilently() async throws {
+    func test_pendingCommand_isSilentAndKeepsHeatRowsLive() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
@@ -1640,8 +1645,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let input = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
         XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                        "Pending is silent: no Stop waiting button (#3496)")
-        XCTAssertFalse(apply.isEnabled)
-        XCTAssertFalse(input.isEnabled)
+        // #3555 B02: heat rows never lock while a request is in flight; the row speaks Applying.
+        XCTAssertTrue(apply.isEnabled)
+        XCTAssertTrue(input.isEnabled)
+        XCTAssertEqual(input.accessibilityValue, "Applying")
         model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         XCTAssertTrue(model.commandNotice?.contains("may still execute") == true)

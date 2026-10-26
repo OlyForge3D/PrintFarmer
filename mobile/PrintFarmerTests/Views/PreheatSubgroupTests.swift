@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Vision
 @testable import PrintFarmer
 
 /// Smoke tests for `PreheatSubgroup` (issue #284). Snapshot tests are
@@ -99,7 +100,9 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, start + 15)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed, "Only the tapped heater changes")
         let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
-        XCTAssertEqual(field.text, HeatTargetRow.draftText(start + 15))
+        XCTAssertEqual(field.text, "", "No draft is created by ±")
+        XCTAssertEqual(field.placeholder, HeatTargetRow.placeholder(currentTarget: start + 15),
+                       "The row shows the queued target while it settles")
         model.cancelPendingCommand()
     }
 
@@ -141,7 +144,9 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertFalse(pendingControls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                        "Pending is silent: no Stop waiting button (#3496)")
         XCTAssertEqual(pendingControls.count, 6, "Rows stay mounted while the request is in flight")
-        XCTAssertTrue(pendingControls.allSatisfy { !$0.isEnabled }, "In-flight state dims the rows")
+        XCTAssertTrue(pendingControls.allSatisfy(\.isEnabled),
+                      "In flight never locks the rows; further edits queue in the view model (#3555 B02)")
+        XCTAssertEqual(field.accessibilityValue, "Applying", "Only an in-flight row speaks Applying")
         model.cancelPendingCommand()
         try await settle(controller)
         let bed = try XCTUnwrap(try control("printer.controls.bed.target", in: controller) as? UITextField)
@@ -199,36 +204,7 @@ final class PreheatSubgroupTests: XCTestCase {
     /// ("Another printer operation is still pending.") on heater or sensor rows.
     func test_executingPreset_showsNoPendingCaptionOnHeatOrSensorRows() async throws {
         executionTimeAllowance = 120
-        var printer = try TestData.decodePrinter()
-        printer.isOnline = true
-        printer.state = "idle"
-        printer.sensors = [
-            PrinterSensor(
-                id: "chamber", displayName: "Chamber", kind: .chamber,
-                readings: [
-                    SensorReading(quantity: .temperature, value: .number(31), unit: .celsius),
-                    SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius)
-                ],
-                writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 70, step: 1, unit: .celsius)]
-            ),
-            PrinterSensor(
-                id: "heater_box1", displayName: "Heater Box1", kind: .chamber,
-                readings: [
-                    SensorReading(quantity: .temperature, value: .number(28), unit: .celsius),
-                    SensorReading(quantity: .targetTemperature, value: .number(0), unit: .celsius)
-                ],
-                writable: [SensorWritable(
-                    quantity: .targetTemperature, min: 0, max: 60, step: 1, unit: .celsius, allowZero: true
-                )]
-            )
-        ]
-        let service = MockPrinterService()
-        var capabilities = PrinterBackendCapabilities.allControlsFixture
-        capabilities.supportsSensorControl = true
-        service.capabilitiesToReturn = capabilities
-        service.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
-        await model.loadCapabilities()
+        let (model, service) = try await multiHeaterModel()
         defer { model.deactivate() }
         let content = VStack(alignment: .leading, spacing: 8) {
             PreheatSubgroup(viewModel: model, compactForDetail: true)
@@ -246,6 +222,11 @@ final class PreheatSubgroupTests: XCTestCase {
         try await settle(controller)
         let idleTexts = accessibilityTexts(controller.view)
         XCTAssertTrue(idleTexts.contains { $0.contains("Heater Box1") }, "Collector sees row titles: \(idleTexts)")
+        let rowControls = { self.nativeControls(controller.view)
+            .filter { $0.accessibilityIdentifier?.hasPrefix("printer.controls.preheat") != true } }
+        // Heater Box1's − is legitimately disabled at Off (its lower limit).
+        let idleEnabled = Set(rowControls().filter(\.isEnabled).compactMap(\.accessibilityIdentifier))
+        XCTAssertGreaterThanOrEqual(idleEnabled.count, 10, "\(idleEnabled)")
 
         let preset = PreheatPreset.pla
         await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
@@ -260,7 +241,11 @@ final class PreheatSubgroupTests: XCTestCase {
         let texts = accessibilityTexts(controller.view)
         XCTAssertFalse(texts.contains { $0.localizedCaseInsensitiveContains("pending") }, "\(texts)")
         XCTAssertFalse(texts.contains { $0.contains("Another") }, "\(texts)")
-        XCTAssertTrue(nativeControls(controller.view).allSatisfy { !$0.isEnabled }, "In flight only dims the rows")
+        let inFlightEnabled = Set(rowControls().filter(\.isEnabled).compactMap(\.accessibilityIdentifier))
+        XCTAssertEqual(inFlightEnabled, idleEnabled, "In flight never locks the rows")
+        let rendered = try recognizedTexts(controller)
+        XCTAssertFalse(rendered.contains { $0.localizedCaseInsensitiveContains("pending") }, "\(rendered)")
+        XCTAssertFalse(rendered.contains { $0.localizedCaseInsensitiveContains("another") }, "\(rendered)")
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
         }
@@ -288,6 +273,325 @@ final class PreheatSubgroupTests: XCTestCase {
             await model.preheat(preset)
             XCTAssertNil(service.setTemperaturesCalledWith)
         }
+    }
+
+
+    // MARK: - Multi-heater (qp4-1 style: Nozzle, Bed, Chamber, Heater Box1)
+
+    private func multiHeaterModel(
+        chamberTarget: Double = 40, chamberStep: Double = 1
+    ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        printer.sensors = [
+            PrinterSensor(
+                id: "chamber", displayName: "Chamber", kind: .chamber,
+                readings: [
+                    SensorReading(quantity: .temperature, value: .number(31), unit: .celsius),
+                    SensorReading(quantity: .targetTemperature, value: .number(chamberTarget), unit: .celsius)
+                ],
+                writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 70, step: chamberStep, unit: .celsius)]
+            ),
+            PrinterSensor(
+                id: "heater_box1", displayName: "Heater Box1", kind: .chamber,
+                readings: [
+                    SensorReading(quantity: .temperature, value: .number(28), unit: .celsius),
+                    SensorReading(quantity: .targetTemperature, value: .number(0), unit: .celsius)
+                ],
+                writable: [SensorWritable(
+                    quantity: .targetTemperature, min: 0, max: 60, step: 1, unit: .celsius, allowZero: true
+                )]
+            )
+        ]
+        let service = MockPrinterService()
+        var capabilities = PrinterBackendCapabilities.allControlsFixture
+        capabilities.supportsSensorControl = true
+        service.capabilitiesToReturn = capabilities
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        return (model, service)
+    }
+
+    /// The live Heat panel order: presets, Nozzle/Bed rows, then sensor rows.
+    private func installMultiHeater(
+        _ model: PrinterControlsViewModel, width: CGFloat = 326, type: DynamicTypeSize = .large,
+        debounce: Duration = .milliseconds(300)
+    ) async throws -> (UIWindow, UIHostingController<AnyView>) {
+        let content = VStack(alignment: .leading, spacing: 8) {
+            PreheatSubgroup(viewModel: model, compactForDetail: true)
+            PrinterSensorControlRows(viewModel: model, compact: true)
+        }
+        .padding(12)
+        .environment(\.dynamicTypeSize, type)
+        .environment(\.heatTargetDebounce, debounce)
+        .environment(\.horizontalSizeClass, width > 390 ? .regular : .compact)
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Color.pfCard)
+        let controller = UIHostingController(rootView: AnyView(content))
+        let size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+        let window = UIWindow()
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        try await settle(controller)
+        return (window, controller)
+    }
+
+    private func attachScreenshot(_ controller: UIViewController, name: String) {
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// On-screen text recognised from the rendered view (SwiftUI `Text` is not
+    /// in the UIKit accessibility tree that unit tests can walk).
+    private func recognizedTexts(_ controller: UIViewController) throws -> [String] {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds, format: format).image { _ in
+            _ = controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: try XCTUnwrap(image.cgImage)).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+    }
+
+    /// OCR-tolerant comparison key: case, spacing and l/1 confusion ignored.
+    private static func ocrKey(_ text: String) -> String {
+        text.lowercased().filter { !$0.isWhitespace }.replacingOccurrences(of: "l", with: "1")
+    }
+
+    private static let chamberField = "printer.controls.sensor.chamber.TargetTemperature.value"
+    private static let heaterBoxField = "printer.controls.sensor.heater_box1.TargetTemperature.value"
+
+    /// #3555 H02: sensor rows show the same bare name as Nozzle and Bed.
+    func test_multiHeater_rowTitlesAreBareNamesWithoutTarget() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await multiHeaterModel()
+        defer { model.deactivate() }
+        for (width, type): (CGFloat, DynamicTypeSize) in [
+            (256, .large), (326, .large), (448, .large), (326, .accessibility5)
+        ] {
+            let (window, controller) = try await installMultiHeater(model, width: width, type: type)
+            defer { window.isHidden = true }
+            // What is drawn on screen, not the VoiceOver labels.
+            let visible = try recognizedTexts(controller)
+            let normalized = Set(visible.map(Self.ocrKey))
+            for title in ["Nozzle", "Bed", "Chamber", "Heater Box1"] {
+                XCTAssertTrue(normalized.contains(Self.ocrKey(title)), "\(title) at \(width)/\(type): \(visible)")
+            }
+            XCTAssertFalse(visible.contains { $0.localizedCaseInsensitiveContains("target") },
+                           "No row shows a \"<name> target\" title at \(width)/\(type): \(visible)")
+            XCTAssertEqual(
+                (try control(Self.chamberField, in: controller) as? UITextField)?.accessibilityLabel,
+                "Chamber target in degrees Celsius", "VoiceOver keeps the descriptive label"
+            )
+            attachScreenshot(controller, name: "heat-rows-multi-heater-idle-\(Int(width))-\(type)")
+        }
+        XCTAssertEqual(PrinterSensorControlRows.title(
+            sensor: try XCTUnwrap(model.printer.sensors.first { $0.id == "heater_box1" }), quantity: .targetTemperature
+        ), "Heater Box1")
+        XCTAssertEqual(service.setSensorValueCallCount, 0)
+    }
+
+    /// #3555 H02: typed sensor entry dispatches only a valid Set, exactly once, to that sensor.
+    func test_sensorTypedEntry_cancelInvalidAndOutOfRangeDispatchNothing_validSetOnce() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await multiHeaterModel()
+        defer { model.deactivate() }
+        let (window, controller) = try await installMultiHeater(model)
+        defer { window.isHidden = true }
+        let field = try XCTUnwrap(try control(Self.chamberField, in: controller) as? UITextField)
+        field.text = "45"
+        field.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try press(field, "cancel")
+        try await settle(controller)
+        XCTAssertEqual(field.text, "", "Cancel reverts the typed draft")
+        XCTAssertEqual(field.placeholder, "40")
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(service.setSensorValueCallCount, 0, "Cancel never sends")
+        // Off-grid, below and above range, not a number, and 0 where Off is not allowed.
+        for invalid in ["45.5", "-1", "71", "NaN", "abc", "0.5"] {
+            field.text = invalid
+            field.sendActions(for: .editingChanged)
+            try await settle(controller)
+            try press(field, "set")
+            try await settle(controller)
+            XCTAssertEqual(field.text, invalid, "Set refuses \(invalid); the draft stays for correction")
+        }
+        for outOfRange in [45.5, -1, 71, 0.5] {
+            XCTAssertEqual(
+                model.sensorValueError(sensorId: "chamber", quantity: .targetTemperature, value: outOfRange),
+                "Enter 0 to 70 in steps of 1.", "\(outOfRange)"
+            )
+        }
+        XCTAssertThrowsError(try ControlNumberInput.optional("abc"))
+        XCTAssertThrowsError(try ControlNumberInput.optional("NaN"))
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(service.setSensorValueCallCount, 0, "Invalid entries never dispatch")
+        XCTAssertNil(model.pendingCommand)
+
+        field.text = "45"
+        field.sendActions(for: .editingChanged)
+        try await settle(controller)
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.beforeSetSensorValue = { dispatched.resume() }
+            try? press(field, "set")
+        }
+        service.beforeSetSensorValue = nil
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(service.setSensorValueCallCount, 1, "A valid Set dispatches exactly once")
+        XCTAssertEqual(service.setSensorValueCalledWith?.sensorId, "chamber")
+        XCTAssertEqual(service.setSensorValueCalledWith?.quantity, .targetTemperature)
+        XCTAssertEqual(service.setSensorValueCalledWith?.value, 45)
+        XCTAssertNil(service.setTemperaturesCalledWith, "No heater changes")
+        model.cancelPendingCommand()
+    }
+
+    /// #3555 H02: sensor ± clamps to the writable range and disables at a limit.
+    func test_sensorStepper_clampsToRangeAndDisablesAtLimits() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await multiHeaterModel(chamberTarget: 68, chamberStep: 5)
+        defer { model.deactivate() }
+        let (window, controller) = try await installMultiHeater(model, debounce: .milliseconds(200))
+        defer { window.isHidden = true }
+        let increase = try control("printer.controls.sensor.chamber.TargetTemperature.increase", in: controller)
+        let decrease = try control("printer.controls.sensor.chamber.TargetTemperature.decrease", in: controller)
+        let boxDecrease = try control("printer.controls.sensor.heater_box1.TargetTemperature.decrease", in: controller)
+        let boxIncrease = try control("printer.controls.sensor.heater_box1.TargetTemperature.increase", in: controller)
+        XCTAssertTrue(increase.isEnabled, "68 + 5 clamps to the 70 maximum")
+        XCTAssertTrue(decrease.isEnabled)
+        XCTAssertFalse(boxDecrease.isEnabled, "Off (0) is the lower limit")
+        XCTAssertTrue(boxIncrease.isEnabled)
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.beforeSetSensorValue = { dispatched.resume() }
+            increase.sendActions(for: .touchUpInside)
+        }
+        service.beforeSetSensorValue = nil
+        XCTAssertEqual(service.setSensorValueCalledWith?.value, 70, "A step past the maximum clamps to it")
+        XCTAssertEqual(service.setSensorValueCalledWith?.sensorId, "chamber")
+        model.cancelPendingCommand()
+        try await settle(controller)
+        XCTAssertFalse(increase.isEnabled, "The queued 70 is the upper limit")
+        XCTAssertTrue(decrease.isEnabled)
+        increase.sendActions(for: .touchUpInside)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(service.setSensorValueCallCount, 1, "A disabled step at the limit never resends")
+    }
+
+    /// #3555 B01: the settle grace clears only the queued value, never a draft being edited.
+    func test_settleGrace_neverClearsADraftBeingEdited() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel()
+        model.heatTargetSettleGrace = .milliseconds(400)
+        let (window, controller) = try await installThermal(model, debounce: .milliseconds(100))
+        defer { window.isHidden = true }
+        let start = try XCTUnwrap(model.printer.hotendTarget)
+        let increase = try control("printer.controls.hotend.increase", in: controller)
+        await tapAndAwaitDispatch(try XCTUnwrap(increase as? UIButton), service: service)
+        try await settle(controller)
+        XCTAssertEqual(model.queuedHeatTargets["hotend"], start + 5)
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
+        field.delegate?.textFieldDidBeginEditing?(field)
+        try await settle(controller)
+        XCTAssertEqual(field.text, HeatTargetRow.draftText(start + 5), "Editing starts from the queued value")
+        field.text = "21"
+        field.sendActions(for: .editingChanged)
+        try await Task.sleep(for: .milliseconds(800))
+        try await settle(controller)
+        XCTAssertNil(model.queuedHeatTargets["hotend"], "The grace elapsed")
+        XCTAssertEqual(field.text, "21", "The grace never replaces or clears the draft")
+        XCTAssertTrue(field.isEnabled)
+        model.cancelPendingCommand()
+    }
+
+    /// #3555 B02: another row's in-flight send leaves the edited field enabled with its draft;
+    /// its Set waits for that send and then applies only this heater.
+    func test_otherRowSend_keepsEditedFieldEnabledWithDraft() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel()
+        let (window, controller) = try await installThermal(model)
+        defer { window.isHidden = true }
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
+        field.delegate?.textFieldDidBeginEditing?(field)
+        field.text = "210"
+        field.sendActions(for: .editingChanged)
+        try await settle(controller)
+        let gate = AsyncStream<Void>.makeStream()
+        service.beforeSetTemperatures = { for await _ in gate.stream { break } }
+        let bedSend = Task { await model.setHeaterTarget(.bed, target: 60) }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while service.setTemperaturesCallCount == 0, ContinuousClock.now < deadline {
+            try await settle(controller)
+        }
+        try await settle(controller)
+        XCTAssertTrue(model.isExecuting, "The Bed send is in flight")
+        XCTAssertTrue(field.isEnabled, "The edited field stays enabled")
+        XCTAssertEqual(field.text, "210", "The draft survives another row's send")
+        XCTAssertNotEqual(field.accessibilityValue, "Applying", "Only Bed is applying")
+        try press(field, "set")
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(service.setTemperaturesCallCount, 1, "Set queues behind the Bed send")
+        XCTAssertEqual(model.queuedHeatTargets["hotend"], 210)
+        service.beforeSetTemperatures = nil
+        gate.continuation.yield()
+        gate.continuation.finish()
+        await bedSend.value
+        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 60)
+        model.cancelPendingCommand()
+        let sendDeadline = ContinuousClock.now + .seconds(10)
+        while service.setTemperaturesCalledWith?.hotend != 210, ContinuousClock.now < sendDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 210)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed, "Only the edited heater is applied")
+        model.cancelPendingCommand()
+    }
+
+    /// #3555 B03/B04: a target queued while idle is dropped, with Heat feedback, once a print
+    /// starts; the queue lives in the view model so it survives the view going away.
+    func test_queuedTarget_droppedWhenPrintStartsAndSurvivesViewDisappearing() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel()
+        model.scheduleHeatTarget(key: "hotend", title: "Nozzle", value: 210, after: .milliseconds(300)) {
+            await $0.setHeaterTarget(.hotend, target: 210)
+        }
+        XCTAssertEqual(model.queuedHeatTargets["hotend"], 210)
+        var printing = model.printer
+        printing.state = "printing"
+        model.handlePrinterUpdate(printing)
+        XCTAssertFalse(model.canControl)
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertEqual(service.setTemperaturesCallCount, 0, "Re-checked before sending: never dispatched mid-print")
+        XCTAssertNil(model.queuedHeatTargets["hotend"])
+        XCTAssertEqual(model.feedbackSection, .heat)
+        XCTAssertTrue(model.commandNotice?.hasPrefix("Nozzle target not sent.") == true, "\(model.commandNotice ?? "nil")")
+
+        let (idleModel, idleService) = try await thermalModel()
+        let (window, controller) = try await installThermal(idleModel, debounce: .milliseconds(300))
+        let increase = try control("printer.controls.hotend.increase", in: controller)
+        increase.sendActions(for: .touchUpInside)
+        controller.rootView = AnyView(EmptyView())
+        window.isHidden = true
+        try await settle(controller)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while idleService.setTemperaturesCallCount == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(idleService.setTemperaturesCallCount, 1, "The queued send outlives the view")
+        idleModel.cancelPendingCommand()
     }
 
     private func thermalModel(
@@ -504,9 +808,6 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     func test_individualHeaterLabels_preserveUnknownVersusZero() {
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Not reported")
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Not reported")
-        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
         XCTAssertEqual(Heater.hotend.title, "Hotend")
         XCTAssertEqual(Heater.bed.title, "Bed")
     }
@@ -908,12 +1209,11 @@ final class PreheatSubgroupTests: XCTestCase {
     func testControlTabPresetRowIsFourEqualButtonsEndingWithSnowflakeCoolDown() throws {
         XCTAssertEqual(PreheatSubgroup.presets, [.pla, .petg, .abs, .coolDown])
         XCTAssertEqual(PreheatSubgroup.presets.last, .coolDown)
-        XCTAssertEqual(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: true), "snowflake")
+        XCTAssertEqual(PreheatSubgroup.detailPresetSymbol(.coolDown), "snowflake",
+                       "Cool-down is an icon-only snowflake in every layout (N3555-02)")
         for preset in [PreheatPreset.pla, .petg, .abs] {
-            XCTAssertNil(PreheatSubgroup.detailPresetSymbol(preset, fillsRow: true))
+            XCTAssertNil(PreheatSubgroup.detailPresetSymbol(preset))
         }
-        XCTAssertNil(PreheatSubgroup.detailPresetSymbol(.coolDown, fillsRow: false),
-                     "Other screens keep their existing Cool down label")
         let printer = try Self.makePrinter(state: "ready", isOnline: true)
         let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         let subgroup = PreheatSubgroup(viewModel: vm)

@@ -1879,10 +1879,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(Panel.isBabystepPending(raise, raise: false))
         XCTAssertFalse(Panel.isBabystepPending(speedUp, raise: true))
 
-        typealias Preheat = PreheatSubgroup.IndividualHeaterControls
-        XCTAssertTrue(Preheat.isHeaterTargetPending(.heaterTargets(hotend: 200, bed: 60)))
-        XCTAssertFalse(Preheat.isHeaterTargetPending(speedUp))
-        XCTAssertFalse(Preheat.isHeaterTargetPending(nil))
     }
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
