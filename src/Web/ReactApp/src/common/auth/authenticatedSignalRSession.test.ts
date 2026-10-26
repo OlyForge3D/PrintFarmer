@@ -8,7 +8,6 @@ describe('authenticated SignalR session reset', () => {
   it('awaits every secured singleton transport reset', async () => {
     const resets = {
       printerStatus: vi.fn().mockResolvedValue(undefined),
-      harvest: vi.fn().mockResolvedValue(undefined),
       printerImport: vi.fn().mockResolvedValue(undefined),
       slicer: vi.fn().mockResolvedValue(undefined),
       maintenance: vi.fn().mockResolvedValue(undefined),

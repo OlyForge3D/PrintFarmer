@@ -740,7 +740,7 @@ src/Web/ReactApp/src/
 ├── features/                    # Feature-based organization
 │   ├── gcode/                   # G-code library and management
 │   │   ├── pages/               # GcodeLibrary, FilesPage
-│   │   ├── components/          # FileBrowser, harvest components
+│   │   ├── components/          # GcodeFileBrowser, queue components
 │   │   └── hooks/               # Feature-specific hooks
 │   ├── models3d/                # 3D model viewing
 │   │   ├── pages/               # ModelsPage, Models3DViewerPage

@@ -15,7 +15,6 @@ let forwardedSignal: AbortSignal | undefined;
 vi.mock('@/services/api', () => ({
   apiClient: {
     downloadModel3dFile: apiMocks.downloadModel3dFile,
-    getAllActiveHarvests: vi.fn().mockResolvedValue([]),
     getUnifiedFiles: apiMocks.getUnifiedFiles,
   },
 }));
@@ -156,7 +155,6 @@ describe('FilesPage unified pagination', () => {
       sortBy: 'name',
       sortOrder: 'asc',
       filter: 'all',
-      harvestId: undefined,
       printerId: undefined,
     }, forwardedSignal);
     expect(screen.getByLabelText('total files')).toHaveTextContent('2505');

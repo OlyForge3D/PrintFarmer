@@ -46,7 +46,6 @@ module.exports = function(fileInfo, api, options) {
   // Mapping table: add known filename -> areaName entries here for predictable guards
   const filenameAreaMap = {
     'printer-signalr.ts': 'printerSignalR',
-    'harvest-signalr.ts': 'harvestSignalR',
     'setupwizard.tsx': 'setupWizard',
     'user-management-page.tsx': 'userManagementPage',
     'filebrowser.tsx': 'fileBrowser',

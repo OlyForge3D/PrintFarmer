@@ -38,47 +38,22 @@ Main overview page showing all printers with real-time status.
 - Auto-refresh on status changes
 
 ### Files Page
-Unified file management interface with tabbed organization for 3D models, G-code files, and print harvest data.
+`/files` separates owned local assets from files observed on printers.
 
-**Tabs:**
+- **Local library** (`/files`): upload and organize models and G-code, search,
+  tag, preview, slice models, and queue local G-code. Use `?type=models` or
+  `?type=gcode` to filter by file type.
+- **On printers** (`/files?source=printers`): browse remote file metadata,
+  availability and freshness, inspect scan status, and explicitly copy a
+  selected location to the local library. Add `&printer=<printerId>` to scope
+  the catalog to one printer. Browsing does not download remote previews or
+  file contents.
 
-1. **3D Models** (`/files?tab=models`)
-   - `ModelsPage.tsx` - Model management interface
-   - Upload and organize 3D model files
-   - Tag models for categorization
-   - Model metadata and preview
-   - Search and filtering
-   - Bulk operations
-
-2. **G-Code** (`/files?tab=gcode`)
-   - `GcodeLibraryPage.tsx` - G-code file browser
-   - View sliced G-code files
-   - File organization and search
-   - Queue G-code to printers
-   - File health and audit information
-   - Printer model associations
-
-3. **Print Harvest** (`/files?tab=harvest`)
-   - `HarvestPage.tsx` - Print result data
-   - Track completed print results
-   - Harvest data analysis and statistics
-   - Print success/failure rates
-   - Model performance metrics
-   - Integration with printer history
-
-**Features:**
-- Tab navigation with icons
-- Persistent tab selection
-- Responsive layout (full-width on all devices)
-- Unified file operations across tabs
-- Real-time file updates via SignalR
-- Comprehensive search and filtering
-
-**Tab Interface:**
-```tsx
-// User can switch between tabs with icon + label
-Models | G-Code | Print Harvest
-```
+The printer-file dialog links to the printer-scoped catalog. Copy operates
+**one file at a time**; bulk import is not available. The React G-code harvest
+wizard, management page, progress UI, and harvest-filtered library view are
+retired. Printed-parts inventory harvesting is a separate workflow and is
+unchanged, as are backend harvest history and the mobile app.
 
 ### Slice Page
 Standalone browser-based 3D slicer application for converting models to G-code.
@@ -787,7 +762,7 @@ All TypeScript types are organized in feature-based files in `src/types/`:
 | `api.ts` | Backend API DTOs | Printer, GcodeFile, QueueJob, PrinterBackend |
 | `models.ts` | 3D model management | Model, ModelTag, ModelListItem |
 | `queue.ts` | Print queue management | JobStatus, JobAction, HistoryJob, ModelStats |
-| `gcode.ts` | G-code file management | GCodeFile, FileEntry, HarvestDiscoveredFile |
+| `gcode.ts` | G-code file management | GCodeFile, FileEntry |
 | `slicer.ts` | Slicer configuration | MaterialType, SlicerSettingsDto, MaterialPreset |
 | `admin.ts` | Admin interface | User, Role, SystemLog, TagOption |
 | `components.ts` | Component props | 77+ component prop interfaces |
