@@ -218,7 +218,6 @@ struct PrinterListView: View {
     private var printerList: some View {
         VStack(spacing: 0) {
             statusFilterBar
-                .padding(.horizontal)
                 .padding(.top, 8)
 
             ScrollView {
@@ -288,13 +287,19 @@ struct PrinterListView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     statusFilterChips(allowsWrapping: true)
                 }
+                .padding(.horizontal)
             } else {
                 // Scroll rather than fixedSize-overflow: an over-wide chip row would
                 // widen the whole Farm root and push the header title off-screen (#3550).
+                // The row bleeds to the screen edges, with the inset applied inside the
+                // scroll content, so an overflowing chip peeks in as a scroll affordance.
+                // (Not .contentMargins: it widens the ScrollView by the margins, which
+                // re-widens the Farm root.)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         statusFilterChips(allowsWrapping: false)
                     }
+                    .padding(.horizontal)
                 }
             }
         }
