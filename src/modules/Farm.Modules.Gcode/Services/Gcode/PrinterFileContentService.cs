@@ -48,7 +48,7 @@ public sealed class PrinterFileContentService(
         catch (PrinterFileCommandException error) when (
             error.Reason is "waiting_for_confirmed_idle" or "source_busy")
         {
-            return Describe(source.Location, null, "printer_busy", "Deferred");
+            return Describe(source.Location, null, "printer_busy", PrinterFilePreviewState.Deferred);
         }
     }
 
@@ -250,16 +250,17 @@ public sealed class PrinterFileContentService(
     }
 
     private static PrinterFilePreviewDto Describe(
-        PrinterFileLocation location, PrinterFilePreviewCapture? capture, string? reason = null, string? state = null)
+        PrinterFileLocation location, PrinterFilePreviewCapture? capture, string? reason = null,
+        PrinterFilePreviewState? state = null)
     {
         string? url = capture?.Content.Image is null ? null :
             $"/api/printer-files/locations/{location.Id}/thumbnail?observationRevision={location.ObservationRevision}";
-        state ??= reason == "preview_unsupported" ? "Unsupported" :
+        PrinterFilePreviewState resolvedState = state ?? (reason == "preview_unsupported" ? PrinterFilePreviewState.Unsupported :
             capture?.Content is { Image: not null } or { PrintTimeSeconds: not null } or { LayerHeightMm: not null }
-                ? "Available" : "Unavailable";
+                ? PrinterFilePreviewState.Available : PrinterFilePreviewState.Unavailable);
         return new(location.Id, location.ObservationRevision, capture?.CapturedAtUtc, capture?.Content.Image is not null, url,
             capture?.Content.PrintTimeSeconds, capture?.Content.LayerHeightMm,
-            reason ?? (capture?.Content.Image is null ? "image_unavailable" : null), state);
+            reason ?? (capture?.Content.Image is null ? "image_unavailable" : null), resolvedState);
     }
 
     private sealed record Source(PrinterFileLocation Location, Printer Printer, string Key);
@@ -304,4 +305,14 @@ public sealed record PrinterFilePreviewDto(
     bool HasImage, string? ThumbnailUrl,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? PrintTimeSeconds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? LayerHeightMm,
-    string? ReasonCode, string State);
+    string? ReasonCode, PrinterFilePreviewState State);
+
+/// <summary>Preview availability serialized as the established case-sensitive string values.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PrinterFilePreviewState>))]
+public enum PrinterFilePreviewState
+{
+    Available,
+    Unavailable,
+    Unsupported,
+    Deferred,
+}

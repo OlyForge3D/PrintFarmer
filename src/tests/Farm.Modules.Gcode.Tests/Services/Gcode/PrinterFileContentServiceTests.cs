@@ -30,7 +30,7 @@ public sealed class PrinterFileContentServiceTests
         Assert.Equal(404, missing.StatusCode);
         Assert.Equal(0, fixture.Fetches);
         PrinterFilePreviewDto first = await fixture.PreviewAsync();
-        Assert.Equal("Available", first.State);
+        Assert.Equal(PrinterFilePreviewState.Available, first.State);
         Assert.True(first.HasImage);
         Assert.Equal(123, first.PrintTimeSeconds);
         Assert.Equal(0.2, first.LayerHeightMm);
@@ -54,7 +54,7 @@ public sealed class PrinterFileContentServiceTests
         await using Fixture fixture = await Fixture.CreateAsync();
         fixture.Activity = activity;
         PrinterFilePreviewDto result = await fixture.PreviewAsync();
-        Assert.Equal("Deferred", result.State);
+        Assert.Equal(PrinterFilePreviewState.Deferred, result.State);
         Assert.Null(result.CapturedAtUtc);
         Assert.Equal(0, fixture.Fetches);
         fixture.Leases.Verify(x => x.TryAcquireAsync(It.IsAny<Guid>(), true, It.IsAny<CancellationToken>()), Times.Never);
@@ -73,7 +73,7 @@ public sealed class PrinterFileContentServiceTests
         await using Fixture fixture = await Fixture.CreateAsync();
         fixture.Online = online;
         fixture.StatusAgeMinutes = ageMinutes;
-        Assert.Equal("Deferred", (await fixture.PreviewAsync()).State);
+        Assert.Equal(PrinterFilePreviewState.Deferred, (await fixture.PreviewAsync()).State);
         Assert.Equal(0, fixture.Fetches);
     }
 
@@ -83,7 +83,7 @@ public sealed class PrinterFileContentServiceTests
         await using Fixture fixture = await Fixture.CreateAsync();
         fixture.Leases.Setup(x => x.TryAcquireAsync(fixture.Printer.Id, true, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IPrinterFileLease?)null);
-        Assert.Equal("Deferred", (await fixture.PreviewAsync()).State);
+        Assert.Equal(PrinterFilePreviewState.Deferred, (await fixture.PreviewAsync()).State);
         using MemoryStream target = new();
         Assert.Equal("source_busy", (await Assert.ThrowsAsync<PrinterFileCommandException>(
             () => fixture.DownloadAsync(target))).Reason);
@@ -157,7 +157,7 @@ public sealed class PrinterFileContentServiceTests
         await using Fixture fixture = await Fixture.CreateAsync();
         fixture.Backends.Setup(x => x.GetClient(It.IsAny<int>())).Returns(Mock.Of<IBackendClient>());
         PrinterFilePreviewDto result = await fixture.PreviewAsync();
-        Assert.Equal("Unsupported", result.State);
+        Assert.Equal(PrinterFilePreviewState.Unsupported, result.State);
         Assert.False(result.HasImage);
         Assert.Null(result.CapturedAtUtc);
         Assert.Null(result.PrintTimeSeconds);

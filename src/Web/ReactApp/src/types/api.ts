@@ -100,7 +100,7 @@ export interface PrinterFileScanStatus {
   reasonCode?: string | null;
   lastAttemptAtUtc?: string | null;
   lastCompleteScanAtUtc?: string | null;
-  nextScanAtUtc: string;
+  nextScanAtUtc: string | null;
   configurationGeneration: number;
   isStale: boolean;
   isScanning: boolean;
