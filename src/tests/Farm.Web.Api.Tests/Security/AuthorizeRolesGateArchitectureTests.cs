@@ -44,7 +44,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// this guard's purposes just because it now lives in its own assembly; each module phase MUST
 /// add its controller assembly here (see #2037 review of the Maintenance move, which found the
 /// SmartPlug module's <see cref="Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController"/>
-/// had been missed by phase 8). SignalR Hub methods (e.g. <c>HarvestHub</c>) are not
+/// had been missed by phase 8). SignalR Hub methods (e.g. <c>MaintenanceHub</c>) are not
 /// <see cref="ControllerBase"/>-derived and are out of scope for "API controllers" as the issue
 /// describes them.
 /// </summary>

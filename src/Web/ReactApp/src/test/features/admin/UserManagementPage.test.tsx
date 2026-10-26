@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
@@ -265,6 +265,34 @@ describe('UserManagementPage shared admin patterns', () => {
     );
     update.resolve(testUser);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('offers only the supported application areas when managing permissions', async () => {
+    vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
+    const user = userEvent.setup();
+    render(<UserManagementPage />);
+
+    await user.click(await screen.findByTitle('Manage permissions'));
+
+    const dialog = await screen.findByRole('dialog');
+    const areaCheckboxes = within(dialog).getAllByRole('checkbox');
+    expect(areaCheckboxes).toHaveLength(6);
+    for (const area of ['Printers', 'Files', 'Jobs', 'Catalog', 'Settings', 'Spools']) {
+      expect(within(dialog).getByRole('checkbox', { name: new RegExp(`^${area}\\b`) })).toBeInTheDocument();
+    }
+    expect(within(dialog).queryByText(/harvest/i)).not.toBeInTheDocument();
+  });
+
+  it('does not offer the retired Harvest option when creating a user', async () => {
+    const user = userEvent.setup();
+    render(<UserManagementPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Add User' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Application Access')).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox', { name: /^Files\b/ })).toBeInTheDocument();
+    expect(within(dialog).queryByText(/harvest/i)).not.toBeInTheDocument();
   });
 
   it('marks the password form pristine after a confirmed password change', async () => {

@@ -210,7 +210,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     private static readonly Type[] GuardedBackgroundServiceTypes =
     [
-        typeof(Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService),
         typeof(Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService),
         typeof(Farm.Modules.Administration.Services.Workers.DiscoveryHeartbeatMonitorService),
         typeof(Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService),

@@ -43,8 +43,7 @@ function isAdministrativeRole(role: Role | undefined): boolean {
 
 const APPLICATION_AREAS = [
   { id: 'printers', name: 'Printers', description: 'View and manage printer configurations' },
-  { id: 'files', name: 'Files', description: 'Access harvested G-code files' },
-  { id: 'harvest', name: 'Harvest', description: 'Use the harvester interface' },
+  { id: 'files', name: 'Files', description: 'Access the G-code library and printer-file catalog' },
   { id: 'jobs', name: 'Jobs', description: 'View and manage print jobs' },
   { id: 'catalog', name: 'Catalog', description: 'Access manufacturer and model catalog' },
   { id: 'settings', name: 'Settings', description: 'Modify account and application settings' },

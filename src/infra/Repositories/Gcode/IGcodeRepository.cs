@@ -12,7 +12,6 @@ namespace Farm.Infrastructure.Repositories.Gcode;
 /// - Full-text search and metadata filtering
 /// - Hierarchical file organization with directory browsing
 /// - Batch operations for efficient querying
-/// - Harvest operation correlation
 /// </summary>
 public interface IGcodeRepository
 {
@@ -46,7 +45,7 @@ public interface IGcodeRepository
 
     /// <summary>
     /// Retrieves a G-code file by its full absolute path on disk.
-    /// Used for correlating harvested files from printer storage.
+    /// Used for correlating library files with printer storage paths.
     /// </summary>
     /// <param name="fullPath">The complete file path (e.g., "/home/pi/gcode/model.gcode")</param>
     /// <param name="ct">Cancellation token for async operation</param>
@@ -116,24 +115,6 @@ public interface IGcodeRepository
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>List of GcodeFile entities in the specified directory only</returns>
     Task<List<GcodeFile>> ListValidByDirectoryAsync(string directory, CancellationToken ct);
-
-    /// <summary>
-    /// Retrieves the latest harvest operation ID associated with a specific printer.
-    /// Used to correlate harvested G-code files with their source printer.
-    /// </summary>
-    /// <param name="printerId">The printer's unique identifier (GUID)</param>
-    /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>The latest GcodeHarvestOperation ID if one exists, otherwise null</returns>
-    Task<Guid?> GetLatestHarvestOperationIdForPrinterAsync(Guid printerId, CancellationToken ct);
-
-    /// <summary>
-    /// Retrieves the latest harvest operation IDs for multiple printers in a single efficient query.
-    /// Preferred over multiple GetLatestHarvestOperationIdForPrinterAsync calls.
-    /// </summary>
-    /// <param name="printerIds">Collection of printer IDs to query</param>
-    /// <param name="ct">Cancellation token for async operation</param>
-    /// <returns>Dictionary mapping printer ID to latest harvest operation ID (null if no operations exist)</returns>
-    Task<Dictionary<Guid, Guid?>> GetLatestHarvestOperationIdsByPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
 
     /// <summary>
     /// Resolves a printer model name to its database ID.

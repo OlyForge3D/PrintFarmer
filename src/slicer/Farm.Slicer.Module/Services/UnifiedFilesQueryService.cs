@@ -155,12 +155,6 @@ public sealed class UnifiedFilesQueryService(
             query = query.Where(file => file.SourcePrinterId == request.PrinterId.Value);
         }
 
-        if (request.HarvestId.HasValue)
-        {
-            query = query.Where(file => file.HarvestFileMappings.Any(
-                mapping => mapping.HarvestDiscoveredFile.HarvestOperationId == request.HarvestId.Value));
-        }
-
         query = request.Filter switch
         {
             UnifiedFileTypeFilter.Models => query.Where(_ => false),

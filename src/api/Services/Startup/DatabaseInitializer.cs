@@ -302,7 +302,6 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         var resources = new[]
         {
             new { Name = "printers", DisplayName = "Printers", ResourceType = "printer", Description = "3D printer management" },
-            new { Name = "gcode_harvest", DisplayName = "G-code Harvest", ResourceType = "harvest", Description = "G-code file harvesting operations" },
             new { Name = "gcode_library", DisplayName = "G-code Library", ResourceType = "library", Description = "G-code file library management" },
             new { Name = "printer_files", DisplayName = "Printer Files", ResourceType = "printer", Description = "Permission-filtered remote file metadata, explicit local copying and separately authorized remote deletion" },
             new { Name = "job_queue", DisplayName = "Print Job Queue (legacy admin overrides)", ResourceType = "queue", Description = "Administrative print-job retry/approval overrides (RetriesController, PrintApprovalsController). Distinct from \"queue\", which gates the calibration/dispatch queue actions that farm_user can hold; job_queue is farm_admin-only by design." },

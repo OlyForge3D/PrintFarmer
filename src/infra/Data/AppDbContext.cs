@@ -98,14 +98,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrinterServiceState> PrinterServiceStates => Set<PrinterServiceState>();
 
-    public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
-
-    public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
-
-    public DbSet<HarvestFileGcodeFileMapping> HarvestFileGcodeFileMappings => Set<HarvestFileGcodeFileMapping>();
-
-    public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
-
     public DbSet<UserTask> UserTasks => Set<UserTask>();
 
     public DbSet<MutationCounter> MutationCounters => Set<MutationCounter>();

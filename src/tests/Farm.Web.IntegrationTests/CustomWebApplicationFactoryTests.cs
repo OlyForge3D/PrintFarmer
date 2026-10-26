@@ -212,9 +212,6 @@ public sealed class CustomWebApplicationFactoryTests
         Assert.False(identity.MeterProviderRegistered);
 
         Assert.DoesNotContain(
-            typeof(Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService),
-            identity.HostedServiceTypes);
-        Assert.DoesNotContain(
             typeof(Farm.Infrastructure.Services.SystemLogs.SystemLogCleanupService),
             identity.HostedServiceTypes);
         Assert.DoesNotContain(

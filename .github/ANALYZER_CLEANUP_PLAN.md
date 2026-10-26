@@ -14,14 +14,14 @@ Status baseline (from latest local build/tests):
 
 ## Phase 1 — Low-risk hygiene and correctness
 - [x] CA1869: Cache JsonSerializerOptions in: `GlobalExceptionMiddleware`, `Program`, `PresetService`, `NetworkDiscoverySettingsService` (static/shared instances)
-- [x] CA1513: Use ObjectDisposedException.ThrowIfDisposed in `InMemoryHarvestQueue`
+- [x] CA1513: Use ObjectDisposedException.ThrowIfDisposed in `InMemoryHarvestQueue` (type since retired in #3531)
 - [ ] S1481/S1066/S3626/S1905: Remove unused locals, merge redundant ifs, remove redundant jumps/casts in the flagged files
 - [x] S6580: Provide CultureInfo when parsing/formatting DateTime in `PrintersController`, `SpoolmanService`
 - [ ] S6605/S6602: Prefer collection-specific Exists/Array.Find where suggested in tests and validators
 	- Scan result (2025-09-02): no actionable patterns found in tests; revisit after new tests land
 - [x] S4136: Co-locate overloads (method overload adjacency) in flagged classes (PrusaLinkApiClient.GetVersionAsync)
 - [x] CA1849: Prefer `RunAsync` over `Run` in `Program.cs`
-- [x] S2325: Make methods static when possible (HarvestWorkerService.ExtractMetadataAsync)
+- [x] S2325: Make methods static when possible (HarvestWorkerService.ExtractMetadataAsync; service since retired in #3531)
 - [x] S3923: Simplify redundant conditional logic (NetworkDiscoveryService.GetHostsInRange)
 - [x] S1199: Reduce nesting by extracting method from complex block (MoonrakerSubscriptionService.EnumerateAndStartSubscriptionsAsync)
 - [ ] CA1805: Remove explicit default initializers where redundant (Entities and services)
@@ -42,7 +42,7 @@ Acceptance criteria:
 	- `PrintersController`: test/demo endpoints annotated; camera URL annotated
 	- `GcodeLibraryController`: all CRUD and download endpoints annotated
 	- `MoonrakerDiagnosticsController`: roots/directory/filelist annotated
-	- Remaining: some `PrintersController` operational endpoints (camera enable/disable, file ops) and other controllers (e.g., `GcodeHarvestController`)
+	- Remaining: some `PrintersController` operational endpoints (camera enable/disable, file ops) and other controllers
 - [x] CA1062: Add guard clauses in representative endpoints
 	- `PrintersController.ResolveHostAsync` and `StartPrintAsync`
 	- `GcodeLibraryController.UploadFileAsync` and `UpdateFileAsync`
@@ -86,9 +86,9 @@ Acceptance criteria:
 
 ## Phase 5 — Model and naming cleanups
 - [ ] CA2227: Make collection properties read-only (init/private set) in models that do not require external mutation
-- [x] CA1711: Scoped suppression added for IHarvestQueue and InMemoryHarvestQueue (avoid breaking rename)
+- [x] CA1711: Scoped suppression added for IHarvestQueue and InMemoryHarvestQueue (avoid breaking rename; types since retired in #3531)
 - [x] CA1724: Class-level suppression on PrusaLinkModels.Storage to avoid conflict without rename
-- [x] S3260: Mark private classes as sealed (NetworkDiscoveryService.PrinterInfo, GcodeHarvestService.PrinterFileInfo)
+- [x] S3260: Mark private classes as sealed (NetworkDiscoveryService.PrinterInfo, GcodeHarvestService.PrinterFileInfo; service since retired in #3531)
 - [x] S125: Remove commented-out dead code (DatabaseInitializer)
 - [x] CA1002: Shift API-facing return types to IReadOnlyList where safe (INetworkDiscoverySettingsService.GetDynamicNetworkRanges)
 
@@ -113,12 +113,10 @@ Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 ## Current remaining warnings of note (snapshot)
 - CA1711: Naming for types ending with Queue (evaluate rename vs. scoped suppression)
 - CA1724: Type name conflicts with namespaces (e.g., Storage) — evaluate mitigation
-- S6960: Controllers split completed for client tests and gcode-harvest (diagnostics vs. test)
+- S6960: Controllers split completed for client tests (the gcode-harvest controllers were retired in #3531)
 	- Routes now:
 		- /api/client-test/moonraker/*
 		- /api/client-test/prusalink/*
-		- /api/gcode-harvest/test/moonraker/*
-		- /api/gcode-harvest/analyze and /api/gcode-harvest/debug-logs remain in diagnostics
 - S6964: Clarify binding on remaining POST/PUT endpoints (partial; continue sweep)
 
 ## Remaining items snapshot (by rule and location)
@@ -126,7 +124,6 @@ Create small PRs referencing this meta-issue, one per bullet or tight cluster:
 Phase 2 high-priority targets next:
 - S6965/S6968 (controller metadata):
 	- PrintersController: add ProducesResponseType to camera enable/disable, file list/upload/print-from-file endpoints
-	- GcodeHarvestController: add ProducesResponseType on key actions (e.g., update/delete, download)
 - CA1062 (null-guards):
 	- Sweep remaining controllers for request-body nulls (e.g., harvest endpoints)
 - CA3003 (path validation):
