@@ -82,9 +82,6 @@ public sealed class UnifiedFilesQueryRequestDto
     /// <summary>Gets or sets the requested file category.</summary>
     public UnifiedFileTypeFilter Filter { get; set; } = UnifiedFileTypeFilter.All;
 
-    /// <summary>Gets or sets an optional harvest operation filter for G-code records.</summary>
-    public Guid? HarvestId { get; set; }
-
     /// <summary>Gets or sets an optional source-printer filter for G-code records.</summary>
     public Guid? PrinterId { get; set; }
 }

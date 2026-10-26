@@ -594,7 +594,7 @@ export const GcodeFileBrowser = ({
         defaultSort: { sortBy: 'name', sortOrder: 'asc' },
         selectedIds: selection,
         onSelectionChange: handleSelectionChange,
-        canCreateDirectory: hasPermission('gcode_harvest', 'create'),
+        canCreateDirectory: hasPermission('gcode_library', 'create'),
         onCreateDirectory: async (path: string, folderName: string) => {
           try {
             const fullPath = path === '/' ? `/${folderName}` : `${path}/${folderName}`;
@@ -633,7 +633,7 @@ export const GcodeFileBrowser = ({
 
   const extraToolbarActions = (
     <>
-      {hasPermission('gcode_harvest', 'create') && (
+      {hasPermission('gcode_library', 'create') && (
         <Button
           type="button"
           variant="secondary"
@@ -679,7 +679,7 @@ export const GcodeFileBrowser = ({
           Add to Project ({selection.length})
         </Button>
       )}
-      {selection.length > 0 && hasPermission('gcode_harvest', 'delete') && (
+      {selection.length > 0 && hasPermission('gcode_library', 'admin') && (
         <Button
           type="button"
           variant="secondary"

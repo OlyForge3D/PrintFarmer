@@ -93,8 +93,10 @@ under Admin Settings > Files.
 
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are
-retired. Printed-parts inventory harvesting is a separate workflow and is
-unchanged, as are backend harvest history and the mobile app.
+retired, and the legacy harvest backend, its history tables, and the
+`gcode_harvest` permission were permanently removed (#3531). Library files
+imported by earlier harvests remain. Printed-parts inventory harvesting is a
+separate workflow and is unchanged, as is the mobile app.
 
 ### Slice Page
 Standalone browser-based 3D slicer application for converting models to G-code.

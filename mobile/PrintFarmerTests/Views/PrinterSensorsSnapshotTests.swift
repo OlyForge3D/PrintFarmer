@@ -52,6 +52,7 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         let rows = VStack(alignment: .leading, spacing: 8) {
             PrinterSensorControlRows(viewModel: model, compact: true)
         }
+        .environment(\.heatTargetDebounce, .milliseconds(300))
         .padding(12)
         .frame(width: 390)
         .fixedSize(horizontal: false, vertical: true)
@@ -65,17 +66,23 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         let sensorControls = controls.filter { $0.accessibilityIdentifier?.hasPrefix("printer.controls.sensor.") == true }
         XCTAssertEqual(Set(sensorControls.compactMap(\.accessibilityIdentifier)), [
             "printer.controls.sensor.chamber.TargetTemperature.increase",
-            "printer.controls.sensor.chamber.TargetTemperature.decrease"
+            "printer.controls.sensor.chamber.TargetTemperature.decrease",
+            "printer.controls.sensor.chamber.TargetTemperature.value"
         ], "Read-only and fan entries must not expose Tune actions")
         for control in sensorControls {
             XCTAssertTrue(control.isEnabled)
             XCTAssertGreaterThanOrEqual(control.bounds.width, 44)
             XCTAssertGreaterThanOrEqual(control.bounds.height, 44)
-            let direction = control.accessibilityIdentifier?.hasSuffix(".increase") == true ? "Increase" : "Decrease"
-            XCTAssertEqual(control.accessibilityLabel, "\(direction) Chamber target")
             let frame = control.convert(control.bounds, to: controller.view)
             XCTAssertGreaterThanOrEqual(frame.minX, 0)
             XCTAssertLessThanOrEqual(frame.maxX, 390)
+            if let field = control as? UITextField {
+                XCTAssertEqual(field.accessibilityLabel, "Chamber target in degrees Celsius")
+                XCTAssertEqual(field.placeholder, "40", "The tappable value shows the current target")
+                continue
+            }
+            let direction = control.accessibilityIdentifier?.hasSuffix(".increase") == true ? "Increase" : "Decrease"
+            XCTAssertEqual(control.accessibilityLabel, "\(direction) Chamber target")
         }
         let attachment = XCTAttachment(image: UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
@@ -87,16 +94,22 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         let increase = try XCTUnwrap(sensorControls.first {
             $0.accessibilityIdentifier == "printer.controls.sensor.chamber.TargetTemperature.increase"
         })
-        increase.sendActions(for: .touchUpInside)
+        // A ± burst collapses into one request for the final value (#3547).
+        for _ in 0..<3 {
+            increase.sendActions(for: .touchUpInside)
+            try await settle(controller)
+        }
+        XCTAssertEqual(service.setSensorValueCallCount, 0, "± waits for the debounce before sending")
         let deadline = ContinuousClock.now + .seconds(5)
         while service.setSensorValueCallCount == 0, ContinuousClock.now < deadline {
             try await settle(controller)
         }
+        try await Task.sleep(for: .milliseconds(500))
         XCTAssertEqual(service.setSensorValueCallCount, 1)
         XCTAssertEqual(service.setSensorValueCalledWith?.printerId, printer.id)
         XCTAssertEqual(service.setSensorValueCalledWith?.sensorId, "chamber")
         XCTAssertEqual(service.setSensorValueCalledWith?.quantity, .targetTemperature)
-        XCTAssertEqual(service.setSensorValueCalledWith?.value, 41)
+        XCTAssertEqual(service.setSensorValueCalledWith?.value, 43)
         XCTAssertEqual(service.setFanSpeedCallCount, 0)
     }
 
@@ -124,7 +137,7 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
             defer { window.isHidden = true }
             try await settle(controller)
             XCTAssertFalse(nativeControls(in: controller.view).contains {
-                $0.accessibilityIdentifier?.hasPrefix("printer.controls.sensor.") == true
+                $0.accessibilityIdentifier?.hasPrefix("printer.controls.sensor.") == true && $0.isEnabled
             }, "Unsupported, offline or unknown relative targets cannot offer actions")
             XCTAssertEqual(service.setSensorValueCallCount, 0)
         }

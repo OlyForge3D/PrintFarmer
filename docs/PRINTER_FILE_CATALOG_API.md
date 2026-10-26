@@ -1,160 +1,29 @@
-# G-code Harvesting API
+# Printer File Catalog API
 
-This document provides detailed reference for the G-code Harvesting endpoints.
+This document provides detailed reference for the durable printer-file catalog
+endpoints: metadata-only discovery, explicit local Copy, staged Queue, and safe
+single-location Delete.
 
-The legacy backend endpoints and stored history remain supported. The React
-G-code harvest UI and client transport are retired; use **Files > On printers**
-(`/files?source=printers`, optionally `&printer=<printerId>`) instead. Its
-explicit Copy action handles one file at a time; it does not provide bulk
-import. Printed-parts inventory harvesting and mobile workflows are unchanged.
-
-## Overview
-The harvesting system scans a printer's G-code storage, filters candidate files, records discovered files, and optionally imports them into the central library. Operations are asynchronous and progress is observable via the REST API or real-time SignalR events on `/hubs/printers`.
-
-## Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/gcode-harvest/start` | Start a harvest operation |
-| GET | `/api/gcode-harvest/operations/{operationId}` | Operation status/details |
-| GET | `/api/gcode-harvest/operations/{operationId}/files` | Discovered files list |
-| POST | `/api/gcode-harvest/import` | Import selected discovered files |
-| POST | `/api/gcode-harvest/operations/{operationId}/cancel` | Cancel running operation |
-| GET | `/api/gcode-harvest/printers/{printerId}/active` | Active operation for printer |
-| GET | `/api/gcode-harvest/printers/{printerId}/recent?count=10` | Recent operations for printer |
-| GET | `/api/gcode-harvest/active` | All active operations |
-| GET | `/api/gcode-harvest/queue?printerId={printerId}&status=Pending` | Queue summaries with optional printer and status filters |
-
-## Harvest Queue
-
-`GET /api/gcode-harvest/queue` returns an array of queue summaries, ordered by
-priority descending and then queued time ascending. Both `printerId` and `status`
-are optional, combined filters applied in the database. Reads do not track
-entities and select only summary fields, including the current printer name.
-The endpoint remains unpaginated and requires `gcode_harvest:admin`.
-
-Each summary contains `id`, `printerId`, `printerName`, `queuedAt`,
-`processingStartedAt`, `completedAt`, `status`, `priority`, `errorMessage`,
-`filesFound`, and `filesAdded`. Status values are strings (`Pending`,
-`Processing`, `Completed`, `Failed`, or `Cancelled`).
-
-## Start Harvest
-`POST /api/gcode-harvest/start`
-
-Request body (StartGcodeHarvestDto):
-```json
-{
-  "printerId": "11111111-1111-1111-1111-111111111111",
-  "includeSubdirectories": true,
-  "fileExtensions": ["gcode", "gco"],
-  "minFileSizeBytes": 1024,
-  "maxFileSizeBytes": 104857600,
-  "modifiedAfter": "2025-09-01T00:00:00Z",
-  "duplicateHandling": "skip"
-}
-```
-
-Field notes:
-- `fileExtensions`: null/empty => no extension filtering.
-- `minFileSizeBytes` / `maxFileSizeBytes`: inclusive bounds (null removes bound).
-- `modifiedAfter`: strict greater-than filter.
-- `duplicateHandling`:
-  - `skip`: ignore existing (increments FilesSkipped)
-  - `overwrite`: replace existing entry (increments FilesAdded)
-  - `rename`: import as new (adds suffix `-copy`, `-copy2`, ...)
-
-Response (GcodeHarvestResultDto):
-```json
-{
-  "operationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-  "success": true,
-  "message": "Harvest started",
-  "discoveredFiles": 0,
-  "importedFiles": 0,
-  "errors": null
-}
-```
-
-## Operation Object
-`GcodeHarvestOperationDto` (summary):
-```json
-{
-  "id": "...",
-  "printerId": "...",
-  "status": "Running|Completed|Failed|Cancelled",
-  "startedAt": "2025-09-06T07:30:00Z",
-  "completedAt": null,
-  "filesFound": 0,
-  "filesAdded": 0,
-  "filesSkipped": 0,
-  "filesErrored": 0,
-  "totalBytesProcessed": 0,
-  "includeSubdirectories": true,
-  "maxFileSizeBytes": 104857600,
-  "modifiedAfter": null,
-  "fileExtensions": ["gcode","gco"],
-  "minFileSizeBytes": 1024,
-  "duplicateHandling": "skip"
-}
-```
-
-## Discovered File Object
-`DiscoveredGcodeFileDto` (summary):
-```json
-{
-  "id": "...",
-  "harvestOperationId": "...",
-  "printerPath": "/path/to/file.gcode",
-  "fileName": "file.gcode",
-  "fileSizeBytes": 123456,
-  "modifiedAt": "2025-09-05T14:11:00Z",
-  "fileHash": null,
-  "isSelected": false,
-  "alreadyInLibrary": false,
-  "existingLibraryFileId": null,
-  "processingFailed": false,
-  "errorMessage": null,
-  "extractedSlicerName": null,
-  "extractedSlicerVersion": null,
-  "extractedPrintTime": null,
-  "extractedFilamentLength": null,
-  "extractedNozzleDiameter": null,
-  "extractedMaterial": null,
-  "extractedLayerHeight": null,
-  "extractedInfill": null
-}
-```
-
-## Import Selected Files
-`POST /api/gcode-harvest/import`
-```json
-{
-  "harvestOperationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-  "selectedFileIds": ["f1f1...", "f2f2..."],
-  "addToLibraryOnly": true,
-  "autoDetectCapabilities": true,
-  "defaultTags": ["harvested"]
-}
-```
-
-## Cancellation
-Cancellation attempts return HTTP 200 with `true` if successful, `400` if the operation can no longer be cancelled.
-
-## Real-time Updates
-Operation progress & completion events are broadcast through the existing printers SignalR hub. The client merges updates into local state.
+The legacy G-code harvest feature (the `/api/gcode-harvest/*` endpoints, the
+`/hubs/harvest` SignalR hub, its operation, queue, and discovered-file tables,
+and the `gcode_harvest` permission resource) was retired permanently in #3531.
+Use **Files > On printers** (`/files?source=printers`, optionally
+`&printer=<printerId>`) instead. Its explicit Copy action handles one file at a
+time; it does not provide bulk import. Library files imported by earlier harvests
+remain in the G-code library with their `Harvested` source, source printer, and
+original printer path. Printed-parts inventory harvesting and mobile workflows
+are unchanged.
 
 ## Development Notes
 - AppDbContext schema is migration-managed for SQLite, PostgreSQL, and SQL Server.
   SQLite API startup uses `ProviderAwareMigrationRunner`; new catalog schema must
   be migrated on existing installations as well as new databases.
-- Duplicate handling is enforced during worker processing when a file hash / name indicates an existing library entry.
 
 ## Durable printer-file catalog
 
-The catalog is independent of harvest-operation history. A remote location
-identifies one registered printer, storage root, and backend-canonical relative
-path. It is not a library asset: `GcodeFile` continues to represent owned local
-bytes. Nested equal filenames, distinct storage roots, and case-distinct paths
+A remote location identifies one registered printer, storage root, and
+backend-canonical relative path. It is not a library asset: `GcodeFile`
+continues to represent owned local bytes. Nested equal filenames, distinct storage roots, and case-distinct paths
 on case-sensitive backends remain separate locations regardless of database
 collation.
 
@@ -265,8 +134,7 @@ and single-location actions. Catalog browsing and automatic indexing remain
 metadata-only. Preview capture is a distinct, opt-in request for visible items;
 it is never part of a scan or catalog list request.
 Captured local versions are links, not a claim that current remote bytes match.
-Legacy harvest remains available through the backend, not the React UI. Copy
-handles one file at a time; bulk import is unavailable. Part/stock harvesting
+Copy handles one file at a time; bulk import is unavailable. Part/stock harvesting
 and immediate printer Print controls are unchanged.
 
 ### On-demand preview and browser Download
@@ -638,6 +506,19 @@ application/schema pair and use global or per-printer discovery disable to stop
 scanning without discarding provenance, owned bytes or accepted queue jobs.
 This is not a guarantee that arbitrary old and new writers can run together.
 
+The `RetireGcodeHarvest` AppDbContext migration (SQLite, PostgreSQL and SQL
+Server, #3531) permanently drops the four legacy harvest tables
+(`GcodeHarvestQueueItems`, `HarvestFileGcodeFileMappings`,
+`HarvestDiscoveredFiles`, `GcodeHarvestOperations`) and deletes only the
+`RolePermissions` rows for the resource named exactly `gcode_harvest`, then
+that resource. Nothing is archived. G-code library files, their `Harvested`
+provenance, printer-file catalog data and printed-parts harvest fields are
+retained. The migration is irreversible: its `Down` throws, so rollback means
+restoring a backup taken before the upgrade. A populated SQLite upgrade test
+verifies the retained rows and exact grant scope; PostgreSQL and SQL Server are
+covered only by generated-migration and model-drift checks, not by execution
+against a live database.
+
 Validation for this implementation uses fake backends and isolated test
 databases, never production printer mutations. A populated maintained SQLite
 migration test verifies ordinal path identity and preservation after printer
@@ -659,9 +540,3 @@ fencing assertion falsifies the safety claims above. A defect can disclose
 restricted filenames, duplicate production, waste material or irreversibly
 delete the only remote copy; scan disable is reversible, physical effects are
 not. Review and live-provider evidence remain separate release gates.
-
-## Future Enhancements (Roadmap)
-- Pagination & server-side filtering for discovered files
-- Retry queue for transient download errors
-- Hash pre-check via printer metadata where available
-- Optional auto-import on completion

@@ -48,15 +48,6 @@ public class MappedEndpointAnonymousAccessTests : IClassFixture<MappedEndpointAn
     }
 
     [Fact]
-    public async Task HarvestHubNegotiate_Unauthenticated_ReturnsUnauthorized()
-    {
-        using HttpClient anon = _factory.CreateClient();
-        HttpResponseMessage response = await anon.PostAsync("/hubs/harvest/negotiate?negotiateVersion=1", content: null);
-
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
     public async Task SlicerRegistryHubNegotiate_Unauthenticated_ReturnsUnauthorized()
     {
         using HttpClient anon = _factory.CreateClient();

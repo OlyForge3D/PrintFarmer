@@ -143,6 +143,11 @@ enum UITestBootstrap {
         }
         return image.jpegData(compressionQuality: 0.8) ?? Data()
     }()
+    /// App Store capture mode serves a rendered printer-cam still instead (#3518).
+    /// Rendered by `scripts/render-app-store-camera-frame.py`; DEBUG-only asset.
+    nonisolated static let appStoreCameraSnapshotData: Data? = UIImage(
+        named: "AppStoreCameraFrame"
+    )?.jpegData(compressionQuality: 0.85)
     /// Drops Speed/Flow readback so XCUI can assert the rendered "not reported" rows (#3484).
     static let issue3484MissingRuntimeFactorsLaunchArgument =
         "--uitesting-issue3484-missing-runtime-factors"
@@ -771,6 +776,10 @@ enum UITestBootstrap {
             remainingWeightG: 350,
             spoolInUse: true
         )
+        if appStoreScreenshotDate != nil {
+            // An idle, cold printer with no loaded spool shows a neutral grey dot on the Farm card (#3518).
+            idleMk4.spoolInfo = nil
+        }
 
         let basePrinters = [
             printer,
@@ -875,8 +884,12 @@ enum UITestBootstrap {
         ]
 
         if appStoreScreenshotDate != nil {
+            // Keep the pending-ready Bambu X1C and trim two printing cards so the iPhone Farm image
+            // shows "Ready to harvest" and "Ready to seed" above the fold (#3518).
             printers.removeAll {
-                !$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")
+                $0.id == issue3259PrusaXLID || $0.id == DemoData.bambuP1S_ID
+                    || ($0.id != DemoData.bambuX1C_ID
+                        && (!$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")))
             }
         }
 
@@ -1247,7 +1260,10 @@ enum UITestBootstrap {
                 ])
                 let queueStatsData = try encoder.encode(QueueStats(
                     totalQueued: 4,
-                    totalPrinting: fixture.printers.filter { $0.state?.lowercased() == "printing" }.count,
+                    // Store captures list one printing job, so the sidebar badge matches the Queue rows (#3518).
+                    totalPrinting: appStoreScreenshotDate == nil
+                        ? fixture.printers.filter { $0.state?.lowercased() == "printing" }.count
+                        : 1,
                     totalPaused: 0,
                     averageWaitTimeMinutes: 18,
                     byModel: []
@@ -1494,7 +1510,8 @@ enum UITestBootstrap {
                             QueueHistoryEntry(
                                 id: DemoData.job9ID.uuidString,
                                 jobName: "cable_chain",
-                                printerName: "Voron 2.4",
+                                // Store captures drop the errored Voron, so keep the failure on a Farm printer (#3518).
+                                printerName: appStoreScreenshotDate == nil ? "Voron 2.4" : "Creality K1",
                                 status: "Failed",
                                 completedAt: Calendar.current.date(
                                     bySettingHour: 8,
@@ -1689,7 +1706,9 @@ enum UITestBootstrap {
             case ("GET", let path)
                 where path.hasPrefix("/api/printers/") && path.hasSuffix("/snapshot")
                     && path.split(separator: "/").count == 4:
-                result = (200, "image/jpeg", UITestBootstrap.issue3496CameraSnapshotData)
+                let frame = UITestBootstrap.appStoreScreenshotDate != nil
+                    ? UITestBootstrap.appStoreCameraSnapshotData : nil
+                result = (200, "image/jpeg", frame ?? UITestBootstrap.issue3496CameraSnapshotData)
             case ("GET", let path)
                 where path.hasPrefix("/api/printers/") && path.split(separator: "/").count == 3:
                 let components = path.split(separator: "/")
@@ -2129,11 +2148,25 @@ enum UITestBootstrap {
             name: "Bambu A1", modelName: "A1",
             status: "Printing", isOnline: true
         )
-        let enderPrinter = QueuePrinterMeta(
+        var enderPrinter = QueuePrinterMeta(
             id: issue3259Ender3S1ID.uuidString.lowercased(),
             name: "Ender 3 S1", modelName: "Ender 3 S1",
             status: "Idle", isOnline: true
         )
+        var queuedVoronPrinter = voronPrinter
+        if appStoreScreenshotDate != nil {
+            // Store captures only show Farm printers, so point queued work at idle Farm printers (#3518).
+            enderPrinter = QueuePrinterMeta(
+                id: DemoData.ender3V3_ID.uuidString.lowercased(),
+                name: "Ender 3 V3", modelName: "Ender 3 V3",
+                status: "Idle", isOnline: true
+            )
+            queuedVoronPrinter = QueuePrinterMeta(
+                id: issue3259CrealityK1ID.uuidString.lowercased(),
+                name: "Creality K1", modelName: "K1",
+                status: "Idle", isOnline: true
+            )
+        }
         let createdAt = Date(timeIntervalSince1970: 1_791_134_000)
 
         func job(
@@ -2274,7 +2307,7 @@ enum UITestBootstrap {
                 position: 3,
                 requiredGrams: 65,
                 durationSeconds: 4_800,
-                assignedPrinter: voronPrinter
+                assignedPrinter: queuedVoronPrinter
             ),
         ]
         if appStoreScreenshotDate != nil {

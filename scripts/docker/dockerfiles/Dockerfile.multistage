@@ -769,7 +769,6 @@ CMD ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
 # Accept build arguments for frontend configuration
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
-ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 
 FROM --platform=${BUILDPLATFORM:-linux/amd64} node:${NODE_TAG} AS frontend-build
 WORKDIR /app
@@ -821,7 +820,6 @@ COPY compliance/dependency-license-policy.json /compliance/dependency-license-po
 COPY compliance/licenses /compliance/licenses
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
-ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 # Full git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
 # as a fallback when .git is not present in the build context).
 ARG GIT_SHA=unknown
@@ -830,12 +828,10 @@ RUN set -eux; \
     echo "[frontend-build] Starting React build with Vite..."; \
     echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
-    echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
     echo "[frontend-build] VITE_GIT_SHA=${VITE_GIT_SHA}"; \
     \
     export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
     export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
-    export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
     export VITE_GIT_SHA="${VITE_GIT_SHA}"; \
     \
     set +e; \

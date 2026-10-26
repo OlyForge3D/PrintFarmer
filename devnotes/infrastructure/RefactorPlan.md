@@ -104,8 +104,6 @@ Order is a recommendation for the safest incremental refactor: start with Low co
 ### Medium complexity (Phase 2)
 - `CatalogController` — uses `AppDbContext` and caching layer (`ICatalogCache`); mostly read/write catalog models (Phase 2)
 - `FilamentTypeController` — DB access for filament presets (read/write) (Phase 2)
-- `GcodeHarvestDiagnosticsController` — delegates to `IGcodeHarvestService`, small surface area (Phase 2)
-- `GcodeHarvestController` — uses `IGcodeHarvestService` to orchestrate long-running ops (Phase 2)
 - `MoonrakerDiagnosticsController` — calls external `IMoonrakerClient` with retry logic (Phase 2)
 - `SpoolmanController` — integrates with `ISpoolmanService` and HTTP probes (Phase 2)
 - `ProfilesController` / `SlicingProfiles` (if present) — small EF usage via `AppDbContext` (Phase 2)
@@ -146,7 +144,7 @@ Per-controller checklist:
 - Open small PR (single controller or small group) and request review.
 
 ### Phase 2 — Medium complexity (goal: interactions & adapters)
-Controllers: `CatalogController`, `FilamentTypeController`, `GcodeHarvestDiagnosticsController`, `GcodeHarvestController`, `MoonrakerDiagnosticsController`, `SpoolmanController`, `ProfilesController`.
+Controllers: `CatalogController`, `FilamentTypeController`, `MoonrakerDiagnosticsController`, `SpoolmanController`, `ProfilesController`.
 
 Per-controller checklist (adds integration points):
 - Extract/define `I<Service>` and `I<Repository>`.

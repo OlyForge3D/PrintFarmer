@@ -89,8 +89,6 @@ public sealed class RevisionConcurrencyProviderTests
         typeof(AppSettingsEntity),
         typeof(DispatchSettings),
         typeof(GcodeFile),
-        typeof(GcodeHarvestOperation),
-        typeof(GcodeHarvestQueueItem),
         typeof(JobExecution),
         typeof(OutboxSequenceState),
         typeof(PrintJob),

@@ -16,10 +16,8 @@ namespace Farm.Modules.Gcode;
 /// <summary>
 /// Vertical-slice module for gcode file management (issue #2039, epic #2019). Owns the
 /// <see cref="Farm.Modules.Gcode.Controllers.GcodeFilesController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeLibraryController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodePromotionsController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestController"/>, and
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestDiagnosticsController"/> controllers, the
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeLibraryController"/> and
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodePromotionsController"/> controllers, the
 /// gcode library/upload/safety-validation services, artifact-to-gcode promotion and its
 /// reconciler, and the file-consistency audit background service. Phase 11 of the Farm.Web.Api
 /// decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces were renamed
@@ -36,7 +34,7 @@ public sealed class GcodeApiModule : IApiModule
     /// <inheritdoc />
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Gcode library service: queries, retrieval, deletion of harvested gcode files.
+        // Gcode library service: queries, retrieval, deletion of owned gcode files.
         _ = services.AddScoped<IGcodeFilesService, GcodeFilesService>();
         _ = services.AddScoped<IPrinterFileAccessService, PrinterFileAccessService>();
         _ = services.AddScoped<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
@@ -76,7 +74,7 @@ public sealed class GcodeApiModule : IApiModule
 
         // Infrastructure-owned processing seam: bridges the infra IGcodeFileProcessingService
         // abstraction to this module's concrete IGcodeFilesService so callers outside this
-        // module (e.g. harvest completion) can process gcode without a compile-time reference
+        // module (e.g. slice import) can process gcode without a compile-time reference
         // into Farm.Modules.Gcode.
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<IGcodeFilesService>());
@@ -87,9 +85,6 @@ public sealed class GcodeApiModule : IApiModule
         // Farm.Modules.Gcode.
         _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter>(sp =>
             (Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter)sp.GetRequiredService<IGcodeFilesService>());
-
-        // Harvest completion event broadcasting over SignalR.
-        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, SignalRHarvestEventBroadcaster>();
 
         // Gcode upload settings, backed by the persisted ISettingsService store.
         _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();

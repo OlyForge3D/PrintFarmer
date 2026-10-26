@@ -5,7 +5,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Cameras;
 using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
-using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Printers;
@@ -39,7 +38,6 @@ public class AppUnitOfWork : IUnitOfWork
 
     private ICameraRepository? _cameraRepository;
     private IGcodeRepository? _gcodeRepository;
-    private IHarvestRepository? _harvestRepository;
 #pragma warning disable CA1859 // Use concrete types when possible for improved performance
     private IPrintersRepository? _printersRepository;
 #pragma warning restore CA1859 // Use concrete types when possible for improved performance
@@ -62,14 +60,7 @@ public class AppUnitOfWork : IUnitOfWork
     public IGcodeRepository GcodeFiles => _gcodeRepository ??= new EfGcodeRepository(_db);
 
     /// <summary>
-    /// Lazy-initializes the Harvest repository, reusing the same DbContext.
-    /// This ensures both repositories work with the same context, preventing FK constraint issues.
-    /// </summary>
-    public IHarvestRepository HarvestOperations => _harvestRepository ??= new EfHarvestRepository(_db);
-
-    /// <summary>
     /// Lazy-initializes the Printers repository, reusing the same DbContext.
-    /// Coordinated with harvest operations for cascading updates.
     /// </summary>
     public IPrintersRepository Printers => _printersRepository ??= new EfPrintersRepository(_db, _sensitiveDataProtector);
 

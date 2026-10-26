@@ -19,18 +19,17 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services.Gcode;
 
 /// <summary>
-/// Integration tests for GcodeHarvestService file discovery with backend clients.
-/// Tests the end-to-end flow of discovering files from Moonraker printers.
+/// Integration tests for backend file-list capability resolution.
 /// These tests verify that the capability factory returns clients that properly
-/// implement the file listing interfaces expected by the harvest service.
+/// implement the file listing interfaces used for printer file discovery.
 /// </summary>
-public class HarvestServiceFileDiscoveryIntegrationTests
+public class BackendFileListCapabilityIntegrationTests
 {
     private readonly Mock<ILogger<BackendCapabilityFactory>> _mockLogger;
     private readonly Mock<IBackendClientFactory> _mockClientFactory;
     private readonly Mock<IBackendPluginRegistry> _mockPluginRegistry;
 
-    public HarvestServiceFileDiscoveryIntegrationTests()
+    public BackendFileListCapabilityIntegrationTests()
     {
         _mockLogger = new Mock<ILogger<BackendCapabilityFactory>>();
         _mockClientFactory = new Mock<IBackendClientFactory>();

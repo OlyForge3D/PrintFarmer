@@ -240,7 +240,7 @@ public static class ServiceCollectionExtensions
         RegisterBackendClientPlugins(services, configuration);  // Register backend client plugins FIRST - they register HTTP clients
         RegisterHttpClients(services);
         RegisterPrinterServices(services);  // Then register printer services that depend on HTTP clients
-        RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
+        RegisterModelAndGcodeServices(services);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
 
@@ -320,11 +320,10 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Roles.IRolesRepository, Farm.Infrastructure.Repositories.Roles.EfRolesRepository>();
 
-        // Unit of Work pattern: coordinates access to 6 repositories with a shared DbContext
-        // This prevents FK constraint violations and ensures atomic transactions across coordinated operations:
-        // - Gcode + Harvest: Harvest operations reference gcode files
+        // Unit of Work pattern: coordinates access to the gcode, folder, printer and location repositories
+        // with a shared DbContext. This prevents FK constraint violations and ensures atomic transactions
+        // across coordinated operations:
         // - Gcode + Folders: Gcode files organized in folder hierarchy
-        // - Harvest + Printers: Harvest operations tied to specific printers
         // - Model3dFiles + Folders: 3D models organized in folder hierarchy
         // - Locations + Printers: Printers located at specific facilities
         _ = services.AddScoped<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork, Farm.Infrastructure.Repositories.UnitOfWork.AppUnitOfWork>();
@@ -332,7 +331,6 @@ public static class ServiceCollectionExtensions
         // Individual repository registrations (for backward compatibility with existing code)
         // These are resolved through IUnitOfWork for coordinated operations
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().GcodeFiles);
-        _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().HarvestOperations);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Printers);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Folders);
         _ = services.AddScoped(sp => sp.GetRequiredService<Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork>().Locations);
@@ -745,7 +743,7 @@ public static class ServiceCollectionExtensions
 
     #region Model and Gcode Services
 
-    private static void RegisterModelAndGcodeServices(IServiceCollection services, IConfiguration configuration, bool disableBackgroundServices)
+    private static void RegisterModelAndGcodeServices(IServiceCollection services)
     {
         // Tag services
         _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
@@ -784,25 +782,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<IVirusScanner, ClamAVVirusScanner>();
         _ = services.AddSingleton<IThumbnailGenerationService, Farm.Slicer.Module.Services.Rendering.ThumbnailGenerationService>();
 
-        // Harvest configuration and services
-        _ = services.Configure<GcodeHarvestSettings>(configuration.GetSection(Farm.Infrastructure.Settings.GcodeHarvestSettings.SectionKey));
-
         _ = services.AddSingleton<IGcodeMetadataExtractorService, GcodeMetadataExtractorService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IPrinterModelAliasService, Farm.Infrastructure.Services.Gcode.PrinterModelAliasService>();
 
         // IGcodeFilesService, IGcodeSafetyValidator, the IGcodeFileProcessingService and
-        // IGcodeFileDeleter bridges, and IHarvestEventBroadcaster are now registered by
+        // IGcodeFileDeleter bridges are now registered by
         // Farm.Modules.Gcode's GcodeApiModule (issue #2039, epic #2019) since their concrete
         // implementations moved into that module.
-        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
-
-        // Gcode harvest queue (async processing)
-        _ = services.AddScoped<Farm.Infrastructure.Services.GcodeHarvest.IGcodeHarvestQueue, Farm.Infrastructure.Services.GcodeHarvest.EfGcodeHarvestQueue>();
-        if (!disableBackgroundServices)
-        {
-            _ = services.AddHostedService<Farm.Infrastructure.Services.GcodeHarvest.GcodeHarvestQueueProcessorService>();
-        }
 
         // Gcode upload quota - IGcodeUploadSettings is now registered by Farm.Modules.Gcode's
         // GcodeApiModule (issue #2039, epic #2019) since PersistedGcodeUploadSettingsAdapter moved.

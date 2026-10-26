@@ -54,6 +54,7 @@ struct DashboardView: View {
                     }
                 }
                 .navigationTitle("Farm")
+                .navigationBarTitleDisplayMode(.inline)
                 .rootNavigationChrome(for: .farm)
                 .refreshable { await viewModel.loadDashboard() }
                 .navigationDestination(for: AppDestination.self) { destination in
