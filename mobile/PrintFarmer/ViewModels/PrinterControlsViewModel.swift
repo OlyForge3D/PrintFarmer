@@ -1255,6 +1255,20 @@ final class PrinterControlsViewModel: ObservableObject {
         return runtimeControlAccessReason
     }
 
+    /// Caption for sensor rows: genuine unsupported/access reasons only. Loading
+    /// and in-flight states disable the row instead of printing text (#3547).
+    var sensorRowMessage: String? {
+        guard let capabilities else { return nil }
+        guard capabilities.supportsSensorControl else {
+            return "Sensor control is unavailable on this printer."
+        }
+        return runtimeControlAccessReason(includingPending: false)
+    }
+
+    var canControlSensors: Bool {
+        capabilities?.supportsSensorControl == true && runtimeControlAccessReason == nil
+    }
+
     func setSensorValue(sensorId: String, quantity: SensorQuantity, value: Double) async {
         let command = ControlCommand(
             kind: .sensorControl(sensorId: sensorId, quantity: quantity, value: value),
@@ -1730,13 +1744,17 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     private var runtimeControlAccessReason: String? {
+        runtimeControlAccessReason(includingPending: true)
+    }
+
+    private func runtimeControlAccessReason(includingPending: Bool) -> String? {
         if commandIdentity == nil { return "Controls require a registered server identity." }
         if !hasConfiguredAccess { return "Waiting for registered-server access confirmation." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
         if !runtimePrinterStateIsSupported { return "Printer is shut down." }
-        if isExecuting { return Self.operationPendingReason }
+        if includingPending, isExecuting { return Self.operationPendingReason }
         return nil
     }
 
@@ -1774,6 +1792,16 @@ final class PrinterControlsViewModel: ObservableObject {
             return "Another controls view is waiting for this printer's request outcome. Routine controls remain locked."
         }
         return nil
+    }
+
+    /// `blockedReason` for heater rows: an in-flight request elsewhere only
+    /// disables the row; it never surfaces as a caption (#3547).
+    var heatRowBlockedReason: String? {
+        if pendingCommand == nil, isExecuting, printer.isOnline, !isPrintingOrPaused,
+           commandIdentity != nil, hasConfiguredAccess, isActive, accessCheck() == nil {
+            return nil
+        }
+        return blockedReason
     }
 
     var isPrintingOrPaused: Bool {

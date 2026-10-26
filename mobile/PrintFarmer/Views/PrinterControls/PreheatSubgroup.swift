@@ -61,11 +61,16 @@ struct ControlNumberField: UIViewRepresentable {
     /// need "-" keep full access. Temperature fields pass `.decimalPad` so
     /// iOS shows the compact numeric keypad instead of the full keyboard.
     var keyboardType: UIKeyboardType = .numbersAndPunctuation
-    /// Stepper values read as centred primary monospaced text (weight 500),
-    /// with no border or fill, matching mockup B's `.stepper .val`.
+    /// Heat target values read as centred primary monospaced text (weight 500)
+    /// on a filled, rounded chip so the value looks tappable (#3547).
     var stepperValueStyle = false
     /// Incrementing this asks the field to become first responder (Heat "Custom…").
     var focusRequest = 0
+    /// When set, the keypad toolbar offers Cancel and Set instead of Done. A
+    /// typed value applies only through Set (return `false` to keep editing);
+    /// any other end of editing calls `onCancel` so the draft reverts.
+    var onSubmit: (() -> Bool)?
+    var onCancel: (() -> Void)?
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -80,7 +85,23 @@ struct ControlNumberField: UIViewRepresentable {
         // Numeric-pad keyboards (.decimalPad, .numberPad, etc.) have no
         // Return key, so textFieldShouldReturn never fires. Add a "Done"
         // toolbar so the keyboard can still be dismissed.
-        if Self.padKeyboardTypesWithoutReturnKey.contains(keyboardType) {
+        if onSubmit != nil {
+            let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
+            let cancel = UIBarButtonItem(
+                title: String(localized: "Cancel", comment: "Heat target keypad: discard the typed value"),
+                style: .plain, target: context.coordinator, action: #selector(Coordinator.cancelTapped)
+            )
+            cancel.accessibilityIdentifier = "\(identifier).cancel"
+            let set = UIBarButtonItem(
+                title: String(localized: "Set", comment: "Heat target keypad: apply the typed value"),
+                style: .done, target: context.coordinator, action: #selector(Coordinator.setTapped)
+            )
+            set.accessibilityIdentifier = "\(identifier).set"
+            toolbar.items = [cancel, UIBarButtonItem(systemItem: .flexibleSpace), set]
+            toolbar.sizeToFit()
+            field.inputAccessoryView = toolbar
+            context.coordinator.field = field
+        } else if Self.padKeyboardTypesWithoutReturnKey.contains(keyboardType) {
             let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
             let done = UIBarButtonItem(
                 barButtonSystemItem: .done,
@@ -101,6 +122,8 @@ struct ControlNumberField: UIViewRepresentable {
 
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onSubmit = onSubmit
+        context.coordinator.onCancel = onCancel
         if field.text != text { field.text = text }
         // A stepper's placeholder is the live target, so it reads as the value.
         let valueFont = stepperValueStyle
@@ -121,7 +144,10 @@ struct ControlNumberField: UIViewRepresentable {
         field.textColor = UIColor(Color.pfTextPrimary)
         field.textAlignment = stepperValueStyle ? .center : .natural
         field.borderStyle = stepperValueStyle ? .none : .roundedRect
-        field.backgroundColor = stepperValueStyle ? .clear : UIColor(Color.pfBackgroundTertiary)
+        field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
+        field.layer.cornerRadius = stepperValueStyle ? 8 : 0
+        field.layer.cornerCurve = .continuous
+        field.clipsToBounds = stepperValueStyle
         if focusRequest != context.coordinator.focusRequest {
             context.coordinator.focusRequest = focusRequest
             DispatchQueue.main.async { if field.isEnabled { field.becomeFirstResponder() } }
@@ -138,17 +164,238 @@ struct ControlNumberField: UIViewRepresentable {
         var text: Binding<String>
         var focusRequest: Int
         weak var field: UITextField?
+        var onSubmit: (() -> Bool)?
+        var onCancel: (() -> Void)?
+        private var submitted = false
         init(text: Binding<String>, focusRequest: Int = 0) {
             self.text = text
             self.focusRequest = focusRequest
         }
         @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            textField.resignFirstResponder()
+            if onSubmit != nil {
+                setTapped()
+            } else {
+                textField.resignFirstResponder()
+            }
             return true
+        }
+        func textFieldDidBeginEditing(_ textField: UITextField) { submitted = false }
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            if !submitted { onCancel?() }
+            submitted = false
         }
         @objc func doneTapped() {
             field?.resignFirstResponder()
+        }
+        @objc func setTapped() {
+            guard let onSubmit, onSubmit() else { return }
+            submitted = true
+            field?.resignFirstResponder()
+        }
+        @objc func cancelTapped() {
+            onCancel?()
+            // Already reverted; keep the end-of-editing callback from repeating it.
+            submitted = true
+            field?.resignFirstResponder()
+        }
+    }
+}
+
+// MARK: - Heat target rows
+
+private struct HeatTargetDebounceKey: EnvironmentKey {
+    static let defaultValue: Duration = .milliseconds(700)
+}
+
+extension EnvironmentValues {
+    /// Quiet period after the last ± tap before a heat row sends its target.
+    var heatTargetDebounce: Duration {
+        get { self[HeatTargetDebounceKey.self] }
+        set { self[HeatTargetDebounceKey.self] = newValue }
+    }
+}
+
+/// One settable heat row shared by Nozzle, Bed, Chamber, Heater Box and any
+/// other writable target (#3547): name and measured value on the left, a
+/// tap-to-edit target with − and + on the right. A row applies only its own
+/// target: ± bursts collapse into one request after `heatTargetDebounce`, and
+/// a typed value applies only on Set (Cancel reverts). In-flight state is a
+/// dimmed row plus a small spinner, never caption text.
+struct HeatTargetRow: View {
+    let title: String
+    let measured: Double?
+    let identifier: String
+    let fieldIdentifier: String
+    let fieldLabel: String
+    let fieldHint: String
+    let stepLabel: (_ increasing: Bool) -> String
+    let unit: SensorUnit
+    let currentTarget: Double?
+    var isPending = false
+    /// Next target one step from `base` (pending draft or reported target), or nil.
+    let next: (_ base: Double?, _ increasing: Bool) -> Double?
+    /// Parses typed text; nil means blank (no change). Throws a user-facing message.
+    let parse: (String) throws -> Double?
+    let isBusy: @MainActor () -> Bool
+    let apply: @MainActor (Double) async -> Void
+    var focusRequest = 0
+
+    @State private var draft = ""
+    @State private var pendingValue: Double?
+    @State private var inputError: String?
+    @State private var applyTask: Task<Void, Never>?
+    @Environment(\.heatTargetDebounce) private var debounce
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    static let postApplyGrace: Duration = .seconds(5)
+
+    static func draftText(_ value: Double) -> String {
+        value.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
+    }
+
+    static func placeholder(currentTarget: Double?, allowsOff: Bool = true) -> String {
+        guard let currentTarget, currentTarget.isFinite else { return PrinterDetailViewModel.missingValuePlaceholder }
+        if currentTarget == 0, allowsOff { return "Off" }
+        return currentTarget.formatted(.number.precision(.fractionLength(0...1)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.pfTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(measuredText)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityIdentifier("\(identifier).measured")
+                        .accessibilityLabel(measuredAccessibilityLabel)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                editor
+            }
+            .frame(minHeight: 48)
+            if let inputError {
+                Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("\(identifier).error")
+            }
+        }
+        .onChange(of: currentTarget) { _, reported in
+            guard let pendingValue, reported == pendingValue, draft == Self.draftText(pendingValue) else { return }
+            clearDraft()
+        }
+        .onDisappear { applyTask?.cancel() }
+    }
+
+    private var editor: some View {
+        HStack(spacing: 4) {
+            stepButton(increasing: false)
+            ControlNumberField(
+                placeholder: Self.placeholder(currentTarget: currentTarget), text: $draft,
+                label: fieldLabel, identifier: fieldIdentifier, hint: fieldHint,
+                keyboardType: .decimalPad, stepperValueStyle: true, focusRequest: focusRequest,
+                onSubmit: submit, onCancel: cancelEditing
+            )
+            .frame(width: 72)
+            .overlay(alignment: .topTrailing) {
+                if isPending {
+                    ProgressView().controlSize(.mini)
+                        .padding(3)
+                        .accessibilityHidden(true)
+                }
+            }
+            .accessibilityValue(isPending ? "Applying" : "")
+            Text(unit.symbol).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                .fixedSize()
+                .accessibilityHidden(true)
+            stepButton(increasing: true)
+        }
+    }
+
+    private func stepButton(increasing: Bool) -> some View {
+        let target = next(pendingValue ?? currentTarget, increasing)
+        return ControlActionButton(
+            title: "",
+            identifier: "\(identifier).\(increasing ? "increase" : "decrease")",
+            accessibilityTitle: stepLabel(increasing),
+            hint: "Applies this target after a short pause.",
+            compact: true,
+            systemImage: increasing ? "plus" : "minus",
+            minimumHeight: 44
+        ) {
+            guard let target = next(pendingValue ?? currentTarget, increasing) else { return }
+            inputError = nil
+            pendingValue = target
+            draft = Self.draftText(target)
+            schedule(target, after: debounce)
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .fixedSize()
+        .disabled(target == nil)
+    }
+
+    private var measuredText: String {
+        guard let measured, measured.isFinite else { return "now \(PrinterDetailViewModel.missingValuePlaceholder)" }
+        return "now \(measured.formatted(.number.precision(.fractionLength(0...1))))\(unit == .celsius ? "°" : unit.symbol)"
+    }
+
+    private var measuredAccessibilityLabel: String {
+        guard let measured, measured.isFinite else { return "Current \(title) value not reported" }
+        let spoken = unit == .celsius ? "degrees" : unit.spoken
+        return "Current \(measured.formatted(.number.precision(.fractionLength(0...1))))\(spoken.isEmpty ? "" : " " + spoken)"
+    }
+
+    private func submit() -> Bool {
+        do {
+            guard let value = try parse(draft) else {
+                inputError = nil
+                return true
+            }
+            inputError = nil
+            pendingValue = value
+            draft = Self.draftText(value)
+            schedule(value, after: nil)
+            return true
+        } catch {
+            inputError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func cancelEditing() {
+        inputError = nil
+        draft = pendingValue.map(Self.draftText) ?? ""
+    }
+
+    private func clearDraft() {
+        pendingValue = nil
+        draft = ""
+    }
+
+    private func schedule(_ value: Double, after delay: Duration?) {
+        applyTask?.cancel()
+        applyTask = Task { @MainActor in
+            if let delay {
+                do { try await Task.sleep(for: delay) } catch { return }
+            }
+            // Another request owns the printer's single-flight slot; wait so
+            // this row's target is not silently dropped.
+            var waited = Duration.zero
+            while isBusy(), waited < .seconds(30) {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                waited += .milliseconds(100)
+            }
+            guard !Task.isCancelled else { return }
+            await apply(value)
+            do { try await Task.sleep(for: Self.postApplyGrace) } catch { return }
+            if pendingValue == value { clearDraft() }
         }
     }
 }
@@ -361,7 +608,6 @@ private final class NativeControlButton: UIButton {
 struct PreheatSubgroup: View {
 
     @ObservedObject var viewModel: PrinterControlsViewModel
-    var usesSteppers = false
     var compactForDetail = false
 
     /// Transient caption shown when the user taps a button while controls are
@@ -419,12 +665,7 @@ struct PreheatSubgroup: View {
             }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
 
-            IndividualHeaterControls(
-                viewModel: viewModel,
-                usesSteppers: usesSteppers,
-                compactForDetail: compactForDetail,
-                nozzleFocusRequest: nozzleFocusRequest
-            )
+            IndividualHeaterControls(viewModel: viewModel, nozzleFocusRequest: nozzleFocusRequest)
 
             if !compactForDetail {
                 grid.padding(.top, 14).padding(.bottom, 8)
@@ -641,40 +882,16 @@ struct PreheatSubgroup: View {
         .help(limitsReason ?? viewModel.preheatAccessReason(preset) ?? "")
     }
 
+    /// Nozzle and Bed rows. Each heater applies on its own: ± taps send after
+    /// a short debounce and typed values send only on Set (#3547).
     struct IndividualHeaterControls: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
-        var usesSteppers = false
-        var compactForDetail = false
         var nozzleFocusRequest = 0
-        @State private var hotend = ""
-        @State private var bed = ""
-        @State private var inputError: String?
-        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 14) {
-                let layout = dynamicTypeSize.isAccessibilitySize || usesSteppers
-                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                    : AnyLayout(HStackLayout(alignment: .bottom, spacing: 12))
-                layout {
-                    HeaterTargetEditor(
-                        viewModel: viewModel, heater: .hotend, target: $hotend,
-                        usesStepper: usesSteppers, compactForDetail: compactForDetail,
-                        focusRequest: nozzleFocusRequest
-                    )
-                    HeaterTargetEditor(
-                        viewModel: viewModel, heater: .bed, target: $bed,
-                        usesStepper: usesSteppers, compactForDetail: compactForDetail
-                    )
-                    if !compactForDetail || !hotend.isEmpty || !bed.isEmpty {
-                        setTargetsButton
-                            .frame(width: dynamicTypeSize.isAccessibilitySize || usesSteppers ? nil : 52)
-                    }
-                }
-                if let inputError {
-                    Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                HeaterTargetEditor(viewModel: viewModel, heater: .hotend, focusRequest: nozzleFocusRequest)
+                HeaterTargetEditor(viewModel: viewModel, heater: .bed)
             }
             .disabled(!viewModel.canControl || viewModel.isExecuting)
         }
@@ -685,126 +902,23 @@ struct PreheatSubgroup: View {
             default: false
             }
         }
-
-        private var setTargetsButton: some View {
-            let pending = Self.isHeaterTargetPending(viewModel.pendingCommand?.kind)
-            return ControlActionButton(
-                title: "Go", identifier: "printer.controls.heat.set-targets",
-                accessibilityTitle: "Go, set heater targets",
-                hint: "Sets only entered targets. Blank leaves a heater unchanged; zero switches it off.",
-                compact: true, prominent: true, value: pending ? "Pending" : nil,
-                matchesInputHeight: true, isPending: pending
-            ) {
-                do {
-                    let hotendValue = try viewModel.supports(.hotend) ? ControlNumberInput.heaterTarget(hotend) : nil
-                    let bedValue = try viewModel.supports(.bed) ? ControlNumberInput.heaterTarget(bed) : nil
-                    guard hotendValue != nil || bedValue != nil else {
-                        throw PrinterControlError.invalidRequest("Enter at least one target. Blank leaves a heater unchanged.")
-                    }
-                    for (heater, value) in [(Heater.hotend, hotendValue), (.bed, bedValue)] {
-                        if let value, let message = viewModel.heaterTargetError(heater, target: value) {
-                            throw PrinterControlError.invalidRequest(message)
-                        }
-                    }
-                    inputError = nil
-                    Task { await viewModel.setHeaterTargets(hotend: hotendValue, bed: bedValue) }
-                } catch {
-                    inputError = error.localizedDescription
-                }
-            }
-            .disabled(!Heater.allCases.contains(where: viewModel.supports))
-        }
     }
 
     struct HeaterTargetEditor: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         let heater: Heater
-        @Binding var target: String
-        var usesStepper = false
-        var compactForDetail = false
         var focusRequest = 0
-        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
             guard let value, value.isFinite else { return "Not reported" }
             return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
         }
 
-        /// Current reported target for this heater, used as the field
-        /// placeholder so the user sees the real value instead of the
-        /// generic word "Unchanged" when the input is blank.
         private var currentTarget: Double? {
             heater == .hotend ? viewModel.printer.hotendTarget : viewModel.printer.bedTarget
         }
 
-        private var placeholder: String {
-            guard viewModel.supports(heater), let currentTarget, currentTarget.isFinite else {
-                return "Unchanged"
-            }
-            return currentTarget == 0 ? "Off" : currentTarget.formatted(.number.precision(.fractionLength(0...1)))
-        }
-
-        var body: some View {
-            Group {
-                if compactForDetail && !dynamicTypeSize.isAccessibilitySize {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(heater == .hotend ? "Nozzle" : "Bed")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.pfTextPrimary)
-                            Text(measuredTemperatureLabel)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(Color.pfTextSecondary)
-                                .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
-                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        stepperEditor
-                    }
-                    .frame(minHeight: 48)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Text("\(heater.title) target")
-                                .font(.footnote)
-                                .foregroundStyle(Color.pfTextSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if usesStepper {
-                                Spacer(minLength: 0)
-                                Text(measuredTemperatureLabel)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(Color.pfTextSecondary)
-                                    .accessibilityIdentifier("printer.controls.\(heater.rawValue).measured")
-                                .accessibilityLabel(measuredTemperatureAccessibilityLabel)
-                            }
-                        }
-                        .frame(minHeight: 20, alignment: .leading)
-                        stepperEditor
-                    }
-                }
-            }
-            .disabled(!viewModel.supports(heater))
-        }
-
-        private var stepperEditor: some View {
-            HStack(spacing: 4) {
-                if usesStepper { stepButton(delta: -5, symbol: "minus") }
-                ControlNumberField(
-                    placeholder: placeholder, text: $target,
-                    label: "\(heater.title) target in degrees Celsius",
-                    identifier: "printer.controls.\(heater.rawValue).target",
-                    hint: targetHint,
-                    keyboardType: .decimalPad,
-                    stepperValueStyle: usesStepper,
-                    focusRequest: focusRequest
-                )
-                .frame(width: compactForDetail && !dynamicTypeSize.isAccessibilitySize ? 72 : nil)
-                Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize()
-                    .accessibilityHidden(true)
-                if usesStepper { stepButton(delta: 5, symbol: "plus") }
-            }
-        }
+        private var title: String { heater == .hotend ? "Nozzle" : "Bed" }
 
         static func steppedTarget(draft: String, current: Double?, maximum: Double?, delta: Double) -> Double? {
             let value = draft.isEmpty ? current : Double(draft)
@@ -815,50 +929,58 @@ struct PreheatSubgroup: View {
             return next == value ? nil : next
         }
 
-        private func stepButton(delta: Double, symbol: String) -> some View {
-            let next = Self.steppedTarget(
-                draft: target, current: currentTarget, maximum: viewModel.maximum(for: heater).map(Double.init), delta: delta
-            )
-            return ControlActionButton(
-                title: "",
-                identifier: "printer.controls.\(heater.rawValue).\(delta > 0 ? "increase" : "decrease")",
-                accessibilityTitle: "\(delta > 0 ? "Increase" : "Decrease") \(heater.title) target by 5 degrees",
-                hint: "Changes the draft only. Choose Go to apply heater targets.",
-                compact: true,
-                systemImage: symbol,
-                minimumHeight: 44
-            ) {
-                guard let next else { return }
-                target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
+        private var isPending: Bool {
+            switch viewModel.pendingCommand?.kind {
+            case .heater(let pending, _): pending == heater
+            case .heaterTargets: true
+            default: false
             }
-            .frame(minWidth: 44, minHeight: 44)
-            .fixedSize()
-            .disabled(next == nil)
         }
 
-        private var measuredTemperatureLabel: String {
-            let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
-            guard let value, value.isFinite else { return "now \(PrinterDetailViewModel.missingValuePlaceholder)" }
-            return "now \(value.formatted(.number.precision(.fractionLength(0...1))))°"
-        }
-
-        private var measuredTemperatureAccessibilityLabel: String {
-            let value = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
-            guard let value, value.isFinite else { return "Current temperature not reported" }
-            return "Current \(value.formatted(.number.precision(.fractionLength(0...1)))) degrees"
+        var body: some View {
+            let measured = heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+            let maximum = viewModel.maximum(for: heater).map(Double.init)
+            HeatTargetRow(
+                title: title,
+                measured: measured,
+                identifier: "printer.controls.\(heater.rawValue)",
+                fieldIdentifier: "printer.controls.\(heater.rawValue).target",
+                fieldLabel: "\(heater.title) target in degrees Celsius",
+                fieldHint: targetHint,
+                stepLabel: { "\($0 ? "Increase" : "Decrease") \(heater.title) target by 5 degrees" },
+                unit: .celsius,
+                currentTarget: viewModel.supports(heater) ? currentTarget : nil,
+                isPending: isPending,
+                next: { base, increasing in
+                    Self.steppedTarget(draft: "", current: base, maximum: maximum, delta: increasing ? 5 : -5)
+                },
+                parse: { text in
+                    guard let value = try ControlNumberInput.heaterTarget(text) else { return nil }
+                    if let message = viewModel.heaterTargetError(heater, target: value) {
+                        throw PrinterControlError.invalidRequest(message)
+                    }
+                    return value
+                },
+                isBusy: { viewModel.isExecuting },
+                apply: { await viewModel.setHeaterTarget(heater, target: $0) },
+                focusRequest: focusRequest
+            )
+            .disabled(!viewModel.supports(heater))
         }
 
         private var targetHint: String {
             guard viewModel.supports(heater) else { return "\(heater.title) control is unavailable." }
             let limit = viewModel.maximum(for: heater).map { "Maximum \($0) degrees. " }
                 ?? "Reported maximum unavailable; firmware limits apply. "
-            return limit + ControlNumberInput.heaterPrecisionMessage + " Blank leaves this heater unchanged; zero switches it off."
+            return "Double tap to enter a target, then choose Set. " + limit
+                + ControlNumberInput.heaterPrecisionMessage + " Zero switches it off."
         }
     }
 
+    /// Genuine blocked reasons only; an in-flight request just disables the rows (#3547).
     private var blockedReasonMessage: String? {
         if horizontalSizeClass == .regular {
-            return viewModel.blockedReason
+            return viewModel.heatRowBlockedReason
         }
         return disabledTapMessage
     }
@@ -952,7 +1074,7 @@ struct PreheatSubgroup: View {
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.
-            let message = viewModel.preheatAccessReason(preset) ?? "Controls are unavailable."
+            guard let message = viewModel.heatRowBlockedReason else { return }
             withAnimation(.easeInOut(duration: 0.15)) {
                 disabledTapMessage = message
             }

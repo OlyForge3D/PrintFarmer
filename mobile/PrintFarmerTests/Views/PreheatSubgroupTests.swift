@@ -19,7 +19,9 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertGreaterThan(size.height, 88)
     }
 
-    func test_essentialHeat_hasPairedInputsOneSetterAndReadableAdaptiveEvidence() async throws {
+    /// #3547: Nozzle and Bed share one row (name, measured value, tappable
+    /// target, − and +). There is no Go/Set-targets button.
+    func test_heatRows_shareOneRowWithTappableTargetAndSteppers() async throws {
         let (model, service) = try await thermalModel()
         var readings = model.printer
         readings.hotendTemp = 192.5
@@ -31,133 +33,141 @@ final class PreheatSubgroupTests: XCTestCase {
             let (window, controller) = try await installThermal(model, width: width, type: type)
             defer { window.isHidden = true }
             let controls = nativeControls(controller.view)
-            XCTAssertEqual(controls.count, 3, "Two inputs and exactly one Set targets; no per-heater Set/Off")
-            let set = try thermalButton(controller)
-            XCTAssertEqual(set.accessibilityLabel, "Go, set heater targets")
-            let fields = controls.compactMap { $0 as? UITextField }
-            XCTAssertEqual(fields.count, 2)
-            let firstFrame = fields[0].convert(fields[0].bounds, to: controller.view)
-            let secondFrame = fields[1].convert(fields[1].bounds, to: controller.view)
-            if type.isAccessibilitySize {
-                XCTAssertLessThanOrEqual(firstFrame.maxY, secondFrame.minY)
-            } else {
-                XCTAssertEqual(firstFrame.maxY, secondFrame.maxY, accuracy: 1)
-                XCTAssertLessThanOrEqual(firstFrame.maxX, secondFrame.minX)
-            }
+            XCTAssertEqual(controls.count, 6, "Per heater: one target field plus − and +; no Go button")
+            XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
             for heater in Heater.allCases {
                 let field = try XCTUnwrap(controls.first {
                     $0.accessibilityIdentifier == "printer.controls.\(heater.rawValue).target"
                 } as? UITextField)
                 XCTAssertEqual(field.accessibilityLabel, "\(heater.title) target in degrees Celsius")
+                XCTAssertEqual(field.textAlignment, .center, "The target reads as a tappable value chip")
+                XCTAssertEqual(field.borderStyle, .none)
+                XCTAssertEqual(field.layer.cornerRadius, 8)
+                XCTAssertNotNil(field.inputAccessoryView, "Numeric entry offers Set and Cancel")
+                let decrease = try XCTUnwrap(controls.first {
+                    $0.accessibilityIdentifier == "printer.controls.\(heater.rawValue).decrease"
+                })
+                let increase = try XCTUnwrap(controls.first {
+                    $0.accessibilityIdentifier == "printer.controls.\(heater.rawValue).increase"
+                })
                 let fieldFrame = field.convert(field.bounds, to: controller.view)
-                let setFrame = set.convert(set.bounds, to: controller.view)
-                XCTAssertEqual(fieldFrame.height, setFrame.height, accuracy: 1)
-                if type.isAccessibilitySize {
-                    XCTAssertLessThanOrEqual(fieldFrame.maxY, setFrame.minY)
-                } else {
-                    XCTAssertEqual(fieldFrame.maxY, setFrame.maxY, accuracy: 1)
-                    XCTAssertLessThanOrEqual(fieldFrame.maxX, setFrame.minX)
-                    XCTAssertLessThanOrEqual(setFrame.width, 52)
-                }
-                for control in [field, set] as [UIControl] {
+                let decreaseFrame = decrease.convert(decrease.bounds, to: controller.view)
+                let increaseFrame = increase.convert(increase.bounds, to: controller.view)
+                XCTAssertEqual(fieldFrame.midY, increaseFrame.midY, accuracy: 1)
+                XCTAssertLessThanOrEqual(decreaseFrame.maxX, fieldFrame.minX)
+                XCTAssertLessThanOrEqual(fieldFrame.maxX, increaseFrame.minX)
+                for control in [field, decrease, increase] {
                     let frame = control.convert(control.bounds, to: controller.view)
                     XCTAssertGreaterThanOrEqual(control.bounds.width, 44)
                     XCTAssertGreaterThanOrEqual(control.bounds.height, 44)
                     XCTAssertGreaterThanOrEqual(frame.minX, -1)
                     XCTAssertLessThanOrEqual(frame.maxX, width + 1)
                 }
-                XCTAssertGreaterThanOrEqual(field.bounds.height, try XCTUnwrap(field.font).lineHeight)
-                for button in [set] {
-                    let label = try XCTUnwrap(button.titleLabel)
-                    XCTAssertGreaterThanOrEqual(label.bounds.height + 1, try XCTUnwrap(label.font).lineHeight)
-                }
             }
             let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "essential-heat-\(Int(width))-\(type)"
+            attachment.name = "heat-rows-\(Int(width))-\(type)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
         XCTAssertNil(service.setTemperaturesCalledWith)
     }
 
-    func test_thermalSetTargets_preservesValidationOmissionZeroAndPendingLock() async throws {
-        // Hang guard only: dispatch is awaited causally below, never against a wall-clock deadline.
+    /// #3547: repeated ± taps send one request, for that heater only, after the debounce.
+    func test_heatStepperBurst_sendsOneRequestForThatHeaterOnly() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel()
+        let (window, controller) = try await installThermal(model, debounce: .milliseconds(300))
+        defer { window.isHidden = true }
+        let start = try XCTUnwrap(model.printer.hotendTarget)
+        let increase = try control("printer.controls.hotend.increase", in: controller)
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.afterSetTemperatures = { dispatched.resume() }
+            Task { @MainActor in
+                for _ in 0..<3 {
+                    increase.sendActions(for: .touchUpInside)
+                    try? await self.settle(controller)
+                }
+                XCTAssertEqual(service.setTemperaturesCallCount, 0, "± waits for the quiet period")
+            }
+        }
+        service.afterSetTemperatures = nil
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(service.setTemperaturesCallCount, 1, "A burst collapses into one request")
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, start + 15)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed, "Only the tapped heater changes")
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
+        XCTAssertEqual(field.text, HeatTargetRow.draftText(start + 15))
+        model.cancelPendingCommand()
+    }
+
+    /// #3547: a typed value applies only on Set; Cancel reverts; range and
+    /// precision validation stays; 0 switches the heater off.
+    func test_typedTarget_appliesOnlyOnSetAndCancelReverts() async throws {
         executionTimeAllowance = 120
         let (model, service) = try await thermalModel()
         let (window, controller) = try await installThermal(model)
         defer { window.isHidden = true }
-        let field = try XCTUnwrap(nativeControls(controller.view).first {
-            $0.accessibilityIdentifier == "printer.controls.hotend.target"
-        } as? UITextField)
-        let set = try thermalButton(controller)
-        for invalid in ["", "200.5", "-1", "NaN", "99999"] {
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
+        field.text = "205"
+        field.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try press(field, "cancel")
+        try await settle(controller)
+        XCTAssertEqual(field.text, "", "Cancel reverts the typed draft")
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertNil(service.setTemperaturesCalledWith, "Typing alone never sends")
+        for invalid in ["200.5", "-1", "NaN", "99999"] {
             field.text = invalid
             field.sendActions(for: .editingChanged)
             try await settle(controller)
-            set.sendActions(for: .touchUpInside)
+            try press(field, "set")
             try await settle(controller)
             XCTAssertNil(service.setTemperaturesCalledWith, invalid)
+            XCTAssertEqual(field.text, invalid, "An invalid value stays for correction")
         }
         field.text = "205"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
-        await tapAndAwaitDispatch(set, service: service)
-        try await settle(controller)
-        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
-        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
-        XCTAssertTrue(model.isExecuting)
-        let commandControls = nativeControls(controller.view)
-        XCTAssertFalse(commandControls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
-                       "Pending is silent: no Stop waiting button (#3496)")
-        XCTAssertEqual(commandControls.count, 3, "Both target fields and the setter remain mounted")
-        XCTAssertTrue(commandControls.allSatisfy { !$0.isEnabled })
-        model.cancelPendingCommand()
-        XCTAssertNil(model.pendingCommand)
-        try await settle(controller)
-        field.text = ""
-        field.sendActions(for: .editingChanged)
-        let bed = try XCTUnwrap(nativeControls(controller.view).first {
-            $0.accessibilityIdentifier == "printer.controls.bed.target"
-        } as? UITextField)
-        bed.text = "0"
-        bed.sendActions(for: .editingChanged)
-        try await settle(controller)
-        await tapAndAwaitDispatch(set, service: service)
-        try await settle(controller)
-        XCTAssertNil(service.setTemperaturesCalledWith?.hotend)
-        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
-        model.cancelPendingCommand()
-    }
-
-    func test_thermalTargets_withUnknownMaximum_dispatchNativelyAndHonorOfflineLock() async throws {
-        let (model, service) = try await thermalModel(knownLimits: false)
-        let (window, controller) = try await installThermal(model)
-        defer { window.isHidden = true }
-        let field = try XCTUnwrap(nativeControls(controller.view).first {
-            $0.accessibilityIdentifier == "printer.controls.hotend.target"
-        } as? UITextField)
-        field.text = "205"
-        field.sendActions(for: .editingChanged)
-        try await settle(controller)
-        await tapAndAwaitDispatch(try thermalButton(controller), service: service)
+        try await pressAndAwaitDispatch(field, service: service)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCallCount, 1)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        XCTAssertTrue(model.isExecuting)
+        let pendingControls = nativeControls(controller.view)
+        XCTAssertFalse(pendingControls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                       "Pending is silent: no Stop waiting button (#3496)")
+        XCTAssertEqual(pendingControls.count, 6, "Rows stay mounted while the request is in flight")
+        XCTAssertTrue(pendingControls.allSatisfy { !$0.isEnabled }, "In-flight state dims the rows")
         model.cancelPendingCommand()
         try await settle(controller)
-        field.text = "0"
+        let bed = try XCTUnwrap(try control("printer.controls.bed.target", in: controller) as? UITextField)
+        bed.text = "0"
+        bed.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try await pressAndAwaitDispatch(bed, service: service)
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
+        XCTAssertNil(service.setTemperaturesCalledWith?.hotend)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0, "Zero switches the bed off")
+        model.cancelPendingCommand()
+    }
+
+    func test_thermalTargets_withUnknownMaximum_dispatchNativelyAndHonorOfflineLock() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel(knownLimits: false)
+        let (window, controller) = try await installThermal(model)
+        defer { window.isHidden = true }
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
+        field.text = "205"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
-        await tapAndAwaitDispatch(try thermalButton(controller), service: service)
-        try await settle(controller)
-        XCTAssertEqual(service.setTemperaturesCallCount, 2)
-        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+        try await pressAndAwaitDispatch(field, service: service)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
-        XCTAssertEqual(field.text, "0")
         model.cancelPendingCommand()
         var offline = model.printer
         offline.isOnline = false
@@ -170,17 +180,95 @@ final class PreheatSubgroupTests: XCTestCase {
         let (model, _) = try await thermalModel(hotendOnly: true)
         let (window, controller) = try await installThermal(model)
         defer { window.isHidden = true }
-        let field = try XCTUnwrap(nativeControls(controller.view).first as? UITextField)
+        let field = try XCTUnwrap(try control("printer.controls.hotend.target", in: controller) as? UITextField)
         field.text = "231"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
         controller.rootView = AnyView(thermalContent(model, width: 326, type: .accessibility5))
         try await settle(controller)
         let controls = nativeControls(controller.view)
-        XCTAssertEqual(controls.count, 3)
-        XCTAssertEqual((controls.first as? UITextField)?.text, "231")
-        let bed = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.bed.target" })
-        XCTAssertFalse(bed.isEnabled)
+        XCTAssertEqual(controls.count, 6)
+        XCTAssertEqual((try control("printer.controls.hotend.target", in: controller) as? UITextField)?.text, "231")
+        for suffix in ["target", "increase", "decrease"] {
+            let bed = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.bed.\(suffix)" })
+            XCTAssertFalse(bed.isEnabled, suffix)
+        }
+    }
+
+    /// #3547 addition: an executing preset never surfaces as caption text
+    /// ("Another printer operation is still pending.") on heater or sensor rows.
+    func test_executingPreset_showsNoPendingCaptionOnHeatOrSensorRows() async throws {
+        executionTimeAllowance = 120
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.state = "idle"
+        printer.sensors = [
+            PrinterSensor(
+                id: "chamber", displayName: "Chamber", kind: .chamber,
+                readings: [
+                    SensorReading(quantity: .temperature, value: .number(31), unit: .celsius),
+                    SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius)
+                ],
+                writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 70, step: 1, unit: .celsius)]
+            ),
+            PrinterSensor(
+                id: "heater_box1", displayName: "Heater Box1", kind: .chamber,
+                readings: [
+                    SensorReading(quantity: .temperature, value: .number(28), unit: .celsius),
+                    SensorReading(quantity: .targetTemperature, value: .number(0), unit: .celsius)
+                ],
+                writable: [SensorWritable(
+                    quantity: .targetTemperature, min: 0, max: 60, step: 1, unit: .celsius, allowZero: true
+                )]
+            )
+        ]
+        let service = MockPrinterService()
+        var capabilities = PrinterBackendCapabilities.allControlsFixture
+        capabilities.supportsSensorControl = true
+        service.capabilitiesToReturn = capabilities
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        defer { model.deactivate() }
+        let content = VStack(alignment: .leading, spacing: 8) {
+            PreheatSubgroup(viewModel: model, compactForDetail: true)
+            PrinterSensorControlRows(viewModel: model, compact: true)
+        }
+        .environment(\.horizontalSizeClass, .regular)
+        .frame(width: 448)
+        .fixedSize(horizontal: false, vertical: true)
+        let controller = UIHostingController(rootView: content)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 448, height: 900))
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await settle(controller)
+        let idleTexts = accessibilityTexts(controller.view)
+        XCTAssertTrue(idleTexts.contains { $0.contains("Heater Box1") }, "Collector sees row titles: \(idleTexts)")
+
+        let preset = PreheatPreset.pla
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.afterSetTemperatures = { dispatched.resume() }
+            Task { @MainActor in await model.preheat(preset) }
+        }
+        service.afterSetTemperatures = nil
+        try await settle(controller)
+        XCTAssertTrue(model.isExecuting, "The preset is still in flight")
+        XCTAssertNil(model.heatRowBlockedReason)
+        XCTAssertNil(model.sensorRowMessage)
+        let texts = accessibilityTexts(controller.view)
+        XCTAssertFalse(texts.contains { $0.localizedCaseInsensitiveContains("pending") }, "\(texts)")
+        XCTAssertFalse(texts.contains { $0.contains("Another") }, "\(texts)")
+        XCTAssertTrue(nativeControls(controller.view).allSatisfy { !$0.isEnabled }, "In flight only dims the rows")
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "heat-rows-multi-heater-preset-in-flight"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        model.cancelPendingCommand()
     }
 
     func test_unsupportedHotendDisablesEveryPresetIncludingCoolDown() async throws {
@@ -218,7 +306,8 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     private func thermalContent(
-        _ model: PrinterControlsViewModel, width: CGFloat, type: DynamicTypeSize = .large
+        _ model: PrinterControlsViewModel, width: CGFloat, type: DynamicTypeSize = .large,
+        debounce: Duration = .milliseconds(700)
     ) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             PrinterDetailTemperatureStrip(
@@ -229,6 +318,7 @@ final class PreheatSubgroupTests: XCTestCase {
             PreheatSubgroup(viewModel: model)
         }
         .environment(\.dynamicTypeSize, type)
+        .environment(\.heatTargetDebounce, debounce)
         .environment(\.horizontalSizeClass, width > 390 ? .regular : .compact)
         .frame(width: width)
         .fixedSize(horizontal: false, vertical: true)
@@ -320,9 +410,12 @@ final class PreheatSubgroupTests: XCTestCase {
     }
 
     private func installThermal(
-        _ model: PrinterControlsViewModel, width: CGFloat = 326, type: DynamicTypeSize = .large
+        _ model: PrinterControlsViewModel, width: CGFloat = 326, type: DynamicTypeSize = .large,
+        debounce: Duration = .milliseconds(700)
     ) async throws -> (UIWindow, UIHostingController<AnyView>) {
-        let controller = UIHostingController(rootView: AnyView(thermalContent(model, width: width, type: type)))
+        let controller = UIHostingController(
+            rootView: AnyView(thermalContent(model, width: width, type: type, debounce: debounce))
+        )
         let size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
         let window = UIWindow()
         window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
@@ -355,12 +448,49 @@ final class PreheatSubgroupTests: XCTestCase {
         (view as? UIControl).map { [$0] } ?? view.subviews.flatMap { nativeControls($0) }
     }
 
-    private func thermalButton(
-        _ controller: UIViewController
-    ) throws -> UIButton {
-        try XCTUnwrap(nativeControls(controller.view).first {
-            $0.accessibilityIdentifier == "printer.controls.heat.set-targets"
-        } as? UIButton)
+    private func control(_ identifier: String, in controller: UIViewController) throws -> UIControl {
+        try XCTUnwrap(nativeControls(controller.view).first { $0.accessibilityIdentifier == identifier }, identifier)
+    }
+
+    /// Invokes the keypad toolbar's Set or Cancel item, as a tap would.
+    private func press(_ field: UITextField, _ item: String) throws {
+        let toolbar = try XCTUnwrap(field.inputAccessoryView as? UIToolbar)
+        let identifier = "\(field.accessibilityIdentifier ?? "").\(item)"
+        let button = try XCTUnwrap(toolbar.items?.first { $0.accessibilityIdentifier == identifier }, identifier)
+        _ = (button.target as? NSObject)?.perform(button.action)
+    }
+
+    private func pressAndAwaitDispatch(_ field: UITextField, service: MockPrinterService) async throws {
+        let toolbar = try XCTUnwrap(field.inputAccessoryView as? UIToolbar)
+        let identifier = "\(field.accessibilityIdentifier ?? "").set"
+        let button = try XCTUnwrap(toolbar.items?.first { $0.accessibilityIdentifier == identifier })
+        await withCheckedContinuation { (dispatched: CheckedContinuation<Void, Never>) in
+            service.afterSetTemperatures = { dispatched.resume() }
+            _ = (button.target as? NSObject)?.perform(button.action)
+        }
+        service.afterSetTemperatures = nil
+    }
+
+    /// Visible SwiftUI text, read through the accessibility tree.
+    private func accessibilityTexts(_ root: NSObject) -> [String] {
+        var texts: [String] = []
+        func visit(_ node: NSObject, depth: Int) {
+            guard depth < 40 else { return }
+            if let label = node.accessibilityLabel, !label.isEmpty { texts.append(label) }
+            if let value = node.accessibilityValue, !value.isEmpty { texts.append(value) }
+            if let elements = node.accessibilityElements as? [NSObject] {
+                elements.forEach { visit($0, depth: depth + 1) }
+            } else {
+                let count = node.accessibilityElementCount()
+                if count != NSNotFound, count > 0 {
+                    (0..<count).compactMap { node.accessibilityElement(at: $0) as? NSObject }
+                        .forEach { visit($0, depth: depth + 1) }
+                }
+            }
+            if let view = node as? UIView { view.subviews.forEach { visit($0, depth: depth + 1) } }
+        }
+        visit(root, depth: 0)
+        return texts
     }
 
     func test_heaterInput_requiresWholeDegreesWithoutSilentRounding() throws {
@@ -438,6 +568,27 @@ final class PreheatSubgroupTests: XCTestCase {
             resignFirstResponderCallCount += 1
             return super.resignFirstResponder()
         }
+    }
+
+    func test_heatTargetField_offersCancelAndSetAndOnlySetApplies() async throws {
+        var value = "205"
+        var submitted = 0
+        var cancelled = 0
+        let field = ControlNumberField(
+            placeholder: "200", text: Binding(get: { value }, set: { value = $0 }),
+            label: "target", identifier: "test.heat", keyboardType: .decimalPad, stepperValueStyle: true,
+            onSubmit: { submitted += 1; return true }, onCancel: { cancelled += 1 }
+        )
+        let (_, controller) = try await install(field)
+        let textField = try XCTUnwrap(nativeControls(controller.view).first as? UITextField)
+        let items = try XCTUnwrap((textField.inputAccessoryView as? UIToolbar)?.items)
+        XCTAssertEqual(items.first?.accessibilityIdentifier, "test.heat.cancel")
+        XCTAssertEqual(items.last?.accessibilityIdentifier, "test.heat.set")
+        XCTAssertEqual(items.last?.title, "Set")
+        try press(textField, "cancel")
+        XCTAssertEqual([submitted, cancelled], [0, 1])
+        try press(textField, "set")
+        XCTAssertEqual([submitted, cancelled], [1, 1])
     }
 
     func test_punctuationKeyboard_hasNoAccessoryToolbar() async throws {

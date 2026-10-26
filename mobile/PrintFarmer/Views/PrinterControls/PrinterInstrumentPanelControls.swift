@@ -411,11 +411,9 @@ struct PrinterInstrumentPanelControls: View {
 
     private var heatPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
+            PreheatSubgroup(viewModel: viewModel, compactForDetail: true)
             // Writable sensors are idle-only here; Tune carries only Speed, Flow and babystep (#3540).
-            PrinterSensorControlRows(
-                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
-                )
+            PrinterSensorControlRows(viewModel: viewModel, compact: true)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.heat-group")

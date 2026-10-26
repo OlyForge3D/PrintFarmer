@@ -1222,7 +1222,8 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         )
     }
 
-    func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
+    /// #3547: ± applies that heater on its own after a short pause; there is no Go button.
+    func testCompactHeatStepperAppliesAfterPauseAndUsesAuthenticatedAPI() {
         openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
@@ -1235,9 +1236,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(increase.waitForExistence(timeout: 8))
         increase.tap()
 
-        let apply = app.buttons["printer.controls.heat.set-targets"]
-        XCTAssertTrue(apply.waitForExistence(timeout: 5))
-        apply.tap()
+        XCTAssertFalse(app.buttons["printer.controls.heat.set-targets"].exists, "Targets apply without a Go button")
         // Success is silent (#3496): no progress or confirmation text, and no error banner.
         XCTAssertFalse(app.buttons["printer.controls.dismiss-error"].waitForExistence(timeout: 3))
         for phrase in ["Command pending", "Request accepted", "Matching telemetry", "Command accepted"] {
@@ -1665,7 +1664,7 @@ final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
             "\(sensor).value", "\(sensor).increase", "\(sensor).decrease",
             "printer.controls.sensor.fan.FanSpeed.value",
             "printer.controls.runtime.temperatures", "printer.controls.heat-group",
-            "printer.controls.hotend.increase", "printer.controls.bed.increase", "printer.controls.heat.set-targets"
+            "printer.controls.hotend.increase", "printer.controls.bed.increase"
         ] {
             XCTAssertFalse(any[id].exists, "\(id) must not render: Tune is Speed, Flow and babystep only")
         }

@@ -433,8 +433,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             "printer.controls.sensor.rpi-fan.TargetTemperature.increase",
             "printer.controls.runtime.fan.increase", "printer.controls.runtime.fan.decrease",
             "printer.controls.hotend.increase", "printer.controls.hotend.decrease",
-            "printer.controls.bed.increase", "printer.controls.bed.decrease",
-            "printer.controls.heat.set-targets"
+            "printer.controls.bed.increase", "printer.controls.bed.decrease"
         ] {
             XCTAssertNil(tune.find(identifier), "\(identifier) must not render: Tune is Speed, Flow and babystep only")
         }
