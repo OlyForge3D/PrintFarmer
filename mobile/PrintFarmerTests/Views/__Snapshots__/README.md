@@ -19,7 +19,7 @@ was re-recorded and no precision was changed.
 | `test_snapshot_flashForgeProfile` | Same unreachable owner, unmatched-route-port fixture; volatile explanatory copy. | **Replace** with the same production-panel matrix: unsupported hotend/bed remain disabled. |
 | `test_snapshot_sdcpProfile` | Same unreachable owner; duplicates the unsupported layout. | **Replace** with the production-panel matrix: SDCP has no advertised motion/heater actions. |
 | `test_snapshot_loadingState_capabilitiesNil` | Unreachable owner; transient async state, not a stable visual contract. | **Replace** with `test_instrumentPanel_loadingCapabilitiesCannotDispatchAndResolvesWithoutRemount`: barrier-held capability discovery, disabled editors, in-place enabling, no command replay. |
-| `test_snapshot_disabledState_printerStarting` | Unreachable setup banner, not current Control/Tune; volatile copy. | **Replace** with `test_instrumentPanel_activeJobsSelectTuneAndGateTemperaturesByCapability`, covering starting, printing and paused, with/without active-print heat support. |
+| `test_snapshot_disabledState_printerStarting` | Unreachable setup banner, not current Control/Tune; volatile copy. | **Replace** with `test_instrumentPanel_activeJobsGateTuneAndHeatersByCapability`: starting disables Tune and omits heater actions; printing/paused select Tune, exposing heater controls only with active-print heat support. |
 | `test_snapshot_lockoutBanner_printingState` | Same unreachable banner; redundant disabled-state pixels. | **Replace** with the active-job matrix plus production native Move/Heat/Tune selection and enablement assertions. No compatibility requirement justifies keeping either legacy banner golden. |
 | `test_controlSensorRows` | `PrinterSensorControlRows` is mounted by production Tune; actively evolving composition. | **Replace** pixels with named 44pt targets, bounds, accessible names, fan/read-only exclusion, exact chamber target dispatch, and absent actions for unsupported/offline/missing readings. |
 | `test_snapshot_printerDetailBorderedDestructiveControls_darkMode` | Stable shared chrome; production `PrinterDetailView` filament action mounts `.eject`. | **Retain** unchanged: dark contrast, destructive tint, icon/title/border and sibling spacing are visual properties. `.cancel` is a synthetic style variant, not the current Cancel UI. Action tests cover state/dispatch. |
@@ -34,10 +34,15 @@ and geometry, not SwiftUI type strings or view-tree shapes.
 `test_instrumentPanel_nativeMoveTargetsFitAndDispatchAcrossAdaptiveLayouts`
 checks bounds and 44pt targets at 320pt, 390pt accessibility text, and 1024pt,
 then selects 10mm and sends a Z jog with the exact printer, axis, distance and
-existing rate. Existing `PrinterDetailPanelsTests` additionally exercises the
+existing rate. Idle Tune stays disabled. The 44pt minimum is measured in native
+hit bounds, not ancestor-converted rectangles whose fractional origins can
+introduce floating-point roundoff. Existing `PrinterDetailPanelsTests` additionally exercises the
 real detail host, server identity, Tune sensors/factors and authenticated API
 dispatch. `PreheatSubgroupTests`, `PrinterControlsViewModelTests` and
 `PrinterRunActionBarTests` retain validation, request locking and action gates.
+
+Validate against the current target-branch integration, not only an old feature
+tree: production Control/Tune contracts can evolve while a PR is open.
 
 ## Review captures are not goldens
 

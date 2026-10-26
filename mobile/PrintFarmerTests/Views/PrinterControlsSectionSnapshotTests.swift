@@ -2065,8 +2065,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCallCount, 0, "Capability resolution cannot replay a command")
     }
 
-    func test_instrumentPanel_activeJobsSelectTuneAndGateTemperaturesByCapability() async throws {
-        for state in ["starting", "printing", "paused"] {
+    func test_instrumentPanel_activeJobsGateTuneAndHeatersByCapability() async throws {
+        for (state, canTune) in [("starting", false), ("printing", true), ("paused", true)] {
             for supportsHeat in [false, true] {
                 let printer = try makePrinter(backend: .moonraker, state: state)
                 var caps = Self.layoutCaps
@@ -2081,13 +2081,22 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     XCTAssertFalse(try panelControl("printer.controls.segment.\(segment)", in: controller).isEnabled, state)
                 }
                 let tune = try XCTUnwrap(try panelControl("printer.controls.segment.tune", in: controller) as? UIButton)
-                XCTAssertTrue(tune.isEnabled)
-                XCTAssertTrue(tune.isSelected, "\(state) must select Tune rather than legacy setup controls")
+                XCTAssertEqual(tune.isEnabled, canTune, state)
+                XCTAssertEqual(tune.isSelected, canTune, state)
                 for heater in ["hotend", "bed"] {
-                    XCTAssertEqual(
-                        try panelControl("printer.controls.\(heater).target", in: controller).isEnabled,
-                        supportsHeat, "\(state) \(heater)"
-                    )
+                    for action in ["target", "decrease", "increase"] {
+                        let identifier = "printer.controls.\(heater).\(action)"
+                        let control = nativeControls(in: controller.view).first {
+                            $0.accessibilityIdentifier == identifier
+                        }
+                        if canTune && supportsHeat {
+                            let control = try XCTUnwrap(control, "\(state) \(identifier)")
+                            XCTAssertTrue(control.isEnabled, "\(state) \(identifier)")
+                            XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, identifier)
+                        } else {
+                            XCTAssertNil(control, "\(state) must not expose unsupported Tune heater actions")
+                        }
+                    }
                 }
                 XCTAssertEqual(service.setTemperaturesCallCount, 0)
                 XCTAssertNil(service.moveCalledWith)
@@ -2118,9 +2127,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             for identifier in identifiers {
                 let control = try panelControl(identifier, in: controller)
                 let frame = control.convert(control.bounds, to: controller.view)
-                XCTAssertTrue(control.isEnabled, identifier)
-                XCTAssertGreaterThanOrEqual(frame.height, 44, identifier)
-                XCTAssertGreaterThanOrEqual(frame.width, 44, identifier)
+                XCTAssertEqual(control.isEnabled, identifier != "printer.controls.segment.tune", identifier)
+                // Native hit bounds avoid coordinate-conversion roundoff at fractional origins.
+                XCTAssertGreaterThanOrEqual(control.bounds.height, 44, identifier)
+                XCTAssertGreaterThanOrEqual(control.bounds.width, 44, identifier)
                 XCTAssertGreaterThanOrEqual(frame.minX, -1, identifier)
                 XCTAssertLessThanOrEqual(frame.maxX, width + 1, identifier)
                 XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, identifier)
