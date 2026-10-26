@@ -175,6 +175,12 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
 
             (await client.SetTempsAsync(root, 220.5, null)).Should().BeTrue();
             PrinterCompositeStatus edited = await client.GetCompositeStatusAsync(root, null);
+            for (int attempt = 0; attempt < 10 && edited.HotendTarget != 220.5; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50));
+                edited = await client.GetCompositeStatusAsync(root, null);
+            }
+
             edited.HotendTarget.Should().Be(220.5);
             Assert.NotNull(edited.Sensors);
             edited.Sensors.Single(sensor => sensor.Id == "extruder").Readings

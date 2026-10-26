@@ -2338,8 +2338,6 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
             XCTAssertFalse(vm.canControl, "Move/setup stay locked during a print")
             XCTAssertEqual(vm.supportsHeatDuringPrint, supported)
-            XCTAssertEqual(vm.canControlHeat, supported)
-            XCTAssertEqual(vm.heatBlockedReason == nil, supported)
 
             await vm.setHeaterTarget(.hotend, target: 210)
             XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, supported ? 210 : nil)
@@ -2351,8 +2349,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     /// Heat is idle-only: no preset (row, More menu or Cool down) runs while a
     /// job is starting, printing or paused, even when the backend supports
-    /// temperature control during a print. Tune's heater targets still apply.
-    func test_heatPresets_blockedMidPrintEvenWithCapability_whileTuneTargetsApply() async throws {
+    /// temperature control during a print. The command layer still honours the
+    /// capability for heater targets, though no view offers them mid-print (#3540).
+    func test_heatPresets_blockedMidPrintEvenWithCapability_whileHeaterTargetCommandsApply() async throws {
         for state in ["starting", "printing", "paused"] {
             var printer = try idlePrinter()
             printer.state = state
@@ -2376,7 +2375,6 @@ final class PrinterControlsViewModelTests: XCTestCase {
             }
 
             if state != "starting" {
-                XCTAssertTrue(vm.canControlHeat, state)
                 await vm.setHeaterTargets(hotend: 215, bed: 65)
                 XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 215, state)
                 XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 65, state)

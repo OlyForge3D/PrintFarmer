@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Tune trimmed to Speed, Flow and babystep (#3540)** — The Control › Tune
+  segment no longer shows hotend/bed target steppers or writable sensor rows
+  while printing, even when the backend supports temperature control during a
+  print. Writable sensors and heater targets remain on Heat while idle.
+
 - **Printer detail clutter (#3496)** — Removed the visible "Speed/Flow can be
   tuned only while printing or paused." lines under the disabled Tune
   steppers (VoiceOver hints keep the reason), the Filament tab's
@@ -23,9 +28,9 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   gone. The Control › Tune segment is disabled (VoiceOver hint
   "Available while printing") unless the printer is printing or paused (not
   starting), and falls back to Move when a print ends; writable sensor
-  controls moved to Heat so they stay reachable while idle. Tune shows nozzle
-  and bed steppers only when the printer accepts temperature changes during a
-  print, and Heat/Move no longer show "Unavailable while printing" text. The
+  controls moved to Heat so they stay reachable while idle. Tune shows only
+  Speed, Flow and Z babystep (#3540), and Heat/Move no longer show
+  "Unavailable while printing" text. The
   iPad jog pad is capped at 480 pt and centred. The camera card now puts the
   "Camera" title and rotate/refresh buttons in a header row above
   full-width, aspect-preserving media whose height is capped relative to the
@@ -214,9 +219,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   targets to 0. No confirmation is needed. Heat is idle-only: presets, the
   More menu, Custom… and the Heat target fields are blocked while a job is
   starting, printing or paused, even with
-  `supportsTemperatureControlDuringPrint`. Mid-print temperature changes
-  happen only on Tune, which keeps that capability gate; Tune omits the `enabled` quantity,
-  and `allowZero` targets step to/from 0. Missing thermal values show "--"
+  `supportsTemperatureControlDuringPrint`. The app offers no mid-print
+  temperature changes: Tune is only Speed, Flow and Z babystep (#3540).
+  Writable sensor rows on Heat omit the `enabled` quantity, and `allowZero`
+  targets step to/from 0. Missing thermal values show "--"
   (VoiceOver "not reported").
 - Heat presets: PLA · PETG · ABS · **More** · Cool down in one row (wrapping
   to presets, then More + Cool down at xxLarge and above, including every

@@ -85,6 +85,7 @@ cd mobile
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+    -only-testing:PrintFarmerTests/PrinterSensorsSnapshotTests \
     -parallel-testing-enabled NO \
     -resultBundlePath "$run_dir/Snapshots.xcresult" \
     2>&1 | tee "$run_dir/test.log"
@@ -105,9 +106,14 @@ for iPad-host runs; each family needs separate unchanged-reference evidence.
 To diagnose environmental drift, compare identical tests/reference blobs under
 identical pinned Xcode/runtime/build, family, scale and locale; do not assume
 every failure is environmental or conflate XCUI failures with image drift.
-Keep snapshot strictness, skip policy and PNGs unchanged. The
-[snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
-authorization to re-record baselines for #2536/#2572.
+The [snapshot policy and complete inventory](PrintFarmerTests/Views/__Snapshots__/README.md)
+retains one stable dark destructive-button golden (two host-family PNGs).
+Backend/loading/job-state and Tune sensor coverage uses focused assertions;
+volatile component screenshots are labeled review-only attachments, not pixel
+gates. Prefer state, command, accessibility and bounded-layout contracts over new
+whole-screen references. Retained goldens still require strict precision, no
+skips and separate approved iPhone/iPad evidence. The guide does not authorize
+re-recording to hide runtime drift.
 
 ## Updating App Store screenshots (manual)
 
@@ -292,12 +298,10 @@ Preheat stays hidden and refuses dispatch until hotend support is confirmed.
 **Cool down** is always offered and is idle-only: it is disabled while a job is
 starting, printing or paused (Emergency stop covers stopping a print). Idle, it
 calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
-otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat targets
-stay available while printing only when the backend reports
-`supportsTemperatureControlDuringPrint`; the instrument panel's Heat segment is
-disabled while printing because Tune carries those targets. While a job is
-printing or paused, **Tune** also shows the hotend and bed targets with the same
-gating; Tune has no fan controls. Above babystep, Tune shows **Speed %** and
+otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat
+targets and writable sensors are idle-only: the instrument panel's Heat segment
+is disabled while a job is printing or paused, and **Tune** offers only Speed,
+Flow and Z babystep — no heater targets, sensors or fans (#3540). Above babystep, Tune shows **Speed %** and
 **Flow %** steppers (±5%, 1–200%) only when the backend reports
 `supportsSpeedFactorControl` / `supportsFlowFactorControl`. They use the shared
 `POST /api/printers/{id}/speed-factor` and `/flow-factor` API and stay pending

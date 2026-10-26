@@ -339,6 +339,7 @@ class RunnerTests(unittest.TestCase):
             "marker.write_text(str(attempt+1))\n"
             "def interrupt(sig, frame):\n"
             "    (bundle/'flushed').write_text('interrupted')\n"
+            "    time.sleep(float(os.environ.get('RUNNER_TEST_FLUSH_DELAY', '0')))\n"
             "    sys.exit(0)\n"
             "signal.signal(signal.SIGINT, interrupt)\n"
             "def emit(name):\n"
@@ -392,7 +393,8 @@ class RunnerTests(unittest.TestCase):
         shutil.rmtree(self.directory)
 
     def invoke(self, mode, status="Success", retry_failed_tests=False,
-               retry_status="Success", extra_environment=None):
+               retry_status="Success", extra_environment=None, *,
+               invocation_timeout=1.5, finalization_timeout=0.3, flush_seconds=0.1):
         marker = self.directory / "attempt-count"
         marker.unlink(missing_ok=True)
         environment = {
@@ -415,8 +417,9 @@ class RunnerTests(unittest.TestCase):
         }
         with patch.dict(os.environ, environment), patch("sys.stdout", new=io.StringIO()):
             code = runner.run(
-                self.arguments, invocation_timeout=1.5, finalization_timeout=0.3,
-                flush_seconds=0.1, poll_seconds=0.01, executable=str(self.stub),
+                self.arguments, invocation_timeout=invocation_timeout,
+                finalization_timeout=finalization_timeout,
+                flush_seconds=flush_seconds, poll_seconds=0.01, executable=str(self.stub),
                 retry_failed_tests=retry_failed_tests,
             )
         summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
@@ -632,12 +635,17 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.invoke("success", status="Failure")[0], 65)
 
     def test_post_test_timeout_flushes_artifacts_but_stays_failed(self):
-        code, summary = self.invoke("hang")
+        code, summary = self.invoke(
+            "hang", extra_environment={"RUNNER_TEST_FLUSH_DELAY": "0.2"},
+            invocation_timeout=5, finalization_timeout=2.5, flush_seconds=2,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [0])
         self.assertEqual(summary["termination_reason"], "post-test-timeout")
-        self.assertTrue((self.bundle / "flushed").exists())
-        self.assertLess(summary["post_last_test_seconds"], 0.5)
+        self.assertEqual((self.bundle / "flushed").read_text(), "interrupted")
+        self.assertEqual(summary["flush_seconds_included"], 2)
+        self.assertEqual(summary["finalization_budget_seconds"], 2.5)
+        self.assertLess(summary["post_last_test_seconds"], 3)
 
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
         code, summary = self.invoke("ignore-interrupt")
@@ -672,10 +680,14 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.invoke("incomplete")[0], 70)
 
     def test_cancellation_stays_nonzero_after_graceful_flush(self):
-        code, summary = self.invoke("cancel")
+        code, summary = self.invoke(
+            "cancel", extra_environment={"RUNNER_TEST_FLUSH_DELAY": "0.2"},
+            invocation_timeout=5, finalization_timeout=2.5, flush_seconds=2,
+        )
         self.assertEqual(code, 143)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [0])
         self.assertEqual(summary["termination_reason"], "cancelled")
-        self.assertTrue((self.bundle / "flushed").exists())
+        self.assertEqual((self.bundle / "flushed").read_text(), "interrupted")
 
     def test_ci_shell_commands_keep_selectors_artifacts_and_pipeline_exit(self):
         mobile = SCRIPT.parents[1]

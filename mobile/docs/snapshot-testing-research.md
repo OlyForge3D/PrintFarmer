@@ -1,6 +1,10 @@
 # Snapshot testing research — issue #289
 
-Status: **research / pending approval**. No code changes in this PR yet.
+Status: **historical research**, not current policy. SnapshotTesting was
+subsequently adopted. #3526 reduced its mandatory surface to one stable shared
+component golden; see the [current policy and inventory](../PrintFarmerTests/Views/__Snapshots__/README.md).
+The recommendations and repository state below describe the original #289
+research, not instructions to restore the retired backend/state images.
 
 ## Current state
 

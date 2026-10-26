@@ -645,9 +645,6 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         var usesSteppers = false
         var compactForDetail = false
-        /// Tune passes `true`: its targets stay editable mid-print when the
-        /// backend supports it. Heat is idle-only.
-        var allowsActivePrint = false
         var nozzleFocusRequest = 0
         @State private var hotend = ""
         @State private var bed = ""
@@ -679,7 +676,7 @@ struct PreheatSubgroup: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .disabled(!(allowsActivePrint ? viewModel.canControlHeat : viewModel.canControl) || viewModel.isExecuting)
+            .disabled(!viewModel.canControl || viewModel.isExecuting)
         }
 
         static func isHeaterTargetPending(_ kind: ControlCommand.Kind?) -> Bool {
