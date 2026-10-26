@@ -8,8 +8,9 @@ The legacy G-code harvest feature (the `/api/gcode-harvest/*` endpoints, the
 `/hubs/harvest` SignalR hub, its operation, queue, and discovered-file tables,
 and the `gcode_harvest` permission resource) was retired permanently in #3531.
 Use **Files > On printers** (`/files?source=printers`, optionally
-`&printer=<printerId>`) instead. Its explicit Copy action handles one file at a
-time; it does not provide bulk import. Library files imported by earlier harvests
+`&printer=<printerId>`) instead. Each Copy request imports exactly one file;
+there is no server-side batch endpoint. The UI can copy several selected files
+by sending one revision-bound request per file. Library files imported by earlier harvests
 remain in the G-code library with their `Harvested` source, source printer, and
 original printer path. Printed-parts inventory harvesting and mobile workflows
 are unchanged.
@@ -134,7 +135,10 @@ and single-location actions. Catalog browsing and automatic indexing remain
 metadata-only. Preview capture is a distinct, opt-in request for visible items;
 it is never part of a scan or catalog list request.
 Captured local versions are links, not a claim that current remote bytes match.
-Copy handles one file at a time; bulk import is unavailable. Part/stock harvesting
+Each Copy request imports one file and there is no batch endpoint. Selecting
+several files makes the UI send one request per file, each bound to its own
+observation revision and intent key; only failed files are retried with their
+original key, and stale files must be refreshed first. Part/stock harvesting
 and immediate printer Print controls are unchanged.
 
 ### On-demand preview and browser Download
