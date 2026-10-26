@@ -39,6 +39,7 @@ cd mobile
   python3 scripts/run-tests.py -- test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+    -only-testing:PrintFarmerTests/PrinterSensorsSnapshotTests \
     -parallel-testing-enabled NO \
     -resultBundlePath "$run_dir/Snapshots.xcresult" \
     2>&1 | tee "$run_dir/test.log"

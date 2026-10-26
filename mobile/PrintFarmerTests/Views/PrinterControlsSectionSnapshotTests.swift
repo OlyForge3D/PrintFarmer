@@ -280,14 +280,8 @@ final class PrinterCardSnapshotTests: XCTestCase {
     }
 }
 
-/// Snapshot tests for printer controls across backend capability profiles,
-/// loading and disabled states, and shared detail-screen control styles.
-///
-/// Closes OlyForge3D/PrintFarmer#289.
-///
-/// SnapshotTesting stores references relative to this file under
-/// `Views/__Snapshots__/PrinterControlsSectionSnapshotTests/`. See the adjacent
-/// `__Snapshots__/README.md` before regenerating SDK-sensitive images.
+/// Legacy setup compatibility assertions, production instrument-panel contracts,
+/// review-only captures, and one stable shared destructive-button golden.
 @MainActor
 final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
@@ -381,15 +375,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         svc.capabilitiesToReturn = caps
         svc.detailsToReturn = try? .controlsLimitsFixture(for: TestData.decodePrinter())
         return svc
-    }
-
-    private func loadedSection(
-        printer: Printer,
-        service: MockPrinterService
-    ) async -> PrinterControlsSection {
-        let viewModel = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
-        await viewModel.loadCapabilities()
-        return PrinterControlsSection(printer: printer, viewModel: viewModel)
     }
 
     private func host(_ view: some View) -> UIViewController {
@@ -675,7 +660,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.moveCalledWith)
     }
 
-    // MARK: - Backend profile snapshots
+    // MARK: - Native control contracts
 
     private func nativeControls(in view: UIView) -> [UIControl] {
         (view as? UIControl).map { [$0] } ?? view.subviews.flatMap { nativeControls(in: $0) }
@@ -2002,89 +1987,173 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.saveZOffsetCalledWith)
     }
 
-    func test_snapshot_moonrakerProfile() async throws {
-        let printer = try makePrinter(backend: .moonraker)
-        // Resolved current Moonraker interfaces: homing/heaters, never jogging.
-        let caps = try wireCapabilities(backend: "Moonraker", operationFields: """
+    // MARK: - Reachable Control tab (no pixel comparisons)
+
+    func test_instrumentPanel_backendProfilesGateNativeHeaterEditors() async throws {
+        let profiles: [(PrinterBackend, String, String, Bool)] = [
+            (.moonraker, "Moonraker", """
         "supportsRelativeMovement": false, "supportsAbsoluteMovement": false,
         "supportsHoming": true, "supportsHomingXY": true, "supportsHomingZ": true,
         "supportsHotendTemperature": true, "supportsBedTemperature": true,
         "supportsExtrusion": true, "supportsDisableMotors": true, "supportsZOffset": true,
         "supportsTemperatureControlDuringPrint": true, "supportsHeaterShutdown": true,
         "supportedAxes": ["x", "y", "z"]
-        """)
-        XCTAssertFalse(caps.supportsMovement)
-        XCTAssertTrue(caps.supportsHome(axes: ["X", "Y", "Z"]))
-        let svc = makeService(caps: caps)
-        let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
-    }
-
-    func test_snapshot_flashForgeProfile() async throws {
-        let printer = try makePrinter(backend: .flashForge)
-        // Current unmatched-route-port case: no physical support is proven.
-        let caps = try wireCapabilities(backend: "FlashForge", operationFields: """
+        """, true),
+            (.flashForge, "FlashForge", """
         "supportsZOffset": true, "supportsRelativeMovement": false,
         "supportsHoming": false, "supportsHotendTemperature": false,
         "supportsBedTemperature": false, "supportedAxes": []
-        """)
-        XCTAssertFalse(caps.supportsMovement)
-        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
-        let svc = makeService(caps: caps)
-        let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
-    }
-
-    func test_snapshot_sdcpProfile() async throws {
-        let printer = try makePrinter(backend: .sdcp)
-        let caps = try wireCapabilities(backend: "Sdcp", operationFields: """
+        """, false),
+            (.sdcp, "Sdcp", """
         "supportsZOffset": true, "supportsRelativeMovement": false,
         "supportsHoming": false, "supportsHotendTemperature": false,
         "supportedAxes": []
-        """)
-        XCTAssertFalse(caps.supportsTemperatureControl)
-        XCTAssertFalse(caps.supportsMovement)
-        XCTAssertFalse(caps.supportsHome(axes: ["X", "Y", "Z"]))
-        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
-        let svc = makeService(caps: caps)
-        let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
+        """, false)
+        ]
+        for (backend, name, fields, supportsHeat) in profiles {
+            let printer = try makePrinter(backend: backend)
+            let caps = try wireCapabilities(backend: name, operationFields: fields)
+            let service = makeService(caps: caps)
+            let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await model.loadCapabilities()
+            let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
+            defer { window.isHidden = true; model.deactivate() }
+            try await settle(controller)
+            XCTAssertNil(nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.jog.x.positive"
+            }, "\(name) does not advertise relative movement")
+            try panelControl("printer.controls.segment.heat", in: controller).sendActions(for: .touchUpInside)
+            try await settle(controller)
+            for heater in ["hotend", "bed"] {
+                let field = try panelControl("printer.controls.\(heater).target", in: controller)
+                XCTAssertEqual(field.isEnabled, supportsHeat, "\(name) \(heater)")
+                XCTAssertTrue(field.accessibilityLabel?.contains("degrees Celsius") == true)
+            }
+            attachPanelReview(controller, scenario: "\(name)-idle-heat")
+            XCTAssertNil(service.moveCalledWith)
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertEqual(service.setTemperaturesCallCount, 0, "Opening Heat must not send targets")
+        }
     }
 
-    // MARK: - State snapshots
-
-    /// Capabilities load is async; the initial render before `loadCapabilities`
-    /// resolves is the race window flagged in Bishop's #299 review. Asserting
-    /// it here pins the loading-state pixels.
-    func test_snapshot_loadingState_capabilitiesNil() throws {
+    func test_instrumentPanel_loadingCapabilitiesCannotDispatchAndResolvesWithoutRemount() async throws {
         let printer = try makePrinter(backend: .octoPrint)
-        let svc = MockPrinterService()
+        let service = makeService(caps: Self.layoutCaps)
         let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        svc.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
-        let model = PrinterControlsViewModel.configuredForTests(printerService: svc, printer: printer)
-        let section = PrinterControlsSection(printer: printer, viewModel: model)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
+        service.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        let load = Task { await model.loadCapabilities() }
+        defer { barrier.close(); load.cancel(); model.deactivate() }
+        await barrier.waitUntilArrived()
+        let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
+        defer { window.isHidden = true }
+        try await settle(controller)
+        XCTAssertFalse(try panelControl("printer.controls.jog.x.positive", in: controller).isEnabled)
+        try panelControl("printer.controls.segment.heat", in: controller).sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertFalse(try panelControl("printer.controls.hotend.target", in: controller).isEnabled)
+        XCTAssertFalse(try panelControl("printer.controls.bed.target", in: controller).isEnabled)
+        XCTAssertEqual(service.setTemperaturesCallCount, 0)
+        XCTAssertNil(service.moveCalledWith)
+
+        barrier.release()
+        await load.value
+        try await settle(controller, "loaded heater editors") {
+            nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.hotend.target"
+            }?.isEnabled == true
+        }
+        XCTAssertTrue(try panelControl("printer.controls.bed.target", in: controller).isEnabled)
+        XCTAssertEqual(service.setTemperaturesCallCount, 0, "Capability resolution cannot replay a command")
     }
 
-    /// Starting is treated as an active job for safety: controls remain visible,
-    /// but heat, motion and filament setup are locked while verified live adjustments stay capability-gated.
-    func test_snapshot_disabledState_printerStarting() async throws {
-        let printer = try makePrinter(backend: .moonraker, state: "starting")
-        let svc = makeService(caps: Self.layoutCaps)
-        let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
+    func test_instrumentPanel_activeJobsSelectTuneAndGateTemperaturesByCapability() async throws {
+        for state in ["starting", "printing", "paused"] {
+            for supportsHeat in [false, true] {
+                let printer = try makePrinter(backend: .moonraker, state: state)
+                var caps = Self.layoutCaps
+                caps.supportsTemperatureControlDuringPrint = supportsHeat
+                let service = makeService(caps: caps)
+                let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+                await model.loadCapabilities()
+                let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
+                defer { window.isHidden = true; model.deactivate() }
+                try await settle(controller)
+                for segment in ["move", "heat"] {
+                    XCTAssertFalse(try panelControl("printer.controls.segment.\(segment)", in: controller).isEnabled, state)
+                }
+                let tune = try XCTUnwrap(try panelControl("printer.controls.segment.tune", in: controller) as? UIButton)
+                XCTAssertTrue(tune.isEnabled)
+                XCTAssertTrue(tune.isSelected, "\(state) must select Tune rather than legacy setup controls")
+                for heater in ["hotend", "bed"] {
+                    XCTAssertEqual(
+                        try panelControl("printer.controls.\(heater).target", in: controller).isEnabled,
+                        supportsHeat, "\(state) \(heater)"
+                    )
+                }
+                XCTAssertEqual(service.setTemperaturesCallCount, 0)
+                XCTAssertNil(service.moveCalledWith)
+                attachPanelReview(controller, scenario: "\(state)-tune-heat-\(supportsHeat)")
+            }
+        }
     }
-    // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
 
-    /// Section remains visible during a print; a lockout banner is shown and
-    /// all subgroup controls are disabled. The section is NOT hidden — only
-    /// the offline state hides it (spec §2.2, §2.4).
-    func test_snapshot_lockoutBanner_printingState() async throws {
-        let printer = try makePrinter(backend: .moonraker, state: "printing")
-        let svc = makeService(caps: Self.layoutCaps)
-        let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
+    func test_instrumentPanel_nativeMoveTargetsFitAndDispatchAcrossAdaptiveLayouts() async throws {
+        for (width, typeSize) in [(CGFloat(320), DynamicTypeSize.large), (390, .accessibility3), (1024, .large)] {
+            let printer = try makePrinter(backend: .moonraker)
+            let service = makeService(caps: Self.layoutCaps)
+            let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await model.loadCapabilities()
+            let content = PrinterInstrumentPanelControls(printer: printer, viewModel: model)
+                .environment(\.dynamicTypeSize, typeSize)
+                .frame(width: width)
+            let (window, controller) = install(content)
+            defer { window.isHidden = true; model.deactivate() }
+            window.frame.size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+            controller.view.frame = window.bounds
+            try await settle(controller)
+            let identifiers = [
+                "printer.controls.segment.move", "printer.controls.segment.heat", "printer.controls.segment.tune",
+                "printer.controls.jog.x.positive", "printer.controls.jog.y.negative", "printer.controls.jog.z.positive",
+                "printer.controls.home.all"
+            ]
+            for identifier in identifiers {
+                let control = try panelControl(identifier, in: controller)
+                let frame = control.convert(control.bounds, to: controller.view)
+                XCTAssertTrue(control.isEnabled, identifier)
+                XCTAssertGreaterThanOrEqual(frame.height, 44, identifier)
+                XCTAssertGreaterThanOrEqual(frame.width, 44, identifier)
+                XCTAssertGreaterThanOrEqual(frame.minX, -1, identifier)
+                XCTAssertLessThanOrEqual(frame.maxX, width + 1, identifier)
+                XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, identifier)
+            }
+            let jog = try panelControl("printer.controls.jog.z.positive", in: controller)
+            XCTAssertEqual(jog.accessibilityLabel, "Move Z positive")
+            try panelControl("printer.controls.jog.step.10", in: controller).sendActions(for: .touchUpInside)
+            try await settle(controller)
+            XCTAssertNil(service.moveCalledWith, "Selecting a distance must not move the printer")
+            try panelControl("printer.controls.jog.z.positive", in: controller).sendActions(for: .touchUpInside)
+            try await settle(controller, "explicit 10 mm Z jog") { service.moveCalledWith != nil }
+            XCTAssertEqual(service.moveCalledWith?.printerId, printer.id)
+            XCTAssertEqual(service.moveCalledWith?.axis, "Z")
+            XCTAssertEqual(service.moveCalledWith?.distanceMm, 10)
+            XCTAssertEqual(service.moveCalledWith?.feedrateMmMin, PrinterControlsViewModel.zFeedrateMmMin)
+            attachPanelReview(controller, scenario: "idle-move-\(Int(width))-\(typeSize)")
+        }
+    }
+
+    private func panelControl(_ identifier: String, in controller: UIViewController) throws -> UIControl {
+        try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityIdentifier == identifier }, identifier)
+    }
+
+    private func attachPanelReview(_ controller: UIViewController, scenario: String) {
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "review-only-production-PrinterInstrumentPanelControls-mock-\(scenario)-\(UIDevice.current.userInterfaceIdiom)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func test_snapshot_printerDetailBorderedDestructiveControls_darkMode() {
