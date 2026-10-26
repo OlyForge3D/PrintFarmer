@@ -1181,9 +1181,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.unloadPhysicalFilament()
 
         XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
-        XCTAssertTrue(viewModel.actionError?.contains("disabled while a print is active") == true)
+        XCTAssertNil(viewModel.actionError, "Blocked commands are refused silently (#3548)")
+        XCTAssertNotNil(viewModel.physicalFilamentCommandBlockedReason(for: .load), "Gating is unchanged")
 
-        viewModel.actionError = nil
         printer.state = "ready"
         mockService.printerToReturn = printer
         mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
@@ -1197,7 +1197,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.unloadPhysicalFilament()
 
         XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
-        XCTAssertTrue(viewModel.actionError?.contains("does not report support") == true)
+        XCTAssertNil(viewModel.actionError, "Blocked commands are refused silently (#3548)")
+        XCTAssertEqual(viewModel.physicalFilamentCommandBlock(for: .load), .unsupported)
     }
 
     /// Shared fixture for tests that need a printer starting WITH an active
@@ -1704,6 +1705,54 @@ final class PrinterDetailViewModelTests: XCTestCase {
             viewModel.isPerformingAction,
             "Busy must clear once every overlapping operation has completed"
         )
+    }
+
+    // MARK: - Eject silent gate (#3548)
+
+    /// Eject is disabled while offline or printing; it never explains why
+    /// through `actionError`.
+    func testCanEjectFilamentOnlyWhenOnlineIdleWithoutAlert() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        for (isOnline, state, expected) in [
+            (false, "idle", false), (true, "printing", false), (true, "paused", false), (true, "idle", true)
+        ] {
+            printer.isOnline = isOnline
+            printer.state = state
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+            XCTAssertEqual(viewModel.canEjectFilament, expected, "online=\(isOnline) state=\(state)")
+            XCTAssertNil(viewModel.actionError, "online=\(isOnline) state=\(state): no blocked-reason alert")
+        }
+    }
+
+    /// Eject was available when the dialog opened, then the printer changed
+    /// state: confirming must neither dispatch nor raise an alert (#3548).
+    func testRacedEjectConfirmationRefusesSilently() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        for (isOnline, state) in [(false, "idle"), (true, "printing"), (true, "paused")] {
+            printer.isOnline = true
+            printer.state = "idle"
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+            XCTAssertTrue(viewModel.canEjectFilament, "Eject must be available when the dialog opens")
+
+            printer.isOnline = isOnline
+            printer.state = state
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+
+            XCTAssertNil(viewModel.confirmEjectFilament(), "online=\(isOnline) state=\(state): must refuse")
+            XCTAssertNil(mockService.setActiveSpoolCalledWith, "online=\(isOnline) state=\(state): no dispatch")
+            XCTAssertNil(mockService.unloadFilamentCalledWith, "online=\(isOnline) state=\(state): no dispatch")
+            XCTAssertNil(viewModel.actionError, "online=\(isOnline) state=\(state): no blocked-reason alert")
+        }
+
+        printer.isOnline = true
+        printer.state = "idle"
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        await viewModel.confirmEjectFilament()?.value
+        XCTAssertEqual(mockService.unloadFilamentCalledWith, TestData.testUUID, "Idle confirmation still ejects")
     }
 
     // MARK: - Eject physical-unload safety (Bishop review finding)
@@ -3067,11 +3116,9 @@ extension PrinterDetailViewModelTests {
         XCTAssertNil(vm.formattedTimeRemaining)
     }
 
-    func testPhysicalFilamentBlockShowsOnlyActionableReasonsOnScreen() {
+    func testPhysicalFilamentBlockMessagesAreHintOnly() {
         typealias Block = PrinterDetailViewModel.PhysicalFilamentBlock
-        XCTAssertFalse(Block.unsupported.isShownOnScreen, "Unsupported is a VoiceOver hint only")
         XCTAssertEqual(Block.unsupported.message, Block.unsupportedMessage)
-        XCTAssertTrue(Block.blocked("Printer is offline.").isShownOnScreen)
         XCTAssertEqual(Block.blocked("Printer is offline.").message, "Printer is offline.")
     }
 

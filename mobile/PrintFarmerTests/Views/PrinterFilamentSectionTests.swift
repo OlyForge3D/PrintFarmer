@@ -88,6 +88,43 @@ final class PrinterFilamentSectionTests: XCTestCase {
         XCTAssertTrue(actions.allSatisfy { model.disabledReason(for: $0) != nil })
     }
 
+    /// #3548: disabled filament actions render no reason caption while printing,
+    /// paused, busy or offline. The reason is the VoiceOver hint only.
+    func testDisabledActionsRenderNoReasonText() async throws {
+        let reasons = [
+            ("printing", "Filament load and unload are disabled while a print is active."),
+            ("paused", "Filament load and unload are disabled while a print is active."),
+            ("pending", "Command in progress."),
+            ("offline", "Printer is offline.")
+        ]
+        for (scenario, reason) in reasons {
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = scenario != "offline"
+            printer.state = scenario == "paused" ? "paused" : (scenario == "printing" ? "printing" : "idle")
+            let actions = [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC].map {
+                PrinterFilamentAction(kind: $0, target: .printer(printer.id), disabledReason: reason)
+            }
+            let section = PrinterFilamentSection(
+                presentation: try presentation(printer: printer), actions: actions,
+                onAction: { _ in XCTFail("Disabled actions must not dispatch") }
+            )
+            // `details` hosts the disabled actions where the reason caption used to render.
+            let host = UIHostingController(rootView: section.details.frame(width: 318))
+            let window = UIWindow()
+            window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            try await Task.sleep(for: .milliseconds(100))
+            host.view.layoutIfNeeded()
+            let text = VisibleText.collect(in: host.view)
+            XCTAssertFalse(text.isEmpty, "\(scenario): walker must see the rendered section")
+            XCTAssertFalse(text.contains { $0.contains(reason) }, "\(scenario): \(text)")
+            VisibleText.assertNoLockoutText(text, scenario)
+        }
+    }
+
     func testStaleViewDoesNotEmitMutation() throws {
         let printer = try TestData.decodePrinter()
         let action = PrinterFilamentAction(kind: .set, target: .printer(printer.id), disabledReason: nil)

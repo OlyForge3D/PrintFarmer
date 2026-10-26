@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Jog subgroup of `PrinterControlsSection`. Axis picker (X/Y/Z) + step picker
+/// Jog subgroup of the printer Control tab. Axis picker (X/Y/Z) + step picker
 /// (0.1/1/10/100 mm) + signed +/- buttons. Calls `viewModel.jog(axis:distanceMm:)`.
 ///
 /// Spec: `mobile/docs/design/printer-controls-section.md` §2.3 (Jog), §2.4 (states).
@@ -42,12 +42,7 @@ struct JogSubgroup: View {
 
     @State private var selectedAxis: String = "X"
     @State private var selectedStep: Double = 1
-    /// Transient caption shown when the user taps a jog button while controls
-    /// are disabled. Mirrors `PreheatSubgroup` so the disabled reason surfaces
-    /// on touch devices where `.help()` doesn't fire.
-    @State private var disabledTapMessage: String?
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     static let stepOptions: [Double] = [0.1, 1, 10, 100]
@@ -88,13 +83,6 @@ struct JogSubgroup: View {
             axisPicker
             stepPicker
             jogButtons
-
-            if let message = disabledTapMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .transition(.opacity)
-            }
         }
         .onChange(of: viewModel.capabilities, initial: true) { _, newCaps in
             // If the printer reports a narrower axis set than what's currently
@@ -178,6 +166,8 @@ struct JogSubgroup: View {
 
         private var validationMessage: String? {
             guard Self.hasDestinationInput(x: x, y: y, z: z) else { return nil }
+            // Lockout reasons gate the row via `.disabled`; only input errors are shown (#3548).
+            guard viewModel.blockedReason == nil else { return nil }
             do {
                 let point = try Self.destination(x: x, y: y, z: z)
                 return viewModel.absoluteMoveBlockedReason(
@@ -243,6 +233,7 @@ struct JogSubgroup: View {
                         do {
                             let point = try Self.destination(x: x, y: y, z: z)
                             let f = try ControlNumberInput.feedrate(feedrate)
+                            guard viewModel.blockedReason == nil else { return }
                             if let reason = viewModel.absoluteMoveBlockedReason(
                                 x: point.x, y: point.y, z: point.z, feedrateMmMin: f
                             ) {
@@ -335,40 +326,20 @@ struct JogSubgroup: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(!isInteractive && !shouldRevealDisabledTooltipOnTap)
+        .disabled(!isInteractive)
         .disabledControlStyle(isDisabled: !isInteractive && !isPending)
         .errorBorderHighlight(isActive: hasError)
         .accessibilityLabel(jogAccessibilityLabel(direction: direction))
         .accessibilityHint(jogAccessibilityHint(direction: direction, stepLabelText: stepLabelText, hasError: hasError))
         .accessibilityValue(jogAccessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)
-        .help(viewModel.blockedReason ?? "")
     }
 
     // MARK: - Helpers
 
-    private var shouldRevealDisabledTooltipOnTap: Bool {
-        horizontalSizeClass != .regular
-    }
-
+    /// Unavailable controls are disabled without explanatory text (#3548).
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl, !viewModel.isExecuting else {
-            let message = viewModel.blockedReason
-                ?? String(localized: "Another command is in flight.", comment: "Fallback when jog tap blocked by single-flight")
-            withAnimation(.easeInOut(duration: 0.15)) {
-                disabledTapMessage = message
-            }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if disabledTapMessage == message {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        disabledTapMessage = nil
-                    }
-                }
-            }
-            return
-        }
-        disabledTapMessage = nil
+        guard viewModel.canControl, !viewModel.isExecuting else { return }
         action()
     }
 

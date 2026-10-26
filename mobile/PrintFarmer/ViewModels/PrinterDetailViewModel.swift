@@ -717,55 +717,51 @@ final class PrinterDetailViewModel {
     func loadPhysicalFilament() async {
         guard !isShowingCachedPrinter else { return }
         clearOperationError(source: .loadPhysicalFilament)
-        guard let reason = physicalFilamentCommandBlockedReason(for: .load) else {
-            guard let printerService else { return }
-            let authority = beginActionAuthority(for: printerService)
-            defer { endBusyToken(authority.busyToken) }
-            do {
-                let result = try await printerService.loadFilament(printerId: printerId)
-                guard hasActionAuthority(authority) else { return }
-                guard result.success else {
-                    setOperationError(
-                        result.message ?? "The printer did not accept the filament load command.",
-                        source: .loadPhysicalFilament
-                    )
-                    return
-                }
-                await loadPrinter()
-            } catch {
-                guard hasActionAuthority(authority) else { return }
-                setOperationError(error.localizedDescription, source: .loadPhysicalFilament)
+        // Blocked commands are refused silently; the disabled button is the only signal (#3548).
+        guard physicalFilamentCommandBlockedReason(for: .load) == nil,
+              let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
+        defer { endBusyToken(authority.busyToken) }
+        do {
+            let result = try await printerService.loadFilament(printerId: printerId)
+            guard hasActionAuthority(authority) else { return }
+            guard result.success else {
+                setOperationError(
+                    result.message ?? "The printer did not accept the filament load command.",
+                    source: .loadPhysicalFilament
+                )
+                return
             }
-            return
+            await loadPrinter()
+        } catch {
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .loadPhysicalFilament)
         }
-        setOperationError(reason, source: .loadPhysicalFilament)
     }
 
     func unloadPhysicalFilament() async {
         guard !isShowingCachedPrinter else { return }
         clearOperationError(source: .unloadPhysicalFilament)
-        guard let reason = physicalFilamentCommandBlockedReason(for: .unload) else {
-            guard let printerService else { return }
-            let authority = beginActionAuthority(for: printerService)
-            defer { endBusyToken(authority.busyToken) }
-            do {
-                let result = try await printerService.unloadFilament(printerId: printerId)
-                guard hasActionAuthority(authority) else { return }
-                guard result.success else {
-                    setOperationError(
-                        result.message ?? "The printer did not accept the filament unload command.",
-                        source: .unloadPhysicalFilament
-                    )
-                    return
-                }
-                await loadPrinter()
-            } catch {
-                guard hasActionAuthority(authority) else { return }
-                setOperationError(error.localizedDescription, source: .unloadPhysicalFilament)
+        // Blocked commands are refused silently; the disabled button is the only signal (#3548).
+        guard physicalFilamentCommandBlockedReason(for: .unload) == nil,
+              let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
+        defer { endBusyToken(authority.busyToken) }
+        do {
+            let result = try await printerService.unloadFilament(printerId: printerId)
+            guard hasActionAuthority(authority) else { return }
+            guard result.success else {
+                setOperationError(
+                    result.message ?? "The printer did not accept the filament unload command.",
+                    source: .unloadPhysicalFilament
+                )
+                return
             }
-            return
+            await loadPrinter()
+        } catch {
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .unloadPhysicalFilament)
         }
-        setOperationError(reason, source: .unloadPhysicalFilament)
     }
 
     // MARK: - NFC Scan to Load
@@ -2372,8 +2368,8 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
-    /// Why a physical filament command is blocked. `unsupported` is hint-only:
-    /// the disabled buttons already say enough on screen.
+    /// Why a physical filament command is blocked. Reasons gate the buttons and
+    /// feed their VoiceOver hints only; none is rendered on screen (#3548).
     enum PhysicalFilamentBlock: Equatable {
         case unsupported
         case blocked(String)
@@ -2387,9 +2383,6 @@ final class PrinterDetailViewModel {
             case let .blocked(reason): reason
             }
         }
-
-        /// Whether the reason is worth a visible caption below the buttons.
-        var isShownOnScreen: Bool { self != .unsupported }
     }
 
     func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
@@ -2424,7 +2417,7 @@ final class PrinterDetailViewModel {
         guard !["printing", "starting", "paused"].contains(state ?? "") else {
             return "Filament load and unload are disabled while a print is active."
         }
-        guard !isPerformingAction else { return "Another printer operation is in progress." }
+        guard !isPerformingAction else { return "Command in progress." }
         return nil
     }
 
@@ -2638,6 +2631,19 @@ final class PrinterDetailViewModel {
     var isActivelyPrinting: Bool {
         guard let state = printer?.state?.lowercased() else { return false }
         return ["printing", "starting", "paused"].contains(state)
+    }
+
+    /// Eject is gated silently: disabled unless online, idle and canonical (#3548).
+    var canEjectFilament: Bool {
+        printer?.isOnline == true && !isActivelyPrinting && !isPerformingAction && !isShowingCachedPrinter
+    }
+
+    /// Confirms Eject from the dialog. A state change while the dialog was
+    /// open refuses silently, with no dispatch and no alert (#3548).
+    @discardableResult
+    func confirmEjectFilament() -> Task<Void, Never>? {
+        guard canEjectFilament else { return nil }
+        return Task { await ejectFilament() }
     }
 
     /// Moonraker keeps reporting the last file after a print ends, so a stale

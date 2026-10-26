@@ -167,6 +167,32 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path == Self.deviceTokensPath })
     }
 
+    /// The production offline Control page renders no lockout banner or
+    /// explanation, only the hidden VoiceOver element (#3548).
+    func testProductionOfflineControlPageRendersNoLockoutText() async throws {
+        executionTimeAllowance = 60
+        let fixture = try detailHostFixture(isOnline: false)
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        detail.configure(printerService: fixture.services.printerService)
+        await detail.loadPrinter()
+        XCTAssertEqual(detail.printer?.isOnline, false)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        try await waitForHost("The offline Control page must settle", in: controller.view) {
+            !VisibleText.collect(in: controller.view).isEmpty
+        }
+        XCTAssertNil(heaterTarget(in: controller.view), "Offline controls stay hidden")
+        let text = VisibleText.collect(in: controller.view)
+        VisibleText.assertNoLockoutText(text, "production-offline-control-page")
+        for fragment in ["unavailable", "reconnect"] {
+            XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains(fragment) }, "\(fragment): \(text)")
+        }
+    }
+
     // MARK: - #3528 H01: production cached-seed lifecycle
 
     /// The detail host seeds from the farm-list cache only after the active
@@ -788,7 +814,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         factorValues: (speed: Double?, flow: Double?) = (100, 98),
         hotendTarget: Double? = nil,
         printerFailure: OSAllocatedUnfairLock<Bool>? = nil,
-        heatDuringPrint: Bool = false
+        heatDuringPrint: Bool = false,
+        isOnline: Bool = true
     ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
@@ -807,7 +834,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let second = try registry.add(displayName: "B", baseURL: URL(string: "https://detail-b.example.com")!)
         var printer = try TestData.decodePrinter()
         printer.state = printerState
-        printer.isOnline = true
+        printer.isOnline = isOnline
         printer.fanSpeedPercent = 25
         printer.liveZOffsetMm = 0
         printer.sensors = writableSensors
@@ -821,7 +848,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let printerData = try encoder.encode(printer)
         var status = PrinterStatusDetail(
             id: printer.id,
-            isOnline: true,
+            isOnline: isOnline,
             state: printerState,
             progress: nil,
             fanSpeedPercent: 25,
@@ -1034,74 +1061,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         } while ContinuousClock.now < deadline
         _ = try XCTUnwrap(condition() ? true : nil, message)
-    }
-
-    func testControlsReflowRetainsJogDistanceAndDirectionalZ() async throws {
-        var printer = try TestData.decodePrinter(from: TestJSON.printer)
-        printer.isOnline = true
-        printer.state = "idle"
-        let service = MockPrinterService()
-        service.capabilitiesToReturn = PrinterBackendCapabilities(
-            supportsMovement: true, supportsTemperatureControl: true,
-            supportsBedTemperature: true, supportsFanControl: true,
-            supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
-        )
-        service.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
-        await model.loadCapabilities()
-        service.getBackendCapabilitiesCalledWith = nil
-
-        func content(width: CGFloat, size: DynamicTypeSize) -> some View {
-            PrinterSetupControlsContent(
-                printer: printer, viewModel: model,
-                usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: size)
-            )
-            .frame(width: width)
-            .environment(\.horizontalSizeClass, .regular)
-            .environment(\.dynamicTypeSize, size)
-        }
-        let controller = UIHostingController(rootView: AnyView(content(width: 900, size: .large)))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1100, height: 1400))
-        window.rootViewController = controller
-        window.isHidden = false
-        defer { window.isHidden = true }
-
-        func settle() async throws {
-            try await Task.sleep(for: .milliseconds(100))
-            controller.view.setNeedsLayout()
-            controller.view.layoutIfNeeded()
-        }
-        func buttons(in view: UIView) -> [UIButton] {
-            (view as? UIButton).map { [$0] }
-                ?? view.subviews.flatMap { buttons(in: $0) }
-        }
-        func choices() throws -> (axis: UIButton, step: UIButton) {
-            let controls = buttons(in: controller.view)
-            return (
-                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.z.positive" }),
-                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.step.10" })
-            )
-        }
-        try await settle()
-        let initial = try choices()
-        XCTAssertTrue(initial.axis.isEnabled)
-        XCTAssertTrue(initial.step.isEnabled)
-        initial.step.sendActions(for: .touchUpInside)
-        try await settle()
-
-        let layouts: [(CGFloat, DynamicTypeSize)] = [
-            (700, .large), (900, .large), (900, .accessibility3), (900, .large)
-        ]
-        for (width, size) in layouts {
-            controller.rootView = AnyView(content(width: width, size: size))
-            try await settle()
-            let current = try choices()
-            XCTAssertTrue(current.axis.isEnabled)
-            XCTAssertEqual(current.axis.accessibilityLabel, "Move Z positive")
-            XCTAssertTrue(current.step.isSelected, "Reflow must preserve selected 10 mm")
-        }
-        XCTAssertNil(service.moveCalledWith)
-        XCTAssertNil(service.getBackendCapabilitiesCalledWith)
     }
 
     func testDetailColumnsRequireUsableWidthAndNonAccessibilityText() {
@@ -1610,7 +1569,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
             XCTAssertEqual(
                 actions.first { $0.kind == kind }?.disabledReason,
-                "Another printer operation is in progress."
+                "Command in progress."
             )
         }
     }

@@ -377,7 +377,7 @@ enum PrinterDetailFilamentActionMapping {
         if !isOnline {
             safetyReason = "Printer is offline."
         } else if isPerformingAction {
-            safetyReason = "Another printer operation is in progress."
+            safetyReason = "Command in progress."
         } else if ["printing", "paused"].contains(state ?? "") {
             safetyReason = nil
         } else if state == "starting" {

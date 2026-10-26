@@ -174,11 +174,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertTrue(model.commandNotice?.contains("Choose") == true)
     }
 
-    func test_feedbackSection_blockedCommandIsReportedAtItsOrigin() async throws {
+    /// #3548: a blocked command is dropped silently; the control is already disabled.
+    func test_feedbackSection_blockedCommandIsSilent() async throws {
         let model = try makeViewModel(capabilities: Self.fullCaps)
         await model.homeAll()
-        XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertEqual(model.lastError?.command.section, .motion)
+        XCTAssertNil(model.feedbackSection)
+        XCTAssertNil(model.lastError)
+        XCTAssertNil(model.commandNotice)
         XCTAssertNil(mockService.homeCalledWith)
     }
 
@@ -1589,14 +1591,15 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
     }
 
-    func test_failedCommand_clearsStaleAcceptanceNotice() async throws {
+    func test_commandAfterDeactivate_isDroppedSilently() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
         await vm.homeAll()
         XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         vm.deactivate()
         await vm.homeZ()
-        XCTAssertNotNil(vm.lastError)
+        XCTAssertNil(mockService.homeZCalledWith)
+        XCTAssertNil(vm.lastError, "Blocked commands render no text (#3548)")
         XCTAssertNil(vm.commandNotice)
     }
 
@@ -2195,7 +2198,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
             XCTAssertFalse(model.canControl)
             XCTAssertNil(model.pendingCommand)
-            XCTAssertNotNil(model.lastError)
+            XCTAssertNil(model.lastError, "Blocked commands render no text (#3548)")
+            XCTAssertNil(model.commandNotice)
             XCTAssertNil(service.setTemperaturesCalledWith)
             XCTAssertNil(service.turnOffHeatersCalledWith)
             XCTAssertNil(service.homeCalledWith)
@@ -2304,7 +2308,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
                 XCTAssertEqual(service.turnOffHeatersCallCount, 0, label)
                 XCTAssertNil(service.setTemperaturesCalledWith, label)
-                XCTAssertEqual(vm.lastError?.isRetryable, false, label)
+                XCTAssertNil(vm.lastError, label)
             }
         }
     }
@@ -2601,8 +2605,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         await vm.preheat(.pla)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
-        XCTAssertNotNil(vm.lastError)
-        XCTAssertEqual(vm.lastError?.isRetryable, false)
+        XCTAssertNil(vm.lastError, "Blocked commands render no text (#3548)")
     }
 
     func test_errorMapping_5xx_isRetryable() async throws {
@@ -2759,7 +2762,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Live snapshot forwarding (issue #706 F1 review)
     //
-    // These tests pin the regression where `PrinterControlsSection` only
+    // These tests pin the regression where the legacy controls section only
     // forwarded snapshots that changed `state` or `isOnline`, leaving
     // jog/preheat/home controls jammed after position/temperature-only
     // updates. The fix is a `PrinterControlsUpdateSignal` that captures
@@ -4712,7 +4715,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         service.errorToThrow = nil
         await model.setHeaterTarget(.hotend, target: 200)
         XCTAssertNil(service.setTemperaturesCalledWith)
-        XCTAssertTrue(model.commandNotice?.contains("Cancel calibration") == true)
+        XCTAssertNil(model.commandNotice, "#3548: a command blocked by calibration is refused silently")
         model.cancelCalibration()
         await model.setHeaterTarget(.hotend, target: 200)
         XCTAssertNotNil(service.setTemperaturesCalledWith)

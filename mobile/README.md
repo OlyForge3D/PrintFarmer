@@ -84,7 +84,7 @@ cd mobile
   cat "$run_dir/destination.log"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
-    -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+    -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \
     -only-testing:PrintFarmerTests/PrinterSensorsSnapshotTests \
     -parallel-testing-enabled NO \
     -resultBundlePath "$run_dir/Snapshots.xcresult" \

@@ -125,17 +125,9 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     var body: some View {
-        if !PrinterControlsSection.isHidden(for: printer) {
+        if PrinterControlsAccess.isEntryVisible(for: printer) {
             VStack(alignment: .leading, spacing: 12) {
                 loadIssues
-                if !isLocked, let reason = viewModel.blockedReason {
-                    Label(reason, systemImage: "lock.fill")
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextPrimary)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(reason)
-                        .accessibilityIdentifier("printer.controls.blocked-reason")
-                }
                 if let label = Self.transitionalStateLabel(isPrinting: isPrinting, isLocked: isLocked) {
                     Text(label)
                         .font(.subheadline.weight(.semibold))
@@ -459,12 +451,6 @@ struct PrinterInstrumentPanelControls: View {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .runtime)
             runtimeFactorRows
             babystepHeaderRow
-            if let reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             stepSelector(
                 title: "Babystep (mm)",
                 options: Self.babystepOptions,

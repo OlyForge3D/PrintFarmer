@@ -306,7 +306,7 @@ final class PrinterControlsViewModel: ObservableObject {
     static let zFeedrateMmMin: Int = 600
 
     /// Shared by every blocked reason that reports an in-flight operation.
-    static let operationPendingReason = "Another printer operation is still pending."
+    static let operationPendingReason = "Command pending."
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
     /// Defense-in-depth latch: set when `configureAccess` is handed a
@@ -646,7 +646,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if commandTask != nil, commandWasDispatched {
             // Canceling an observer cannot recall a physical command. Keep
             // both the response and its single-flight owner until it settles.
-            commandNotice = "Stopped waiting for telemetry. The request outcome is unresolved; routine controls remain locked. The printer may still execute the request."
+            commandNotice = "Stopped waiting for telemetry. The request outcome is unresolved; the printer may still execute the request."
             return
         }
         commandTask?.cancel()
@@ -1246,8 +1246,9 @@ final class PrinterControlsViewModel: ObservableObject {
         printer.sensors.filter { !$0.writable.isEmpty }
     }
 
-    /// Caption for sensor rows: genuine unsupported/access reasons only. Loading
-    /// and in-flight states disable the row instead of printing text (#3547).
+    /// VoiceOver hint for disabled sensor rows: genuine unsupported/access reasons
+    /// only, never rendered as visible text (#3548). Loading and in-flight states
+    /// return nil (#3547).
     var sensorRowMessage: String? {
         guard let capabilities else { return nil }
         guard capabilities.supportsSensorControl else {
@@ -1838,7 +1839,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if !printer.isOnline { return "Printer is offline." }
         if isPrintingOrPaused { return "Controls are locked while a print is active." }
         if pendingCommand == nil, isExecuting {
-            return "Another controls view is waiting for this printer's request outcome. Routine controls remain locked."
+            return "Another controls view is waiting for this printer's request outcome."
         }
         return nil
     }
@@ -1911,28 +1912,11 @@ final class PrinterControlsViewModel: ObservableObject {
             case .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
                 break
             default:
-                feedbackSection = command.section
-                lastError = nil
-                commandNotice = "Cancel calibration before another setup command. Emergency Stop remains independent."
                 return false
             }
         }
-        guard canExecute(command) else {
-            feedbackSection = command.section
-            commandNotice = nil
-            let reason: String?
-            if case .runtimeFactor(let factor, _) = command.kind {
-                reason = runtimeFactorUnavailableReason(factor)
-            } else {
-                reason = blockedReason
-            }
-            lastError = ControlsError(
-                command: command,
-                message: reason ?? "Controls are unavailable.",
-                isRetryable: false
-            )
-            return false
-        }
+        // Gated commands are refused silently; no lockout text is rendered (#3548).
+        guard canExecute(command) else { return false }
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)

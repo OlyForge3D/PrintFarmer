@@ -202,6 +202,78 @@ final class PreheatSubgroupTests: XCTestCase {
         }
     }
 
+    /// H3552-01: a disabled sensor row explains why through its VoiceOver hint
+    /// only. Unsupported, access and offline reasons never render visible text;
+    /// loading leaves the ordinary entry hint.
+    func test_sensorRows_unavailableReasonIsVoiceOverHintOnly() async throws {
+        executionTimeAllowance = 180
+        let scenarios: [(name: String, expected: String?, make: () async throws -> (PrinterControlsViewModel, MockPrinterService))] = [
+            ("unsupported", "Sensor control is unavailable on this printer.",
+             { try await self.multiHeaterModel(supportsSensorControl: false) }),
+            ("access-error", "Server denied control access.", {
+                // Access is revoked after capabilities load, as a server switch does.
+                let denied = AccessFlag()
+                let result = try await self.multiHeaterModel(
+                    accessCheck: { denied.value ? "Server denied control access." : nil }
+                )
+                denied.value = true
+                result.0.refreshAccess()
+                return result
+            }),
+            ("offline", "Printer is offline.", { try await self.multiHeaterModel(isOnline: false) }),
+            ("loading", nil, { try await self.multiHeaterModel(loadCapabilities: false) })
+        ]
+        for scenario in scenarios {
+            let (model, _) = try await scenario.make()
+            defer { model.deactivate() }
+            XCTAssertEqual(model.sensorRowMessage, scenario.expected, scenario.name)
+            let (window, controller) = try await installMultiHeater(model)
+            defer { window.isHidden = true }
+            let field = try XCTUnwrap(
+                try control(Self.chamberField, in: controller) as? UITextField, scenario.name
+            )
+            XCTAssertFalse(field.isEnabled, "\(scenario.name): gating is unchanged")
+            if let expected = scenario.expected {
+                XCTAssertEqual(field.accessibilityHint, expected, scenario.name)
+            } else {
+                XCTAssertTrue(field.accessibilityHint?.hasPrefix("Double tap to enter a value") == true,
+                              "\(scenario.name): \(field.accessibilityHint ?? "nil")")
+            }
+            XCTAssertFalse(
+                findIdentifier("printer.controls.sensor.reason", in: controller.view),
+                "\(scenario.name): no visible sensor caption"
+            )
+            let texts = accessibilityTexts(controller.view)
+            if let expected = scenario.expected {
+                XCTAssertFalse(texts.contains { $0.contains(expected) }, "\(scenario.name): \(texts)")
+            }
+            VisibleText.assertNoLockoutText(VisibleText.collect(in: controller.view), scenario.name)
+            let rendered = try recognizedTexts(controller)
+            for fragment in ["unavailable", "offline", "denied", "Another", "locked"] {
+                XCTAssertFalse(rendered.contains { $0.localizedCaseInsensitiveContains(fragment) },
+                               "\(scenario.name) rendered \(fragment): \(rendered)")
+            }
+            attachScreenshot(controller, name: "sensor-rows-\(scenario.name)")
+        }
+    }
+
+    @MainActor private final class AccessFlag { var value = false }
+
+    private func findIdentifier(_ identifier: String, in root: NSObject, depth: Int = 0) -> Bool {
+        guard depth < 40 else { return false }
+        if (root as? UIAccessibilityIdentification)?.accessibilityIdentifier == identifier { return true }
+        var children: [NSObject] = (root as? UIView)?.subviews ?? []
+        if let elements = root.accessibilityElements as? [NSObject] {
+            children += elements
+        } else {
+            let count = root.accessibilityElementCount()
+            if count != NSNotFound, count > 0 {
+                children += (0..<count).compactMap { root.accessibilityElement(at: $0) as? NSObject }
+            }
+        }
+        return children.contains { findIdentifier(identifier, in: $0, depth: depth + 1) }
+    }
+
     /// #3547 addition: an executing preset never surfaces as caption text
     /// ("Another printer operation is still pending.") on heater or sensor rows.
     func test_executingPreset_showsNoPendingCaptionOnHeatOrSensorRows() async throws {
@@ -240,8 +312,20 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertTrue(model.isExecuting, "The preset is still in flight")
         XCTAssertNil(model.heatRowBlockedReason)
         XCTAssertNil(model.sensorRowMessage)
+        let chamber = try XCTUnwrap(nativeControls(controller.view)
+            .first { $0.accessibilityIdentifier == Self.chamberField } as? UITextField)
+        XCTAssertTrue(chamber.accessibilityHint?.hasPrefix("Double tap to enter a value") == true,
+                      "In flight adds no blocked-reason hint: \(chamber.accessibilityHint ?? "nil")")
         let texts = accessibilityTexts(controller.view)
-        XCTAssertFalse(texts.contains { $0.localizedCaseInsensitiveContains("pending") }, "\(texts)")
+        // With AX automation on, the in-flight preset exposes its spec §4.1
+        // VoiceOver value "Pending"; that is the only allowed occurrence.
+        let pendingIndices = texts.indices.filter { texts[$0].localizedCaseInsensitiveContains("pending") }
+        XCTAssertLessThanOrEqual(pendingIndices.count, 1, "\(texts)")
+        for index in pendingIndices {
+            XCTAssertEqual(texts[index], "Pending", "\(texts)")
+            XCTAssertTrue(index > 0 && texts[index - 1] == "Preheat for PLA, in progress",
+                          "Only the in-flight preset's VoiceOver value may say Pending: \(texts)")
+        }
         XCTAssertFalse(texts.contains { $0.contains("Another") }, "\(texts)")
         let inFlightEnabled = Set(rowControls().filter(\.isEnabled).compactMap(\.accessibilityIdentifier))
         XCTAssertEqual(inFlightEnabled, idleEnabled, "In flight never locks the rows")
@@ -281,10 +365,13 @@ final class PreheatSubgroupTests: XCTestCase {
     // MARK: - Multi-heater (qp4-1 style: Nozzle, Bed, Chamber, Heater Box1)
 
     private func multiHeaterModel(
-        chamberTarget: Double = 40, chamberStep: Double = 1
+        chamberTarget: Double = 40, chamberStep: Double = 1,
+        supportsSensorControl: Bool = true, isOnline: Bool = true,
+        accessCheck: @escaping @MainActor () -> String? = { nil },
+        loadCapabilities: Bool = true
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         var printer = try TestData.decodePrinter()
-        printer.isOnline = true
+        printer.isOnline = isOnline
         printer.state = "idle"
         printer.sensors = [
             PrinterSensor(
@@ -308,11 +395,13 @@ final class PreheatSubgroupTests: XCTestCase {
         ]
         let service = MockPrinterService()
         var capabilities = PrinterBackendCapabilities.allControlsFixture
-        capabilities.supportsSensorControl = true
+        capabilities.supportsSensorControl = supportsSensorControl
         service.capabilitiesToReturn = capabilities
         service.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
-        await model.loadCapabilities()
+        let model = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer, accessCheck: accessCheck
+        )
+        if loadCapabilities { await model.loadCapabilities() }
         return (model, service)
     }
 

@@ -1355,6 +1355,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].exists)
         XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
         attachScreen("\(device)-\(size)-printer-control-idle")
+        assertNoLockoutText(in: app, "idle Heat")
 
         XCTAssertFalse(app.buttons["printer.controls.segment.tune"].isEnabled, "Tune is print-only (#3496)")
 
@@ -1368,6 +1369,8 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         // #3516: firmware owns the cold-extrusion floor; the app no longer pre-blocks idle load/unload.
         XCTAssertTrue(physicalLoad.isEnabled, "Idle physical filament load defers temperature safety to firmware.")
         XCTAssertTrue(physicalUnload.isEnabled, "Idle physical filament unload defers temperature safety to firmware.")
+        assertNoLockoutText(in: app, "idle Filament")
+        attachScreen("\(device)-\(size)-printer-filament-idle")
 
         selector.buttons["Queue"].tap()
         let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]
@@ -1668,10 +1671,23 @@ final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
         ] {
             XCTAssertFalse(any[id].exists, "\(id) must not render: Tune is Speed, Flow and babystep only")
         }
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "Issue 3540 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-tune-printing-speed-flow-babystep"
+        screenshot.name = "Issue 3540 \(device)-tune-printing-speed-flow-babystep"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        // #3548: disabled Move/Heat and the printing filament page carry no lockout text.
+        assertNoLockoutText(in: app, "printing Tune")
+        XCTAssertFalse(app.buttons["printer.controls.segment.move"].isEnabled)
+        XCTAssertFalse(app.buttons["printer.controls.segment.heat"].isEnabled)
+        selector.buttons["Filament"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["printer.detail.panel.filament"].waitForExistence(timeout: 5))
+        assertNoLockoutText(in: app, "printing Filament")
+        let filament = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        filament.name = "Issue 3548 \(device)-filament-printing-no-lockout"
+        filament.lifetime = .keepAlways
+        add(filament)
     }
 }
 
@@ -2369,5 +2385,22 @@ private final class SignalRPrinterUpdateObserver: @unchecked Sendable {
 
     private struct NegotiateResponse: Decodable {
         let connectionToken: String
+    }
+}
+
+/// #3548: gated controls are hidden or disabled with no rendered explanation.
+@MainActor
+func assertNoLockoutText(
+    in app: XCUIApplication, _ context: String,
+    file: StaticString = #filePath, line: UInt = #line
+) {
+    let fragments = [
+        "Another printer operation", "Controls are", "locked while", "Command in progress",
+        "Command pending", "Unavailable while", "while a print", "while printing",
+        "Printer is offline", "Requires Queue.Start"
+    ]
+    for fragment in fragments {
+        let match = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", fragment)).firstMatch
+        XCTAssertFalse(match.exists, "\(context): rendered lockout text \"\(match.exists ? match.label : fragment)\"", file: file, line: line)
     }
 }

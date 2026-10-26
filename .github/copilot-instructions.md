@@ -136,7 +136,7 @@ fastlane beta   # release pipeline
 ```
 
 For focused snapshots select
-`-only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests`; for XCUI
+`-only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests`; for XCUI
 select `-only-testing:PrintFarmerUITests/<Suite>`. See
 [mobile testing guidance](../mobile/AGENTS.md#simulator-testing) for separate
 iPhone/iPad evidence and environmental-drift diagnosis. Do not re-record PNGs,

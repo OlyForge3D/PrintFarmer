@@ -24,10 +24,13 @@ was re-recorded and no precision was changed.
 | `test_controlSensorRows` | `PrinterSensorControlRows` is mounted by production Tune; actively evolving composition. | **Replace** pixels with named 44pt targets, bounds, accessible names, fan/read-only exclusion, exact chamber target dispatch, and absent actions for unsupported/offline/missing readings. |
 | `test_snapshot_printerDetailBorderedDestructiveControls_darkMode` | Stable shared chrome; production `PrinterDetailView` filament action mounts `.eject`. | **Retain** unchanged: dark contrast, destructive tint, icon/title/border and sibling spacing are visual properties. `.cancel` is a synthetic style variant, not the current Cancel UI. Action tests cover state/dispatch. |
 
-`PrinterDetailView` mounts `PrinterInstrumentPanelControls`, not
-`PrinterControlsSection` or `PrinterSetupControlsContent`. The legacy ownership,
-layout and command tests are retained for compatibility; they do not justify
-mandatory pixels or represent the current Control tab. New coverage renders the
+`PrinterDetailView` mounts `PrinterInstrumentPanelControls`. The legacy
+`PrinterControlsSection` and `PrinterSetupControlsContent` views were deleted in
+#3548 (closing #3542), together with their lockout banner and blocked-reason
+captions; the suite was renamed `PrinterDetailControlsSnapshotTests` and its
+retained PNGs moved without re-recording. Gated controls are hidden or disabled
+with only a VoiceOver hint; `test_instrumentPanel_rendersNoLockoutTextInAnyBlockedState`
+asserts no lockout text renders while printing, paused, pending or offline. New coverage renders the
 actual instrument panel and observes public accessibility IDs, native actions
 and geometry, not SwiftUI type strings or view-tree shapes.
 
@@ -65,7 +68,7 @@ detail host with demo/mock data and do not use PNG comparisons.
 SnapshotTesting derives the retained reference path from its source file:
 
 ```text
-mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/
+mobile/PrintFarmerTests/Views/__Snapshots__/PrinterDetailControlsSnapshotTests/
 ```
 
 The component fixtures use the same iPhone 13 layout on both test hosts.
@@ -86,7 +89,7 @@ iOS 26.5 (23F77) simulator runtime. CI uses the `macos-26` arm64 runner image an
 installs iOS 26.5 when it is not preinstalled. Select the simulator with the
 same workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only the affected snapshot test
-class (`PrinterControlsSectionSnapshotTests`).
+class (`PrinterDetailControlsSnapshotTests`).
 The shared host helper forces `.light`; the dedicated destructive-button
 snapshot selects `.dark` explicitly, so host appearance cannot change the
 Controls references.
@@ -317,8 +320,8 @@ PETG and ABS presets changed to 230/80 and 245/100 (nozzle/bed °C), read from
 and `test_snapshot_sdcpProfile`. All six were re-recorded on iPhone 15 (3x) and
 iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
 appearance, default locale, after inspecting the images. These snapshots
-render the standalone `PrinterSetupControlsContent` (formerly hosted by the
-removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
+rendered the standalone `PrinterSetupControlsContent` (historical: deleted in
+#3542; formerly hosted by the removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
 tab's five-slot row with More has no snapshot coverage and is exercised by
 `Issue3259ControlIdleUITests.testHeatPresetRowOffersMoreMenuWhileIdle`.
 
@@ -333,8 +336,8 @@ it attaches screenshots without comparing reference images.
 
 Only `test_snapshot_disabledState_printerStarting` and
 `test_snapshot_lockoutBanner_printingState` were re-recorded for both families.
-These tests mount the legacy standalone `PrinterControlsSection` setup
-component, not the current printer-detail Control tab's
+These tests mounted the legacy standalone `PrinterControlsSection` setup
+component (historical: deleted in #3542), not the current printer-detail Control tab's
 `PrinterInstrumentPanelControls`. The banner in these fixtures is not a
 banner on the current Control or Tune screen.
 
@@ -357,6 +360,6 @@ Tune no longer renders heater targets or writable sensor rows. No reference
 image was re-recorded: no snapshot test mounts the printer-detail Control
 tab's `PrinterInstrumentPanelControls`. `PrinterSensorsSnapshotTests` renders
 idle, component-level sensor rows and `PrinterControlsSectionSnapshotTests`
-mounts the legacy `PrinterControlsSection`; neither layout changed. Tune
+mounted the legacy `PrinterControlsSection` (historical: deleted in #3542); neither layout changed. Tune
 coverage lives in `PrinterDetailPanelsTests` and the XCUI
 `Issue3496TuneSensorsUITests` screenshots.
