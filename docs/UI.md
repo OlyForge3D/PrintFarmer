@@ -42,7 +42,11 @@ Main overview page showing all printers with real-time status.
 
 - **Local library** (`/files`): upload and organize models and G-code, search,
   tag, preview, slice models, and queue local G-code. Use `?type=models` or
-  `?type=gcode` to filter by file type.
+  `?type=gcode` to filter by file type. Prusa binary G-code (`.bgcode`) uploads
+  show slicer metadata and an embedded PNG or JPEG thumbnail. QOI-only
+  thumbnails and unsupported block compression are omitted; malformed or
+  oversized files (over 1 MiB per metadata block, 2 MiB per thumbnail block,
+  64 header blocks, or 16 MiB of header data) show no metadata.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one location at a time. Add
   `&printer=<printerId>` to scope the catalog to one printer.

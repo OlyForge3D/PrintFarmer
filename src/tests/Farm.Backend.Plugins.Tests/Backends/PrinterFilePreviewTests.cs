@@ -2,7 +2,6 @@
 using System.Text;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
-using Farm.Backend.Plugin.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
@@ -127,13 +126,6 @@ public sealed class PrinterFilePreviewTests
         Assert.Equal("redirect_refused", error.Reason);
         Assert.DoesNotContain("secret", error.Message);
         Assert.Equal(1, handler.Requests);
-    }
-
-    [Fact]
-    public void PrusaLink_DoesNotAdvertiseUncertifiedPreview()
-    {
-        using HttpClient http = new();
-        Assert.False((object)new PrusaLinkClient(http) is ISupportsPrinterFilePreview);
     }
 
     private static MoonrakerClient Moonraker(HttpClient http) =>

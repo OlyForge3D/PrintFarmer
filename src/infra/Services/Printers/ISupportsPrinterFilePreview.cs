@@ -35,6 +35,24 @@ public static class PrinterFilePreviewTransport
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// Bounded read for adapters whose redirect-disabled transport performs its own authentication
+    /// handshake. The sender must use the supplied token and must not follow redirects.
+    /// </summary>
+    public static async Task<byte[]> ReadAsync(
+        Func<CancellationToken, Task<HttpResponseMessage>> send, int maximumBytes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(send);
+        using HttpResponseMessage response = await send(ct).ConfigureAwait(false);
+        using MemoryStream buffer = new();
+        await PrinterFileCopyTransport.CopyResponseAsync(response, buffer, maximumBytes, ct).ConfigureAwait(false);
+        return buffer.ToArray();
+    }
+
+    /// <summary>Returns the MIME type of a supported raster signature, or null for anything else.</summary>
+    public static string? DetectImageContentType(byte[] image) =>
+        new[] { "image/png", "image/jpeg", "image/webp" }.FirstOrDefault(type => IsValidImage(image, type));
+
     /// <summary>Rejects changed or missing provider identity rather than mislabeling a capture.</summary>
     public static void ValidateObservation(PrinterFileInventoryEntry expected, PrinterFileInventoryEntry actual)
     {

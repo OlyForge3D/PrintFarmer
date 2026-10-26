@@ -322,7 +322,8 @@ currently certified adapters.
 | --- | --- | --- |
 | Moonraker | Native per-file metadata, estimated time, layer height, and optional native PNG/JPEG/WebP | Certified authenticated `gcodes` stream |
 | OctoPrint | Native per-file analysis estimated time; image and layer height explicitly unavailable | Certified authenticated `local` stream |
-| PrusaLink, FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
+| PrusaLink | Native per-file details (estimated time and layer height when reported) and optional native PNG/JPEG thumbnail from `/thumb/...` or `/api/thumbnails/...` refs only; QOI and other refs are ignored | Unsupported until native streaming is certified |
+| FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
 
 Preview never fetches G-code to parse metadata or render an image. Moonraker
 uses at most two metadata requests and one image request per capture, with a
@@ -330,6 +331,10 @@ uses at most two metadata requests and one image request per capture, with a
 Images require a supported raster signature; SVG, redirects, ambiguous paths,
 encoded traversal, compressed responses, and oversized/truncated bodies fail
 closed. OctoPrint uses one bounded metadata request and no image request.
+PrusaLink reads `/api/v1/files/<storage>/<path>` details with the same
+256 KiB and 2 MiB limits and signature checks. When a supported image is
+returned, details are re-read to detect a concurrent overwrite. Thumbnail refs
+must be same-origin, at most 1024 characters, and cannot traverse paths.
 
 The server cache is private filesystem data under
 `<ContentRoot>/App_Data/printer-file-previews`, outside the web root, and is

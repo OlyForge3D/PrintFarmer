@@ -40,9 +40,10 @@ IGcodeHarvestService harvestService) : ControllerBase
             return BadRequest("No file provided");
         }
 
-        if (!file.FileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase))
+        if (!file.FileName.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) &&
+            !file.FileName.EndsWith(".bgcode", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest("File must be a .gcode file");
+            return BadRequest("File must be a .gcode or .bgcode file");
         }
 
         try
@@ -50,6 +51,11 @@ IGcodeHarvestService harvestService) : ControllerBase
             using Stream stream = file.OpenReadStream();
             GcodeMetadataDto metadata = await _harvestService.ExtractMetadataAsync(stream, ct);
             return Ok(metadata);
+        }
+        catch (BinaryGcodeFormatException ex)
+        {
+            _logger.LogWarning("Cannot analyze binary G-code: {Reason}", ex.Reason);
+            return BadRequest($"Cannot analyze binary G-code: {ex.Reason}");
         }
         catch (Exception ex)
         {

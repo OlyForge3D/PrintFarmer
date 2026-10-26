@@ -578,7 +578,9 @@ public class GcodeHarvestService(
         ArgumentNullException.ThrowIfNull(gcodeStream);
         GcodeMetadataDto metadata = new();
 
-        using StreamReader reader = new(gcodeStream, leaveOpen: true);
+        using TextReader reader = await BinaryGcodeReader.IsBinaryGcodeAsync(gcodeStream, ct)
+            ? new StringReader(await BinaryGcodeReader.ReadAsTextAsync(gcodeStream, ct))
+            : new StreamReader(gcodeStream, leaveOpen: true);
 
         // Read first few hundred lines to get slicer comments
         int linesRead = 0;
