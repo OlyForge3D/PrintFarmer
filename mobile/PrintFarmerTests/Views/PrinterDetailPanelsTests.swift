@@ -1,4 +1,5 @@
 import XCTest
+import os
 import SwiftUI
 import KeychainSwift
 @testable import PrintFarmer
@@ -233,10 +234,15 @@ final class PrinterDetailPanelsTests: XCTestCase {
         executionTimeAllowance = 60
         let printerBarrier = AsyncBarrier()
         addTeardownBlock { printerBarrier.close() }
-        let fixture = try detailHostFixture(printerBarrier: printerBarrier)
+        let fixture = try detailHostFixture(printerBarrier: printerBarrier, hotendTarget: 222)
         await fixture.services.awaitActiveServerSettled()
+        // The cached row differs from the canonical printer in a field the
+        // owner renders (the hotend target placeholder), so an owner built
+        // from the cached printer is observable.
+        var cached = fixture.printer
+        cached.hotendTarget = 111
         fixture.services.printerSummaryCache.replace(
-            with: [fixture.printer], generation: fixture.services.activeServerGeneration
+            with: [cached], generation: fixture.services.activeServerGeneration
         )
 
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
@@ -263,6 +269,47 @@ final class PrinterDetailPanelsTests: XCTestCase {
         controller.view.layoutIfNeeded()
         XCTAssertEqual(capabilityRequests(fixture.api).count, 2,
                        "Exactly one owner load plus foreground safety discovery")
+        XCTAssertEqual(heaterTarget(in: controller.view)?.placeholder, "222",
+                       "The owner must be built from the canonical printer, not the cached row")
+    }
+
+    /// A deep link to a printer missing from the farm-list cache whose first
+    /// load fails keeps its intent parked; a successful Retry replays it (B06).
+    func testDeepLinkIntentReplaysAfterErrorRetrySucceeds() async throws {
+        executionTimeAllowance = 60
+        let failing = OSAllocatedUnfairLock(initialState: true)
+        let fixture = try detailHostFixture(printerFailure: failing)
+        await fixture.services.awaitActiveServerSettled()
+        let router = AppRouter()
+        router.pendingNFCReadyPrinterId = fixture.printer.id
+
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services,
+            registry: fixture.registry, router: router
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        // Let configureDetail run to completion (its last network work is the
+        // operator sections) so its own tail replay cannot mask the Retry path.
+        try await waitForHost("The uncached first load must fail and operator sections finish", in: controller.view) {
+            let paths = fixture.api.capturedRequests.compactMap { $0.url?.path }
+            return detail.printer == nil && detail.errorMessage != nil
+                && paths.contains { $0.hasSuffix("/history") }
+                && paths.contains { $0.hasPrefix("/api/job-queue-analytics/printer/") }
+                && paths.contains { $0.hasPrefix("/api/maintenance/upcoming") }
+                && paths.contains { $0.hasSuffix("/details") }
+        }
+        await detail.waitForCanonicalLoadToBecomeIdle()
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertEqual(router.pendingNFCReadyPrinterId, fixture.printer.id,
+                       "A failed load must not consume the intent")
+
+        failing.withLock { $0 = false }
+        await detail.loadPrinter() // The error view's Retry action.
+        try await waitForHost("Retry success must replay the parked intent", in: controller.view) {
+            detail.printer != nil && router.pendingNFCReadyPrinterId == nil
+        }
     }
 
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
@@ -701,7 +748,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         writableSensors: [PrinterSensor] = [],
         runtimeFactors: Bool = false,
         printerState: String = "idle",
-        factorValues: (speed: Double?, flow: Double?) = (100, 98)
+        factorValues: (speed: Double?, flow: Double?) = (100, 98),
+        hotendTarget: Double? = nil,
+        printerFailure: OSAllocatedUnfairLock<Bool>? = nil
     ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
@@ -724,6 +773,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         printer.fanSpeedPercent = 25
         printer.liveZOffsetMm = 0
         printer.sensors = writableSensors
+        if let hotendTarget { printer.hotendTarget = hotendTarget }
         if runtimeFactors {
             printer.speedFactorPercent = factorValues.speed
             printer.flowFactorPercent = factorValues.flow
@@ -775,6 +825,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
             let data: Data
             if path == printerPath {
                 await printerBarrier?.arriveAndWait()
+                if printerFailure?.withLock({ $0 }) == true {
+                    return (TestData.httpResponse(url: request.url, statusCode: 500), Data())
+                }
                 data = printerData
             } else if path.hasSuffix("/backend-capabilities") {
                 await capabilityBarrier?.arriveAndWait()
@@ -838,7 +891,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private func host(
         _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry,
-        scenePhase: ScenePhase = .active
+        scenePhase: ScenePhase = .active, router: AppRouter = AppRouter()
     ) throws -> some View {
         let auth = AuthViewModel(services: services)
         auth.isAuthenticated = true
@@ -849,7 +902,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             .environment(services)
             .environment(registry)
             .environment(auth)
-            .environment(AppRouter())
+            .environment(router)
             .environment(\.scenePhase, scenePhase)
             .transaction { $0.disablesAnimations = true }
     }

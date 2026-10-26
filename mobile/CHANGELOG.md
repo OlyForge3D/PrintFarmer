@@ -38,7 +38,8 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   available. While only cached details are shown, printer controls, filament
   actions and Start Next Job stay disabled until the server confirms the
   printer, except Emergency Stop. NFC "ready" and guided spool-swap deep links
-  opened during that window wait and run once the printer is confirmed. A
+  opened during that window wait and run once the printer is confirmed,
+  including after a failed first load succeeds on Retry. A
   connectivity-only live update during a refresh no longer lets the cached
   printer state override the server's current state.
   A failed refresh shows a compact "Showing last known status" note with

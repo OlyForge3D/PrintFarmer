@@ -402,6 +402,13 @@ struct PrinterDetailView: View {
                 }
             }
         }
+        // Replays parked deep-link intents whenever the printer becomes
+        // confirmed: cached→canonical, or error→Retry success (#3528 B02/B06).
+        .onChange(of: viewModel.printer != nil && !viewModel.isShowingCachedPrinter) { _, isConfirmed in
+            guard isConfirmed else { return }
+            let task = Task { await consumePendingRouterIntents() }
+            activeTasks.append(task)
+        }
     }
 
     private func configureDetail() async {
@@ -454,8 +461,8 @@ struct PrinterDetailView: View {
         await consumePendingRouterIntents()
     }
 
-    /// Deep-link intents stay parked on the router while the page shows the
-    /// cached printer; the cached→canonical transition replays them (#3528 B02).
+    /// Deep-link intents stay parked on the router until the printer is
+    /// confirmed; the confirmation transition replays them (#3528 B02/B06).
     private func consumePendingRouterIntents() async {
         guard !viewModel.isShowingCachedPrinter, viewModel.printer != nil else { return }
         if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
@@ -780,10 +787,7 @@ struct PrinterDetailView: View {
         }
         .onChange(of: viewModel.isShowingCachedPrinter) { _, isCached in
             guard !isCached else { return }
-            let task = Task {
-                await ensureControlsOwnerIfAvailable(for: printer)
-                await consumePendingRouterIntents()
-            }
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
             activeTasks.append(task)
         }
         .onChange(of: controlsAvailable(for: printer)) { _, isAvailable in
