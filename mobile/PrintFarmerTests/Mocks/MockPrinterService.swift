@@ -94,6 +94,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var beforeAdjustZOffset: (@Sendable () async -> Void)?
     private(set) var setFanSpeedCallCount = 0
     var setSensorValueCalledWith: (printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double)?
+    var beforeSetSensorValue: (@Sendable () async -> Void)?
     private(set) var setSensorValueCallCount = 0
     private(set) var adjustZOffsetCallCount = 0
     private(set) var setRuntimeFactorCalls: [(printerId: UUID, factor: RuntimeFactor, percent: Double)] = []
@@ -330,6 +331,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
         setSensorValueCallCount += 1
         setSensorValueCalledWith = (printerId, sensorId, quantity, value)
+        if let beforeSetSensorValue { await beforeSetSensorValue() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
@@ -458,6 +460,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         saveZOffsetCalledWith = nil
         setFanSpeedCalledWith = nil
         setSensorValueCalledWith = nil
+        beforeSetSensorValue = nil
         setSensorValueCallCount = 0
         adjustZOffsetCalledWith = nil
         setRuntimeFactorCalls = []

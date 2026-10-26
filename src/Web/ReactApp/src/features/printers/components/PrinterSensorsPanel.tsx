@@ -189,7 +189,7 @@ export function PrinterSensorsPanel({
       label={`Set ${formatPrinterSensorName(sensor.displayName)} ${QUANTITY_LABEL[descriptor.quantity]}`}
       current={current} min={descriptor.min} max={descriptor.max} step={descriptor.step}
       allowZero={descriptor.quantity === 'TargetTemperature' && descriptor.allowZero} unit={UNIT_SUFFIX[descriptor.unit]}
-      disabled={!canControl || !isOnline || !sensor.available} mode={mode} status={status}
+      disabled={!canControl || !isOnline} mode={mode} status={status}
       onSubmit={value => apiClient.setPrinterSensor(printerId, sensor.id, {
         quantity: descriptor.quantity, value: descriptor.quantity === 'Enabled' ? value === 1 : value,
       })}>

@@ -71,16 +71,15 @@ describe('TemperatureControlSection', () => {
     expect(temperatureTargetLimitError({ [heater]: max }, undefined, capabilities)).toBeUndefined();
   });
 
-  it('addresses the active physical heater and allows zero below its heating minimum', async () => {
+  it('uses the native primary-hotend command and allows zero below its heating minimum', async () => {
     const user = userEvent.setup();
     renderSection({ activeExtruderId: 'extruder3', sensors: tools });
     const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveAttribute('max', '280');
     await user.clear(input);
     await user.type(input, '0{Enter}');
-    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith(
-      'p1', 'extruder3', { quantity: 'TargetTemperature', value: 0 }));
-    expect(mocks.setTemperatures).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.setTemperatures).toHaveBeenCalledExactlyOnceWith('p1', { hotend: 0 }));
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it('discards an unsent draft when the active tool changes and restores tool zero as an additional row', async () => {
@@ -104,9 +103,13 @@ describe('TemperatureControlSection', () => {
     expect(screen.getByLabelText('Cooldown')).toBeEnabled();
   });
 
-  it('fails closed when active heater identity is explicitly unknown', () => {
+  it('allows the native hotend command when active heater identity is unknown', async () => {
     renderSection({ activeExtruderId: null, sensors: tools });
-    expect(screen.getByLabelText('Extruder target temperature')).toBeDisabled();
+    const input = screen.getByLabelText('Extruder target temperature');
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: '220' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mocks.setTemperatures).toHaveBeenCalledExactlyOnceWith('p1', { hotend: 220 }));
     expect(additionalPrinterSensors(tools, { activeExtruderId: null })).toHaveLength(4);
   });
   it('renders the Temps heading by default and omits it when showHeading is false', () => {
@@ -221,7 +224,7 @@ describe('TemperatureControlSection', () => {
     const input = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
     expect(input).toHaveAttribute('min', '10');
     expect(input).toHaveAttribute('max', '250');
-    expect(input).toHaveAttribute('step', '0.5');
+    expect(input).toHaveAttribute('step', '1');
     await user.clear(input);
     await user.type(input, '250.5{Enter}{Tab}');
     expect(mocks.setTemperatures).not.toHaveBeenCalled();

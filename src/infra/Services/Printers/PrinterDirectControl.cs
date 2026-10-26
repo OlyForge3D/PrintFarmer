@@ -1,6 +1,4 @@
-﻿using Farm.Infrastructure.Domain;
-
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Bounds ordinary manual commands without retaining operation receipts.</summary>
 public static class PrinterDirectControl
@@ -11,20 +9,15 @@ public static class PrinterDirectControl
         operation is "home" or "home_xy" or "home_z" or "move" or "move_to";
 
     /// <summary>
-    /// Absolute setpoint writes (heater targets, fan speed, runtime factors). Re-issuing a
-    /// setpoint supersedes an unknown earlier one, so an unknown outcome must not fence the printer.
+    /// Absolute setpoint writes whose unknown idle barriers can be reclaimed without replay.
     /// </summary>
     public static bool IsSetpoint([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? operation) =>
         operation is "set_temperature" or "set_fan_speed" or "set_speed_factor" or "set_flow_factor";
 
-    /// <summary>Idle direct operations whose barrier is released (not retained) on an unknown outcome.</summary>
-    public static bool ReleasesBarrierOnUnknown([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? operation) =>
-        IsManualMotion(operation) || IsSetpoint(operation);
-
-    /// <summary>
-    /// Backends whose manual motion is preflighted against a fresh observed position and the
-    /// verified travel envelope before dispatch. Relative jog is only advertised for these.
-    /// </summary>
-    public static bool HasObservedManualMotionPreflight(PrinterBackend backend) =>
-        backend == PrinterBackend.Moonraker;
+    /// <summary>Operator commands whose uncertain response must not become a persistent manual lockout.</summary>
+    public static bool IsInteractive(string? operation) =>
+        IsManualMotion(operation) || IsSetpoint(operation) ||
+        operation is "adjust_z_offset" or "set_sensor_value" or "turn_off_heaters" or
+            "disable_motors" or "extrude_filament" or "filament_load" or "filament_unload" or "filament_change" ||
+        operation?.StartsWith("mmu_", StringComparison.Ordinal) == true;
 }

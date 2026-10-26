@@ -66,26 +66,15 @@ public sealed class MoonrakerDirectControlTests
     [Theory]
     [InlineData("move")]
     [InlineData("moveto")]
-    public async Task ManualJogAsync_FreshSnapshotThenSend_UsesTwoRequestsWithoutReceiptOrPolling(string operation)
+    public async Task ManualJogAsync_UsesOneRequestWithoutSnapshotReceiptOrPolling(string operation)
     {
         using var handler = new JogHandler();
         using var http = new HttpClient(handler);
         var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
-        var printer = new Printer
-        {
-            Id = Guid.NewGuid(),
-            Backend = (int)PrinterBackend.Moonraker,
-            ServerUrl = "http://direct-fixture.invalid",
-            Credential = PrinterCredential.FromApiKey("fixture-key"),
-        };
-
-        PrinterStatusDto observed = await client.GetMovementStatusAsync(printer, default);
-        Assert.True(observed.IsOnline);
         Assert.True(await ExecuteControlAsync(client, operation));
 
         Assert.Equal(
             [
-                "GET /printer/objects/query?webhooks=state&print_stats=state&toolhead=homed_axes&gcode_move=position,gcode_position",
                 "POST /printer/gcode/script",
             ],
             handler.Requests);

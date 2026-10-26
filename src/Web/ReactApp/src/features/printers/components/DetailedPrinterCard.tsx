@@ -82,7 +82,6 @@ import { getStatusHeaderClassName, isPrinterStateShutdown } from '@/features/pri
 import {
   getPresetTargets,
   temperatureTargetLimitError,
-  getExtrudeMinTemp,
   DEFAULT_EXTRUDE_DISTANCE_MM,
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
@@ -237,7 +236,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = !motion.blocked && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canDisableMotorsNow = !motion.blocked && backendCapabilities?.supportsDisableMotors !== false && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
@@ -248,8 +247,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
 
-  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
-  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
+  const canExtrudeNow = isOnline && isEnabled && !isPrinting && !isShutdown && backendCapabilities?.supportsExtrusion === true;
 
   const isActivePrintForObjectQuery = isActivePrintForObjects({ state, isOnline });
   // A pending skip confirmation never outlives its print or its printer.
@@ -351,16 +349,18 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
     setFilamentActionPending(true);
     try {
-      const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
+      const methodMap = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
         console.error(`Failed to ${action} filament:`, result.error);
+        toast.error(result.error || result.message || `Failed to ${action} filament`);
       }
     } catch (error) {
       console.error(`Error during filament ${action}:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to ${action} filament`));
     } finally {
       setFilamentActionPending(false);
     }
@@ -371,6 +371,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     ? {
       blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
       pending: filamentActionPending,
+      supportsLoad: backendCapabilities?.supportsFilamentLoad,
+      supportsUnload: backendCapabilities?.supportsFilamentUnload,
       onAction: (action) => void handleFilamentAction(action),
     }
     : undefined;
@@ -465,7 +467,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       
       if (!result.success) {
         console.error(`Failed to move ${axis} by ${distance}:`, result.error);
-        toast.error(result.error || `Failed to move ${axis}`);
+        toast.error(result.error || result.message || `Failed to move ${axis}`);
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
@@ -497,7 +499,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       
       if (!result.success) {
         console.error(`Failed to home ${axes || 'all'}:`, result.error);
-        toast.error(result.error || 'Failed to home printer');
+        toast.error(result.error || result.message || 'Failed to home printer');
       }
     } catch (error) {
       console.error(`Error homing ${axes || 'all'}:`, error);
@@ -512,7 +514,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });
-      if (!result.success) toast.error(result.error || 'Movement did not succeed');
+      if (!result.success) toast.error(result.error || result.message || 'Movement did not succeed');
     } catch (error) {
       toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
     } finally {
@@ -534,7 +536,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
-        toast.error(result.error || `Failed to ${direction}`);
+        toast.error(result.error || result.message || `Failed to ${direction}`);
       }
     } catch (error) {
       console.error(`Error ${direction}ing:`, error);
@@ -851,9 +853,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerZ={printer.z}
             homedAxes={homedAxesRaw}
             hotendTemp={printer.hotendTemp}
-            extrudeMinTemp={extrudeMinTemp}
             movementActionPending={movementActionPending}
             canMove={canMoveNow}
+            canHomeAll={canMoveNow && backendCapabilities?.supportsHoming !== false}
+            canHomeXY={canMoveNow && backendCapabilities?.supportsHomingXY !== false}
+            canHomeZ={canMoveNow && backendCapabilities?.supportsHomingZ !== false}
             canDisableMotors={canDisableMotorsNow}
             canSetStep={canSetStepNow}
             canManualMove={canManualMoveNow}
@@ -866,7 +870,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             onExtrudeSpeedChange={setExtrudeSpeed}
             onMove={handleMove}
             onHome={handleHome}
-            onMoveTo={handleMoveTo}
+            onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
             rightContent={

@@ -266,3 +266,25 @@ The Advanced printer controls screen, its Settings toggle and the onboarding
 prompt were removed. No reference image changed: the blocked-editor evidence
 test now covers the readiness gate instead of the retired Settings opt-in, and
 it attaches screenshots without comparing reference images.
+
+## Native-control compatibility fixture wording (#3512)
+
+Only `test_snapshot_disabledState_printerStarting` and
+`test_snapshot_lockoutBanner_printingState` were re-recorded for both families.
+These tests mount the legacy standalone `PrinterControlsSection` setup
+component, not the current printer-detail Control tab's
+`PrinterInstrumentPanelControls`. The banner in these fixtures is not a
+banner on the current Control or Tune screen.
+
+Reference, actual and difference images were inspected before recording.
+Every changed pixel is confined to the intentional lockout message, which
+now describes temperature and Z-offset controls in Tune without the removed
+verified-readback requirement. All control positions, readings and disabled
+states are unchanged; this is not a toolchain-drift rebaseline.
+
+Generation used task-isolated iPhone 15 (3x, 1170x2532) and iPad Pro 13-inch
+(M5) (2x, 780x1688) hosts, Xcode 26.6 (17F113), iOS 26.5 (23F77), light
+appearance, default locale and the unchanged `.iPhone13` component
+configuration. All other Controls and sensor references, strict comparison
+settings and test selectors remain unchanged; recording is disabled.
+Both full snapshot classes passed on each host with zero skips.

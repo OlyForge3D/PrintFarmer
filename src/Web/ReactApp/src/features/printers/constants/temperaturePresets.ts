@@ -66,9 +66,6 @@ export function temperatureTargetLimitError(
   return undefined;
 }
 
-/** Default minimum hotend temperature (°C) for extrusion when material is unknown. Matches PLA. */
-export const DEFAULT_EXTRUDE_MIN_TEMP = 210;
-
 /** Selectable extrusion distances in mm. */
 export const EXTRUDE_DISTANCE_OPTIONS = [10, 25, 50, 100] as const;
 
@@ -80,15 +77,3 @@ export const EXTRUDE_SPEED_OPTIONS = [1, 5, 10] as const;
 
 /** Default extrusion speed in mm/s. */
 export const DEFAULT_EXTRUDE_SPEED_MMS = 5;
-
-/**
- * Returns the minimum hotend temperature required before extruding for a given material.
- * Falls back to DEFAULT_EXTRUDE_MIN_TEMP (210 °C / PLA) when the material is unknown.
- */
-export function getExtrudeMinTemp(material?: string): number {
-  if (material) {
-    const targets = getPresetTargets(material);
-    if (targets && targets.hotend > 0) return targets.hotend;
-  }
-  return DEFAULT_EXTRUDE_MIN_TEMP;
-}

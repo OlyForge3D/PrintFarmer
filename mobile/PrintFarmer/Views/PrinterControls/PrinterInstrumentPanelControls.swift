@@ -150,7 +150,7 @@ struct PrinterInstrumentPanelControls: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
                     .font(.headline)
-                Text(viewModel.hardwareLoadError ?? "Positive targets require valid reported maxima. Supported zero-off commands remain available.")
+                Text(viewModel.hardwareLoadError ?? "Reported heater limits are unavailable. Commands remain subject to firmware limits.")
                     .font(.footnote)
                 ControlActionButton(title: "Retry heater limits", identifier: "printer.controls.retry-limits") {
                     Task { await viewModel.loadHardware() }
@@ -273,13 +273,6 @@ struct PrinterInstrumentPanelControls: View {
                     zColumn.frame(width: 72)
                 }
                 .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                if let note = jogSafetyNote {
-                    Text(note)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfWarning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.jog.homing-safety")
-                }
                 stepSelector(
                     title: "Jog distance (mm)",
                     options: Self.jogSteps,
@@ -322,17 +315,6 @@ struct PrinterInstrumentPanelControls: View {
             home("Z", axes: ["Z"], accessibilityTitle: "Home Z") { await viewModel.homeZ() }
             jog("Z", sign: -1, symbol: "chevron.down", title: "Z")
         }
-    }
-
-    private var jogSafetyNote: String? {
-        guard let axes = viewModel.printer.homedAxes else {
-            return "Homing status unavailable. Verify axes are homed before moving."
-        }
-        let required = JogSubgroup.visibleAxes(for: viewModel.capabilities)
-        guard required.allSatisfy({ axes.lowercased().contains($0.lowercased()) }) else {
-            return "Not homed. Home all axes before moving."
-        }
-        return nil
     }
 
     private func jog(_ axis: String, sign: Double, symbol: String, title: String = "") -> some View {

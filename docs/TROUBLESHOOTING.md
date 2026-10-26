@@ -42,11 +42,12 @@ Solutions to common issues in PrintFarmer.
    # (Usually via printer UI or SSH)
    ```
 
-### Moonraker Jog Reports Unverified Movement Evidence
+### Moonraker Commands Reach the Wrong Endpoint
 
-If PrintFarmer reports `printer_safety_evidence_unknown` while the printer is
-online and homed, check the server logs for `Moonraker verified safety discovery
-failed`. A JSON error beginning with `'<'` can indicate that the request
+Interactive controls no longer require verified geometry or homing preflight.
+On older builds, `printer_safety_evidence_unknown` can still originate in that
+removed manual layer; automated/calibration workflows retain evidence checks.
+A JSON error beginning with `'<'` can indicate that the request
 received the Fluidd/Mainsail HTML page instead of Moonraker JSON.
 
 Keep **Backend Port (API)** set to the actual Moonraker API port (commonly
@@ -62,8 +63,8 @@ curl "http://<printer-ip>:7125/printer/objects/list"
 curl "http://<printer-ip>:7125/printer/objects/query?toolhead=axis_minimum,axis_maximum,homed_axes&gcode_move=homing_origin,gcode_position,position"
 ```
 
-These should return JSON, not HTML. Do not bypass homing or travel-bound checks
-to work around an endpoint mismatch. On affected older builds, correct port
+These should return JSON, not HTML. Native commands still require the correct
+API endpoint; removing preflight cannot repair routing. On affected older builds, correct port
 settings alone do not fix frontend-port routing; deploy the endpoint-selection
 fix first.
 

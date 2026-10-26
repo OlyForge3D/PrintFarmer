@@ -34,12 +34,11 @@ function RuntimeFactors({ printer, speed, flow }: { printer: Printer; speed: boo
   const telemetry = useRuntimeFactors(printer.id);
   const { hasPermission } = useAuth();
   const blocked = !hasPermission('queue', 'start') ? 'Queue.Start permission required'
-    : !printer.isOnline || !telemetry.connected || telemetry.status?.isOnline === false ? 'Printer or live connection is offline'
+    : !printer.isOnline || telemetry.status?.isOnline === false ? 'Printer is offline'
     : printer.isEnabled === false ? 'Printer is disabled'
     : printer.inMaintenance ? 'Printer is in maintenance'
-    : !telemetry.status ? 'Waiting for current printer status'
-    : printer.state?.toLowerCase() !== 'printing' || telemetry.status.state?.toLowerCase() !== 'printing'
-      ? 'Tuning is available while printing'
+    : printer.state?.toLowerCase() === 'shutdown'
+      ? 'Printer is shut down'
     : '';
   return <div className="my-2">
     <CollapsibleSection title="Tuning" keepMounted>

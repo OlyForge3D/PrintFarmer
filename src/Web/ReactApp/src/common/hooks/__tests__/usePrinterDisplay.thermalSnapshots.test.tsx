@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, renderHook, screen } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { usePrinterDisplay, usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { loadWireContractFixture } from '@/test/wireContracts';
@@ -22,9 +22,10 @@ describe('Moonraker authoritative heater snapshots', () => {
   beforeEach(() => {
     state.statuses = new Map();
     vi.clearAllMocks();
+    state.setTemperatures.mockResolvedValue({ success: true });
   });
 
-  it('clears stale API identity and readings using real SignalR wire captures on both display hooks', () => {
+  it('clears stale API identity and readings on both display hooks without blocking native heater commands', async () => {
     const known = loadWireContractFixture<PrinterStatusUpdate>('api/printer-status/moonraker-primary.known.json');
     const invalid = loadWireContractFixture<PrinterStatusUpdate>('api/printer-status/moonraker-primary.invalid.json');
     const unknown = loadWireContractFixture<PrinterStatusUpdate>('api/printer-status/moonraker-primary.unknown.json');
@@ -65,9 +66,20 @@ describe('Moonraker authoritative heater snapshots', () => {
       hotendCurrent={display.hotendTemp} hotendTarget={display.hotendTarget} sensors={display.sensors}
       temperatureActionPending={false} canSetTemperatures canCooldown
       onApplyPreset={vi.fn()} onApplySingleHeaterPreset={vi.fn()} />);
-    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
+    const hotendInput = screen.getByRole('spinbutton', { name: 'Extruder target temperature' });
+    const bedInput = screen.getByRole('spinbutton', { name: 'Heater Bed target temperature' });
+    expect(hotendInput).toBeEnabled();
+    expect(hotendInput).toHaveValue(null);
+    expect(bedInput).toBeEnabled();
+    expect(bedInput).toHaveValue(null);
     expect(state.setPrinterSensor).not.toHaveBeenCalled();
     expect(state.setTemperatures).not.toHaveBeenCalled();
+
+    fireEvent.change(hotendInput, { target: { value: '220' } });
+    fireEvent.keyDown(hotendInput, { key: 'Enter' });
+    await waitFor(() => expect(state.setTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { hotend: 220 }));
+    expect(await screen.findByText('Accepted 220°C · awaiting telemetry')).toBeVisible();
+    expect(state.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])('preserves omitted delta fields without a complete %s sensor snapshot', backend => {

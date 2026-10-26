@@ -52,7 +52,7 @@ struct PrinterSetupControlsContent: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
                             .font(.headline)
-                        Text(viewModel.hardwareLoadError ?? "Positive targets require valid reported maxima. Supported zero-off commands remain available.")
+                        Text(viewModel.hardwareLoadError ?? "Reported heater limits are unavailable. Commands remain subject to firmware limits.")
                             .font(.footnote)
                         ControlActionButton(title: "Retry heater limits", identifier: "printer.controls.retry-limits") {
                             Task { await viewModel.loadHardware() }
@@ -135,7 +135,7 @@ struct PrinterSetupControlsContent: View {
     }
 
     private var lockoutBanner: some View {
-        let message = String(localized: "Heat, motion and filament setup are unavailable while a job is starting, printing or paused. Z-offset adjustments require verified capability and live readback.")
+        let message = String(localized: "Motion and filament setup are unavailable while a job is starting, printing or paused. Supported temperature and Z-offset controls remain available in Tune.")
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
@@ -350,8 +350,7 @@ struct PrinterSensorControlRows: View {
         let reading = sensor.reading(descriptor.quantity)
         let current = reading?.value.number
         let reason = viewModel.sensorControlUnavailableReason
-            ?? (sensor.available ? (current == nil ? "Current value is unknown; controls are disabled." : nil)
-                                 : "Unavailable; controls are disabled.")
+            ?? (current == nil ? "Current value is unknown; relative adjustments are unavailable." : nil)
         let title = "\(PrinterSensorFormatting.displayName(sensor.displayName)) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
         let id = "printer.controls.sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
         return VStack(alignment: .leading, spacing: 4) {
