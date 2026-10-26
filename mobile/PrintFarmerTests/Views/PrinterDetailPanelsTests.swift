@@ -17,8 +17,24 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
     }
 
-    func testPageIndicatorUsesCompactHeight() {
-        XCTAssertLessThanOrEqual(PrinterDetailLayout.pageIndicatorHeight, 20)
+    func testMovePositionReadoutHidesOnlyWhenNoPositionIsReported() {
+        let show = PrinterInstrumentPanelControls.showsPositionReadout
+        XCTAssertTrue(show(0, 0, 5, "xyz"))
+        XCTAssertTrue(show(10, 20, 0.2, nil), "Backends without homing data still report coordinates")
+        XCTAssertFalse(show(nil, nil, nil, nil), "No position reported")
+        XCTAssertFalse(show(.nan, .infinity, nil, "xyz"), "Only non-finite values")
+        XCTAssertTrue(show(0, 0, nil, "xyz"), "Partial position shows a placeholder for the missing axis")
+        XCTAssertTrue(show(0, 0, 5, ""), "Unhomed axes show placeholders, not a hidden readout")
+        XCTAssertTrue(show(0, 0, 5, "xy"))
+    }
+
+    func testMovePositionReadoutUsesDashForUnhomedOrUnknownAxes() {
+        typealias Panel = PrinterInstrumentPanelControls
+        XCTAssertEqual(Panel.readoutPlaceholder, "\u{2014}")
+        XCTAssertEqual(Panel.readoutText(axis: "X", value: 120, homedAxes: "xyz"), "120.0")
+        XCTAssertEqual(Panel.readoutText(axis: "Z", value: 5, homedAxes: "xy"), Panel.readoutPlaceholder)
+        XCTAssertEqual(Panel.readoutText(axis: "Y", value: nil, homedAxes: "xyz"), Panel.readoutPlaceholder)
+        XCTAssertEqual(Panel.readoutText(axis: "X", value: 0, homedAxes: ""), Panel.readoutPlaceholder)
     }
 
     func testMoveEmptyStateUsesAValidSFSymbol() {
@@ -322,7 +338,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
-        let fixture = try detailHostFixture()
+        // Tune is only selectable while printing or paused (#3496).
+        let fixture = try detailHostFixture(printerState: "printing")
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
@@ -361,7 +378,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         signal.simulatePrinterUpdate(PrinterStatusUpdate(
             id: fixture.printer.id,
             isOnline: true,
-            state: "idle",
+            state: "printing",
             progress: nil,
             fanSpeedPercent: nil,
             liveZOffsetMm: 0.005,
@@ -430,6 +447,21 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
     }
 
+    func testIdlePrinterShowsWritableSensorControlsUnderHeat() async throws {
+        let panel = try await hostedTunePanel(printerState: "idle")
+        defer { panel.window.isHidden = true; panel.window.rootViewController = nil }
+        let sensorIncrease = "printer.controls.sensor.chamber.TargetTemperature.increase"
+        try await waitForHost("Idle Control must mount its segment picker", in: panel.controller.view) {
+            panel.find("printer.controls.segment.heat") != nil
+        }
+        XCTAssertEqual(panel.find("printer.controls.segment.tune")?.isEnabled, false, "Tune is print-only")
+        try XCTUnwrap(panel.find("printer.controls.segment.heat")).sendActions(for: .touchUpInside)
+        try await waitForHost("An idle printer's writable sensor must stay reachable on Heat", in: panel.controller.view) {
+            panel.find(sensorIncrease)?.isEnabled == true
+        }
+        XCTAssertNotNil(panel.find("printer.controls.sensor.chamber.TargetTemperature.decrease"))
+    }
+
     func testTuneShowsSpeedAndFlowAboveBabystepAndPostsFactorAPI() async throws {
         let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "printing")
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
@@ -461,31 +493,17 @@ final class PrinterDetailPanelsTests: XCTestCase {
                        "A speed step never writes flow")
     }
 
-    func testTuneKeepsSpeedAndFlowEnabledWhileIdleAndDispatchesOnlyExplicitSpeedChange() async throws {
-        let tune = try await hostedTunePanel(runtimeFactors: true)
+    func testTuneSegmentIsDisabledAndUnreachableWhenNotPrinting() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true, printerState: "idle")
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        try await waitForHost("Babystep must render enabled while idle", in: tune.controller.view) {
-            tune.button("printer.controls.runtime.z-offset.increase")?.isEnabled == true
+        try await waitForHost("Tune segment must render disabled while idle", in: tune.controller.view) {
+            tune.find("printer.controls.segment.tune")?.isEnabled == false
         }
+        XCTAssertNil(tune.button("printer.controls.runtime.z-offset.increase"), "Babystep is unreachable while idle")
         for factor in RuntimeFactor.allCases {
-            for direction in ["increase", "decrease"] {
-                let button = try XCTUnwrap(tune.button("printer.controls.runtime.\(factor.rawValue)-factor.\(direction)"))
-                XCTAssertTrue(button.isEnabled, "\(factor.title) \(direction) remains available while idle")
-                XCTAssertEqual(button.accessibilityHint, "Sends a new \(factor.rawValue) percentage to the printer.")
-            }
+            XCTAssertNil(tune.find("printer.controls.runtime.\(factor.rawValue)-factor.increase"))
         }
         XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("-factor") == true })
-        try XCTUnwrap(tune.button("printer.controls.runtime.speed-factor.increase"))
-            .sendActions(for: .touchUpInside)
-        let path = "/api/printers/\(tune.printerId)/speed-factor"
-        try await waitForHost("Idle speed step must reach the shared factor API", in: tune.controller.view) {
-            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == path }
-        }
-        let requests = tune.api.capturedRequests.filter { $0.httpMethod == "POST" && $0.url?.path == path }
-        XCTAssertEqual(requests.count, 1)
-        let body = try XCTUnwrap(try XCTUnwrap(requests.first).capturedHTTPBody())
-        XCTAssertEqual(try JSONSerialization.jsonObject(with: body) as? [String: Double], ["percent": 105])
-        XCTAssertFalse(tune.api.capturedRequests.contains { $0.url?.path.hasSuffix("/flow-factor") == true })
     }
 
     func testTuneSupportedSpeedWithMissingTelemetryStaysVisibleDisabledAndShowsPlaceholder() async throws {
@@ -560,13 +578,15 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let printerId: UUID
         let window: UIWindow
         let button: (String) -> UIButton?
+        /// Lookup without tapping the Tune segment first.
+        let find: (String) -> UIButton?
     }
 
     /// Hosts the detail Control tab on Tune with writable fans and a chamber heater.
     /// Callers hide the returned window when done.
     private func hostedTunePanel(
         runtimeFactors: Bool = false,
-        printerState: String = "idle",
+        printerState: String = "printing",
         factorValues: (speed: Double?, flow: Double?) = (100, 98)
     ) async throws -> HostedTunePanel {
         let auxiliaryFan = PrinterSensor(
@@ -605,7 +625,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             }
             return find(identifier)
         }
-        return HostedTunePanel(controller: controller, api: fixture.api, printerId: fixture.printer.id, window: window, button: button)
+        return HostedTunePanel(controller: controller, api: fixture.api, printerId: fixture.printer.id, window: window, button: button, find: { find($0) })
     }
 
     private static let deviceTokensPath = "/api/notifications/device-tokens"
@@ -1117,56 +1137,74 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testInstrumentPanelLocksMoveAndHeatToTuneWhilePrinting() {
         typealias Panel = PrinterInstrumentPanelControls
-        for state in ["printing", "Paused", "STARTING"] {
+        for state in ["printing", "Paused"] {
             XCTAssertTrue(Panel.isPrinting(state: state), state)
         }
-        for state in [nil, "", "idle", "ready", "error", "offline"] as [String?] {
+        for state in [nil, "", "idle", "ready", "error", "offline", "STARTING"] as [String?] {
             XCTAssertFalse(Panel.isPrinting(state: state), String(describing: state))
         }
         XCTAssertFalse(Panel.isAvailable(.move, isPrinting: true))
         XCTAssertFalse(Panel.isAvailable(.heat, isPrinting: true))
         XCTAssertTrue(Panel.isAvailable(.tune, isPrinting: true))
-        XCTAssertTrue(Panel.Segment.allCases.allSatisfy { Panel.isAvailable($0, isPrinting: false) })
+        XCTAssertTrue(Panel.isAvailable(.move, isPrinting: false))
+        XCTAssertTrue(Panel.isAvailable(.heat, isPrinting: false))
+        XCTAssertFalse(Panel.isAvailable(.tune, isPrinting: false), "Tune is print-only (#3496)")
         XCTAssertEqual(Panel.resolvedSegment(.move, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: true), .tune)
         XCTAssertEqual(Panel.resolvedSegment(.heat, isPrinting: false), .heat)
+        XCTAssertEqual(Panel.resolvedSegment(.tune, isPrinting: false), .move)
+        XCTAssertEqual(Panel.unavailableHint(.tune), "Available while printing")
         XCTAssertEqual(Panel.Segment.allCases.map(\.title), ["Move", "Heat", "Tune"])
     }
 
     /// Entering Control mid-print or a print starting selects Tune; the print
-    /// ending re-enables Move/Heat but keeps Tune selected.
-    func testInstrumentPanelSelectsTuneOnPrintStartAndKeepsItAfterwards() {
+    /// ending disables Tune and falls back to Move (#3496).
+    func testInstrumentPanelSelectsTuneOnPrintStartAndFallsBackToMoveAfterwards() {
         typealias Panel = PrinterInstrumentPanelControls
         for selected in Panel.Segment.allCases {
             XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: true), .tune, "\(selected)")
-            XCTAssertEqual(Panel.selection(afterPrintingChange: selected, isPrinting: false), selected, "\(selected)")
         }
+        XCTAssertEqual(Panel.selection(afterPrintingChange: .move, isPrinting: false), .move)
+        XCTAssertEqual(Panel.selection(afterPrintingChange: .heat, isPrinting: false), .heat)
         let duringPrint = Panel.selection(afterPrintingChange: .heat, isPrinting: true)
-        XCTAssertEqual(Panel.selection(afterPrintingChange: duringPrint, isPrinting: false), .tune)
-        XCTAssertTrue(Panel.Segment.allCases.allSatisfy { Panel.isAvailable($0, isPrinting: false) })
+        XCTAssertEqual(Panel.selection(afterPrintingChange: duringPrint, isPrinting: false), .move)
     }
 
     func testInstrumentPanelSharesPrintingStatesWithControlsViewModel() {
         for state in [nil, "", "idle", "printing", "Paused", "STARTING", "error"] as [String?] {
             XCTAssertEqual(
                 PrinterInstrumentPanelControls.isPrinting(state: state),
+                PrinterControlsViewModel.isRunningPrint(state: state),
+                String(describing: state)
+            )
+            XCTAssertEqual(
+                PrinterInstrumentPanelControls.isLocked(state: state),
                 PrinterControlsViewModel.isPrintingOrPaused(state: state),
                 String(describing: state)
             )
         }
     }
 
-    func testTuneTemperaturesExplainOnlyWhenTheBackendCannotApplyThem() {
+    func testStartingStateCannotSelectTuneOrExposeRuntimeControls() {
         typealias Panel = PrinterInstrumentPanelControls
-        XCTAssertEqual(
-            Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: false, canControlHeat: false, heatBlockedReason: "Controls are locked while a print is active."),
-            "This printer can't change temperatures during a print."
-        )
-        XCTAssertNil(Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: true, canControlHeat: true, heatBlockedReason: nil))
-        XCTAssertEqual(
-            Panel.tuneTemperatureBlockedReason(isPrinting: true, heatDuringPrint: true, canControlHeat: false, heatBlockedReason: "Printer is offline."),
-            "Printer is offline."
-        )
+        XCTAssertFalse(PrinterControlsViewModel.isRunningPrint(state: "starting"))
+        XCTAssertFalse(PrinterControlsViewModel.isRunningPrint(state: "STARTING"))
+        XCTAssertTrue(PrinterControlsViewModel.isRunningPrint(state: "printing"))
+        XCTAssertTrue(PrinterControlsViewModel.isRunningPrint(state: "paused"))
+        let printing = Panel.isPrinting(state: "starting")
+        let locked = Panel.isLocked(state: "starting")
+        XCTAssertFalse(printing)
+        XCTAssertTrue(locked)
+        XCTAssertFalse(Panel.isAvailable(.tune, isPrinting: printing, isLocked: locked))
+        XCTAssertNotEqual(Panel.resolvedSegment(.tune, isPrinting: printing, isLocked: locked), .tune)
+        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: printing, heatDuringPrint: true))
+    }
+
+    func testTuneTemperaturesAreOmittedWhenTheBackendCannotApplyThem() {
+        typealias Panel = PrinterInstrumentPanelControls
+        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: true, heatDuringPrint: false))
+        XCTAssertTrue(Panel.showsTuneTemperatures(isPrinting: true, heatDuringPrint: true))
+        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: false, heatDuringPrint: true))
     }
 
     func testPositionReadoutSpeaksMillimeters() {
@@ -1771,6 +1809,80 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     // MARK: - Camera lifecycle mapping (Hicks review finding 19)
 
+    func testCameraMediaAspectRatioSwapsOnQuarterTurns() {
+        let size = CGSize(width: 1600, height: 900)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 0)!, 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 90)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 180)!, 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: 270)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(PrinterDetailCameraLayout.aspectRatio(imageSize: size, rotation: -90)!, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertNil(PrinterDetailCameraLayout.aspectRatio(imageSize: .zero, rotation: 0))
+    }
+
+    func testCameraMediaHeightIsClampedRelativeToTheContainer() {
+        typealias Layout = PrinterDetailCameraLayout
+        XCTAssertEqual(Layout.maximumHeight(containerHeight: 800), 480, accuracy: 0.001)
+        XCTAssertEqual(Layout.maximumHeight(containerHeight: 200), Layout.minimumMaximumHeight)
+        XCTAssertEqual(Layout.maximumHeight(containerHeight: 0), .infinity)
+        XCTAssertEqual(Layout.maximumHeight(containerHeight: .nan), .infinity)
+
+        // Landscape image on an iPhone-width card: full width, under the cap.
+        let wide = Layout.fittedSize(aspect: 16.0 / 9.0, width: 360, maxHeight: 480)
+        XCTAssertEqual(wide.width, 360, accuracy: 0.001)
+        XCTAssertEqual(wide.height, 202.5, accuracy: 0.001)
+
+        // 90-degree rotation on iPhone: portrait media is capped and narrows.
+        let portrait = Layout.fittedSize(aspect: 9.0 / 16.0, width: 360, maxHeight: 480)
+        XCTAssertEqual(portrait.height, 480, accuracy: 0.001)
+        XCTAssertEqual(portrait.width, 270, accuracy: 0.001)
+
+        // iPad landscape: a wide card would make 16:9 media taller than the cap.
+        let iPadLandscape = Layout.fittedSize(aspect: 16.0 / 9.0, width: 1300, maxHeight: Layout.maximumHeight(containerHeight: 900))
+        XCTAssertEqual(iPadLandscape.height, 540, accuracy: 0.001)
+        XCTAssertEqual(iPadLandscape.width, 960, accuracy: 0.001)
+
+        XCTAssertEqual(Layout.fittedSize(aspect: 0, width: 360, maxHeight: 480), .zero)
+        XCTAssertEqual(Layout.maximumWidth(aspect: 9.0 / 16.0, maxHeight: 480), 270, accuracy: 0.001)
+        XCTAssertEqual(Layout.maximumWidth(aspect: nil, maxHeight: 480), .infinity)
+        XCTAssertEqual(Layout.maximumWidth(aspect: 1, maxHeight: .infinity), .infinity)
+    }
+
+    func testMjpegStreamAspectSwapsOnQuarterTurns() {
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 0), 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 90), 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 180), 16.0 / 9.0, accuracy: 0.0001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 270), 9.0 / 16.0, accuracy: 0.0001)
+    }
+
+    func testIdentityHeaderMapsReadyStatesToIdle() {
+        typealias Header = PrinterDetailPanelsHost<EmptyView, EmptyView, EmptyView, EmptyView>.PrinterDetailIdentityHeader
+        XCTAssertEqual(Header.statusText(state: "ready", isOnline: true), "Idle")
+        XCTAssertEqual(Header.statusText(state: "Ready", isOnline: true), "Idle")
+        XCTAssertEqual(Header.statusText(state: "idle", isOnline: true), "Idle")
+        XCTAssertEqual(Header.statusText(state: "operational", isOnline: true), "Idle")
+        XCTAssertEqual(Header.statusText(state: "printing", isOnline: true), "Printing")
+        XCTAssertEqual(Header.statusText(state: "ready", isOnline: false), "Offline")
+    }
+
+    func testTunePendingStateFollowsTheTappedControl() {
+        typealias Panel = PrinterInstrumentPanelControls
+        let speedUp = ControlCommand.Kind.runtimeFactor(.speed, percent: 110)
+        XCTAssertTrue(Panel.isRuntimeFactorPending(speedUp, factor: .speed, increase: true, current: 100))
+        XCTAssertFalse(Panel.isRuntimeFactorPending(speedUp, factor: .speed, increase: false, current: 100))
+        XCTAssertFalse(Panel.isRuntimeFactorPending(speedUp, factor: .flow, increase: true, current: 100))
+        XCTAssertFalse(Panel.isRuntimeFactorPending(nil, factor: .speed, increase: true, current: 100))
+
+        let raise = ControlCommand.Kind.transientZOffset(targetMm: 0.05, deltaMm: 0.05)
+        XCTAssertTrue(Panel.isBabystepPending(raise, raise: true))
+        XCTAssertFalse(Panel.isBabystepPending(raise, raise: false))
+        XCTAssertFalse(Panel.isBabystepPending(speedUp, raise: true))
+
+        typealias Preheat = PreheatSubgroup.IndividualHeaterControls
+        XCTAssertTrue(Preheat.isHeaterTargetPending(.heaterTargets(hotend: 200, bed: 60)))
+        XCTAssertFalse(Preheat.isHeaterTargetPending(speedUp))
+        XCTAssertFalse(Preheat.isHeaterTargetPending(nil))
+    }
+
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
         XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
             scenePhase: .active, selectedPanel: .status
@@ -1802,4 +1914,46 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
     }
 
+
+    // MARK: - #3514 round 3 helpers
+
+    func testTransitionalStateLabelOnlyShowsWhileStarting() {
+        XCTAssertEqual(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: false, isLocked: true), "Starting…")
+        XCTAssertNil(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: true, isLocked: true))
+        XCTAssertNil(PrinterInstrumentPanelControls.transitionalStateLabel(isPrinting: false, isLocked: false))
+    }
+
+    func testMjpegFrameSizeParsesOnlyPositiveFinitePairs() {
+        XCTAssertEqual(MJPEGStreamView.frameSize(from: [NSNumber(value: 640), NSNumber(value: 480)]), CGSize(width: 640, height: 480))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: [NSNumber(value: 0), NSNumber(value: 480)]))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: [NSNumber(value: 640)]))
+        XCTAssertNil(MJPEGStreamView.frameSize(from: "640x480"))
+    }
+
+    func testMjpegAspectUsesReportedFrameAndSwapsOnQuarterTurn() {
+        let frame = CGSize(width: 640, height: 480)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 0, frameSize: frame), 640.0 / 480.0, accuracy: 0.001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 90, frameSize: frame), 480.0 / 640.0, accuracy: 0.001)
+        XCTAssertEqual(MJPEGStreamContainer.aspectRatio(rotation: 0), 16.0 / 9.0, accuracy: 0.001)
+    }
+
+    func testSurfaceColorReadsOpaqueCornerAndIgnoresTransparency() {
+        func image(_ color: UIColor) -> UIImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = false
+            return UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4), format: format).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+            }
+        }
+        let opaque = PrinterDetailCameraLayout.surfaceColor(of: image(UIColor(red: 1, green: 0, blue: 0, alpha: 1)))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        XCTAssertNotNil(opaque)
+        opaque?.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        XCTAssertEqual(red, 1, accuracy: 0.02)
+        XCTAssertEqual(green, 0, accuracy: 0.02)
+        XCTAssertEqual(alpha, 1, accuracy: 0.001)
+        XCTAssertNil(PrinterDetailCameraLayout.surfaceColor(of: image(.clear)))
+    }
 }

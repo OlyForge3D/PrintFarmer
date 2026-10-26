@@ -69,12 +69,12 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   Capability changes must not remove groups or rearrange their controls.
   This does not relax authorization, offline access or physical-command gates.
 - Command feedback appears beneath the originating **Heat**, **Move & home**,
-  or **Filament tools** heading, not below the scrolling page. Pending commands
-  show visible progress and a local **Stop waiting for command** action; home
-  jog and absolute GO buttons also show a stable-size spinner and a VoiceOver
-  pending value. Errors and dismissal stay in that card,
-  as do acceptance, telemetry confirmation and interrupted-observation notices.
-  Request acceptance never implies physical completion, and stopping observation
+  or **Filament tools** heading, not below the scrolling page. Pending and
+  success are silent (#3496): the tapped control shows a stable-size spinner
+  and a VoiceOver "Pending" value, and there is no visible "Stop waiting"
+  action. Only actionable notices (rejected, unsupported, error, unknown
+  outcome) and their dismissal appear in that card.
+  Request acceptance never implies physical completion, and ending observation
   never claims to stop the printer.
   Home, jog and absolute commands settle when their direct HTTP request returns.
   Acceptance explicitly does not confirm physical completion. Pending requests
@@ -396,18 +396,17 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   until the request returns even when matching telemetry arrives first.
   Other-axis, measured-temperature and unrelated setpoint noise do not
   acknowledge an individual target or absolute move.
-- Only a matching **post-dispatch** update permits “Matching telemetry received.”
-  If cached heater setpoints or absolute coordinates already match, successful
-  HTTP acceptance ends waiting with an explicit notice that fresh physical
-  completion is **not confirmed**. This applies equally to repeated presets,
-  already-zero Cool Down, individual heaters and already-matching destinations.
-  A fresh update arriving before the HTTP response retains telemetry wording,
-  but never releases the response's single-flight slot early.
-- Home All/XY/Z on axes already reported homed completes local waiting after
-  successful request acceptance, explicitly **without confirming fresh physical
-  completion**. Otherwise homing waits for a fresh requested-axis report.
-  Cached homing or unrelated noise never releases an outstanding HTTP request;
-  a server rejection still wins over telemetry received before its response.
+- Pending and success are **silent** (#3496). The app triggers the action as
+  the web UI does: the tapped control shows a small spinner and a VoiceOver
+  "Pending" value while its command is in flight, then returns to normal. There
+  is no "Command pending", acceptance or "Matching telemetry received" text.
+  Correlation rules are unchanged: only a matching **post-dispatch** update
+  acknowledges telemetry, cached setpoints, coordinates or homed axes end
+  waiting on HTTP acceptance, and a fresh update never releases the response's
+  single-flight slot early. A server rejection still wins over telemetry
+  received before its response.
+- Only actionable outcomes show a notice: **rejected**, **unsupported**,
+  **error**, or an **unknown outcome** the user must check on the printer.
 - The access-lifecycle modifier belongs on the **detail host**, not a pager
   child. It fences server generation, signed-in user, per-server preference,
   readiness and Queue.Start permission. Leaving the detail or losing authority
@@ -417,8 +416,8 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   visible, while acceptance is reported with an unknown physical outcome even
   if the printer reconnects first. With no outstanding response, unsafe state
   ends telemetry waiting with an uncertainty warning.
-  **Stop waiting**, caller cancellation, access revocation and deactivation
-  never cancel a dispatched transport task or free its unresolved response's
+  Internal cancellation (`cancelPendingCommand()`, caller cancellation),
+  access revocation and deactivation never cancel a dispatched transport task or free its unresolved response's
   single-flight slot. Routine actions remain locked even if an owner is
   recreated, reactivated or permission is restored. Matching telemetry cannot release this
   lock early. The eventual response releases its own slot: acceptance after
@@ -427,11 +426,20 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   neither a stale success nor failure becomes a new lifecycle's result; a
   notice instead directs the operator to check the original printer.
   Cancellation proven to precede dispatch releases safely without sending
-  anything. After an HTTP response has already returned, Stop waiting may end
-  telemetry observation, but cannot undo printer execution. Nothing is replayed.
+  anything. After an HTTP response has already returned, internal cancellation
+  or deactivation may end telemetry observation, but cannot undo printer
+  execution. Nothing is replayed.
+- **Leaving the detail screen clears a stuck pending command.** There is no
+  visible "Stop waiting" action and no timer. If the HTTP response has returned
+  but matching telemetry never arrives, the tapped control stays pending until
+  the user leaves the printer detail screen. Leaving deactivates the controls
+  owner, which ends observation and releases that command; on return the
+  controls are enabled again and an unknown-outcome notice asks the user to
+  check the printer. A request whose HTTP response is still outstanding stays
+  locked until it returns, as described above.
   Disabled editors expose the readiness/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
-  success/acceptance notices. Offline controls remain hidden, with the
+  notices. Offline controls remain hidden, with the
   explanation supplied by the detail host.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
   and no dependency on pending setup commands. It is a full-width, solid red
@@ -487,10 +495,10 @@ release matching command/workflow tokens when a settled observer is destroyed;
 an abandoned view cannot strand the process-wide registry. An in-flight call
 still retains its cleanup owner until the response returns.
 
-A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
-not offer Stop waiting for another owner's request. Shared-state observation
+A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it
+cannot end another owner's request. Shared-state observation
 updates the replacement UI when matching telemetry clears the original pending
-command. Stop waiting/deactivation after HTTP settlement explicitly ends
+command. Internal cancellation/deactivation after HTTP settlement explicitly ends
 observation and releases that token with an uncertainty warning; it does not
 cancel, reverse or prove completion of the physical action. Before settlement,
 neither cancellation nor matching telemetry releases the outstanding request.
@@ -720,19 +728,19 @@ Example: tapping **Preheat PLA** disables PETG/ABS/Cool Down until the command r
     └── 200 OK
          │
          ▼
-   [ wait for printerupdated SignalR event matching printerId ]
+   [ wait silently for a matching post-dispatch printerupdated event ]
          │
-         ├── event arrives within 5s ────► [ Pending → Default, banner clears ]
-         └── timeout (5s, no event) ─────► [ Pending → Default with subtle toast
-                                            "Sent. Awaiting printer." — not an error,
-                                            because the HTTP call succeeded ]
+         ├── matching event arrives ─────► [ Pending → Default, no text ]
+         └── no matching event ──────────► [ stays Pending (spinner only) until the
+                                            user leaves the detail screen; see
+                                            "Embedding contract (#2521)" ]
 ```
 
 **Debounce window:** 250ms (single trailing-edge debounce). Below 250ms feels sticky on iOS 17 button presses; above 400ms users start re-tapping.
 
 **Pending → Default transition:** crossfade 150ms.
 
-**Pending timeout:** 5 seconds. After 5s with no `printerupdated`, the button returns to Default and a non-blocking toast says "Sent. Awaiting printer." This is **not** an error — the API accepted the command, the printer just hasn't echoed state yet.
+**No pending timeout or toast (#3496).** Pending and success are silent. A command that is accepted but never echoed in telemetry stays pending until the detail screen is left, which ends observation and releases it.
 
 ### 3.3 Error banner
 

@@ -223,9 +223,12 @@ struct ControlActionButton: UIViewRepresentable {
         context.coordinator.action = action
         let fontSize = fontScale / 16 * textSize
         var configuration = UIButton.Configuration.plain()
-        configuration.title = title
+        // An empty title still reserves label space and pushes a lone symbol off-centre.
+        configuration.title = title.isEmpty ? nil : title
+        configuration.titleAlignment = menu == nil ? .center : .leading
         configuration.image = menu == nil ? systemImage.flatMap { UIImage(systemName: $0) } : nil
-        configuration.showsActivityIndicator = isPending
+        // Pending shows an overlay spinner over the hidden content rather than
+        // `showsActivityIndicator`, so the content layout is unchanged when it settles.
         configuration.preferredSymbolConfigurationForImage = .init(pointSize: fontScale, weight: .regular)
         configuration.imagePlacement = menu == nil ? .leading : .trailing
         configuration.imagePadding = menu == nil ? 0 : 8
@@ -236,6 +239,7 @@ struct ControlActionButton: UIViewRepresentable {
         if menu != nil { configuration.contentInsets.trailing = 30 }
         configuration.background.cornerRadius = cornerRadiusOverride ?? (segmented ? 8 : 10)
         configuration.baseForegroundColor = UIColor(
+            isPending ? Color.clear :
             !isEnabled ? Color.pfTextTertiary :
                 isDestructive ? Color.pfError : prominent ? Color.pfButtonPrimaryText :
                 tinted ? Color.pfButtonPrimary : Color.pfTextPrimary
@@ -256,6 +260,12 @@ struct ControlActionButton: UIViewRepresentable {
         button.configuration = configuration
         button.menu = menu
         if let button = button as? NativeControlButton {
+            button.pendingIndicator.color = UIColor(Color.pfTextSecondary)
+            if isPending {
+                button.pendingIndicator.startAnimating()
+            } else {
+                button.pendingIndicator.stopAnimating()
+            }
             button.menuChevron.image = menu == nil ? nil : UIImage(
                 systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: fontScale * 0.75)
             )
@@ -294,9 +304,15 @@ struct ControlActionButton: UIViewRepresentable {
 
 private final class NativeControlButton: UIButton {
     let menuChevron = UIImageView()
+    let pendingIndicator = UIActivityIndicatorView(style: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        pendingIndicator.hidesWhenStopped = true
+        pendingIndicator.isUserInteractionEnabled = false
+        pendingIndicator.isAccessibilityElement = false
+        pendingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pendingIndicator)
         menuChevron.isAccessibilityElement = false
         menuChevron.contentMode = .scaleAspectFit
         menuChevron.translatesAutoresizingMaskIntoConstraints = false
@@ -305,11 +321,39 @@ private final class NativeControlButton: UIButton {
             menuChevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             menuChevron.centerYAnchor.constraint(equalTo: centerYAnchor),
             menuChevron.widthAnchor.constraint(equalToConstant: 16),
-            menuChevron.heightAnchor.constraint(equalToConstant: 16)
+            menuChevron.heightAnchor.constraint(equalToConstant: 16),
+            pendingIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+            pendingIndicator.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
 
     required init?(coder: NSCoder) { return nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        recentreContent()
+    }
+
+    /// UIKit can lay a configuration's content out at its size-to-fit origin after SwiftUI
+    /// re-measures a flexible representable, leaving centred titles stuck at the leading
+    /// inset (#3496 N09). Re-centre the content block rather than rebuilding the button,
+    /// so the tapped control keeps VoiceOver focus (R3514-H07).
+    private func recentreContent() {
+        guard contentHorizontalAlignment == .center, let content = contentFrame() else { return }
+        let dx = (bounds.midX - content.midX).rounded()
+        let dy = (bounds.midY - content.midY).rounded()
+        guard abs(dx) >= 1 || abs(dy) >= 1 else { return }
+        for view in [titleLabel, imageView].compactMap({ $0 }) where !view.isHidden {
+            view.frame = view.frame.offsetBy(dx: dx, dy: dy)
+        }
+    }
+
+    private func contentFrame() -> CGRect? {
+        [titleLabel, imageView].compactMap { $0 }
+            .filter { !$0.isHidden && $0.bounds.width > 0 && $0.superview != nil }
+            .map { $0.convert($0.bounds, to: self) }
+            .reduce(nil) { $0?.union($1) ?? $1 }
+    }
 }
 
 /// Essential Heat group (#2593): paired target inputs, one guarded setter,
@@ -638,12 +682,21 @@ struct PreheatSubgroup: View {
             .disabled(!(allowsActivePrint ? viewModel.canControlHeat : viewModel.canControl) || viewModel.isExecuting)
         }
 
+        static func isHeaterTargetPending(_ kind: ControlCommand.Kind?) -> Bool {
+            switch kind {
+            case .heater, .heaterTargets: true
+            default: false
+            }
+        }
+
         private var setTargetsButton: some View {
-            ControlActionButton(
+            let pending = Self.isHeaterTargetPending(viewModel.pendingCommand?.kind)
+            return ControlActionButton(
                 title: "Go", identifier: "printer.controls.heat.set-targets",
                 accessibilityTitle: "Go, set heater targets",
                 hint: "Sets only entered targets. Blank leaves a heater unchanged; zero switches it off.",
-                compact: true, prominent: true, matchesInputHeight: true
+                compact: true, prominent: true, value: pending ? "Pending" : nil,
+                matchesInputHeight: true, isPending: pending
             ) {
                 do {
                     let hotendValue = try viewModel.supports(.hotend) ? ControlNumberInput.heaterTarget(hotend) : nil
@@ -781,7 +834,8 @@ struct PreheatSubgroup: View {
                 guard let next else { return }
                 target = next.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
             }
-            .frame(width: 44, height: 44)
+            .frame(minWidth: 44, minHeight: 44)
+            .fixedSize()
             .disabled(next == nil)
         }
 

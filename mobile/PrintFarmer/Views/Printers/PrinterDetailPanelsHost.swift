@@ -74,7 +74,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                     PrinterDetailPanelPicker(selection: $selection)
                     .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     .frame(maxWidth: .infinity)
-                    pageIndicator
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, inset)
@@ -96,26 +95,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         .onChange(of: controlsAvailable) { _, newValue in
             selection = Self.resolvedSelection(current: selection, controlsAvailable: newValue)
         }
-    }
-
-    private var pageIndicator: some View {
-        HStack(spacing: 0) {
-            ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
-                Button { selection = panel } label: {
-                    Circle()
-                        .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
-                        .frame(width: 6, height: 6)
-                        .frame(width: 44, height: PrinterDetailLayout.pageIndicatorHeight)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(panel.title)
-                .accessibilityValue(selection == panel ? "Selected" : "")
-                .accessibilityAddTraits(selection == panel ? .isSelected : [])
-                .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private struct PrinterDetailPanelPicker: View {
@@ -214,10 +193,16 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         let printer: Printer
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-        private var status: String {
-            guard printer.isOnline else { return "Offline" }
-            guard let state = printer.state, !state.isEmpty else { return "Not reported" }
-            return state.capitalized
+        private var status: String { Self.statusText(state: printer.state, isOnline: printer.isOnline) }
+
+        /// Ready, idle and operational all read "Idle", matching the printer list.
+        static func statusText(state: String?, isOnline: Bool) -> String {
+            guard isOnline else { return "Offline" }
+            guard let state, !state.isEmpty else { return "Not reported" }
+            switch state.lowercased() {
+            case "ready", "idle", "operational": return "Idle"
+            default: return state.capitalized
+            }
         }
 
         private var statusColor: Color {
@@ -568,9 +553,83 @@ enum PrinterDetailCameraLifecycleMapping {
 /// Use the actual detail width, not the device family: an iPad split can be
 /// narrower than a phone in landscape. Accessibility text uses one column.
 enum PrinterDetailLayout {
+    /// Bottom space that keeps scrolled content clear of the Emergency Stop bar.
+    static let emergencyStopClearance: CGFloat = 80
+
     static func usesColumns(width: CGFloat, dynamicTypeSize: DynamicTypeSize) -> Bool {
         width >= 760 && !dynamicTypeSize.isAccessibilitySize
     }
+}
+
+/// Camera media fills the card width; a quarter-turn swaps the image's aspect ratio.
+enum PrinterDetailCameraLayout {
+    static func isQuarterTurn(_ rotation: Int) -> Bool {
+        ((rotation % 360) + 360) % 180 == 90
+    }
+
+    static func aspectRatio(imageSize: CGSize, rotation: Int) -> CGFloat? {
+        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+        return isQuarterTurn(rotation)
+            ? imageSize.height / imageSize.width
+            : imageSize.width / imageSize.height
+    }
+
+    /// Livestreams do not report their frame size; assume 16:9 before rotation.
+    static let streamImageSize = CGSize(width: 16, height: 9)
+
+    /// Media may use at most this share of the visible page height, so a
+    /// portrait (or quarter-turned) image never pushes the job off screen.
+    static let maximumHeightFraction: CGFloat = 0.6
+    static let minimumMaximumHeight: CGFloat = 180
+
+    static func maximumHeight(containerHeight: CGFloat) -> CGFloat {
+        guard containerHeight.isFinite, containerHeight > 0 else { return .infinity }
+        return max(containerHeight * maximumHeightFraction, minimumMaximumHeight)
+    }
+
+    /// Aspect-fit inside `width` x `maxHeight`: full width unless that would
+    /// exceed the height cap, in which case the media narrows and centres.
+    static func fittedSize(aspect: CGFloat, width: CGFloat, maxHeight: CGFloat) -> CGSize {
+        guard aspect > 0, width > 0 else { return .zero }
+        let height = width / aspect
+        guard height > maxHeight else { return CGSize(width: width, height: height) }
+        return CGSize(width: maxHeight * aspect, height: maxHeight)
+    }
+
+    /// Width limit that keeps aspect-fit media within `maxHeight`.
+    static func maximumWidth(aspect: CGFloat?, maxHeight: CGFloat) -> CGFloat {
+        guard let aspect, aspect > 0, maxHeight.isFinite else { return .infinity }
+        return maxHeight * aspect
+    }
+
+    #if canImport(UIKit)
+    /// The opaque top-left pixel of a slicer thumbnail, used as the print
+    /// preview card's surface so the image never sits in a mismatched inner
+    /// rectangle. Transparent or unreadable images return nil.
+    static func surfaceColor(of image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let drawn: Bool = pixel.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .none
+            // Draw so the image's top-left pixel lands in the 1x1 context.
+            context.draw(cgImage, in: CGRect(
+                x: 0, y: 1 - CGFloat(cgImage.height),
+                width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)
+            ))
+            return true
+        }
+        guard drawn, pixel[3] == 255 else { return nil }
+        return UIColor(
+            red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+            blue: CGFloat(pixel[2]) / 255, alpha: 1
+        )
+    }
+    #endif
 }
 
 struct PrinterDetailTemperatureReading: Equatable {
@@ -718,12 +777,6 @@ struct PrinterDetailTemperatureStrip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
-}
-
-extension PrinterDetailLayout {
-    /// Compact dot strip; the segmented picker above is the primary
-    /// 44 pt navigation target, so the dots don't need a full-height row.
-    static let pageIndicatorHeight: CGFloat = 16
 }
 
 /// Compact, read-only notice shown while the page still renders the farm

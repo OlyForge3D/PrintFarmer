@@ -3067,6 +3067,31 @@ extension PrinterDetailViewModelTests {
         XCTAssertNil(vm.formattedTimeRemaining)
     }
 
+    func testPhysicalFilamentBlockShowsOnlyActionableReasonsOnScreen() {
+        typealias Block = PrinterDetailViewModel.PhysicalFilamentBlock
+        XCTAssertFalse(Block.unsupported.isShownOnScreen, "Unsupported is a VoiceOver hint only")
+        XCTAssertEqual(Block.unsupported.message, Block.unsupportedMessage)
+        XCTAssertTrue(Block.blocked("Printer is offline.").isShownOnScreen)
+        XCTAssertEqual(Block.blocked("Printer is offline.").message, "Printer is offline.")
+    }
+
+    func testIdlePrinterWithStaleFileNameDoesNotShowCurrentJob() throws {
+        let vm = makeOperatorViewModel()
+        var printer = try TestData.decodePrinter()
+        printer.isOnline = true
+        printer.fileName = "gear_set_v3.gcode"
+        for state in ["idle", "ready", "standby", "complete", "cancelled", "error", "starting", "STARTING"] {
+            printer.state = state
+            vm.printer = printer
+            XCTAssertFalse(vm.showsCurrentJob, "A stale file name on a \(state) printer must show No active print.")
+        }
+        for state in ["printing", "paused", "Printing"] {
+            printer.state = state
+            vm.printer = printer
+            XCTAssertTrue(vm.showsCurrentJob, "\(state) printers show the current job.")
+        }
+    }
+
     // MARK: Odometer due logic
 
     func testOdometerRowsDeriveThresholdAndDueState() {
