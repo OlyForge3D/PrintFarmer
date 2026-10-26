@@ -22,12 +22,12 @@ interface Intent {
   key: string;
 }
 
-function observedAt(value: string | null) {
+function observedAt(value?: string | null) {
   return value ? new Date(value).toLocaleString() : 'Unknown';
 }
 
-function byteCount(value: number | null) {
-  return value === null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
+function byteCount(value?: number | null) {
+  return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
 }
 
 export function PrinterFileCatalog() {
@@ -121,7 +121,7 @@ export function PrinterFileCatalog() {
     mutationFn: async (action: 'confirm' | 'decline' | 'retry' | 'cancel') => {
       if (!operation) throw new Error('Reload the operation first.');
       if (action === 'confirm' || action === 'decline') {
-        if (!operation.gcodeFileId || !operation.contentSha256 || operation.sizeBytes === null) {
+        if (!operation.gcodeFileId || !operation.contentSha256 || operation.sizeBytes == null) {
           throw new Error('The captured-content binding is unavailable.');
         }
         return apiClient.confirmPrinterFileSnapshot(operation.id, {

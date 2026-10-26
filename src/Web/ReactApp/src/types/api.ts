@@ -6,19 +6,21 @@ export type PrinterFileOperationState =
   | 'Enqueueing' | 'Queued' | 'AwaitingDeleteConfirmation' | 'SendingDelete'
   | 'ReconcilingDelete' | 'Deleted' | 'Blocked' | 'Failed' | 'Cancelled';
 
+// Printer-file DTOs: the API omits null properties (WhenWritingNull), so nullable
+// fields may be absent on the wire. Guard them with `== null`, never `=== null`.
 export interface PrinterFileOperation {
   id: string;
   revision: number;
   action: PrinterFileAction;
   state: PrinterFileOperationState;
   locationId: string;
-  gcodeFileId: string | null;
-  contentSha256: string | null;
-  sizeBytes: number | null;
+  gcodeFileId?: string | null;
+  contentSha256?: string | null;
+  sizeBytes?: number | null;
   verification: PrinterFileVerification;
-  reasonCode: string | null;
+  reasonCode?: string | null;
   cancellationRequested: boolean;
-  destinationPrinterId: string | null;
+  destinationPrinterId?: string | null;
   payloadSha256: string;
   jobIds: string[];
 }
@@ -54,9 +56,9 @@ export interface PrinterFileDeleteOperation {
   guarantee: 'Unsupported' | 'CurrentExactPath' | 'NativeConditional';
   confirmationBinding: string;
   currentPathRaceAccepted: boolean;
-  deleteSentAtUtc: string | null;
+  deleteSentAtUtc?: string | null;
   outcome: 'AwaitingConfirmation' | 'Acknowledged' | 'OutcomeUnknown' | 'ObservedAbsent' | 'Blocked';
-  reasonCode: string | null;
+  reasonCode?: string | null;
 }
 
 export interface PrinterFileDeleteConfirmation {
@@ -76,13 +78,13 @@ export interface PrinterFileCatalogEntry {
   storageRoot: string;
   relativePath: string;
   displayName: string;
-  sizeBytes: number | null;
-  modifiedValue: string | null;
+  sizeBytes?: number | null;
+  modifiedValue?: string | null;
   observationRevision: number;
   configurationGeneration: number;
   availability: PrinterFileAvailability;
   lastSeenAtUtc: string;
-  lastCompleteScanAtUtc: string | null;
+  lastCompleteScanAtUtc?: string | null;
   isStale: boolean;
   localCopies: Array<{
     gcodeFileId: string;
@@ -95,9 +97,9 @@ export interface PrinterFileScanStatus {
   printerId: string;
   enabled: boolean;
   outcome: PrinterFileScanOutcome;
-  reasonCode: string | null;
-  lastAttemptAtUtc: string | null;
-  lastCompleteScanAtUtc: string | null;
+  reasonCode?: string | null;
+  lastAttemptAtUtc?: string | null;
+  lastCompleteScanAtUtc?: string | null;
   nextScanAtUtc: string;
   configurationGeneration: number;
   isStale: boolean;
