@@ -3,8 +3,8 @@ import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 
 /**
- * One file action, rendered as an icon button in cards/rows and as a labelled button in the
- * detail panel, so every surface offers the same actions with the same glyphs.
+ * One file action, rendered as an icon button on every surface (cards, rows, detail panel)
+ * so each offers the same actions with the same glyphs.
  */
 export interface FileAction {
   id: string;
@@ -47,26 +47,11 @@ export function FileActionIconButtons({ actions, dense = false }: { actions: Fil
   );
 }
 
-/** Labelled buttons for the detail panel. */
+/** Icon-only action group for the detail panel, matching cards and rows. */
 export function FileActionList({ actions, label = 'File actions' }: { actions: FileAction[]; label?: string }) {
   return (
     <div role="group" aria-label={label} className="flex flex-wrap gap-2">
-      {actions.map((action) => (
-        <Button
-          key={action.id}
-          type="button"
-          size="sm"
-          variant={variantFor(action)}
-          className={clsx(action.tone === 'danger' && DANGER_CLASS)}
-          disabled={action.disabled}
-          onClick={action.onClick}
-          onFocus={action.onPreload}
-          onPointerEnter={action.onPreload}
-          iconLeft={action.icon}
-        >
-          {action.label}
-        </Button>
-      ))}
+      <FileActionIconButtons actions={actions} />
     </div>
   );
 }

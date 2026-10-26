@@ -13,7 +13,13 @@ interface CompactFileCardProps {
   status?: ReactNode;
   actions?: FileAction[];
   /** Bulk selection; omitted where the source has no bulk actions. */
-  selection?: { checked: boolean; onToggle: () => void };
+  selection?: {
+    checked: boolean;
+    onToggle: () => void;
+    /** True when no bulk action applies to this file; `title` explains why. */
+    disabled?: boolean;
+    title?: string;
+  };
   /** True while this file is shown in the detail panel. */
   isActive?: boolean;
   onOpen: (invoker: HTMLElement | null) => void;
@@ -48,7 +54,13 @@ export function CompactFileCard({
         {thumbnail}
         {selection && (
           <div className="absolute left-1.5 top-1.5 z-10 rounded-xs bg-pf-bg-0/80 p-0.5">
-            <Checkbox aria-label={`Select ${name}`} checked={selection.checked} onChange={selection.onToggle} />
+            <Checkbox
+              aria-label={`Select ${name}`}
+              checked={selection.checked}
+              disabled={selection.disabled}
+              title={selection.title}
+              onChange={selection.onToggle}
+            />
           </div>
         )}
         {status && <div className="absolute right-1.5 top-1.5 rounded-xs bg-pf-bg-0/80 px-1 py-0.5">{status}</div>}

@@ -14,6 +14,7 @@ import { apiClient } from '@/services/api';
 import { generateUUID } from '@/utils/uuid';
 import type { PrinterFileAvailability, PrinterFileCatalogEntry } from '@/types/api';
 import { PrinterFileDeleteControl, type PrinterFileDeleteIntent } from '@/features/files/components/PrinterFileDeleteControl';
+import { PrinterFileBulkActions } from '@/features/files/components/PrinterFileBulkActions';
 import { CompactFileCard } from '@/features/files/components/CompactFileCard';
 import { FileActionIconButtons, type FileAction } from '@/features/files/components/FileActions';
 import { FileNameButton } from '@/features/files/components/FileNameButton';
@@ -23,6 +24,11 @@ import { PrinterFileThumbnail } from '@/features/files/components/PrinterFileThu
 import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
 import { canDownloadSource } from '@/features/files/hooks/usePrinterFilePreview';
 import { formatSizeLabel } from '@/features/files/utils/fileDisplay';
+import {
+  describePrinterFileFailure,
+  hasBulkCapability,
+  printerFileBulkCapabilities,
+} from '@/features/files/utils/printerFileBulk';
 import {
   COMPACT_FILE_GRID_CLASS,
   COMPACT_FILE_TABLE_CELL_CLASS,
@@ -43,18 +49,17 @@ interface Intent {
   key: string;
 }
 
-function byteCount(value?: number | null) {
-  return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
+/** Bulk selection, scoped to the filters and page it was made on. */
+interface Selection {
+  scope: string;
+  ids: ReadonlySet<string>;
 }
 
-/** Download errors arrive as the shared ApiError shape; blob bodies carry no parsed reason. */
-function downloadFailure(error: unknown): { message: string; observationChanged: boolean } {
-  const failure = error as { statusCode?: number; message?: string; data?: { reasonCode?: unknown } } | null;
-  const observationChanged = failure?.statusCode === 409 || failure?.data?.reasonCode === 'source_observation_changed';
-  if (observationChanged) {
-    return { message: 'The file changed on the printer. The list was refreshed; try again.', observationChanged };
-  }
-  return { message: failure?.message || 'Unknown error', observationChanged };
+const NO_IDS: ReadonlySet<string> = new Set();
+const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
+
+function byteCount(value?: number | null) {
+  return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
 }
 
 export function PrinterFileCatalog() {
@@ -79,8 +84,13 @@ export function PrinterFileCatalog() {
   const canRead = hasPermission('printer_files', 'read');
   const { data: destinations = [] } = usePrinters({ enabled: canRead });
   const canQueue = hasPermission('queue', 'write');
+  const canDeleteFiles = hasPermission('printer_files', 'delete');
   const { viewMode, setViewMode } = useViewModePreference(VIEW_MODE_STORAGE_KEY);
   const details = useFileDetailSelection<string>();
+  // Filters and paging change what is listed, so any change starts a fresh selection.
+  const selectionScope = JSON.stringify([printerId, search, availability ?? '', freshness, page]);
+  const [selection, setSelection] = useState<Selection>(() => ({ scope: selectionScope, ids: NO_IDS }));
+  if (selection.scope !== selectionScope) setSelection({ scope: selectionScope, ids: NO_IDS });
 
   const changeFilter = (key: string, value: string) => {
     setParams(previous => {
@@ -173,9 +183,9 @@ export function PrinterFileCatalog() {
     mutationFn: (entry: PrinterFileCatalogEntry) =>
       apiClient.downloadPrinterFile(entry.id, entry.observationRevision, entry.displayName),
     onError: async (error: unknown) => {
-      const failure = downloadFailure(error);
+      const failure = describePrinterFileFailure(error, { blobResponse: true });
       toast.error(`Failed to download: ${failure.message}`);
-      if (failure.observationChanged) {
+      if (failure.stale) {
         await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
       }
     },
@@ -217,6 +227,52 @@ export function PrinterFileCatalog() {
   const selectedEntry = details.selected
     ? catalog.data?.items.find(entry => entry.id === details.selected) ?? null : null;
 
+  const items = catalog.data?.items ?? [];
+  const capabilitiesFor = (entry: PrinterFileCatalogEntry) =>
+    printerFileBulkCapabilities(entry, sourceFor(entry), canDeleteFiles);
+  // Only listed files that support at least one bulk action can be selected.
+  const selectableIds = items.filter(entry => hasBulkCapability(capabilitiesFor(entry))).map(entry => entry.id);
+  const selectedIds = selection.scope === selectionScope ? selection.ids : NO_IDS;
+  const selectedEntries = items.filter(entry => selectedIds.has(entry.id) && selectableIds.includes(entry.id));
+  // Drop ids that are no longer listed (or no longer eligible) so they never come back selected.
+  if (catalog.data && selectedIds.size !== selectedEntries.length) {
+    setSelection({ scope: selectionScope, ids: new Set(selectedEntries.map(entry => entry.id)) });
+  }
+  const writeSelection = (ids: Iterable<string>) => setSelection({ scope: selectionScope, ids: new Set(ids) });
+  const toggleSelected = (id: string) => {
+    const next = new Set(selectedEntries.map(entry => entry.id));
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    writeSelection(next);
+  };
+  const allSelected = selectableIds.length > 0 && selectedEntries.length === selectableIds.length;
+  const someSelected = selectedEntries.length > 0 && !allSelected;
+  const toggleAll = () => writeSelection(allSelected ? [] : selectableIds);
+  const selectAllCheckbox = (label?: string) => (
+    <Checkbox
+      aria-label={label ? undefined : 'Select all files on this page'}
+      label={label}
+      checked={allSelected}
+      indeterminate={someSelected}
+      disabled={selectableIds.length === 0}
+      onChange={toggleAll}
+    />
+  );
+  const selectionFor = (entry: PrinterFileCatalogEntry) => {
+    const selectable = selectableIds.includes(entry.id);
+    return {
+      checked: selectable && selectedIds.has(entry.id),
+      onToggle: () => toggleSelected(entry.id),
+      disabled: !selectable,
+      title: selectable ? undefined : NO_BULK_ACTION_TITLE,
+    };
+  };
+  const showDeleteOperation = (id: string) => setParams(previous => {
+    const next = new URLSearchParams(previous);
+    next.set('deleteOperation', id);
+    return next;
+  });
+
   return (
     <section aria-labelledby="printer-catalog-heading" className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-pf-border pb-3">
@@ -253,10 +309,19 @@ export function PrinterFileCatalog() {
       </div>
       {catalog.isLoading && <div role="status"><Spinner /> Loading observations</div>}
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}
+      <PrinterFileBulkActions
+        selected={selectedEntries.map(entry => ({ entry, capabilities: capabilitiesFor(entry) }))}
+        onClearSelection={() => writeSelection([])}
+        onShowOperation={id => changeFilter('operation', id)}
+        onShowDeleteOperation={showDeleteOperation}
+      />
       {catalog.data && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
+            <div className="flex flex-wrap items-center gap-3">
+              {viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
+              <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
+            </div>
             <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
           <div className="flex items-start gap-4">
@@ -275,6 +340,7 @@ export function PrinterFileCatalog() {
                           status={<PrinterFileStatusGlyphs entry={entry} />}
                           meta={<span title={entry.printerName}>{formatSizeLabel(entry.sizeBytes)} · {entry.printerName}</span>}
                           actions={entryActions(entry)}
+                          selection={selectionFor(entry)}
                           isActive={details.selected === entry.id}
                           onOpen={invoker => details.open(entry.id, invoker)}
                         />
@@ -287,6 +353,7 @@ export function PrinterFileCatalog() {
                   <table className={COMPACT_FILE_TABLE_CLASS} aria-label="Files on printers">
                     <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
                     <thead className="border-b border-pf-border bg-pf-bg-1"><tr>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-8')}>{selectAllCheckbox()}</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Preview</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Name</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Printer</th>
@@ -299,8 +366,18 @@ export function PrinterFileCatalog() {
                       {catalog.data.items.map(entry => {
                         const path = `${entry.storageRoot}/${entry.relativePath}`;
                         const isActive = details.selected === entry.id;
+                        const rowSelection = selectionFor(entry);
                         return (
-                          <tr key={entry.id} className={clsx('border-b border-pf-border last:border-b-0', isActive ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
+                          <tr key={entry.id} className={clsx('border-b border-pf-border last:border-b-0', isActive || rowSelection.checked ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
+                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                              <Checkbox
+                                aria-label={`Select ${entry.displayName}`}
+                                checked={rowSelection.checked}
+                                disabled={rowSelection.disabled}
+                                title={rowSelection.title}
+                                onChange={rowSelection.onToggle}
+                              />
+                            </td>
                             <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
                               <PrinterFileThumbnail entry={entry} source={sourceFor(entry)} size="row" />
                             </td>
