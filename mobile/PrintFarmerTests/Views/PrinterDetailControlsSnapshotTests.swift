@@ -992,6 +992,17 @@ final class PrinterDetailControlsSnapshotTests: XCTestCase {
         }
     }
 
+    /// The production Control-page host shows no offline banner (#3548).
+    func test_offlineControlPage_rendersNoLockoutBanner() async throws {
+        let (window, controller) = install(PrinterDetailControlsUnavailable())
+        defer { window.isHidden = true }
+        try await settle(controller)
+        let text = VisibleText.collect(in: controller.view)
+        VisibleText.assertNoLockoutText(text, "offline-control-page")
+        XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains("unavailable") }, "\(text)")
+        XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains("reconnect") }, "\(text)")
+    }
+
     private func panelControl(
         _ identifier: String, in controller: UIViewController,
         file: StaticString = #filePath, line: UInt = #line
@@ -1041,7 +1052,8 @@ enum VisibleText {
     static let forbiddenFragments = [
         "Another printer operation", "Command pending", "Command in progress", "locked",
         "while printing", "while a print", "Printer is offline", "Controls are", "Unavailable while",
-        "unavailable while", "Unavailable.", "permission is required", "Requires Queue.Start", "does not report support", "Confirming printer status"
+        "unavailable while", "Unavailable.", "permission is required", "Requires Queue.Start", "does not report support", "Confirming printer status",
+        "Controls unavailable", "Reconnect to use", "must be online and idle"
     ]
 
     /// SwiftUI only publishes its accessibility tree once automation is enabled.

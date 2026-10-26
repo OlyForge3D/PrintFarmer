@@ -320,8 +320,8 @@ PETG and ABS presets changed to 230/80 and 245/100 (nozzle/bed °C), read from
 and `test_snapshot_sdcpProfile`. All six were re-recorded on iPhone 15 (3x) and
 iPad Pro 13-inch (M5), Xcode 26.6 (17F113), iOS 26.5 (23F77), light
 appearance, default locale, after inspecting the images. These snapshots
-render the standalone `PrinterSetupControlsContent` (formerly hosted by the
-removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
+rendered the standalone `PrinterSetupControlsContent` (historical: deleted in
+#3542; formerly hosted by the removed Advanced screen), which keeps PLA/PETG/ABS + Cool down; the Control
 tab's five-slot row with More has no snapshot coverage and is exercised by
 `Issue3259ControlIdleUITests.testHeatPresetRowOffersMoreMenuWhileIdle`.
 
@@ -336,8 +336,8 @@ it attaches screenshots without comparing reference images.
 
 Only `test_snapshot_disabledState_printerStarting` and
 `test_snapshot_lockoutBanner_printingState` were re-recorded for both families.
-These tests mount the legacy standalone `PrinterControlsSection` setup
-component, not the current printer-detail Control tab's
+These tests mounted the legacy standalone `PrinterControlsSection` setup
+component (historical: deleted in #3542), not the current printer-detail Control tab's
 `PrinterInstrumentPanelControls`. The banner in these fixtures is not a
 banner on the current Control or Tune screen.
 
@@ -360,6 +360,6 @@ Tune no longer renders heater targets or writable sensor rows. No reference
 image was re-recorded: no snapshot test mounts the printer-detail Control
 tab's `PrinterInstrumentPanelControls`. `PrinterSensorsSnapshotTests` renders
 idle, component-level sensor rows and `PrinterControlsSectionSnapshotTests`
-mounts the legacy `PrinterControlsSection`; neither layout changed. Tune
+mounted the legacy `PrinterControlsSection` (historical: deleted in #3542); neither layout changed. Tune
 coverage lives in `PrinterDetailPanelsTests` and the XCUI
 `Issue3496TuneSensorsUITests` screenshots.

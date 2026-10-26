@@ -1707,6 +1707,24 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Eject silent gate (#3548)
+
+    /// Eject is disabled while offline or printing; it never explains why
+    /// through `actionError`.
+    func testCanEjectFilamentOnlyWhenOnlineIdleWithoutAlert() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        for (isOnline, state, expected) in [
+            (false, "idle", false), (true, "printing", false), (true, "paused", false), (true, "idle", true)
+        ] {
+            printer.isOnline = isOnline
+            printer.state = state
+            mockService.printerToReturn = printer
+            await viewModel.loadPrinter()
+            XCTAssertEqual(viewModel.canEjectFilament, expected, "online=\(isOnline) state=\(state)")
+            XCTAssertNil(viewModel.actionError, "online=\(isOnline) state=\(state): no blocked-reason alert")
+        }
+    }
+
     // MARK: - Eject physical-unload safety (Bishop review finding)
 
     /// The physical unload leg of `ejectFilament()` must ALWAYS complete

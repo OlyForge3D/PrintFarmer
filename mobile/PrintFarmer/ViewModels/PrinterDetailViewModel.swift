@@ -2633,6 +2633,11 @@ final class PrinterDetailViewModel {
         return ["printing", "starting", "paused"].contains(state)
     }
 
+    /// Eject is gated silently: disabled unless online, idle and canonical (#3548).
+    var canEjectFilament: Bool {
+        printer?.isOnline == true && !isActivelyPrinting && !isPerformingAction && !isShowingCachedPrinter
+    }
+
     /// Moonraker keeps reporting the last file after a print ends, so a stale
     /// file name alone must not resurrect the current-job block. Transitional
     /// states such as `starting` are excluded: printing or paused only (#3496).

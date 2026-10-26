@@ -162,17 +162,18 @@ owner to refresh read-only evidence every five seconds while foregrounded; defau
 embedded content performs no automatic reads. Directional movement reads only
 the existing owner's capabilities and dispatches the explicitly chosen axis.
 
-`PrinterControlsSection(printer:composition:)` remains the standalone owner,
-with lazy construction directly inside `StateObject(wrappedValue:)`. The
-`printer:viewModel:` wrapper initializer is test-only. The wrapper loads
-capabilities and forwards `PrinterControlsUpdateSignal` changes outside
-online/offline content, so hiding controls cannot strand an acknowledgement.
+`PrinterDetailView` owns one `PrinterControlsViewModel` per scoped server and
+printer and forwards `PrinterControlsUpdateSignal` changes even while controls
+are hidden, so hiding them cannot strand an acknowledgement. The standalone
+`PrinterControlsSection` and `PrinterSetupControlsContent` wrappers were
+deleted (#3542).
 
-**Essential integration (#2594):** `PrinterDetailView` embeds the presentation-only
-`PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
+**Essential integration (#2594):** `PrinterDetailView` renders
+`PrinterInstrumentPanelControls` in an always-discoverable Overview/Controls pager.
 `PrinterControlsAccess.isEntryVisible` gates command content and owner
-construction, not destination existence. An offline/disabled visit explains
-the restriction without dispatching commands, and loads capabilities only for
+construction, not destination existence. An offline visit hides the controls
+with no visible banner, only a short VoiceOver hint (#3548), and loads
+capabilities only for
 Moonraker printers (the detail view always builds their owner for durable motion, #2678). There is
 no per-server opt-in setting.
 
@@ -861,6 +862,8 @@ VoiceOver swipe order: section header → lockout banner (if any) → Preheat he
 ---
 
 ## 6. SwiftUI Skeleton (for Hudson)
+
+> Historical: the `PrinterControlsSection` skeleton below was deleted in #3542.
 
 This is structure only — no business logic. Use existing services and view models.
 

@@ -863,7 +863,7 @@ struct PrinterDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if !controlsAvailable(for: printer) {
-                        controlsUnavailable(printer)
+                        PrinterDetailControlsUnavailable()
                     } else if let controlsViewModel {
                         PrinterInstrumentPanelControls(printer: printer, viewModel: controlsViewModel)
                         if controlsViewModel.safetyReadError != nil {
@@ -909,25 +909,6 @@ struct PrinterDetailView: View {
         .accessibilityIdentifier("printer.detail.control.reconnectState")
     }
 
-    private func controlsUnavailable(_ printer: Printer) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "lock.fill")
-                .foregroundStyle(Color.pfTextSecondary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Controls unavailable")
-                    .font(.subheadline.weight(.semibold))
-                // Controls are hidden only while the printer is offline.
-                Text("Reconnect to use setup controls.")
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
-        }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("printer.detail.control.unavailable")
-    }
-
     private func safetyRefresh(_ owner: PrinterControlsViewModel) -> some View {
         PrinterDetailSafetyRefresh(owner: owner) {
             let task = Task { await owner.refreshSafetyEvidence() }
@@ -943,15 +924,14 @@ struct PrinterDetailView: View {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
                 showsEjectConfirmation = true
             }
-            .disabled(viewModel.isPerformingAction || viewModel.isShowingCachedPrinter)
+            .disabled(!viewModel.canEjectFilament)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
+            .accessibilityHint(viewModel.canEjectFilament ? "" : "Available when the printer is online and idle.")
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
             .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
                 Button("Eject", role: .destructive) {
-                    guard viewModel.printer?.isOnline == true, !viewModel.isActivelyPrinting else {
-                        viewModel.actionError = "The printer must be online and idle to eject filament."
-                        return
-                    }
+                    // A state change while the dialog was open refuses silently (#3548).
+                    guard viewModel.canEjectFilament else { return }
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     let task = Task { await viewModel.ejectFilament() }
                     activeTasks.append(task)
@@ -1767,5 +1747,18 @@ private extension View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.pfBorder, lineWidth: 1)
             )
+    }
+}
+
+/// Offline Control page: controls are hidden with no visible lockout banner
+/// (#3548). VoiceOver keeps a short hint.
+struct PrinterDetailControlsUnavailable: View {
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+            .accessibilityElement()
+            .accessibilityLabel("Controls")
+            .accessibilityHint("Available when the printer is online.")
+            .accessibilityIdentifier("printer.detail.control.unavailable")
     }
 }
