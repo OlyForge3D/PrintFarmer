@@ -303,12 +303,7 @@ struct PrinterFilamentSection: View {
             }
             if !showsAllActions {
                 ForEach(detailActions) { action in
-                    VStack(alignment: .leading, spacing: 4) {
-                        actionButton(action)
-                        if let reason = presentation.disabledReason(for: action) {
-                            Text(reason).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    actionButton(action)
                 }
             }
         }

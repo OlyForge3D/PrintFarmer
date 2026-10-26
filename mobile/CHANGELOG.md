@@ -6,6 +6,14 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Leftover lockout text (#3548, #3542)** — Printer detail, the Control tab
+  (Move, Heat, Tune) and the filament section no longer render lockout banners,
+  blocked-reason captions, tap-to-reveal hints or errors such as "Controls are
+  locked while a print is active." or "Another printer operation is in
+  progress." Gated controls stay hidden or disabled exactly as before and keep a
+  short VoiceOver hint; blocked taps are refused silently. The dead
+  `PrinterControlsSection` and `PrinterSetupControlsContent` views were deleted.
+
 - **Tune trimmed to Speed, Flow and babystep (#3540)** — The Control › Tune
   segment no longer shows hotend/bed target steppers or writable sensor rows
   while printing, even when the backend supports temperature control during a

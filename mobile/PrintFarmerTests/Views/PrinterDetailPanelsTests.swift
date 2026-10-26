@@ -1037,74 +1037,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         _ = try XCTUnwrap(condition() ? true : nil, message)
     }
 
-    func testControlsReflowRetainsJogDistanceAndDirectionalZ() async throws {
-        var printer = try TestData.decodePrinter(from: TestJSON.printer)
-        printer.isOnline = true
-        printer.state = "idle"
-        let service = MockPrinterService()
-        service.capabilitiesToReturn = PrinterBackendCapabilities(
-            supportsMovement: true, supportsTemperatureControl: true,
-            supportsBedTemperature: true, supportsFanControl: true,
-            supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
-        )
-        service.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
-        await model.loadCapabilities()
-        service.getBackendCapabilitiesCalledWith = nil
-
-        func content(width: CGFloat, size: DynamicTypeSize) -> some View {
-            PrinterSetupControlsContent(
-                printer: printer, viewModel: model,
-                usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: size)
-            )
-            .frame(width: width)
-            .environment(\.horizontalSizeClass, .regular)
-            .environment(\.dynamicTypeSize, size)
-        }
-        let controller = UIHostingController(rootView: AnyView(content(width: 900, size: .large)))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1100, height: 1400))
-        window.rootViewController = controller
-        window.isHidden = false
-        defer { window.isHidden = true }
-
-        func settle() async throws {
-            try await Task.sleep(for: .milliseconds(100))
-            controller.view.setNeedsLayout()
-            controller.view.layoutIfNeeded()
-        }
-        func buttons(in view: UIView) -> [UIButton] {
-            (view as? UIButton).map { [$0] }
-                ?? view.subviews.flatMap { buttons(in: $0) }
-        }
-        func choices() throws -> (axis: UIButton, step: UIButton) {
-            let controls = buttons(in: controller.view)
-            return (
-                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.z.positive" }),
-                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.step.10" })
-            )
-        }
-        try await settle()
-        let initial = try choices()
-        XCTAssertTrue(initial.axis.isEnabled)
-        XCTAssertTrue(initial.step.isEnabled)
-        initial.step.sendActions(for: .touchUpInside)
-        try await settle()
-
-        let layouts: [(CGFloat, DynamicTypeSize)] = [
-            (700, .large), (900, .large), (900, .accessibility3), (900, .large)
-        ]
-        for (width, size) in layouts {
-            controller.rootView = AnyView(content(width: width, size: size))
-            try await settle()
-            let current = try choices()
-            XCTAssertTrue(current.axis.isEnabled)
-            XCTAssertEqual(current.axis.accessibilityLabel, "Move Z positive")
-            XCTAssertTrue(current.step.isSelected, "Reflow must preserve selected 10 mm")
-        }
-        XCTAssertNil(service.moveCalledWith)
-        XCTAssertNil(service.getBackendCapabilitiesCalledWith)
-    }
-
     func testDetailColumnsRequireUsableWidthAndNonAccessibilityText() {
         XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 1024, dynamicTypeSize: .large))
         XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 760, dynamicTypeSize: .xxxLarge))
@@ -1611,7 +1543,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for kind in [PrinterFilamentAction.Kind.change, .clearAssignment, .scanNFC] {
             XCTAssertEqual(
                 actions.first { $0.kind == kind }?.disabledReason,
-                "Another printer operation is in progress."
+                "Command in progress."
             )
         }
     }

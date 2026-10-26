@@ -364,14 +364,9 @@ struct PreheatSubgroup: View {
     var usesSteppers = false
     var compactForDetail = false
 
-    /// Transient caption shown when the user taps a button while controls are
-    /// disabled (offline / mid-print). Cleared after a few seconds. Phone
-    /// equivalent of the `.help()` tooltip that appears on iPad/Mac.
-    @State private var disabledTapMessage: String?
     /// Bumped by the More menu's "Custom…" to focus the Nozzle target field.
     @State private var nozzleFocusRequest = 0
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .subheadline) private var presetFontSize: CGFloat = 14
     @Environment(\.preheatPresetsFillRow) private var presetsFillRow
@@ -432,13 +427,6 @@ struct PreheatSubgroup: View {
                 Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
                     .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
                     .padding(.top, 10)
-            }
-            if let message = blockedReasonMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .transition(.opacity)
-                    .accessibilityAddTraits(.isStaticText)
             }
         }
     }
@@ -629,16 +617,13 @@ struct PreheatSubgroup: View {
             compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize,
             cornerRadius: cornerRadiusOverride ?? 10
         ))
-        .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
-        // On compact layouts we keep blocked buttons tappable so the user can
-        // reveal the disabled reason; regular width shows the reason inline.
+        .disabled(isAnyPreheatInProgress || limitsReason != nil || !canControl)
         .disabledControlStyle(isDisabled: !isInteractive && !isPending, cornerRadius: 8)
         .errorBorderHighlight(isActive: hasError, cornerRadius: 8)
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
         .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(limitsReason ?? viewModel.preheatAccessReason(preset) ?? "")
     }
 
     struct IndividualHeaterControls: View {
@@ -856,21 +841,6 @@ struct PreheatSubgroup: View {
         }
     }
 
-    private var blockedReasonMessage: String? {
-        if horizontalSizeClass == .regular {
-            return viewModel.blockedReason
-        }
-        return disabledTapMessage
-    }
-
-    private var shouldRevealDisabledTooltipOnTap: Bool {
-        horizontalSizeClass != .regular
-    }
-
-    private func isBlockedWithoutTapReveal(canControl: Bool) -> Bool {
-        !canControl && !shouldRevealDisabledTooltipOnTap
-    }
-
     private func buttonLabel(
         preset: PreheatPreset,
         isPending: Bool,
@@ -949,25 +919,8 @@ struct PreheatSubgroup: View {
 
     private func handleTap(preset: PreheatPreset, canControl: Bool) {
         guard viewModel.preheatBlockedReason(preset) == nil else { return }
-        guard canControl else {
-            // Disabled tap: surface the blocked reason as a transient caption
-            // (phone) and let `.help()` cover iPad/Mac hover.
-            let message = viewModel.preheatAccessReason(preset) ?? "Controls are unavailable."
-            withAnimation(.easeInOut(duration: 0.15)) {
-                disabledTapMessage = message
-            }
-            // Auto-clear after a moment so it doesn't linger.
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if disabledTapMessage == message {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        disabledTapMessage = nil
-                    }
-                }
-            }
-            return
-        }
-        disabledTapMessage = nil
+        // Unavailable presets are refused silently; no lockout text (#3548).
+        guard canControl else { return }
         Task { await viewModel.preheat(preset) }
     }
 

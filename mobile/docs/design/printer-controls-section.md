@@ -11,6 +11,15 @@ Preheat/Home/Jog stack and not separate per-heater Set/Off rows. The original
 subgroup specification is retained only as historical context in numbered
 sections 1–7 below; it must not override this contract.
 
+> **No lockout text (#3548).** A gated control is hidden or disabled. It never
+> renders a lockout banner, blocked-reason caption, hint text, toast or error for
+> printing, paused, pending or offline states; the reason is exposed only as a
+> short VoiceOver hint. Blocked taps are refused silently. This overrides every
+> lockout banner, "explanatory lockout" and visible blocked-reason requirement
+> below, including §3.4 and the lockout rows in the accessibility table. The
+> standalone `PrinterControlsSection` and `PrinterSetupControlsContent` views
+> were deleted (#3542).
+
 ## Approved Essential composition
 
 Printer identity belongs above the shared Overview/Controls selector, not inside
@@ -61,7 +70,7 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   Calibration stays inline after entry so Emergency Stop remains reachable.
   Before entry, its unsupported-operation explanation belongs behind
   **Details & safety**, not a permanent paragraph next to Z-offset. During an
-  active calibration workflow, blocked reasons remain immediately visible.
+  active calibration workflow, blocked controls are disabled with a VoiceOver hint only (#3548).
   Supported design fixtures must include Disable motors. Unsupported operations
   stay in their original positions but are disabled, including motor release,
   heater targets/presets, the increment selector, all directional/home actions,
@@ -143,10 +152,11 @@ Necessary runtime differences from the illustrative prototype:
 
 ## Embedding contract (#2521)
 
-`Views/PrinterControls/PrinterSetupControlsContent.swift` exports
-`PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
-owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
-command outcome presentation. It does not create services/models or subscribe to
+`Views/PrinterControls/PrinterInstrumentPanelControls.swift` exports
+`PrinterInstrumentPanelControls(printer:viewModel:)`; shared rows live in
+`PrinterControlsSharedViews.swift`. They observe an externally
+owned `PrinterControlsViewModel` and render thermal/motion and
+command outcome presentation, with no lockout presentation (#3548). It does not create services/models or subscribe to
 SignalR. Production hosts explicitly opt into `observesSafety`, which asks the same
 owner to refresh read-only evidence every five seconds while foregrounded; default
 embedded content performs no automatic reads. Directional movement reads only
@@ -186,7 +196,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
 All operations retain shared command single-flight and online/idle gating. Printing
-and paused printers keep the explanatory lockout. Unrelated telemetry and
+and paused printers keep physical controls disabled or hidden, with no explanatory text (#3548). Unrelated telemetry and
 other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
 HTTP response. Network/server failures can have uncertain physical outcomes;
@@ -764,6 +774,8 @@ Position: **directly below the affected subgroup**, full width, slides down 200m
 - Only **one banner per subgroup** at a time; a new error replaces the previous.
 
 ### 3.4 Mid-print lockout
+
+> Superseded by #3548: no banner renders. Controls are disabled or hidden and carry a VoiceOver hint only.
 
 When `printer.state` is `.printing` or `.paused`:
 

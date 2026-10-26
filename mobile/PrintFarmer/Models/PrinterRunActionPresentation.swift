@@ -217,7 +217,7 @@ public enum PrinterRunActionLabels {
     ///
     ///   1. Pending → static per-kind hint.
     ///   2. Disabled with a non-empty host reason → the reason (mirrors
-    ///      sibling `PrinterControlsSection` in issue #2519 so both surfaces
+    ///      sibling Control tab in issue #2519 so both surfaces
     ///      on the printer-detail screen explain disable state the same way
     ///      when #2522 embeds them together).
     ///   3. Disabled without a reason (or empty) → the generic

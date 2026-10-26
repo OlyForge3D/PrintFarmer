@@ -351,7 +351,7 @@ final class PrinterRunActionPresentationTests: XCTestCase {
     /// When a descriptor is disabled with a host-supplied reason the bar
     /// **replaces** the hint with that reason so VoiceOver announces the
     /// dimmed control's cause (matching #2519's pattern in
-    /// `PrinterControlsSection` so both surfaces on the printer-detail screen
+    /// the Control tab so both surfaces on the printer-detail screen
     /// explain disable state the same way).
     func test_resolvedHint_forDisabledWithReason_isTheHostReason() {
         let descriptor = PrinterRunActionDescriptor(

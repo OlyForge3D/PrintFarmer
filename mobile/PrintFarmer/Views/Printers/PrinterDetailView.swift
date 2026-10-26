@@ -617,18 +617,9 @@ struct PrinterDetailView: View {
         return user.permissions.contains("queue:start") || user.roles.contains("farm_admin")
     }
 
-    private func physicalFilamentCommandBlock(
-        for operation: PhysicalFilamentOperation
-    ) -> PrinterDetailViewModel.PhysicalFilamentBlock? {
-        guard canStartPrinterCommand else {
-            return .blocked("Queue.Start permission is required to use physical filament controls.")
-        }
-        return viewModel.physicalFilamentCommandBlock(for: operation)
-    }
-
     private func physicalFilamentCommandBlockedReason(load: Bool) -> String? {
         guard canStartPrinterCommand else {
-            return "Queue.Start permission is required to use physical filament controls."
+            return "Requires Queue.Start permission."
         }
         return viewModel.physicalFilamentCommandBlockedReason(for: load ? .load : .unload)
     }
@@ -673,15 +664,6 @@ struct PrinterDetailView: View {
                 .accessibilityHint(unloadReason ?? "Requests a physical filament unload without changing its assignment.")
                 .accessibilityIdentifier("printer.detail.filament.unload")
             }
-
-            if !viewModel.isActivelyPrinting,
-               let block = [PhysicalFilamentOperation.load, .unload]
-                .compactMap({ physicalFilamentCommandBlock(for: $0) })
-                .first(where: \.isShownOnScreen) {
-                Text(block.message)
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
         }
         .padding(.top, 4)
         .accessibilityElement(children: .contain)
@@ -690,10 +672,8 @@ struct PrinterDetailView: View {
 
     @MainActor
     private func dispatchPhysicalFilamentCommand(load: Bool) {
-        if let reason = physicalFilamentCommandBlockedReason(load: load) {
-            viewModel.actionError = reason
-            return
-        }
+        // Gated silently; the disabled button is the only signal (#3548).
+        guard physicalFilamentCommandBlockedReason(load: load) == nil else { return }
         UIImpactFeedbackGenerator(style: load ? .medium : .heavy).impactOccurred()
         let task = Task {
             if load {

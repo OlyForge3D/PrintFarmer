@@ -1181,9 +1181,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.unloadPhysicalFilament()
 
         XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
-        XCTAssertTrue(viewModel.actionError?.contains("disabled while a print is active") == true)
+        XCTAssertNil(viewModel.actionError, "Blocked commands are refused silently (#3548)")
+        XCTAssertNotNil(viewModel.physicalFilamentCommandBlockedReason(for: .load), "Gating is unchanged")
 
-        viewModel.actionError = nil
         printer.state = "ready"
         mockService.printerToReturn = printer
         mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
@@ -1197,7 +1197,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.unloadPhysicalFilament()
 
         XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
-        XCTAssertTrue(viewModel.actionError?.contains("does not report support") == true)
+        XCTAssertNil(viewModel.actionError, "Blocked commands are refused silently (#3548)")
+        XCTAssertEqual(viewModel.physicalFilamentCommandBlock(for: .load), .unsupported)
     }
 
     /// Shared fixture for tests that need a printer starting WITH an active
@@ -3067,11 +3068,9 @@ extension PrinterDetailViewModelTests {
         XCTAssertNil(vm.formattedTimeRemaining)
     }
 
-    func testPhysicalFilamentBlockShowsOnlyActionableReasonsOnScreen() {
+    func testPhysicalFilamentBlockMessagesAreHintOnly() {
         typealias Block = PrinterDetailViewModel.PhysicalFilamentBlock
-        XCTAssertFalse(Block.unsupported.isShownOnScreen, "Unsupported is a VoiceOver hint only")
         XCTAssertEqual(Block.unsupported.message, Block.unsupportedMessage)
-        XCTAssertTrue(Block.blocked("Printer is offline.").isShownOnScreen)
         XCTAssertEqual(Block.blocked("Printer is offline.").message, "Printer is offline.")
     }
 
