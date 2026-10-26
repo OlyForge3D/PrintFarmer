@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Tune trimmed to Speed, Flow and babystep (#3540)** — The Control › Tune
+  segment no longer shows hotend/bed target steppers or writable sensor rows
+  while printing, even when the backend supports temperature control during a
+  print. Writable sensors and heater targets remain on Heat while idle.
+
 - **Printer detail clutter (#3496)** — Removed the visible "Speed/Flow can be
   tuned only while printing or paused." lines under the disabled Tune
   steppers (VoiceOver hints keep the reason), the Filament tab's

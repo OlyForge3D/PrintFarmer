@@ -321,8 +321,8 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   fallback matching the web app). Presets
   require proven hotend support; unsupported or explicitly bed-less hardware
   omits the bed. Heat (presets, More, Custom… and its target fields) is
-  idle-only. Mid-print temperature edits happen only on Tune and require
-  `supportsTemperatureControlDuringPrint`. While printing, Move and Heat
+  idle-only. The app offers no mid-print temperature or sensor edits: Tune is
+  Speed, Flow and Z babystep only (#3540). While printing, Move and Heat
   segments are disabled and Tune is auto-selected; it stays selected when the
   print ends. Tune lists Speed % and Flow % steppers (±5%, 1–200%) above
   babystep, hidden unless `supportsSpeedFactorControl` /

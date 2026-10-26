@@ -412,39 +412,32 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
     }
 
-    func testTuneOmitsAllFanControls() async throws {
-        let tune = try await hostedTunePanel()
+    /// #3540: Tune is Speed, Flow and babystep only. Writable sensors, fans and
+    /// heater targets never render there, even when the backend supports
+    /// temperature control during a print.
+    func testTuneWhilePrintingRendersOnlySpeedFlowAndBabystep() async throws {
+        let tune = try await hostedTunePanel(runtimeFactors: true, heatDuringPrint: true)
         defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        let chamberIncrease = "printer.controls.sensor.chamber.TargetTemperature.increase"
-        try await waitForHost("Tune must render the non-fan writable sensor control", in: tune.controller.view) {
-            tune.button(chamberIncrease)?.isEnabled == true
+        let tuneControls = [
+            "printer.controls.runtime.speed-factor.increase", "printer.controls.runtime.speed-factor.decrease",
+            "printer.controls.runtime.flow-factor.increase", "printer.controls.runtime.flow-factor.decrease",
+            "printer.controls.runtime.z-offset.increase", "printer.controls.runtime.z-offset.decrease"
+        ]
+        try await waitForHost("Tune must render Speed, Flow and babystep", in: tune.controller.view) {
+            tuneControls.allSatisfy { tune.button($0) != nil }
         }
         for identifier in [
-            "printer.controls.runtime.fan.increase", "printer.controls.runtime.fan.decrease",
+            "printer.controls.sensor.chamber.TargetTemperature.increase",
+            "printer.controls.sensor.chamber.TargetTemperature.decrease",
             "printer.controls.sensor.aux-fan.FanSpeed.increase", "printer.controls.sensor.aux-fan.FanSpeed.decrease",
-            "printer.controls.sensor.rpi-fan.TargetTemperature.increase"
+            "printer.controls.sensor.rpi-fan.TargetTemperature.increase",
+            "printer.controls.runtime.fan.increase", "printer.controls.runtime.fan.decrease",
+            "printer.controls.hotend.increase", "printer.controls.hotend.decrease",
+            "printer.controls.bed.increase", "printer.controls.bed.decrease",
+            "printer.controls.heat.set-targets"
         ] {
-            XCTAssertNil(tune.button(identifier), "\(identifier) must not render: Tune has no fan controls")
+            XCTAssertNil(tune.find(identifier), "\(identifier) must not render: Tune is Speed, Flow and babystep only")
         }
-    }
-
-    func testTuneWritableSensorControlInvokesRegisteredPrinterSensorAPI() async throws {
-        let tune = try await hostedTunePanel()
-        defer { tune.window.isHidden = true; tune.window.rootViewController = nil }
-        let sensorIncrease = "printer.controls.sensor.chamber.TargetTemperature.increase"
-        try await waitForHost("Tune must render an enabled writable sensor control", in: tune.controller.view) {
-            tune.button(sensorIncrease)?.isEnabled == true
-        }
-        XCTAssertNotNil(tune.button("printer.controls.sensor.chamber.TargetTemperature.decrease"))
-        try XCTUnwrap(tune.button(sensorIncrease)).sendActions(for: .touchUpInside)
-        let sensorPath = "/api/printers/\(tune.printerId)/sensors/chamber"
-        try await waitForHost("Writable sensor must reach the registered sensor API", in: tune.controller.view) {
-            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == sensorPath }
-        }
-        XCTAssertFalse(
-            tune.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/fan") == true },
-            "Tune must never reach the part fan endpoint"
-        )
     }
 
     func testIdlePrinterShowsWritableSensorControlsUnderHeat() async throws {
@@ -582,12 +575,14 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let find: (String) -> UIButton?
     }
 
-    /// Hosts the detail Control tab on Tune with writable fans and a chamber heater.
+    /// Hosts the detail Control tab on Tune with writable fans and a chamber heater,
+    /// none of which Tune may render (#3540).
     /// Callers hide the returned window when done.
     private func hostedTunePanel(
         runtimeFactors: Bool = false,
         printerState: String = "printing",
-        factorValues: (speed: Double?, flow: Double?) = (100, 98)
+        factorValues: (speed: Double?, flow: Double?) = (100, 98),
+        heatDuringPrint: Bool = false
     ) async throws -> HostedTunePanel {
         let auxiliaryFan = PrinterSensor(
             id: "aux-fan", displayName: "Auxiliary fan", kind: .fan, fanRole: .auxiliary,
@@ -606,7 +601,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
         let fixture = try detailHostFixture(
             writableSensors: [auxiliaryFan, temperatureFan, chamber], runtimeFactors: runtimeFactors,
-            printerState: printerState, factorValues: factorValues
+            printerState: printerState, factorValues: factorValues, heatDuringPrint: heatDuringPrint
         )
         let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
         detail.configure(printerService: fixture.services.printerService)
@@ -779,7 +774,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         printerState: String = "idle",
         factorValues: (speed: Double?, flow: Double?) = (100, 98),
         hotendTarget: Double? = nil,
-        printerFailure: OSAllocatedUnfairLock<Bool>? = nil
+        printerFailure: OSAllocatedUnfairLock<Bool>? = nil,
+        heatDuringPrint: Bool = false
     ) throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
         first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
@@ -846,7 +842,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
          "supportsFanControl":true,"supportsFanSpeedReadback":true,
          "supportsZOffsetAdjustment":true,"supportsZOffsetReadback":true,
          "supportsSpeedFactorControl":\(runtimeFactors),"supportsFlowFactorControl":\(runtimeFactors),
-         "supportsSensorControl":\(!writableSensors.isEmpty)}
+         "supportsSensorControl":\(!writableSensors.isEmpty),
+         "supportsTemperatureControlDuringPrint":\(heatDuringPrint)}
         """.utf8)
         let api = MockAPIClient()
         api.asyncRequestHandler = { request in
@@ -1197,14 +1194,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertTrue(locked)
         XCTAssertFalse(Panel.isAvailable(.tune, isPrinting: printing, isLocked: locked))
         XCTAssertNotEqual(Panel.resolvedSegment(.tune, isPrinting: printing, isLocked: locked), .tune)
-        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: printing, heatDuringPrint: true))
-    }
-
-    func testTuneTemperaturesAreOmittedWhenTheBackendCannotApplyThem() {
-        typealias Panel = PrinterInstrumentPanelControls
-        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: true, heatDuringPrint: false))
-        XCTAssertTrue(Panel.showsTuneTemperatures(isPrinting: true, heatDuringPrint: true))
-        XCTAssertFalse(Panel.showsTuneTemperatures(isPrinting: false, heatDuringPrint: true))
     }
 
     func testPositionReadoutSpeaksMillimeters() {

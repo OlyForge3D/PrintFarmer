@@ -195,7 +195,7 @@ not re-recorded and pass unchanged on both families.
 
 The printer detail Status page no longer shows the sensor/fan readout or the
 nozzle/bed temperature strip. Temperatures remain on the Control tab's Heat
-section, and writable fans and sensors remain in Tune. `PrinterSensorsReadout`
+section, and writable fans and sensors remained in Tune (later removed by #3540). `PrinterSensorsReadout`
 and `test_statusSensorReadout` were deleted together with both
 `test_statusSensorReadout` references (iPhone and iPad). `test_controlSensorRows`
 and every Controls reference are unchanged; no PNGs were re-recorded.
@@ -288,3 +288,13 @@ appearance, default locale and the unchanged `.iPhone13` component
 configuration. All other Controls and sensor references, strict comparison
 settings and test selectors remain unchanged; recording is disabled.
 Both full snapshot classes passed on each host with zero skips.
+
+## Tune trimmed to Speed, Flow and babystep (#3540)
+
+Tune no longer renders heater targets or writable sensor rows. No reference
+image was re-recorded: no snapshot test mounts the printer-detail Control
+tab's `PrinterInstrumentPanelControls`. `PrinterSensorsSnapshotTests` renders
+idle, component-level sensor rows and `PrinterControlsSectionSnapshotTests`
+mounts the legacy `PrinterControlsSection`; neither layout changed. Tune
+coverage lives in `PrinterDetailPanelsTests` and the XCUI
+`Issue3496TuneSensorsUITests` screenshots.

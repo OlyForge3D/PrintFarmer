@@ -292,12 +292,10 @@ Preheat stays hidden and refuses dispatch until hotend support is confirmed.
 **Cool down** is always offered and is idle-only: it is disabled while a job is
 starting, printing or paused (Emergency stop covers stopping a print). Idle, it
 calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
-otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat targets
-stay available while printing only when the backend reports
-`supportsTemperatureControlDuringPrint`; the instrument panel's Heat segment is
-disabled while printing because Tune carries those targets. While a job is
-printing or paused, **Tune** also shows the hotend and bed targets with the same
-gating; Tune has no fan controls. Above babystep, Tune shows **Speed %** and
+otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat
+targets and writable sensors are idle-only: the instrument panel's Heat segment
+is disabled while a job is printing or paused, and **Tune** offers only Speed,
+Flow and Z babystep — no heater targets, sensors or fans (#3540). Above babystep, Tune shows **Speed %** and
 **Flow %** steppers (±5%, 1–200%) only when the backend reports
 `supportsSpeedFactorControl` / `supportsFlowFactorControl`. They use the shared
 `POST /api/printers/{id}/speed-factor` and `/flow-factor` API and stay pending
