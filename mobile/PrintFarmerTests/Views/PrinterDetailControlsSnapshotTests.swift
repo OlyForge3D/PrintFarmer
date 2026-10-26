@@ -96,7 +96,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
         printer.isOnline = true
         let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
                                          attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
-        XCTAssertEqual(bed.stateLabel, "Bed clear")
+        XCTAssertEqual(bed.stateLabel, "Bed clear?")
         XCTAssertEqual(bed.jobLabel, "Ready to harvest")
     }
 
@@ -165,7 +165,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
             printTimeLeftSeconds: 1_320
         )
 
-        XCTAssertEqual(presentation.stateLabel, "Bed clear")
+        XCTAssertEqual(presentation.stateLabel, "Bed clear?")
         XCTAssertFalse(presentation.canShowJobETA)
         XCTAssertFalse(presentation.showsJobProgress)
         XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
