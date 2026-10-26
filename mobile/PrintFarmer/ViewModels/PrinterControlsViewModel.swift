@@ -1246,8 +1246,9 @@ final class PrinterControlsViewModel: ObservableObject {
         printer.sensors.filter { !$0.writable.isEmpty }
     }
 
-    /// Caption for sensor rows: genuine unsupported/access reasons only. Loading
-    /// and in-flight states disable the row instead of printing text (#3547).
+    /// VoiceOver hint for disabled sensor rows: genuine unsupported/access reasons
+    /// only, never rendered as visible text (#3548). Loading and in-flight states
+    /// return nil (#3547).
     var sensorRowMessage: String? {
         guard let capabilities else { return nil }
         guard capabilities.supportsSensorControl else {

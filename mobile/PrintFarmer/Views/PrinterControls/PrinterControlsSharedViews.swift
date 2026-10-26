@@ -99,7 +99,9 @@ struct PrinterSensorControlRows: View {
             identifier: id,
             fieldIdentifier: id + ".value",
             fieldLabel: spokenTitle + (unitSpoken.isEmpty ? "" : " in \(unitSpoken)"),
-            fieldHint: "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
+            // Disabled rows explain why to VoiceOver only; no visible caption (#3548).
+            fieldHint: viewModel.sensorRowMessage
+                ?? "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
                 + (allowsOff ? "; zero switches it off." : "."),
             stepLabel: { "\($0 ? "Increase" : "Decrease") \(spokenTitle)" },
             unit: descriptor.unit,
