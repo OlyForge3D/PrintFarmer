@@ -922,7 +922,7 @@ export function FilesPage() {
           Upload Model
         </Button>
       )}
-      {hasPermission('gcode_harvest', 'create') && (
+      {hasPermission('gcode_library', 'create') && (
         <Button
           type="button"
           variant="secondary"

@@ -140,9 +140,7 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         // A regression check on the resolution/eligibility logic itself: "ApiKeyPurpose" is a plain,
         // globally-converted enum with no same-name collisions, while "AttentionSeverity" has two
         // same-named CLR types and is only checkable because the custom-converter one is correctly
-        // excluded from eligibility. "GcodeHarvestQueueItemStatus" no longer collides at all -- #2289
-        // removed the duplicate Dto enum, leaving `Farm.Infrastructure.Domain.GcodeHarvestQueueItemStatus`
-        // as the single CLR type referenced (directly, with no cast) by `GcodeHarvestQueueItemDto.Status`.
+        // excluded from eligibility.
         // "SlicerEngineType" previously collided with the gRPC-only Farm.Web.Api.Grpc.SlicerEngineType
         // (see #2290); that type was renamed to GrpcSlicerEngineType, so this simple name now
         // resolves unambiguously to Farm.Slicer.Module.Models.SlicerEngineType with no exclusion
@@ -150,7 +148,7 @@ public sealed class OpenApiEnumFidelityTests(OpenApiDocumentFixture fixture)
         // future regression) silently dropping the type actually bound to the schema. All must still
         // be found and checked.
         _ = checkedSchemaNames.Should().Contain(
-            new[] { "ApiKeyPurpose", "AttentionSeverity", "GcodeHarvestQueueItemStatus", "SlicerEngineType" },
+            new[] { "ApiKeyPurpose", "AttentionSeverity", "SlicerEngineType" },
             "the sweep should resolve and check at least these known, non-ambiguous-after-filtering enums");
 
         _ = failures.Should().BeEmpty(

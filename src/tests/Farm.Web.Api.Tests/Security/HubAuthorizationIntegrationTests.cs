@@ -25,7 +25,6 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposab
 
     [Theory]
     [InlineData("/hubs/printers/negotiate?negotiateVersion=1")]
-    [InlineData("/hubs/harvest/negotiate?negotiateVersion=1")]
     [InlineData("/hubs/maintenance/negotiate?negotiateVersion=1")]
     [InlineData("/hubs/nfc/negotiate?negotiateVersion=1")]
     public async Task NegotiateAsync_WithoutAuthentication_IsDenied(string route)

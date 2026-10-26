@@ -217,27 +217,6 @@ EOF
 
 ## Service Integration
 
-### GcodeHarvestService
-
-The harvest service uses `IStoragePathService` to determine storage directories:
-
-```csharp
-public class GcodeHarvestService(
-    // ... other dependencies ...
-    IStoragePathService storagePathService) : IGcodeHarvestService
-{
-    public async Task<GcodeHarvestResultDto> ImportSelectedFilesAsync(...)
-    {
-        // Uses centralized storage service
-        string storageDir = _storagePathService.GetGcodeStorageDirectory();
-        string thumbnailDir = _storagePathService.GetThumbnailDirectory();
-        
-        // Files saved to external volume in production
-        // Files saved to local development paths in dev
-    }
-}
-```
-
 ### Initialization
 
 The storage service can be initialized during application startup:

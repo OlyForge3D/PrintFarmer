@@ -18,8 +18,8 @@ public class PrinterMaintenanceScheduleConfiguration : IEntityTypeConfiguration<
 
         // Schedules cannot be silently orphaned when a Printer is deleted (schedules carry
         // required PrinterId). Callers use EfPrintersRepository.RemoveAsync which explicitly
-        // deletes schedules before removing the printer (matching GcodeFiles/PrintJobs/
-        // GcodeHarvestOperations pattern). Restrict (not Cascade) here breaks the SQL Server
+        // deletes schedules before removing the printer (matching GcodeFiles/PrintJobs
+        // pattern). Restrict (not Cascade) here breaks the SQL Server
         // multi-cascading-path graph Printers ⇒ Schedules ⇒ MaintenanceAlerts (SetNull) that
         // triggered error 1785. Dallas cascade adjudication for #953 / #723.
         _ = builder.HasOne(s => s.Printer)

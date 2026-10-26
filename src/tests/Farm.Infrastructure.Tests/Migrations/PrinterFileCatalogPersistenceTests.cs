@@ -85,7 +85,8 @@ public sealed class PrinterFileCatalogPersistenceTests
     private static async Task AssertPopulatedUpgradeAsync(AppDbContext context)
     {
         string previous = context.Database.GetMigrations()
-            .Last(name => !name.EndsWith("_AddPrinterFileCatalog", StringComparison.Ordinal));
+            .TakeWhile(name => !name.EndsWith("_AddPrinterFileCatalog", StringComparison.Ordinal))
+            .Last();
         await context.GetService<IMigrator>().MigrateAsync(previous);
 
         Manufacturer manufacturer = new() { Id = Guid.NewGuid(), Name = "Catalog test" };

@@ -701,20 +701,6 @@ ORCA_WORKER_COUNT=3 \
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
-### Redis Harvest Queue
-For high-volume gcode harvesting, configure Redis backend:
-
-```bash
-REDIS_CONNECTION_STRING=redis://redis:6379 \
-HARVEST_QUEUE_ENABLED=true \
-./scripts/deploy-docker.sh --non-interactive
-```
-
-The Redis queue uses a 3-tier data structure:
-1. **Primary Queue**: Sorted set with timestamp scores for FIFO ordering
-2. **Processing Set**: Tracks jobs being processed (crash recovery)
-3. **Completed Set**: Retains completed jobs for 24 hours (audit trail)
-
 ### Monitoring & Telemetry
 Enable observability features:
 

@@ -24,7 +24,6 @@ public sealed class PermissionAuthorizationHandlerTests
     public static IEnumerable<object[]> CanonicalResources()
     {
         yield return new object[] { "printers" };
-        yield return new object[] { "gcode_harvest" };
         yield return new object[] { "gcode_library" };
         yield return new object[] { "job_queue" };
         yield return new object[] { "slicer_engines" };

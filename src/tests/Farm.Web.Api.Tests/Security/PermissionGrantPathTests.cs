@@ -85,7 +85,7 @@ public sealed class PermissionGrantPathTests
     private static readonly Assembly[] ScannedAssemblies =
     [
         typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
-        typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
+        typeof(Farm.Infrastructure.Services.SignalR.PrinterHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue controllers (JobQueueController,
         // SlicePrintBridgeController, PrintApprovalsController, DispatchSettingsController, etc.)

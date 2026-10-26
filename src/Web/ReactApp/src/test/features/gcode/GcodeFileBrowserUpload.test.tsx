@@ -9,7 +9,7 @@ import { GcodeSource } from '@/types/api';
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    hasPermission: (_resource: string, action: string) => action === 'create',
+    hasPermission: (resource: string, action: string) => resource === 'gcode_library' && action === 'create',
   }),
 }));
 

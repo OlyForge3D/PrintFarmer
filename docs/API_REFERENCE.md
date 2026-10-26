@@ -1,13 +1,12 @@
 # API Reference (Summary)
 
 This document aggregates endpoint groups and key DTOs. For specialized domains see:
-- `GCODE_HARVESTING_API.md`
+- [Printer File Catalog API](./PRINTER_FILE_CATALOG_API.md)
 
 ## Tags / Endpoint Groups
 - Authentication
 - Printers
 - Catalog
-- G-code Harvesting
 - Filament Types
 - G-code Library
 - Job Queue
@@ -20,15 +19,6 @@ This document aggregates endpoint groups and key DTOs. For specialized domains s
 
 ### PrinterDto
 Represents a printer with optional live status fields.
-
-### StartGcodeHarvestDto
-Configuration for starting a harvest (filters & duplicate handling).
-
-### DiscoveredGcodeFileDto
-Represents a file found on a printer during harvest.
-
-### GcodeHarvestOperationDto
-Tracks progress/state of a harvest operation.
 
 ### PagedResult<T>
 Generic wrapper for paging: items, totalCount, page, pageSize, totalPages.

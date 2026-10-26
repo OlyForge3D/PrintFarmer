@@ -368,7 +368,7 @@ When reviewing primary constructor conversions:
 - ✅ PrintersController
 - ✅ CatalogController
 - ✅ SpoolmanController
-- ✅ GcodeHarvestController
+- ✅ GcodeHarvestController (since retired in #3531)
 - ✅ FileConsistencyController
 - ✅ NotificationsController
 - ✅ AuthController
