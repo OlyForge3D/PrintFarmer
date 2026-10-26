@@ -70,10 +70,15 @@ import WebKit
 struct MJPEGStreamView: UIViewRepresentable {
     let request: URLRequest
     let rotation: Int
+    /// Called once with the first decoded frame's natural size (#3496 N05).
+    var onFrameSize: (CGSize) -> Void = { _ in }
+
+    static let frameSizeMessage = "pfStreamFrameSize"
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
+        config.userContentController.add(WeakScriptHandler(context.coordinator), name: Self.frameSizeMessage)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
@@ -88,89 +93,138 @@ struct MJPEGStreamView: UIViewRepresentable {
         return webView
     }
 
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: frameSizeMessage)
+    }
+
     func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onFrameSize = onFrameSize
         if context.coordinator.currentRequest != request {
             context.coordinator.currentRequest = request
             webView.load(request)
         }
 
-        let rotationCSS = """
+        context.coordinator.rotation = rotation
+        webView.evaluateJavaScript(Self.layoutScript(rotation: rotation), completionHandler: nil)
+    }
+
+    /// Centres the frame and aspect-fits it; a quarter turn swaps the image box
+    /// so the rotated frame fills the (already swapped) container (#3496).
+    static func layoutScript(rotation: Int) -> String {
+        let quarterTurn = PrinterDetailCameraLayout.isQuarterTurn(rotation)
+        return """
             document.body.style.margin = '0';
             document.body.style.padding = '0';
             document.body.style.overflow = 'hidden';
             document.body.style.background = 'transparent';
+            document.body.style.height = '100vh';
             var img = document.querySelector('img');
             if (img) {
-                img.style.width = '100%';
-                img.style.height = 'auto';
+                img.style.position = 'absolute';
+                img.style.left = '50%';
+                img.style.top = '50%';
+                img.style.width = '\(quarterTurn ? "100vh" : "100vw")';
+                img.style.height = '\(quarterTurn ? "100vw" : "100vh")';
+                img.style.objectFit = 'contain';
                 img.style.display = 'block';
-                img.style.transform = 'rotate(\(rotation)deg)';
+                img.style.transform = 'translate(-50%, -50%) rotate(\(rotation)deg)';
                 img.style.transformOrigin = 'center center';
             }
+            if (!window.pfFrameSizeWatch) {
+                window.pfFrameSizeWatch = setInterval(function () {
+                    var frame = document.querySelector('img');
+                    if (frame && frame.naturalWidth > 0 && frame.naturalHeight > 0) {
+                        clearInterval(window.pfFrameSizeWatch);
+                        window.webkit.messageHandlers.\(frameSizeMessage).postMessage(
+                            [frame.naturalWidth, frame.naturalHeight]);
+                    }
+                }, 250);
+            }
         """
-        webView.evaluateJavaScript(rotationCSS, completionHandler: nil)
+    }
+
+    /// Parses the `[width, height]` frame-size message posted by `layoutScript`.
+    static func frameSize(from body: Any) -> CGSize? {
+        guard let values = body as? [NSNumber], values.count == 2 else { return nil }
+        let size = CGSize(width: values[0].doubleValue, height: values[1].doubleValue)
+        return size.width > 0 && size.height > 0 && size.width.isFinite && size.height.isFinite ? size : nil
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var currentRequest: URLRequest?
         var hasLoaded = false
+        var rotation = 0
+        var onFrameSize: (CGSize) -> Void = { _ in }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == MJPEGStreamView.frameSizeMessage,
+                  let size = MJPEGStreamView.frameSize(from: message.body) else { return }
+            onFrameSize(size)
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             hasLoaded = true
-            let setupCSS = """
-                document.body.style.margin = '0';
-                document.body.style.padding = '0';
-                document.body.style.overflow = 'hidden';
-                document.body.style.background = 'transparent';
-                var img = document.querySelector('img');
-                if (img) {
-                    img.style.width = '100%';
-                    img.style.height = 'auto';
-                    img.style.display = 'block';
-                }
-            """
-            webView.evaluateJavaScript(setupCSS, completionHandler: nil)
+            webView.evaluateJavaScript(MJPEGStreamView.layoutScript(rotation: rotation), completionHandler: nil)
         }
     }
 }
 
+private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
+    weak var target: WKScriptMessageHandler?
+    init(_ target: WKScriptMessageHandler) { self.target = target }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        target?.userContentController(controller, didReceive: message)
+    }
+}
+
+/// Sizes the livestream to its first frame's aspect ratio. Until a frame
+/// arrives a compact placeholder stands in, so a slow or dead stream never
+/// reserves a tall blank panel (#3496 N05).
 struct MJPEGStreamContainer: View {
     let url: URL
     let rotation: Int
+    var maxHeight: CGFloat = .infinity
     /// Returns the authenticated server's base URL and bearer, read atomically.
     let credentials: @Sendable () async -> (baseURL: URL, accessToken: String?)?
     @State private var request: URLRequest?
-    @State private var isLoading = true
-    @State private var loadingTask: Task<Void, Never>?
+    @State private var frameSize: CGSize?
+    @State private var timedOut = false
+
+    static let placeholderHeight: CGFloat = 120
+    static let connectTimeout: Duration = .seconds(8)
+
+    static func aspectRatio(rotation: Int, frameSize: CGSize? = nil) -> CGFloat {
+        PrinterDetailCameraLayout.aspectRatio(
+            imageSize: frameSize ?? PrinterDetailCameraLayout.streamImageSize, rotation: rotation
+        ) ?? 16 / 9
+    }
 
     var body: some View {
+        let aspect = Self.aspectRatio(rotation: rotation, frameSize: frameSize)
         ZStack {
             if let request {
-                MJPEGStreamView(request: request, rotation: rotation)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .onAppear { scheduleLoadingDismiss() }
+                MJPEGStreamView(request: request, rotation: rotation) { size in
+                    if frameSize != size { frameSize = size }
+                }
+                .opacity(frameSize == nil ? 0 : 1)
+                .accessibilityHidden(frameSize == nil)
             }
-
-            if isLoading || request == nil {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.pfCard)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            ProgressView()
-                            Text("Connecting to stream…")
-                                .font(.caption)
-                                .foregroundStyle(Color.pfTextSecondary)
-                        }
-                    }
+            if frameSize == nil {
+                placeholder
             }
         }
+        .modifier(StreamFrame(aspect: frameSize == nil ? nil : aspect))
+        .frame(maxWidth: frameSize == nil ? .infinity : PrinterDetailCameraLayout.maximumWidth(
+            aspect: aspect, maxHeight: maxHeight
+        ))
         .task(id: url) {
+            frameSize = nil
+            timedOut = false
             let session = await credentials()
             guard !Task.isCancelled else { return }
             request = CameraURLResolver.streamRequest(
@@ -178,14 +232,41 @@ struct MJPEGStreamContainer: View {
                 serverBaseURL: session?.baseURL,
                 accessToken: session?.accessToken
             )
+            try? await Task.sleep(for: Self.connectTimeout)
+            guard !Task.isCancelled, frameSize == nil else { return }
+            timedOut = true
         }
-        .onDisappear { loadingTask?.cancel() }
     }
 
-    private func scheduleLoadingDismiss() {
-        loadingTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            withAnimation { isLoading = false }
+    private var placeholder: some View {
+        VStack(spacing: 8) {
+            if timedOut {
+                Image(systemName: "video.slash.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.pfTextTertiary)
+                Text("Stream unavailable")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+            } else {
+                ProgressView()
+                Text("Connecting to stream…")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("printer.detail.camera.stream.placeholder")
+    }
+
+    private struct StreamFrame: ViewModifier {
+        let aspect: CGFloat?
+        func body(content: Content) -> some View {
+            if let aspect {
+                content.aspectRatio(aspect, contentMode: .fit)
+            } else {
+                content.frame(height: MJPEGStreamContainer.placeholderHeight)
+            }
         }
     }
 }

@@ -36,7 +36,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         printer.bedTarget = 55
         model.handlePrinterUpdate(printer)
         XCTAssertNil(model.pendingCommand)
-        XCTAssertTrue(model.commandNotice?.contains("setpoint") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
     }
 
     func test_combinedTargets_rejectsInvalidPairAtomically() async throws {
@@ -266,9 +266,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     ) {
         XCTAssertNil(vm.pendingCommand, file: file, line: line)
         XCTAssertNil(vm.lastError, file: file, line: line)
-        XCTAssertTrue(vm.commandNotice?.hasPrefix("Request accepted.") == true, file: file, line: line)
-        XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true, file: file, line: line)
-        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true, file: file, line: line)
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)", file: file, line: line)
     }
 
     private func assertDirectAcceptanceOnly(
@@ -277,11 +275,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand, file: file, line: line)
         XCTAssertFalse(vm.isExecuting, file: file, line: line)
         XCTAssertNil(vm.lastError, file: file, line: line)
-        XCTAssertEqual(
-            vm.commandNotice,
-            "Command accepted. Physical completion is not confirmed; check the printer before another action.",
-            file: file, line: line
-        )
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)", file: file, line: line)
     }
 
     // MARK: - Non-matching cached targets keep waiting for live evidence
@@ -349,7 +343,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         gate.release()
         await first
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
 
         let motionGate = AsyncBarrier()
         defer { motionGate.close() }

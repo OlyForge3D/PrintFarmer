@@ -110,6 +110,82 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     #if DEBUG
     @MainActor
     class Issue3259MockupCaptureUITests: PrintFarmerUITestCase {
+        /// #3509 sorts the Farm by state group, then name, so at large text sizes
+        /// the card can sit below the fold or under the Scan dock. tap() targets its
+        /// centre, so filter the Farm by name and tap the card's top edge clear of the dock.
+        func openFarmCard(_ printerID: String) {
+            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+            XCTAssertTrue(farm.waitForExistence(timeout: 8))
+            farm.tap()
+            let printerCard = app.buttons["farm-card-\(printerID)"]
+            // SwiftUI surfaces the Farm scroll view as farm.printerList on iPhone
+            // and as farm.root inside the iPad split view.
+            let farmScroll = app.scrollViews
+                .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+                .firstMatch
+            XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+            // At accessibility sizes a card can be taller than the space above the
+            // Scan dock and keyboard, so tap near its top edge rather than its centre.
+            func tapPoint() -> CGPoint? {
+                guard printerCard.exists, printerCard.isHittable else { return nil }
+                let card = printerCard.frame
+                let point = CGPoint(x: card.midX, y: card.minY + min(44, card.height / 2))
+                var bottom = farmScroll.frame.maxY
+                let scan = app.buttons["navigation.scan"]
+                if scan.exists { bottom = min(bottom, scan.frame.minY - 8) }
+                let keyboard = app.keyboards.firstMatch
+                if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
+                return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
+            }
+            // Scrolling the Farm grid in the simulator can trap the main thread in a
+            // LazyVGrid placement loop, so filter with Farm search instead of swiping.
+            if tapPoint() == nil, let name = Self.fixturePrinterNames[printerID] {
+                searchFarm(name)
+                _ = printerCard.waitForExistence(timeout: 8)
+            }
+            guard let point = tapPoint() else {
+                XCTFail("The top of the printer card must be on screen before tapping")
+                return
+            }
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: point.x, dy: point.y))
+                .tap()
+        }
+
+        /// Filters the Farm by name. Swiping the Farm LazyVGrid in the simulator can
+        /// trap the main thread in a placement loop, so tests search instead.
+        /// Submitting dismisses the keyboard so it stops covering cards and the dock.
+        func searchFarm(_ query: String) {
+            let searchButton = app.buttons["farm.search"]
+            let field = app.searchFields.firstMatch
+            func presentField() {
+                if !field.exists {
+                    XCTAssertTrue(searchButton.waitForExistence(timeout: 8))
+                    searchButton.tap()
+                }
+                XCTAssertTrue(field.waitForExistence(timeout: 8))
+                field.tap()
+            }
+            presentField()
+            // Tapping places the caret mid-text, so clear with the field's own button.
+            let clear = field.buttons["Clear text"]
+            if clear.exists {
+                clear.tap()
+                presentField()
+            }
+            let current = (field.value as? String) ?? ""
+            XCTAssertTrue(
+                current.isEmpty || current == field.placeholderValue,
+                "Farm search must be empty before typing a new query, found '\(current)'."
+            )
+            field.typeText(query + "\n")
+        }
+
+        static let fixturePrinterNames = [
+            "10000000-0001-0000-0000-000000000001": "Prusa MK4 #1",
+            "10000000-0001-0000-0000-000000000002": "Prusa MK4 #2",
+        ]
+
         override var waitsForNavigationReadiness: Bool { true }
         var contentSizeCategory: String { "UICTContentSizeCategoryL" }
 
@@ -198,101 +274,42 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             if !isIPad {
                 XCTAssertTrue(printerList.exists, "Farm printer cards must remain in a scrollable list.")
             }
-            func scrollFarmUp() {
-                if isIPad {
-                    app.swipeUp()
-                } else {
-                    printerList.swipeUp()
-                }
+            // Swiping the Farm LazyVGrid in the simulator can trap the main thread in a
+            // placement loop (it also fails on development), so locate each card with
+            // Farm search instead. PrinterListViewModelTests covers the #3509 sort.
+            func farmCard(_ name: String, _ detail: String? = nil) -> XCUIElement {
+                searchFarm(name)
+                let predicate = detail.map {
+                    NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", name, $0)
+                } ?? NSPredicate(format: "label CONTAINS %@", name)
+                let card = app.buttons.matching(predicate).firstMatch
+                XCTAssertTrue(card.waitForExistence(timeout: 8), "\(name) must appear in the Farm.")
+                return card
             }
-            let failureCard = app.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@ AND label CONTAINS %@",
-                "Voron 2.4",
-                "Failure suspected:"
-            )).firstMatch
-            XCTAssertTrue(failureCard.waitForExistence(timeout: 5))
-            XCTAssertTrue(failureCard.label.contains("gear_set_v3.gcode"))
-            XCTAssertTrue(failureCard.label.contains("22% progress at failure"))
-            XCTAssertTrue(failureCard.label.contains("2h 41m left"))
-            XCTAssertTrue(failureCard.label.contains("Done"))
-            let firstPrintingCard = app.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@ AND label CONTAINS %@",
-                "Prusa MK4 #1",
-                "benchy_0.2mm_PLA.gcode"
-            )).firstMatch
-            XCTAssertTrue(firstPrintingCard.waitForExistence(timeout: 5))
-            let miniCard = app.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@ AND label CONTAINS %@",
-                "Prusa Mini",
-                "clip_holder_x4.gcode"
-            )).firstMatch
-            for _ in 0..<8 where !miniCard.exists {
-                scrollFarmUp()
-            }
-            XCTAssertTrue(miniCard.waitForExistence(timeout: 5))
+            _ = farmCard("Ender 3 S1", "Paused")
+            _ = farmCard("Prusa MK4 #1", "benchy_0.2mm_PLA.gcode")
+            let miniCard = farmCard("Prusa Mini", "clip_holder_x4.gcode")
             XCTAssertTrue(miniCard.label.contains("22m left"))
-            let bedClearPrinter = app.buttons.matching(
-                NSPredicate(format: "label CONTAINS %@", "Bambu X1C")
-            ).firstMatch
-            for _ in 0..<8 where !bedClearPrinter.exists {
-                scrollFarmUp()
-            }
-            XCTAssertTrue(bedClearPrinter.waitForExistence(timeout: 5))
+            let bedClearPrinter = farmCard("Bambu X1C")
             XCTAssertTrue(
                 bedClearPrinter.label.localizedCaseInsensitiveContains("Bed clear"),
                 "Bambu X1C must use the mockup's real PendingReady demo state rather than appear as a second print."
             )
             XCTAssertFalse(bedClearPrinter.label.contains("% complete"))
             XCTAssertFalse(bedClearPrinter.label.contains("ETA unavailable"))
-            let pausedCard = app.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@ AND label CONTAINS %@",
-                "Ender 3 S1",
-                "Paused"
-            )).firstMatch
-            for _ in 0..<8 where !pausedCard.exists {
-                scrollFarmUp()
-            }
-            XCTAssertTrue(pausedCard.waitForExistence(timeout: 5))
-            if size == "normal" {
-                if isIPad {
-                    XCTAssertLessThan(firstPrintingCard.frame.minX, failureCard.frame.minX)
-                    XCTAssertLessThan(failureCard.frame.minX, bedClearPrinter.frame.minX)
-                    XCTAssertGreaterThan(pausedCard.frame.minY, firstPrintingCard.frame.minY)
-                } else {
-                    XCTAssertLessThan(firstPrintingCard.frame.minY, failureCard.frame.minY)
-                    XCTAssertLessThan(failureCard.frame.minY, bedClearPrinter.frame.minY)
-                    XCTAssertLessThan(bedClearPrinter.frame.minY, pausedCard.frame.minY)
-                }
-            }
-            let lastFarmCard = app.buttons.matching(
-                NSPredicate(
-                    format: "label CONTAINS %@",
-                    "Creality K1"
-                )
-            ).firstMatch
-            for _ in 0..<16 where
-                !lastFarmCard.isHittable
-                || lastFarmCard.frame.maxY > scanButton.frame.minY - 8
-            {
-                scrollFarmUp()
-            }
-            XCTAssertTrue(lastFarmCard.isHittable, "The final Farm card must scroll above floating navigation.")
+            let failureCard = farmCard("Voron 2.4", "Failure suspected:")
+            XCTAssertTrue(failureCard.label.contains("gear_set_v3.gcode"))
+            XCTAssertTrue(failureCard.label.contains("22% progress at failure"))
+            XCTAssertTrue(failureCard.label.contains("2h 41m left"))
+            XCTAssertTrue(failureCard.label.contains("Done"))
+            XCTAssertTrue(failureCard.isHittable, "A Farm card must sit above floating navigation.")
             XCTAssertLessThanOrEqual(
-                lastFarmCard.frame.maxY,
+                failureCard.frame.minY,
                 scanButton.frame.minY - 8,
-                "Farm cards must clear the floating Scan control when scrolled to the end."
+                "Farm cards must start above the floating Scan control."
             )
-            func scrollFarmDown() {
-                if isIPad {
-                    app.swipeDown()
-                } else {
-                    printerList.swipeDown()
-                }
-            }
             let allFilterButton = app.buttons["farm.filter.All"]
-            for _ in 0..<16 where !allFilterButton.isHittable {
-                scrollFarmDown()
-            }
+            XCTAssertTrue(allFilterButton.waitForExistence(timeout: 8))
             XCTAssertTrue(
                 allFilterButton.isHittable,
                 "Farm filters must remain reachable after scrolling through the cards. "
@@ -461,13 +478,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             allFilter.tap()
             attachScreen("\(device)-\(size)-filament-inventory")
             farm.tap()
-            farm.tap()
-            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-            for _ in 0..<8 where !printerCard.exists {
-                printerList.swipeDown()
-            }
-            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-            printerCard.tap()
+            openFarmCard("10000000-0001-0000-0000-000000000001")
             XCTAssertFalse(
                 app.buttons["navigation.scan"].exists,
                 "The root-level scanner must not cover printer-detail controls; in-page spool scan remains available."
@@ -489,9 +500,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                     )
                 }
                 if panel == "Queue" {
-                    XCTAssertTrue(
-                        page.staticTexts["printer.detail.queue.reorderNote"].waitForExistence(timeout: 5)
-                    )
+                    XCTAssertTrue(page.staticTexts["Up next"].waitForExistence(timeout: 5))
+                    XCTAssertFalse(page.staticTexts["printer.detail.queue.reorderNote"].exists)
                     XCTAssertFalse(
                         page.staticTexts["Assigned"].exists,
                         "Assigned jobs must not appear as a section before Up next."
@@ -520,22 +530,19 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         .matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label CONTAINS %@", "Done at", "Unknown"))
                         .firstMatch
                     XCTAssertTrue(finishTime.exists)
-                    // The fixture omits layer counters (#3284), so Layer shows the
-                    // "--" placeholder, which VoiceOver reads as "not reported".
-                    let layerFact = app.staticTexts
-                        .matching(identifier: "printer.detail.job")
-                        .matching(NSPredicate(format: "label == %@", "Layer, not reported"))
-                        .firstMatch
-                    XCTAssertTrue(layerFact.waitForExistence(timeout: 5))
+                    // The fixture omits layer counters (#3284), so the Layer cell is
+                    // omitted rather than showing a "--" placeholder (#3496).
+                    XCTAssertFalse(
+                        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists
+                    )
                     XCTAssertFalse(
                         page.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Unavailable")).firstMatch.exists,
                         "Missing Status values use the -- placeholder, not Unavailable."
                     )
-                    let preview = app.images
-                        .matching(identifier: "printer.detail.hero")
-                        .matching(NSPredicate(format: "label == %@", "Current print preview"))
-                        .firstMatch
+                    let preview = app.images["printer.detail.camera.media"]
                     XCTAssertTrue(preview.waitForExistence(timeout: 5))
+                    XCTAssertEqual(preview.label, "Current print preview")
+                    XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Print preview")
                     if size == "largest" {
                         let pause = app.buttons["printer.detail.control.pause"]
                         let cancel = app.buttons["printer.detail.control.cancel"]
@@ -562,10 +569,14 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if panel == "Filament" {
                     let warning = app.descendants(matching: .any)["printer.filament.attention"]
                     XCTAssertTrue(warning.waitForExistence(timeout: 5))
-                    XCTAssertEqual(warning.label, "About 84 g left. This job needs about 140 g.")
+                    XCTAssertEqual(warning.label, "84 g / needs 140 g")
                     XCTAssertEqual(
-                        app.staticTexts.matching(
-                            NSPredicate(format: "label CONTAINS %@", "This job needs about 140 g")
+                        app.descendants(matching: .any).matching(
+                            // The combined filament row repeats its children for VoiceOver; count visible copies only.
+                            NSPredicate(
+                                format: "label CONTAINS %@ AND NOT (identifier BEGINSWITH %@)",
+                                "needs 140 g", "printer.filament.row."
+                            )
                         ).count,
                         1,
                         "The current-job demand warning should be visible once."
@@ -590,9 +601,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                         app.staticTexts["printer.detail.filament.extruder.heading"].exists,
                         "Load and Unload belong directly beneath the loaded-spool hero."
                     )
-                    XCTAssertEqual(
-                        app.staticTexts["printer.detail.filament.printingLockout"].label,
-                        "Unavailable while printing"
+                    XCTAssertFalse(
+                        app.staticTexts["printer.detail.filament.printingLockout"].exists,
+                        "Dimmed buttons and their VoiceOver hint replace the lockout caption (#3496)."
                     )
                     attachScreen("\(device)-\(size)-printer-filament")
                     if size == "largest" {
@@ -649,12 +660,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         }
 
         func testRuntimeControlsUseAuthenticatedCommandsAndServerReadback() {
-            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-            XCTAssertTrue(farm.exists)
-            farm.tap()
-            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-            printerCard.tap()
+            openFarmCard("10000000-0001-0000-0000-000000000001")
 
             let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
             XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -675,12 +681,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         }
 
         func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
-            let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-            XCTAssertTrue(farm.exists)
-            farm.tap()
-            let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-            XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-            printerCard.tap()
+            openFarmCard("10000000-0001-0000-0000-000000000001")
 
             let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
             XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -731,7 +732,16 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertFalse(app.descendants(matching: .any)["printer.detail.sensors"].exists)
 
             XCTAssertFalse(app.buttons["printer.detail.control.emergencyStop"].exists)
-            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            let window = app.windows.firstMatch
+            let isLandscape = orientation.isLandscape
+            let settled = NSPredicate { _, _ in (window.frame.width > window.frame.height) == isLandscape }
+            wait(for: [XCTNSPredicateExpectation(predicate: settled, object: nil)], timeout: 8)
+            // Redraw upright so viewers that ignore EXIF orientation show true landscape (#3496 N14).
+            let raw = XCUIScreen.main.screenshot().image
+            let upright = UIGraphicsImageRenderer(size: raw.size).image { _ in
+                raw.draw(in: CGRect(origin: .zero, size: raw.size))
+            }
+            let screenshot = XCTAttachment(image: upright)
             screenshot.name = "Essential Status \(orientation == .portrait ? "portrait" : "landscape")"
             screenshot.lifetime = .keepAlways
             add(screenshot)
@@ -828,9 +838,12 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     func testUnsettledControlsContextCannotExposeMaterialActuationAndKeepsEmergencyIndependent() {
         openFirstPrinterDetail()
         panelSelector().buttons["Control"].tap()
-        XCTAssertTrue(app.staticTexts[
+        // A short empty state replaces the technical explanation (#3496 N15).
+        XCTAssertTrue(app.staticTexts["Reconnect to control"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["printer.detail.control.reconnect"].isHittable)
+        XCTAssertFalse(app.staticTexts[
             "Controls require a settled registered server connection. Reopen this printer after reconnecting."
-        ].waitForExistence(timeout: 8))
+        ].exists)
         XCTAssertFalse(app.buttons["printer.controls.extrude"].exists,
                        "Demo targets and spool assignment cannot establish physical-control access")
         for operation in ["load", "unload", "change"] {
@@ -1066,6 +1079,65 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         captureApprovedMockupScreens()
     }
 
+    /// The "Camera" header sits above the media, which spans the card width (#3496).
+    func testCameraHeaderSitsAboveFullWidthMedia() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
+
+        let content = app.descendants(matching: .any)["printer.detail.status.content"]
+        let title = app.staticTexts["printer.detail.camera.title"]
+        let preview = app.images["printer.detail.camera.media"]
+        XCTAssertTrue(content.waitForExistence(timeout: 8))
+        XCTAssertTrue(title.waitForExistence(timeout: 8))
+        XCTAssertTrue(preview.waitForExistence(timeout: 8))
+        // Without a camera the hero shows the sliced-model preview (#3496 D3).
+        XCTAssertEqual(title.label, "Print preview")
+        XCTAssertEqual(preview.label, "Current print preview")
+        XCTAssertLessThanOrEqual(title.frame.maxY, preview.frame.minY + 1, "The header row sits above the media")
+        XCTAssertLessThan(title.frame.midX, preview.frame.midX, "The title sits at the top left")
+        XCTAssertLessThanOrEqual(
+            preview.frame.height, app.windows.firstMatch.frame.height * 0.6 + 1,
+            "The media height is capped relative to the container (#3496 B01)"
+        )
+        attachScreen("status-print-preview-header-full-width-media")
+    }
+
+    /// Tune is selected mid-print; when the print ends Tune disables and
+    /// Control falls back to Move (#3496).
+    func testTuneSegmentFallsBackToMoveWhenPrintEnds() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
+
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        let move = app.buttons["printer.controls.segment.move"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        XCTAssertTrue(tune.isEnabled, "Tune is enabled while printing")
+        XCTAssertTrue(tune.isSelected, "Control opens on Tune while printing")
+        XCTAssertFalse(move.isEnabled)
+
+        selector.buttons["Status"].tap()
+        let page = app.descendants(matching: .any)["printer.detail.panel.status"]
+        let cancel = app.buttons["printer.detail.control.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 8))
+        for _ in 0..<8 where !cancel.isHittable {
+            page.swipeUp()
+        }
+        cancel.tap()
+        let confirm = app.alerts.buttons["Confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+
+        selector.buttons["Control"].tap()
+        let tuneDisabled = NSPredicate(format: "isEnabled == false")
+        expectation(for: tuneDisabled, evaluatedWith: tune)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(move.isEnabled)
+        XCTAssertTrue(move.isSelected, "Tune falls back to Move when the print ends")
+        XCTAssertFalse(app.otherElements["printer.controls.runtime"].exists)
+        attachScreen("control-tune-fallback-after-print-ends")
+    }
+
     func testRetryFailedQueueJobUsesAuthenticatedRerunEndpoint() {
         let queue = shellDestinationButton(tabIdentifier: "tab.queue", timeout: 8)
         XCTAssertTrue(queue.waitForExistence(timeout: 8))
@@ -1100,46 +1172,58 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
-    /// Idle printers keep Speed/Flow visible with their readback but disabled (#3476).
+    /// Speed, Flow and babystep only apply to a running print, so the Tune
+    /// segment is disabled while idle and Control stays on Move (#3496).
     override func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-        printerCard.tap()
+        assertTuneSegmentDisabledWhileIdle()
+        attachScreen("control-tune-segment-idle-disabled")
+    }
+
+    override func testRuntimeControlsUseAuthenticatedCommandsAndServerReadback() {
+        assertTuneSegmentDisabledWhileIdle()
+    }
+
+    func testIdleStatusIgnoresStaleFileNameAndShowsNoActivePrint() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
+
+        let status = app.descendants(matching: .any)["printer.detail.panel.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["No active print"].waitForExistence(timeout: 8))
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "gear_set")).firstMatch.exists,
+            "A stale Moonraker file name must not render as the current job"
+        )
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists
+        )
+        attachScreen("status-idle-no-active-print")
+    }
+
+    private func assertTuneSegmentDisabledWhileIdle() {
+        openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
         let tune = app.buttons["printer.controls.segment.tune"]
+        let move = app.buttons["printer.controls.segment.move"]
         XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        XCTAssertFalse(tune.isEnabled, "Tune is disabled while the printer is not printing")
+        XCTAssertTrue(move.isEnabled)
+        XCTAssertTrue(move.isSelected, "Control opens on Move while idle")
         tune.tap()
-
-        for (id, title, label) in [("speed", "Speed", "Speed 100 percent"), ("flow", "Flow", "Flow 98 percent")] {
-            let value = app.staticTexts["printer.controls.runtime.\(id)-factor.value"]
-            XCTAssertTrue(value.waitForExistence(timeout: 8), "\(title) stays visible while idle")
-            XCTAssertEqual(value.label, label)
-            for direction in ["increase", "decrease"] {
-                let button = app.buttons["printer.controls.runtime.\(id)-factor.\(direction)"]
-                XCTAssertTrue(button.waitForExistence(timeout: 5))
-                XCTAssertFalse(button.isEnabled, "\(title) \(direction) is disabled while idle")
-            }
-            let reason = app.staticTexts["printer.controls.runtime.\(id)-factor.reason"]
-            XCTAssertTrue(reason.waitForExistence(timeout: 5))
-            XCTAssertEqual(reason.label, "\(title) can be tuned only while printing or paused.")
-        }
-        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled, "Babystep is not restricted")
-        attachScreen("control-tune-speed-flow-idle-disabled")
+        XCTAssertTrue(move.isSelected, "A disabled Tune segment cannot be selected")
+        XCTAssertFalse(app.otherElements["printer.controls.runtime"].exists)
+        XCTAssertFalse(app.buttons["printer.controls.runtime.z-offset.increase"].exists)
+        XCTAssertFalse(app.staticTexts["printer.controls.runtime.speed-factor.value"].exists)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "while printing")).firstMatch.exists,
+            "The disabled segment carries no visible explanation"
+        )
     }
 
     func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-        printerCard.tap()
+        openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -1154,45 +1238,18 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let apply = app.buttons["printer.controls.heat.set-targets"]
         XCTAssertTrue(apply.waitForExistence(timeout: 5))
         apply.tap()
-        let accepted = app.staticTexts.matching(
-            NSPredicate(
-                format: "label == %@",
-                "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+        // Success is silent (#3496): no progress or confirmation text, and no error banner.
+        XCTAssertFalse(app.buttons["printer.controls.dismiss-error"].waitForExistence(timeout: 3))
+        for phrase in ["Command pending", "Request accepted", "Matching telemetry", "Command accepted"] {
+            XCTAssertFalse(
+                app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch.exists,
+                "\(phrase) must not be shown after a successful command"
             )
-        ).firstMatch
-        XCTAssertTrue(
-            accepted.waitForExistence(timeout: 8),
-            "The authenticated temperature API must accept the guarded stepper draft without claiming physical completion."
-        )
+        }
     }
 
     func testHeatPresetRowOffersMoreMenuWhileIdle() {
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
-        // SwiftUI surfaces the Farm scroll view as farm.printerList on iPhone
-        // and as farm.root inside the iPad split view.
-        let farmScroll = app.scrollViews
-            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
-            .firstMatch
-        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
-        // At accessibility sizes the card can sit below the fold; tap() targets
-        // its centre, so scroll until that point is inside the list viewport.
-        // A short drag without fling momentum cannot skip past it between checks.
-        func cardIsVisible() -> Bool {
-            guard printerCard.exists, printerCard.isHittable else { return false }
-            let card = printerCard.frame
-            return farmScroll.frame.contains(CGPoint(x: card.midX, y: card.midY))
-        }
-        // Drag inside the list itself: window-relative offsets can land in the
-        // iPad split view's detail column instead of the Farm list.
-        for _ in 0..<12 where !cardIsVisible() {
-            farmScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-                .press(forDuration: 0.1, thenDragTo: farmScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
-        }
-        XCTAssertTrue(cardIsVisible(), "The idle printer card centre must be on screen before tapping")
-        printerCard.tap()
+        openFarmCard("10000000-0001-0000-0000-000000000002")
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
@@ -1224,7 +1281,9 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         // without scrolling at every text size.
         let custom = app.buttons["printer.controls.preheat.custom"]
         XCTAssertTrue(custom.waitForExistence(timeout: 5), "Custom…")
-        XCTAssertTrue(custom.isHittable, "Custom…")
+        // The menu's open animation can briefly report its items as not hittable.
+        let hittable = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: custom)
+        wait(for: [hittable], timeout: 5)
         XCTAssertGreaterThanOrEqual(custom.frame.minY, app.windows.firstMatch.frame.minY, "Custom… top edge")
         XCTAssertLessThanOrEqual(
             custom.frame.maxY, app.buttons["printer.detail.control.emergencyStop"].frame.minY,
@@ -1244,15 +1303,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             }
         }
 
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
-        for _ in 0..<8 where !printerCard.exists {
-            app.swipeUp()
-        }
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-        printerCard.tap()
+        openFarmCard("10000000-0001-0000-0000-000000000002")
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
         selector.buttons["Control"].tap()
@@ -1306,16 +1357,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(app.buttons["printer.controls.hotend.increase"].isEnabled)
         attachScreen("\(device)-\(size)-printer-control-idle")
 
-        app.buttons["printer.controls.segment.tune"].tap()
-        let runtime = app.otherElements["printer.controls.runtime"]
-        XCTAssertTrue(runtime.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["printer.controls.runtime.z-offset.increase"].isEnabled)
-        for _ in 0..<4 where !runtime.isHittable {
-            controlPage.swipeUp()
-        }
-        XCTAssertTrue(runtime.isHittable, "Z babystep controls must be visibly reachable.")
-        XCTAssertFalse(app.buttons["printer.controls.runtime.fan.increase"].exists, "Tune has no fan controls.")
-        attachScreen("\(device)-\(size)-printer-control-idle-runtime")
+        XCTAssertFalse(app.buttons["printer.controls.segment.tune"].isEnabled, "Tune is print-only (#3496)")
 
         selector.buttons["Filament"].tap()
         let filamentPage = app.descendants(matching: .any)["printer.detail.panel.filament"]
@@ -1324,14 +1366,9 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let physicalUnload = app.buttons["printer.detail.filament.unload"]
         XCTAssertTrue(physicalLoad.waitForExistence(timeout: 5))
         XCTAssertTrue(physicalUnload.waitForExistence(timeout: 5))
-        XCTAssertFalse(physicalLoad.isEnabled, "Room-temperature measured telemetry must not authorize physical filament load.")
-        XCTAssertFalse(physicalUnload.isEnabled, "Room-temperature measured telemetry must not authorize physical filament unload.")
-        XCTAssertTrue(
-            app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS %@", "required minimum of 220")
-            ).firstMatch.exists,
-            "The unavailable state must explain the live 220 °C safety floor, not claim the backend lacks support."
-        )
+        // #3516: firmware owns the cold-extrusion floor; the app no longer pre-blocks idle load/unload.
+        XCTAssertTrue(physicalLoad.isEnabled, "Idle physical filament load defers temperature safety to firmware.")
+        XCTAssertTrue(physicalUnload.isEnabled, "Idle physical filament unload defers temperature safety to firmware.")
 
         selector.buttons["Queue"].tap()
         let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]
@@ -1344,7 +1381,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(queue.staticTexts["Then"].exists)
         XCTAssertTrue(queue.staticTexts["clip_holder ×4"].exists)
         XCTAssertTrue(queue.staticTexts["shelf_bracket ×6"].exists)
-        XCTAssertTrue(queue.descendants(matching: .any)["printer.detail.queue.reorderNote"].exists)
+        XCTAssertFalse(queue.descendants(matching: .any)["printer.detail.queue.reorderNote"].exists)
         XCTAssertFalse(
             queue.descendants(matching: .any).matching(
                 NSPredicate(format: "label CONTAINS[c] %@", "benchy_0.2mm_PLA.gcode")
@@ -1366,12 +1403,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             "--uitesting-issue3259-control-idle",
             "--uitesting-issue3259-safe-filament-actions"
         ])
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-        printerCard.tap()
+        openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -1424,12 +1456,7 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
     /// Supported Speed/Flow without readback render the "--" placeholder that
     /// VoiceOver reads as "not reported", with disabled steppers.
     override func testSpeedAndFlowSteppersSitAboveBabystepAndApplyServerReadback() {
-        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
-        XCTAssertTrue(farm.waitForExistence(timeout: 8))
-        farm.tap()
-        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
-        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
-        printerCard.tap()
+        openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -1469,6 +1496,170 @@ final class Issue3484MissingRuntimeFactorsUITests: PrinterDetailPanelsUITests.Is
 final class Issue3259ControlIdleAccessibilityUITests: Issue3259ControlIdleUITests {
     override var contentSizeCategory: String {
         "UICTContentSizeCategoryAccessibilityXXXL"
+    }
+}
+
+/// Camera header layout with real camera media (#3496 D2): the title sits
+/// top left, Rotate/Refresh top right, and the media spans the card below.
+@MainActor
+class Issue3496CameraLayoutUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    var cameraLaunchArgument: String { "" }
+
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-issue3259-visual-acceptance",
+            cameraLaunchArgument,
+            "-pf_theme_mode", "dark",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"
+        ]
+    }
+
+    func openPrimaryPrinterStatus() {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let printerCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 8))
+        printerCard.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.status.content"].waitForExistence(timeout: 8)
+        )
+    }
+
+    func assertHeaderAboveMedia(
+        buttons identifiers: [String],
+        name: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let title = app.staticTexts["printer.detail.camera.title"]
+        let media = app.descendants(matching: .any)["printer.detail.camera.media"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8), file: file, line: line)
+        XCTAssertTrue(media.waitForExistence(timeout: 8), file: file, line: line)
+        XCTAssertEqual(title.label, "Camera", file: file, line: line)
+        XCTAssertLessThanOrEqual(title.frame.maxY, media.frame.minY + 1, file: file, line: line)
+        for identifier in identifiers {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.waitForExistence(timeout: 8), "\(identifier) is missing", file: file, line: line)
+            XCTAssertLessThanOrEqual(
+                button.frame.maxY, media.frame.minY + 1,
+                "\(identifier) sits in the header row above the media", file: file, line: line
+            )
+            XCTAssertGreaterThan(button.frame.minX, title.frame.maxX, "\(identifier) sits right of the title",
+                                 file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, file: file, line: line)
+            XCTAssertFalse(button.label.isEmpty, "\(identifier) keeps its VoiceOver label", file: file, line: line)
+        }
+        let card = app.descendants(matching: .any)["printer.detail.hero"]
+        if media.frame.width < card.frame.width - 2 {
+            // The height cap binds (e.g. a quarter-turned 4:3 image), so the
+            // media aspect-fits inside the cap and centres in the card.
+            XCTAssertLessThan(media.frame.width, media.frame.height, "Only portrait media narrows below the card width",
+                              file: file, line: line)
+            XCTAssertEqual(media.frame.midX, card.frame.midX, accuracy: 2, "Capped media is centred",
+                           file: file, line: line)
+        }
+        XCTAssertLessThanOrEqual(
+            media.frame.height, app.windows.firstMatch.frame.height * 0.6 + 1,
+            "Media height is capped relative to the container", file: file, line: line
+        )
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Issue 3496 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-\(name)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+}
+
+@MainActor
+final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
+    override var cameraLaunchArgument: String { "--uitesting-issue3496-camera-snapshot" }
+
+    func testSnapshotCameraHeaderSitsAboveFullWidthMedia() {
+        openPrimaryPrinterStatus()
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
+            name: "camera-snapshot"
+        )
+        // Same header in every mode: the badge is gone (#3496 N08).
+        XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
+        XCTAssertFalse(app.staticTexts["LIVE"].exists)
+        let named = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        named.name = "status-camera-header-full-width-media"
+        named.lifetime = .keepAlways
+        add(named)
+        // A quarter turn keeps the header above capped, full-width media.
+        app.buttons["printer.detail.camera.rotate"].tap()
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
+            name: "camera-snapshot-rotated-90"
+        )
+    }
+}
+
+@MainActor
+final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
+    override var cameraLaunchArgument: String { "--uitesting-issue3496-camera-mjpeg" }
+
+    func testMjpegCameraHeaderSitsAboveFullWidthMedia() {
+        openPrimaryPrinterStatus()
+        // Live mode keeps the same header as snapshot mode (#3496 N05).
+        assertHeaderAboveMedia(
+            buttons: ["printer.detail.camera.rotate", "printer.detail.camera.refresh"],
+            name: "camera-mjpeg"
+        )
+        let media = app.descendants(matching: .any)["printer.detail.camera.media"]
+        let toggle = app.buttons["printer.detail.camera.livetoggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(toggle.frame.minY, media.frame.minY - 1, "The mode toggle sits on the media, not in the header")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
+            "An unreachable stream shows a compact placeholder rather than a tall blank panel"
+        )
+        XCTAssertLessThanOrEqual(media.frame.height, 160, "The placeholder stays compact")
+        XCTAssertFalse(app.staticTexts["LIVE"].exists)
+
+        // R3514-B12: a stream-only camera must stay switchable after choosing snapshot.
+        toggle.tap()
+        XCTAssertTrue(app.buttons["Switch to livestream"].waitForExistence(timeout: 5), "Toggle stays reachable in snapshot mode")
+        XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Camera")
+        app.buttons["Switch to livestream"].tap()
+        XCTAssertTrue(app.buttons["Switch to snapshot"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
+            "Livestream returns after switching back"
+        )
+    }
+}
+
+/// A printing printer with a writable chamber heater and a read-only part fan (#3496 N16).
+@MainActor
+final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
+    override var cameraLaunchArgument: String { "--uitesting-issue3496-tune-sensors" }
+
+    func testTuneWhilePrintingShowsWritableSensorRows() {
+        openPrimaryPrinterStatus()
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.waitForExistence(timeout: 8))
+        selector.buttons["Control"].tap()
+        let tune = app.buttons["printer.controls.segment.tune"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        XCTAssertTrue(tune.isEnabled, "Tune is available while printing")
+        tune.tap()
+        let id = "printer.controls.sensor.heater_generic chamber.TargetTemperature"
+        let value = app.staticTexts["\(id).value"]
+        let control = app.descendants(matching: .any)["printer.controls.runtime"]
+        for _ in 0..<4 where !value.exists { control.swipeUp() }
+        XCTAssertTrue(value.waitForExistence(timeout: 8), "The writable chamber heater row shows on Tune")
+        XCTAssertTrue(app.buttons["\(id).increase"].exists)
+        XCTAssertTrue(app.buttons["\(id).decrease"].exists)
+        // Fans are read-only in the app, so the part fan gets no controls.
+        XCTAssertFalse(app.descendants(matching: .any)["printer.controls.sensor.fan.FanSpeed.value"].exists)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Issue 3496 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-tune-printing-sensors"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }
 

@@ -9,6 +9,8 @@ final class PrinterDetailViewModel {
     ) -> Void
 
     var printer: Printer?
+    private var detailSource: DetailSource = .none
+    private var cameraMetadataDeferred = false
     var statusDetail: PrinterStatusDetail?
     var currentJob: PrintJobStatusInfo?
     var snapshotData: Data?
@@ -259,6 +261,10 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var canonicalPassHasRecoveryDemand = false
     @ObservationIgnored private var canonicalPendingRecoveryDemand = false
     @ObservationIgnored private var liveSensorUpdateRevision: UInt64 = 0
+    @ObservationIgnored private var liveConnectivityRevision: UInt64 = 0
+    /// Bumped only by SignalR updates that actually report `state`; a nil-state
+    /// update must never let cached or older state override a REST read (#3507).
+    @ObservationIgnored private var liveStateRevision: UInt64 = 0
     @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
     @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
     private var predictiveService: (any PredictiveServiceProtocol)?
@@ -384,6 +390,7 @@ final class PrinterDetailViewModel {
     /// cooperative and this method has an uncancellable network await in
     /// the middle of it.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService else {
             setOperationError("Printer service not available.", source: .bindToolheadSpool)
@@ -514,6 +521,10 @@ final class PrinterDetailViewModel {
         if update.sensors != nil {
             liveSensorUpdateRevision &+= 1
         }
+        liveConnectivityRevision &+= 1
+        if update.state != nil {
+            liveStateRevision &+= 1
+        }
         if var p = printer {
             let jobChanged = update.jobName != nil && update.jobName != p.jobName
             let stateEnded = update.state.map {
@@ -522,6 +533,7 @@ final class PrinterDetailViewModel {
             let currentJobThumbnail = stateEnded
                 ? nil
                 : update.currentJobThumbnailUrl ?? (jobChanged ? nil : p.currentJobThumbnailUrl)
+            let cameraMetadataNowReachable = cameraMetadataDeferred && !p.isOnline && update.isOnline
             p.isOnline = update.isOnline
             if let s = update.state { p.state = s }
             // Backend sends progress as 0-100; normalize to 0-1.0 for SwiftUI
@@ -570,6 +582,11 @@ final class PrinterDetailViewModel {
                 }
             }
             startSnapshotPollingIfNeeded()
+            if cameraMetadataNowReachable {
+                // The canonical pass skipped camera metadata while offline (#3507).
+                cameraMetadataDeferred = false
+                requestCanonicalLoad()
+            }
         }
 
         let previousStatusDetail = statusDetail
@@ -623,6 +640,7 @@ final class PrinterDetailViewModel {
 
     #if canImport(UIKit)
     func writeNFCPrinterTag() {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printer else { return }
         guard let nfcService = nfcScanner as? NFCService else {
@@ -644,19 +662,30 @@ final class PrinterDetailViewModel {
 
     // MARK: - Mark Ready (NFC Deep Link)
 
-    func prepareReadyConfirmation() async {
-        guard isViewActive, let autoDispatchService else { return }
+    /// Returns `false` when the confirmation could not be staged (cached
+    /// printer, inactive view, or no auto-dispatch service) so the caller can
+    /// keep the deep-link intent for a later attempt. A server error is shown
+    /// to the user and counts as handled.
+    @discardableResult
+    func prepareReadyConfirmation() async -> Bool {
+        guard !isShowingCachedPrinter else { return false }
+        guard isViewActive, let autoDispatchService else { return false }
         do {
-            reviewedReadyStatus = try await autoDispatchService.getStatus(
+            let status = try await autoDispatchService.getStatus(
                 printerId: printerId
             )
+            guard isViewActive else { return false }
+            reviewedReadyStatus = status
             showNFCReadyConfirmation = true
         } catch {
+            guard isViewActive else { return false }
             setOperationError(error.localizedDescription, source: .prepareReadyConfirmation)
         }
+        return true
     }
 
     func markPrinterReady() async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let autoDispatchService, let reviewedReadyStatus else {
             setOperationError("Refresh the auto-dispatch status before confirming.", source: .markPrinterReady)
@@ -681,10 +710,12 @@ final class PrinterDetailViewModel {
     // MARK: - Filament / Spool
 
     func loadFilament() {
+        guard !isShowingCachedPrinter else { return }
         showSpoolPicker = true
     }
 
     func loadPhysicalFilament() async {
+        guard !isShowingCachedPrinter else { return }
         clearOperationError(source: .loadPhysicalFilament)
         guard let reason = physicalFilamentCommandBlockedReason(for: .load) else {
             guard let printerService else { return }
@@ -711,6 +742,7 @@ final class PrinterDetailViewModel {
     }
 
     func unloadPhysicalFilament() async {
+        guard !isShowingCachedPrinter else { return }
         clearOperationError(source: .unloadPhysicalFilament)
         guard let reason = physicalFilamentCommandBlockedReason(for: .unload) else {
             guard let printerService else { return }
@@ -739,6 +771,7 @@ final class PrinterDetailViewModel {
     // MARK: - NFC Scan to Load
 
     func handleNFCScanToLoad() {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let nfcScanner, nfcScanner.isAvailable else {
             nfcScanError = "NFC scanning is not available on this device."
@@ -816,6 +849,7 @@ final class PrinterDetailViewModel {
     /// this call must never silently return once the assignment has
     /// already been cleared.
     func ejectFilament() async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
@@ -927,6 +961,7 @@ final class PrinterDetailViewModel {
     /// alias the combined eject flow, which stays reachable separately
     /// (accurately labeled "Eject Filament") for the physical operation.
     func clearActiveSpoolAssignment() async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
@@ -964,6 +999,7 @@ final class PrinterDetailViewModel {
     }
 
     func setActiveSpool(_ spool: SpoolmanSpool) async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         showSpoolPicker = false
         guard let printerService else {
@@ -1000,6 +1036,33 @@ final class PrinterDetailViewModel {
             print("❌ setActiveSpool failed: \(error)")
             setOperationError(error.localizedDescription, source: .setActiveSpool)
         }
+    }
+
+    /// True while the page shows the farm list's last-known printer and no
+    /// canonical detail has arrived yet (#3507). Every mutating entry point
+    /// fails closed while this holds; the first canonical `get` (`.partial`)
+    /// is authoritative printer data and lifts the gate.
+    var isShowingCachedPrinter: Bool { detailSource == .cached }
+
+    /// A canonical refresh failed while only the cached printer is shown, so
+    /// the page is stale and read-only until a retry succeeds (#3507).
+    var isCachedRefreshFailed: Bool { isShowingCachedPrinter && errorMessage != nil }
+
+    /// Seeds the page from the farm list's last-known printer so the detail
+    /// renders immediately instead of blocking on the canonical load (#3507).
+    /// Ignored once any printer — cached or canonical — is already shown.
+    func seedCachedPrinter(_ cached: Printer) {
+        guard printer == nil, detailSource == .none, cached.id == printerId else { return }
+        printer = cached
+        detailSource = .cached
+    }
+
+    /// Drops an unconfirmed seed (e.g. the active server changed or the
+    /// detail task was cancelled before canonical data arrived).
+    func clearCachedPrinter() {
+        guard detailSource == .cached else { return }
+        printer = nil
+        detailSource = .none
     }
 
     func loadPrinter() async {
@@ -1080,11 +1143,14 @@ final class PrinterDetailViewModel {
             cameraRotation: cameraRotation,
             logger: logger
         )
+        let progress: CanonicalProgressSink = { [weak self] update in
+            await self?.applyCanonicalProgress(update, authority: authority)
+        }
         let taskTracker = canonicalTaskTracker
         taskTracker.taskStarted()
         canonicalLoadTask = Task { [weak self, taskTracker, input] in
             defer { taskTracker.taskFinished() }
-            let result = await Self.loadCanonicalPrinter(input: input)
+            let result = await Self.loadCanonicalPrinter(input: input, progress: progress)
             self?.completeCanonicalPass(
                 result,
                 authority: authority,
@@ -1103,14 +1169,33 @@ final class PrinterDetailViewModel {
             canonicalLoadRequested = false
             canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
             canonicalPendingRecoveryDemand = false
-            startCanonicalPass(authority: authority)
+            // The restarted pass issues fresh REST reads, so live updates seen
+            // during the superseded pass are older than its results. Re-baseline
+            // the live revisions; token, epoch and service identities are
+            // unchanged because isCanonicalLoadCurrent just held.
+            startCanonicalPass(authority: makeCanonicalAuthority(token: authority.token))
             return
         }
 
+        var needsCameraFollowUp = false
         switch result {
         case .success(let snapshot):
+            var preserved = preservingLiveSensorUpdates(
+                in: snapshot,
+                since: authority.liveSensorUpdateRevision
+            )
+            preserved = preservingLiveConnectivity(
+                in: preserved,
+                since: authority
+            )
+            // A live update saw the printer come online after this pass chose
+            // to skip camera metadata; fetch it in a follow-up pass (#3507).
+            if preserved.cameraMetadataDeferred && preserved.printer.isOnline {
+                preserved.cameraMetadataDeferred = false
+                needsCameraFollowUp = true
+            }
             publish(
-                preservingLiveSensorUpdates(in: snapshot, since: authority.liveSensorUpdateRevision),
+                preserved,
                 includesAuthoritativeSnapshot: isSnapshotRequestCurrent(snapshotAuthority)
             )
         case .failure(let error):
@@ -1119,6 +1204,33 @@ final class PrinterDetailViewModel {
             break
         }
         finishCanonicalLoad(authority: authority)
+        if needsCameraFollowUp {
+            requestCanonicalLoad()
+        }
+    }
+
+    /// SignalR connectivity that arrived during the pass is newer than the
+    /// pass's REST reads, so the published snapshot keeps it (#3507).
+    private func preservingLiveConnectivity(
+        in snapshot: CanonicalSnapshot,
+        since authority: CanonicalAuthority
+    ) -> CanonicalSnapshot {
+        var snapshot = snapshot
+        applyLiveConnectivity(to: &snapshot.printer, since: authority)
+        return snapshot
+    }
+
+    /// Copies only fields SignalR reported after `authority` started: `isOnline`
+    /// on any update, `state` only when an update carried one. Never copies
+    /// state that came from the cached seed or an older snapshot.
+    private func applyLiveConnectivity(to target: inout Printer, since authority: CanonicalAuthority) {
+        guard let live = printer else { return }
+        if liveConnectivityRevision != authority.liveConnectivityRevision {
+            target.isOnline = live.isOnline
+        }
+        if liveStateRevision != authority.liveStateRevision {
+            target.state = live.state
+        }
     }
 
     private func preservingLiveSensorUpdates(
@@ -1140,7 +1252,8 @@ final class PrinterDetailViewModel {
     }
 
     nonisolated private static func loadCanonicalPrinter(
-        input: CanonicalLoadInput
+        input: CanonicalLoadInput,
+        progress: CanonicalProgressSink
     ) async -> CanonicalLoadResult {
         let loadedPrinter: Printer
         do {
@@ -1150,21 +1263,28 @@ final class PrinterDetailViewModel {
             return .failure(error)
         }
         guard !Task.isCancelled else { return .superseded }
+        await progress(.printer(loadedPrinter))
 
+        // #3507: an offline printer's camera endpoints only wait on backend
+        // timeouts, so camera metadata is fetched up front only when online.
+        let fetchesCameraEagerly = loadedPrinter.isOnline
         async let statusTask = fetchStatus(
             using: input.printerService,
             printerId: input.printerId,
-            logger: input.logger
+            logger: input.logger,
+            progress: progress
         )
         async let cameraTask = fetchCamera(
             using: input.printerService,
             printerId: input.printerId,
-            logger: input.logger
+            logger: input.logger,
+            enabled: fetchesCameraEagerly
         )
         async let currentJobTask = fetchCurrentJob(
             using: input.printerService,
             printerId: input.printerId,
-            logger: input.logger
+            logger: input.logger,
+            progress: progress
         )
         async let operatorTask = fetchOperatorSnapshot(
             printerId: input.printerId,
@@ -1173,7 +1293,7 @@ final class PrinterDetailViewModel {
             maintenanceService: input.maintenanceService,
             logger: input.logger
         )
-        let (statusResult, cameraResult, jobResult, operatorSnapshot) = await (
+        let (statusResult, eagerCameraResult, jobResult, operatorSnapshot) = await (
             statusTask,
             cameraTask,
             currentJobTask,
@@ -1187,14 +1307,26 @@ final class PrinterDetailViewModel {
             loadedStatus = detail
             canonicalPrinter = Self.applying(detail, to: canonicalPrinter)
         }
+        var cameraResult = eagerCameraResult
+        if !fetchesCameraEagerly && canonicalPrinter.isOnline {
+            cameraResult = await fetchCamera(
+                using: input.printerService,
+                printerId: input.printerId,
+                logger: input.logger,
+                enabled: true
+            )
+            guard !Task.isCancelled else { return .superseded }
+        }
         if case .value(let camera) = cameraResult {
             canonicalPrinter = Self.applying(camera, to: canonicalPrinter)
         }
+        let cameraMetadataDeferred = !fetchesCameraEagerly && !canonicalPrinter.isOnline
 
         let previewMode = Self.cameraPreviewMode(for: canonicalPrinter)
         var loadedSnapshotData = input.snapshotData
-        let shouldFetchSnapshot = previewMode == .snapshotPolling
-            || (previewMode == .directSnapshot && loadedSnapshotData == nil)
+        let shouldFetchSnapshot = canonicalPrinter.isOnline
+            && (previewMode == .snapshotPolling
+                || (previewMode == .directSnapshot && loadedSnapshotData == nil))
         if shouldFetchSnapshot {
             do {
                 loadedSnapshotData = try await input.printerService.getSnapshot(id: input.printerId)
@@ -1246,7 +1378,8 @@ final class PrinterDetailViewModel {
                 printerStatistics: operatorSnapshot.printerStatistics ?? input.printerStatistics,
                 upcomingMaintenance: operatorSnapshot.upcomingMaintenance ?? input.upcomingMaintenance,
                 history: operatorSnapshot.history ?? input.history,
-                cameraRotation: input.cameraRotation
+                cameraRotation: input.cameraRotation,
+                cameraMetadataDeferred: cameraMetadataDeferred
             )
         )
     }
@@ -1275,9 +1408,48 @@ final class PrinterDetailViewModel {
         upcomingMaintenance = snapshot.upcomingMaintenance
         history = snapshot.history
         cameraRotation = snapshot.cameraRotation
+        cameraMetadataDeferred = snapshot.cameraMetadataDeferred
+        detailSource = .canonical
         errorMessage = nil
         if includesAuthoritativeSnapshot {
             startSnapshotPollingIfNeeded()
+        }
+    }
+
+    private func applyCanonicalProgress(
+        _ update: CanonicalProgress,
+        authority: CanonicalAuthority
+    ) {
+        // Partial results only fill the first render; refreshes of an
+        // already-canonical page keep publishing atomically.
+        guard isCanonicalLoadCurrent(authority) else { return }
+        if case .printer(let loaded) = update, !loaded.isOnline {
+            // Record the camera deferral as soon as the pass decides it, so a
+            // live online transition mid-pass re-runs the load (#3507).
+            cameraMetadataDeferred = true
+        }
+        guard detailSource != .canonical else { return }
+        let liveSensorsChanged = liveSensorUpdateRevision != authority.liveSensorUpdateRevision
+        switch update {
+        case .printer(var loaded):
+            if liveSensorsChanged, let liveSensors = printer?.sensors {
+                loaded.sensors = liveSensors
+            }
+            applyLiveConnectivity(to: &loaded, since: authority)
+            printer = loaded
+            detailSource = .partial
+        case .status(var detail):
+            guard detailSource == .partial, let current = printer else { return }
+            if liveSensorsChanged {
+                detail.sensors = current.sensors
+            }
+            var applied = Self.applying(detail, to: current)
+            applyLiveConnectivity(to: &applied, since: authority)
+            printer = applied
+            statusDetail = detail
+        case .currentJob(let job):
+            guard detailSource == .partial else { return }
+            currentJob = job
         }
     }
 
@@ -1318,6 +1490,8 @@ final class PrinterDetailViewModel {
             token: token,
             lifecycleEpoch: canonicalLifecycleEpoch,
             liveSensorUpdateRevision: liveSensorUpdateRevision,
+            liveConnectivityRevision: liveConnectivityRevision,
+            liveStateRevision: liveStateRevision,
             printerServiceIdentity: Self.identity(printerService),
             jobServiceIdentity: Self.identity(jobService),
             maintenanceServiceIdentity: Self.identity(maintenanceService),
@@ -1502,6 +1676,10 @@ final class PrinterDetailViewModel {
         await canonicalTaskTracker.waitForIdle()
     }
 
+    var hasPendingCanonicalLoadForTesting: Bool {
+        canonicalLoadRequested
+    }
+
     func waitForSupersededCanonicalLoads() async {
         await canonicalTaskTracker.waitForIdle()
     }
@@ -1510,10 +1688,14 @@ final class PrinterDetailViewModel {
     nonisolated private static func fetchStatus(
         using service: any PrinterServiceProtocol,
         printerId: UUID,
-        logger: Logger
+        logger: Logger,
+        progress: CanonicalProgressSink
     ) async -> CanonicalValue<PrinterStatusDetail> {
         do {
-            return .value(try await service.getStatus(id: printerId))
+            let detail = try await service.getStatus(id: printerId)
+            guard !Task.isCancelled else { return .unavailable }
+            await progress(.status(detail))
+            return .value(detail)
         } catch {
             logger.warning("Failed to load printer status: \(error.localizedDescription)")
             return .unavailable
@@ -1523,8 +1705,10 @@ final class PrinterDetailViewModel {
     nonisolated private static func fetchCamera(
         using service: any PrinterServiceProtocol,
         printerId: UUID,
-        logger: Logger
+        logger: Logger,
+        enabled: Bool
     ) async -> CanonicalValue<PrinterCameraUrl> {
+        guard enabled else { return .unavailable }
         do {
             return .value(try await service.getCameraUrl(id: printerId))
         } catch {
@@ -1536,10 +1720,14 @@ final class PrinterDetailViewModel {
     nonisolated private static func fetchCurrentJob(
         using service: any PrinterServiceProtocol,
         printerId: UUID,
-        logger: Logger
+        logger: Logger,
+        progress: CanonicalProgressSink
     ) async -> CanonicalValue<PrintJobStatusInfo?> {
         do {
-            return .value(try await service.getCurrentJob(id: printerId))
+            let job = try await service.getCurrentJob(id: printerId)
+            guard !Task.isCancelled else { return .unavailable }
+            await progress(.currentJob(job))
+            return .value(job)
         } catch {
             logger.warning("Failed to load current job: \(error.localizedDescription)")
             return .unavailable
@@ -1714,6 +1902,8 @@ final class PrinterDetailViewModel {
         let token: UUID
         let lifecycleEpoch: UInt64
         let liveSensorUpdateRevision: UInt64
+        let liveConnectivityRevision: UInt64
+        let liveStateRevision: UInt64
         let printerServiceIdentity: ObjectIdentifier?
         let jobServiceIdentity: ObjectIdentifier?
         let maintenanceServiceIdentity: ObjectIdentifier?
@@ -1735,6 +1925,24 @@ final class PrinterDetailViewModel {
         let upcomingMaintenance: [UpcomingMaintenanceTask]
         let history: [PrinterHistoryJob]
         let cameraRotation: Int
+        var cameraMetadataDeferred: Bool
+    }
+
+    /// Partial canonical results published before the full pass completes
+    /// so slow or offline backends never block the page (#3507).
+    private enum CanonicalProgress: Sendable {
+        case printer(Printer)
+        case status(PrinterStatusDetail)
+        case currentJob(PrintJobStatusInfo?)
+    }
+
+    private typealias CanonicalProgressSink = @Sendable (CanonicalProgress) async -> Void
+
+    private enum DetailSource {
+        case none
+        case cached
+        case partial
+        case canonical
     }
 
     private struct CanonicalLoadInput: Sendable {
@@ -1952,6 +2160,7 @@ final class PrinterDetailViewModel {
     // MARK: - Dispatch-to
 
     func startNextJob(_ reviewedJob: QueuedPrintJobResponse) async {
+        guard !isShowingCachedPrinter else { return }
         guard !isDispatching, !isPerformingAction else {
             dispatchError = "Wait for the current printer action to finish before starting a job."
             return
@@ -2011,6 +2220,7 @@ final class PrinterDetailViewModel {
     }
 
     func beginDispatch(for job: QueuedPrintJobResponse) async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
         dispatchTargetJob = job
         dispatchCandidates = []
@@ -2029,6 +2239,7 @@ final class PrinterDetailViewModel {
     }
 
     func dispatch(_ job: QueuedPrintJobResponse, to targetPrinterId: UUID) async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
         isDispatching = true
         dispatchError = nil
@@ -2056,6 +2267,7 @@ final class PrinterDetailViewModel {
     // MARK: - Maintenance log completion
 
     func logMaintenanceCompletion(_ row: OdometerRow, performedBy: String) async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive, let maintenanceService else { return }
         let busyToken = beginBusyToken()
         clearOperationError(source: .logMaintenanceCompletion)
@@ -2093,10 +2305,14 @@ final class PrinterDetailViewModel {
     }
 
     func requestCancel() {
+        guard !isShowingCachedPrinter else { return }
         pendingAction = .cancelPrint
         showConfirmation = true
     }
 
+    // Emergency Stop stays available on the cached page: it is a fail-safe
+    // that must never be blanket-disabled (epic #2518), unlike every other
+    // mutation, which waits for canonical printer data (#3507).
     func requestEmergencyStop() {
         pendingAction = .emergencyStop
         showConfirmation = true
@@ -2105,6 +2321,7 @@ final class PrinterDetailViewModel {
     func confirmAction() async {
         guard isViewActive else { return }
         guard let action = pendingAction else { return }
+        guard action == .emergencyStop || !isShowingCachedPrinter else { return }
         showConfirmation = false
         pendingAction = nil
 
@@ -2131,6 +2348,7 @@ final class PrinterDetailViewModel {
     }
 
     func toggleMaintenance() async {
+        guard !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService, let printer else { return }
         do {
@@ -2154,8 +2372,51 @@ final class PrinterDetailViewModel {
         return rowVersion
     }
 
+    /// Why a physical filament command is blocked. `unsupported` is hint-only:
+    /// the disabled buttons already say enough on screen.
+    enum PhysicalFilamentBlock: Equatable {
+        case unsupported
+        case blocked(String)
+
+        static let unsupportedMessage =
+            "This printer backend does not report support for that filament command."
+
+        var message: String {
+            switch self {
+            case .unsupported: Self.unsupportedMessage
+            case let .blocked(reason): reason
+            }
+        }
+
+        /// Whether the reason is worth a visible caption below the buttons.
+        var isShownOnScreen: Bool { self != .unsupported }
+    }
+
     func physicalFilamentCommandBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
+        physicalFilamentCommandBlock(for: operation)?.message
+    }
+
+    func physicalFilamentCommandBlock(for operation: PhysicalFilamentOperation) -> PhysicalFilamentBlock? {
+        if let reason = physicalFilamentCommandStateBlockedReason(for: operation) { return .blocked(reason) }
+        guard let capabilities = filamentCommandCapabilities else {
+            if let filamentCommandCapabilitiesError {
+                return .blocked("Printer support could not be confirmed: \(filamentCommandCapabilitiesError)")
+            }
+            return .blocked("Checking printer filament-command support.")
+        }
+        let isSupported = operation == .load
+            ? capabilities.supportsFilamentLoad
+            : capabilities.supportsFilamentUnload
+        guard isSupported else { return .unsupported }
+        return PhysicalFilamentCommandEligibility.blockedReason(
+            for: operation,
+            capabilities: capabilities
+        ).map(PhysicalFilamentBlock.blocked)
+    }
+
+    private func physicalFilamentCommandStateBlockedReason(for operation: PhysicalFilamentOperation) -> String? {
         guard printerService != nil else { return "Printer service is not available." }
+        guard !isShowingCachedPrinter else { return "Confirming printer status." }
         guard let printer else { return "Printer status is unavailable." }
         guard printer.isOnline else { return "Printer is offline." }
         let state = printer.state?.lowercased()
@@ -2164,22 +2425,7 @@ final class PrinterDetailViewModel {
             return "Filament load and unload are disabled while a print is active."
         }
         guard !isPerformingAction else { return "Another printer operation is in progress." }
-        guard let capabilities = filamentCommandCapabilities else {
-            if let filamentCommandCapabilitiesError {
-                return "Printer support could not be confirmed: \(filamentCommandCapabilitiesError)"
-            }
-            return "Checking printer filament-command support."
-        }
-        let isSupported = operation == .load
-            ? capabilities.supportsFilamentLoad
-            : capabilities.supportsFilamentUnload
-        guard isSupported else {
-            return "This printer backend does not report support for that filament command."
-        }
-        return PhysicalFilamentCommandEligibility.blockedReason(
-            for: operation,
-            capabilities: capabilities
-        )
+        return nil
     }
 
     @discardableResult
@@ -2394,6 +2640,13 @@ final class PrinterDetailViewModel {
         return ["printing", "starting", "paused"].contains(state)
     }
 
+    /// Moonraker keeps reporting the last file after a print ends, so a stale
+    /// file name alone must not resurrect the current-job block. Transitional
+    /// states such as `starting` are excluded: printing or paused only (#3496).
+    var showsCurrentJob: Bool {
+        PrinterControlsViewModel.isRunningPrint(state: printer?.state)
+    }
+
     var canShowLivestream: Bool {
         isActivelyPrinting && cameraPreviewMode == .mjpegStream
     }
@@ -2428,7 +2681,7 @@ final class PrinterDetailViewModel {
     }
 
     var shouldPollSnapshot: Bool {
-        cameraPreviewMode == .snapshotPolling
+        isOnline && cameraPreviewMode == .snapshotPolling
     }
 
     var isSnapshotPollingActive: Bool {
@@ -2670,6 +2923,7 @@ final class PrinterDetailViewModel {
         _ kind: PrinterRunActionKind,
         _ action: @escaping (any PrinterServiceProtocol) async throws -> Void
     ) async {
+        guard kind == .emergencyStop || !isShowingCachedPrinter else { return }
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)

@@ -14,6 +14,27 @@ enum NavigationIdentityResolution: Equatable, Sendable {
     case failed(String)
 }
 
+/// Last-known farm list printers, keyed by the server generation they were
+/// loaded for, so printer detail can render instantly instead of blocking on
+/// the canonical load (#3507).
+@MainActor
+final class PrinterSummaryCache {
+    private var generation: Int?
+    private var printers: [Printer] = []
+
+    /// O(1): keeps a copy-on-write reference to the farm list, since this runs
+    /// on every live farm update while lookups happen only on navigation.
+    func replace(with printers: [Printer], generation: Int) {
+        self.generation = generation
+        self.printers = printers
+    }
+
+    func printer(id: UUID, generation: Int) -> Printer? {
+        guard self.generation == generation else { return nil }
+        return printers.last { $0.id == id }
+    }
+}
+
 /// Dependency container providing access to all services.
 /// Created once at app startup and passed via SwiftUI environment.
 @MainActor
@@ -54,6 +75,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// Observed farm counts used only to select the shell arrangement.
     var farmShapeService: any FarmShapeServiceProtocol
     var activeServerGeneration = 0
+    @ObservationIgnored let printerSummaryCache = PrinterSummaryCache()
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
     var barcodeScannerService: BarcodeScannerService?

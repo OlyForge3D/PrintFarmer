@@ -120,6 +120,29 @@ enum UITestBootstrap {
         "--uitesting-issue3259-control-idle"
     static let issue3259SafeFilamentActionsLaunchArgument =
         "--uitesting-issue3259-safe-filament-actions"
+    /// Gives the primary visual-acceptance printer a polled snapshot camera.
+    static let issue3496CameraSnapshotLaunchArgument =
+        "--uitesting-issue3496-camera-snapshot"
+    /// Gives the primary visual-acceptance printer an MJPEG livestream camera.
+    static let issue3496CameraMjpegLaunchArgument =
+        "--uitesting-issue3496-camera-mjpeg"
+    /// Gives the printing primary printer a writable chamber heater and a part fan.
+    static let issue3496TuneSensorsLaunchArgument =
+        "--uitesting-issue3496-tune-sensors"
+
+    /// A 4:3 camera frame generated at runtime, so no asset is needed (#3496).
+    nonisolated static let issue3496CameraSnapshotData: Data = {
+        let size = CGSize(width: 640, height: 480)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor(red: 0.16, green: 0.18, blue: 0.22, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.94, green: 0.42, blue: 0.29, alpha: 1).setFill()
+            context.fill(CGRect(x: 240, y: 200, width: 160, height: 120))
+        }
+        return image.jpegData(compressionQuality: 0.8) ?? Data()
+    }()
     /// Drops Speed/Flow readback so XCUI can assert the rendered "not reported" rows (#3484).
     static let issue3484MissingRuntimeFactorsLaunchArgument =
         "--uitesting-issue3484-missing-runtime-factors"
@@ -641,7 +664,8 @@ enum UITestBootstrap {
             printer.currentLayer = nil
             printer.totalLayers = nil
             printer.jobName = nil
-            printer.fileName = nil
+            // Moonraker keeps the last file after a print ends (#3496).
+            printer.fileName = "gear_set_v3.gcode"
             printer.currentJobThumbnailUrl = nil
             printer.hotendTemp = 24
             printer.bedTemp = 23
@@ -652,9 +676,35 @@ enum UITestBootstrap {
             printer.z = 5
             printer.homedAxes = ""
         }
+        if ProcessInfo.processInfo.arguments.contains(issue3496CameraSnapshotLaunchArgument) {
+            printer.cameraAccessMode = .snapshotOnly
+            printer.cameraStreamUrl = nil
+            printer.cameraSnapshotUrl = nil
+        } else if ProcessInfo.processInfo.arguments.contains(issue3496CameraMjpegLaunchArgument) {
+            printer.cameraAccessMode = .streamOnly
+            printer.cameraStreamFormat = .mjpeg
+            printer.cameraStreamUrl = "http://127.0.0.1:9/webcam/?action=stream"
+            printer.cameraSnapshotUrl = nil
+        }
         if ProcessInfo.processInfo.arguments.contains(issue3484MissingRuntimeFactorsLaunchArgument) {
             printer.speedFactorPercent = nil
             printer.flowFactorPercent = nil
+        }
+        if ProcessInfo.processInfo.arguments.contains(issue3496TuneSensorsLaunchArgument) {
+            printer.sensors = [
+                PrinterSensor(
+                    id: "heater_generic chamber", displayName: "chamber", kind: .other,
+                    readings: [
+                        SensorReading(quantity: .temperature, value: .number(38), unit: .celsius),
+                        SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius),
+                    ],
+                    writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 70, step: 1, unit: .celsius)]
+                ),
+                PrinterSensor(
+                    id: "fan", displayName: "part_fan", kind: .fan, fanRole: .partCooling,
+                    readings: [SensorReading(quantity: .fanSpeed, value: .number(60), unit: .percent)]
+                ),
+            ]
         }
         if ProcessInfo.processInfo.arguments.contains(issue3259SafeFilamentActionsLaunchArgument) {
             printer.state = "ready"
@@ -1095,14 +1145,14 @@ enum UITestBootstrap {
 
     private final class Issue3259VisualAcceptanceURLProtocol: URLProtocol, @unchecked Sendable {
         private struct FixtureState: Sendable {
-            let printersData: Data
-            let printersByID: [String: Data]
+            var printersData: Data
+            var printersByID: [String: Data]
             let currentJobThumbnailUrlsByID: [String: String]
             let currentJobThumbnailDataByID: [String: Data]
             let queueThumbnailDataByJobID: [String: Data]
             var statusData: Data
             let additionalStatusDataByID: [String: Data]
-            let detailsDataByID: [String: Data]
+            var detailsDataByID: [String: Data]
             let attentionData: Data
             let capabilitiesDataByID: [String: Data]
             let assignedQueueDataByID: [String: Data]
@@ -1180,6 +1230,9 @@ enum UITestBootstrap {
                     "supportsFilamentUnload": true,
                     "supportsFilamentChange": false,
                     "supportedAxes": ["X", "Y", "Z"],
+                    "supportsSensorControl": ProcessInfo.processInfo.arguments.contains(
+                        UITestBootstrap.issue3496TuneSensorsLaunchArgument
+                    ),
                     "verifiedSafety": safety
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())
@@ -1630,6 +1683,10 @@ enum UITestBootstrap {
             case ("GET", "/api/printers/camera-urls"):
                 result = (200, "application/json", Data("[]".utf8))
             case ("GET", let path)
+                where path.hasPrefix("/api/printers/") && path.hasSuffix("/snapshot")
+                    && path.split(separator: "/").count == 4:
+                result = (200, "image/jpeg", UITestBootstrap.issue3496CameraSnapshotData)
+            case ("GET", let path)
                 where path.hasPrefix("/api/printers/") && path.split(separator: "/").count == 3:
                 let components = path.split(separator: "/")
                 if let printer = fixture.printersByID[String(components[2]).lowercased()] {
@@ -1743,6 +1800,8 @@ enum UITestBootstrap {
                 let jobID = String(path.dropFirst("/api/gcode-files/thumbnail/".count)).lowercased()
                 result = fixture.queueThumbnailDataByJobID[jobID].map { (200, "image/png", $0) }
                     ?? (404, "application/json", Data(#"{"error":"not-found"}"#.utf8))
+            case ("POST", "/api/printers/\(printerID)/cancel"):
+                result = cancelPrint(&fixture)
             case ("POST", "/api/printers/\(printerID)/temps"):
                 result = updateTemperatures(&fixture, request: request)
             case ("POST", "/api/printers/\(printerID)/fan"):
@@ -1809,6 +1868,38 @@ enum UITestBootstrap {
                 return (200, "application/json", try JSONEncoder().encode(command))
             } catch {
                 return (500, "application/json", Data(#"{"error":"fixture-temperature-command-failed"}"#.utf8))
+            }
+        }
+
+        /// Ends the fixture print so UI tests can observe the printing → idle
+        /// transition (#3496 Tune fallback).
+        private static func cancelPrint(_ fixture: inout FixtureState) -> (Int, String, Data) {
+            func idle(_ data: Data) throws -> Data {
+                let object = try JSONSerialization.jsonObject(with: data)
+                if var printers = object as? [[String: Any]] {
+                    for index in printers.indices
+                        where (printers[index]["id"] as? String)?.lowercased() == printerID {
+                        printers[index]["state"] = "Idle"
+                    }
+                    return try JSONSerialization.data(withJSONObject: printers)
+                }
+                guard var single = object as? [String: Any] else { return data }
+                single["state"] = "Idle"
+                return try JSONSerialization.data(withJSONObject: single)
+            }
+            do {
+                fixture.statusData = try idle(fixture.statusData)
+                fixture.printersData = try idle(fixture.printersData)
+                if let printer = fixture.printersByID[printerID] {
+                    fixture.printersByID[printerID] = try idle(printer)
+                }
+                if let details = fixture.detailsDataByID[printerID] {
+                    fixture.detailsDataByID[printerID] = try idle(details)
+                }
+                let command = CommandResult(success: true, message: "Print cancelled by visual-acceptance API fixture.")
+                return (200, "application/json", try JSONEncoder().encode(command))
+            } catch {
+                return (500, "application/json", Data(#"{"error":"fixture-cancel-failed"}"#.utf8))
             }
         }
 
