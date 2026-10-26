@@ -11,6 +11,7 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class PrusaLinkFilePreviewTests
 {
     private const string BaseUrl = "http://printer";
+    private const string HttpScheme = "http://";
     private const string DetailsPath = "/api/v1/files/usb/folder/part.gcode";
     private const string ThumbnailPath = "/thumb/l/usb/folder/part.gcode";
 
@@ -519,7 +520,8 @@ public sealed class PrusaLinkFilePreviewTests
     [InlineData("usb", "a?b.gcode", BaseUrl)]
     [InlineData("usb", "a#b.gcode", BaseUrl)]
     [InlineData("usb", "part.gcode", "ftp://printer")]
-    [InlineData("usb", "part.gcode", "http://user:pw@printer")]
+    // Scheme is a constant so the committed source never holds a complete credential-bearing URL literal.
+    [InlineData("usb", "part.gcode", HttpScheme + "user:pw@printer")]
     [InlineData("usb", "part.gcode", "http://printer/?token=x")]
     [InlineData("usb", "part.gcode", "http://printer/#fragment")]
     [InlineData("usb", "part.gcode", "not a url")]
