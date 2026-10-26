@@ -811,9 +811,10 @@ struct PreheatSubgroup: View {
 
         static func steppedTarget(draft: String, current: Double?, maximum: Double?, delta: Double) -> Double? {
             let value = draft.isEmpty ? current : Double(draft)
-            guard let value, value.isFinite, value >= 0, delta.isFinite,
-                  let maximum, maximum.isFinite, maximum > 0, value <= maximum else { return nil }
-            let next = min(max(value + delta, 0), maximum)
+            guard let value, value.isFinite, value >= 0, delta.isFinite else { return nil }
+            let upper = maximum.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? Double(Int32.max)
+            guard value <= upper else { return nil }
+            let next = min(max(value + delta, 0), upper)
             return next == value ? nil : next
         }
 
@@ -853,7 +854,7 @@ struct PreheatSubgroup: View {
         private var targetHint: String {
             guard viewModel.supports(heater) else { return "\(heater.title) control is unavailable." }
             let limit = viewModel.maximum(for: heater).map { "Maximum \($0) degrees. " }
-                ?? "Heating unavailable until heater limits are known. "
+                ?? "Reported maximum unavailable; firmware limits apply. "
             return limit + ControlNumberInput.heaterPrecisionMessage + " Blank leaves this heater unchanged; zero switches it off."
         }
     }

@@ -813,7 +813,8 @@ public sealed class OctoPrintPollingService(
                         }
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(cacheUpdate, statusData.OriginWatermark);
+                        _statusCacheWriter.UpdateStatus(
+                            cacheUpdate with { RawActivityState = statusData.State }, statusData.OriginWatermark);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var signalRUpdate = new PrinterStatusUpdate(

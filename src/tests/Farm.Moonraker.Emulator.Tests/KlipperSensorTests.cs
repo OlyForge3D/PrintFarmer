@@ -57,6 +57,81 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
+    public async Task SendGcode_M104AfterToolSelection_ChangesOnlyActiveExtruderAndPreservesOtherTargets()
+    {
+        using HttpClient http = factory.CreateClient();
+        await ResetAsync(http);
+        using HttpResponseMessage mode = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"SnapmakerU1"}"""));
+        mode.EnsureSuccessStatusCode();
+        try
+        {
+            for (int active = 0; active < 4; active++)
+            {
+                string initialize = string.Join('\n', Enumerable.Range(0, 4).Select(index =>
+                    $"SET_HEATER_TEMPERATURE HEATER={(index == 0 ? "extruder" : $"extruder{index}")} TARGET={210 + index}"));
+                string script = $"{initialize}\nT{active}\nM104 S220.5\nM140 S55";
+                using HttpResponseMessage write = await http.PostAsync("/printer/gcode/script",
+                    TestRequests.Json(JsonSerializer.Serialize(new { script })));
+                write.EnsureSuccessStatusCode();
+                using JsonDocument document = JsonDocument.Parse(
+                    await http.GetStringAsync("/printer/objects/query?extruder&extruder1&extruder2&extruder3&heater_bed"));
+                JsonElement status = document.RootElement.GetProperty("result").GetProperty("status");
+                for (int index = 0; index < 4; index++)
+                {
+                    string id = index == 0 ? "extruder" : $"extruder{index}";
+                    status.GetProperty(id).GetProperty("target").GetDouble().Should().Be(index == active ? 220.5 : 210 + index);
+                }
+
+                using HttpResponseMessage cool = await http.PostAsync("/printer/gcode/script", TestRequests.Json("""{"script":"M104 S0"}"""));
+                cool.EnsureSuccessStatusCode();
+                using JsonDocument cooled = JsonDocument.Parse(
+                    await http.GetStringAsync("/printer/objects/query?extruder&extruder1&extruder2&extruder3&heater_bed"));
+                JsonElement cooledStatus = cooled.RootElement.GetProperty("result").GetProperty("status");
+                for (int index = 0; index < 4; index++)
+                {
+                    string id = index == 0 ? "extruder" : $"extruder{index}";
+                    cooledStatus.GetProperty(id).GetProperty("target").GetDouble().Should().Be(index == active ? 0 : 210 + index);
+                }
+
+                cooledStatus.GetProperty("heater_bed").GetProperty("target").GetDouble().Should().Be(55);
+            }
+        }
+        finally
+        {
+            using HttpResponseMessage restore = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"None"}"""));
+            restore.EnsureSuccessStatusCode();
+            await ResetAsync(http);
+        }
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(271)]
+    public async Task SendGcode_M104OutsideActiveExtruderLimits_RejectsWithoutChangingAnyTarget(int target)
+    {
+        using HttpClient http = factory.CreateClient();
+        await ResetAsync(http);
+        using HttpResponseMessage mode = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"SnapmakerU1"}"""));
+        mode.EnsureSuccessStatusCode();
+        try
+        {
+            using HttpResponseMessage write = await http.PostAsync("/printer/gcode/script",
+                TestRequests.Json(JsonSerializer.Serialize(new { script = $"T3\nM104 S{target}" })));
+            write.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            using JsonDocument document = JsonDocument.Parse(
+                await http.GetStringAsync("/printer/objects/query?extruder&extruder1&extruder2&extruder3"));
+            document.RootElement.GetProperty("result").GetProperty("status").EnumerateObject()
+                .Should().OnlyContain(property => property.Value.GetProperty("target").GetDouble() == 0);
+        }
+        finally
+        {
+            using HttpResponseMessage restore = await http.PostAsync("/__emulator/printer/mmu", TestRequests.Json("""{"mode":"None"}"""));
+            restore.EnsureSuccessStatusCode();
+            await ResetAsync(http);
+        }
+    }
+
+    [Fact]
     public async Task FourToolPrinter_RealClientQueriesAndCommands_KeepEachHeaterIndependentAndShutdownAll()
     {
         using HttpClient http = factory.CreateClient();

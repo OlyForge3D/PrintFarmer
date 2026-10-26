@@ -95,18 +95,17 @@ state only for that request and display errors, cancellation, and timeouts
 explicitly. A lost response can mean the command was sent; never automatically
 retry, replay after reconnect, or infer that motion stopped.
 
-Moonraker jog and absolute positioning use one fresh authenticated
-movement-safety snapshot, not full composite status enrichment, then one send
-without tracking hops or artificial waits. Homing, effective coordinate-frame,
-and travel-envelope guards remain. Manual moves do not require the automated
-workflow's minimum Z clearance; unrelated automated protections remain unchanged.
+Interactive motion sends the native command without a preceding position,
+homing, geometry, or clearance query. Firmware enforces its own motion rules.
+Relative movement reflects native transport support (including OctoPrint and
+PrusaLink); absolute movement is advertised separately and is not inferred from
+verified geometry. Automated and calibration protections remain separate.
 
 The detailed card and sidebar offer Relative and Absolute coordinate entry.
 Tab/blur or Enter sends only the changed axis (`/move` for a relative distance,
 `/moveto` for an absolute target); omitted axes stay untouched. All coordinate
-fields require X, Y and Z to be explicitly reported homed, in both modes.
-Losing any required homing discards unsubmitted coordinate edits. Partial or unknown homing,
-offline/disabled printers, missing queue/start permission, unsupported movement,
+fields accept finite numeric inputs without requiring homing/geometry telemetry.
+Offline/disabled printers, missing queue/start permission, unsupported movement,
 and a pending command disable entry. Escape and mode changes discard drafts.
 Enter followed by blur never repeats a move. Submitted fields clear, so another
 relative move requires a deliberate new edit; commands are never replayed.
@@ -134,17 +133,15 @@ See [direct-motion coordination and upgrades](JOB_QUEUE_ARCHITECTURE.md#direct-m
 `{"speedPercent": 100}`. `POST /api/printers/{id}/z-offset/adjust` accepts a
 non-zero `offsetMm` from `-0.2` through `0.2`. Both use the existing
 `CommandResult` response, require `Queue.Start` permission and printer Submit
-access, and are capability/readback-gated. The Z-offset command is transient;
+access, and are capability-gated. The Z-offset command is transient;
 it does not save firmware configuration.
 
-Check `supportsFanControl` and `supportsFanSpeedReadback` before enabling fan
-controls, and `supportsZOffsetAdjustment` and `supportsZOffsetReadback` before
-enabling live Z-offset controls. A status value must also be present. At present
-these controls are supported only by Moonraker printers reporting the needed
-readback. Known online idle states use a direct actuation lease; printing and
-paused states use the active-print lease. Offline printers return `503`,
-unknown/transitional states return `409`, and unsupported controls or unknown
-readbacks return `502` without sending a command.
+Check `supportsFanControl` or `supportsZOffsetAdjustment` before enabling each
+control. Readback flags describe telemetry, not permission to send a command;
+missing values display as unknown. These controls are currently implemented by
+Moonraker. Printing and paused states use the active-print lease; other states
+use direct coordination. Cached offline/unknown status does not veto a native
+command; transport failure and backend rejection remain explicit errors.
 
 Status DTOs and `printerupdated` events may include:
 
@@ -182,11 +179,10 @@ may legitimately exceed the application's write range after an external change;
 do not clamp it or infer a default. No profile/configuration is saved.
 
 Writes require authenticated `Queue.Start` permission and printer **Submit**
-access. Known online idle states (`idle`, `ready`, `standby`, `complete`,
-`completed`, `cancelled`) use the existing direct actuation barrier; `printing`
+access. Non-printing states use the existing direct actuation barrier; `printing`
 and `paused` use the active-print barrier. Existing queue ownership/fence checks
 still apply, including rejection of an externally started job without a local
-active attempt. Disabled printers and printers in maintenance return `409`.
+active attempt. The UI retains enabled/non-maintenance affordances.
 
 `200 {"success":true}` means the backend acknowledged **that single command**,
 not that the factor was subsequently observed. Never optimistically replace live
@@ -198,7 +194,7 @@ there is no atomic two-factor update or claim that both succeeded.
 | `400` | Missing, malformed, non-finite, out-of-range or over-precision percent; no command |
 | `401` / `403` | Authentication / `Queue.Start` denied; no command |
 | `404` | Missing printer or insufficient resource access; no command |
-| `409` | Unknown/transitional/error state or ownership/fence conflict; no command |
+| `409` | Ownership/fence conflict; no command |
 | `501` | Unsupported operation; no command |
 | `503` | Offline/unavailable, or an unconfirmed/failed/timed-out backend command |
 
@@ -241,10 +237,8 @@ pipeline; command submission itself never fabricates telemetry.
 The detailed printer card and printer sidebar expose independent **Speed %**
 and **Flow %** sliders in a collapsible **Tuning** group only when their respective operation capability is
 explicitly true for that printer. Older servers and unsupported backends hide
-them. Queue.Start permission, a live connection, enabled/non-maintenance status
-and **Printing** in both the printer and fresh live status are required. Idle,
-paused and terminal states disable tuning. This web restriction does not change
-the API's state policy. The server remains authoritative
+them. Queue.Start permission and online, enabled/non-maintenance status are required;
+printing state and live readback are not prerequisites. The server remains authoritative
 for printer Submit access and active-print queue ownership/fences.
 
 Each row separates **Observed** readback from the selected slider value.
@@ -347,9 +341,8 @@ status update that does not report sensors keeps the cached list, while a
 reported list (even `[]`) replaces it. Backends may also deliver partial sensor
 updates; omitted sensors and readings keep their last values, and omitted
 `displayName`, `fanRole`, `lastUpdated`, and `writable` keep their previous
-values. Sensor control is accepted only while the last sensor report (a
-reported list or a sensor update, even with unchanged values) is under two
-minutes old; status updates that do not report sensors do not extend it. A
+values. The last advertised writable descriptors remain usable without a fresh
+measurement; unavailable readings do not revoke native control support. A
 sensor-only or availability-only change still emits
 `printerupdated`. When a printer goes offline, all entries are kept with
 `available: false`. `SubscribeToPrinter`, `SubscribeToPrinters`, and
@@ -363,7 +356,7 @@ Both default to `false` and are only `true` for backends that opt in.
 
 Sets one writable quantity: `{"quantity": "FanSpeed", "value": 40}`. Requires
 `Queue.Start` permission and printer Submit access. It uses the same lease rules
-as `/fan`: offline returns `503` and unknown printer states return `409`. The
+as `/fan`: cached offline/unknown status does not block the command. The
 request is checked against the sensor's advertised `writable` descriptors
 before any command is sent:
 
@@ -372,11 +365,15 @@ before any command is sent:
 | `200` | Backend confirmed the command (`CommandResult`). |
 | `400` | Missing body, wrong value type, or a value outside the advertised range/step (including `allowZero`). |
 | `404` | Printer not found or not accessible. |
-| `409` | Unknown or unavailable sensor, read-only sensor, or quantity not writable. |
+| `409` | Unknown sensor, read-only sensor, or quantity not writable. |
 | `501` | Backend does not support targeted sensor control. |
 
 Errors use `application/problem+json`. Sensor ids are matched exactly
 (case-sensitive).
+
+The iOS shared controls lease ends when the sensor command request settles.
+An acknowledgment does not require matching readback and does not replace
+observed values or prove physical completion.
 
 #### Moonraker (Klipper) mapping
 
@@ -400,12 +397,15 @@ Disconnect, shutdown and rediscovery invalidate old limits. Configuration reads
 are bounded to five seconds; HTTP errors, malformed responses or timeouts are
 logged and leave heaters read-only without blocking live readings. A subsequent
 connection or rediscovery reads configuration again. Model defaults and another
-printer's bounds are never substituted; writes still revalidate live limits.
+printer's bounds are never substituted. Writes use the known descriptor for
+typed input validation, then send one command without rediscovery; Klipper
+validates the current object and configured limits at execution time.
 
 `activeExtruderId` identifies the physical `extruder`/`extruderN` represented by
 the primary Hotend readings and controls. It follows `toolhead.extruder`, not
 an assumed tool zero. The other extruders remain individually addressed rows.
-Unknown active identity clears primary readings and blocks the primary control.
+Unknown active identity clears primary readings, not the native primary control.
+Primary writes use `M104`, so Klipper resolves the active extruder at execution.
 Omitted fields in Klipper deltas retain their previous values; explicit null or
 invalid readings clear that field. Safety timestamps belong to each measured
 field; an unrelated fan update does not refresh heater evidence.
@@ -430,9 +430,9 @@ existing partial-update merge behavior.
 | Other objects with `temperature`/`humidity`/`pressure`/`gas` | name hint, else `Other` | those fields | — |
 
 Name hints: `chamber`, `enclosure`, or `exhaust` map to `Chamber`; `ambient`
-maps to `Ambient`. Writes are rejected without sending G-code unless the object
-name is a safe Klipper identifier that is currently listed by the printer and the
-value is in range.
+maps to `Ambient`. Writes require a safe Klipper identifier, a known writable
+descriptor, and a valid typed value. They do not re-enumerate objects before
+sending; Klipper resolves the object and current bounds.
 Temperature controls require finite configured sensor limits, exclude negative
 targets, and intersect those limits with `target_min_temp`/`target_max_temp`
 when a Klipper fork reports separate target limits. Invalid or conflicting
@@ -443,11 +443,10 @@ already reports the same physical sensor.
 Measured temperature extrema remain available in the API but are omitted from
 the web sensor rows to keep the controls compact.
 
-Manual target edits are available while printing or paused on backends with
-`supportsTemperatureControlDuringPrint`; material preset menus are disabled in
-those states. Permission, known-state, online/enabled and command-lease checks
-still apply. This matches Mainsail's distinction between manual temperature input
-and preset menus, not a blanket prohibition on active-print temperature changes.
+Manual target edits and presets are available while printing or paused on
+backends with `supportsTemperatureControlDuringPrint`. Permissions, valid
+inputs, native capability and command-lease checks still apply; cached
+readback/online status is not an additional API admission requirement.
 
 ### `POST /api/printers/{id}/heaters/off`
 
@@ -455,8 +454,8 @@ Requires `Queue.Start`, printer Submit access and `supportsHeaterShutdown`.
 Moonraker sends `TURN_OFF_HEATERS`, including all extruders, the bed and generic
 chamber heaters. It does not turn off automatic cooling fans or temperature fans.
 This operation is available while printing or paused, using the active command
-lease. Unsupported backends return `501`; offline or unconfirmed outcomes return
-`503`, and unknown states return `409`.
+lease. Unsupported backends return `501`; transport failures or unconfirmed
+outcomes return `503`, and ownership/fence conflicts return `409`.
 
 This is distinct from `/temps` with zero targets: ordinary zero targets affect
 only the addressed primary heater/bed, never every heater. Successful commands

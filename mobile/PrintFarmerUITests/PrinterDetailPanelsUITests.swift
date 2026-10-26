@@ -1366,14 +1366,9 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         let physicalUnload = app.buttons["printer.detail.filament.unload"]
         XCTAssertTrue(physicalLoad.waitForExistence(timeout: 5))
         XCTAssertTrue(physicalUnload.waitForExistence(timeout: 5))
-        XCTAssertFalse(physicalLoad.isEnabled, "Room-temperature measured telemetry must not authorize physical filament load.")
-        XCTAssertFalse(physicalUnload.isEnabled, "Room-temperature measured telemetry must not authorize physical filament unload.")
-        XCTAssertTrue(
-            app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS %@", "required minimum of 220")
-            ).firstMatch.exists,
-            "The unavailable state must explain the live 220 °C safety floor, not claim the backend lacks support."
-        )
+        // #3516: firmware owns the cold-extrusion floor; the app no longer pre-blocks idle load/unload.
+        XCTAssertTrue(physicalLoad.isEnabled, "Idle physical filament load defers temperature safety to firmware.")
+        XCTAssertTrue(physicalUnload.isEnabled, "Idle physical filament unload defers temperature safety to firmware.")
 
         selector.buttons["Queue"].tap()
         let queue = app.descendants(matching: .any)["printer.detail.panel.queue"]

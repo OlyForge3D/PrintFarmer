@@ -183,7 +183,7 @@ struct PrinterInstrumentPanelControls: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
                     .font(.headline)
-                Text(viewModel.hardwareLoadError ?? "Positive targets require valid reported maxima. Supported zero-off commands remain available.")
+                Text(viewModel.hardwareLoadError ?? "Reported heater limits are unavailable. Commands remain subject to firmware limits.")
                     .font(.footnote)
                 ControlActionButton(title: "Retry heater limits", identifier: "printer.controls.retry-limits") {
                     Task { await viewModel.loadHardware() }
@@ -333,13 +333,6 @@ struct PrinterInstrumentPanelControls: View {
                 .frame(maxWidth: Self.maximumJogPadWidth)
                 .frame(maxWidth: .infinity)
                 .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
-                if let note = jogSafetyNote {
-                    Text(note)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfWarning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.jog.homing-safety")
-                }
                 stepSelector(
                     title: "Jog distance (mm)",
                     options: Self.jogSteps,
@@ -382,14 +375,6 @@ struct PrinterInstrumentPanelControls: View {
             home("Z", axes: ["Z"], accessibilityTitle: "Home Z") { await viewModel.homeZ() }
             jog("Z", sign: -1, symbol: "chevron.down", title: "Z")
         }
-    }
-
-    private var jogSafetyNote: String? {
-        // Unhomed axes read "—" in the position readout; no extra text (#3496).
-        guard viewModel.printer.homedAxes != nil else {
-            return "Homing status unavailable. Verify axes are homed before moving."
-        }
-        return nil
     }
 
     private func jog(_ axis: String, sign: Double, symbol: String, title: String = "") -> some View {

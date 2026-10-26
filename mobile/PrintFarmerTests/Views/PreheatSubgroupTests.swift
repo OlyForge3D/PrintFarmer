@@ -132,7 +132,7 @@ final class PreheatSubgroupTests: XCTestCase {
         model.cancelPendingCommand()
     }
 
-    func test_thermalZero_withUnknownMaximum_honorsOfflineLock() async throws {
+    func test_thermalTargets_withUnknownMaximum_dispatchNativelyAndHonorOfflineLock() async throws {
         let (model, service) = try await thermalModel(knownLimits: false)
         let (window, controller) = try await installThermal(model)
         defer { window.isHidden = true }
@@ -142,14 +142,19 @@ final class PreheatSubgroupTests: XCTestCase {
         field.text = "205"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
-        try thermalButton(controller).sendActions(for: .touchUpInside)
+        await tapAndAwaitDispatch(try thermalButton(controller), service: service)
         try await settle(controller)
-        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        model.cancelPendingCommand()
+        try await settle(controller)
         field.text = "0"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
-        try thermalButton(controller).sendActions(for: .touchUpInside)
+        await tapAndAwaitDispatch(try thermalButton(controller), service: service)
         try await settle(controller)
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         XCTAssertEqual(field.text, "0")
@@ -828,4 +833,3 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
     func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }
-

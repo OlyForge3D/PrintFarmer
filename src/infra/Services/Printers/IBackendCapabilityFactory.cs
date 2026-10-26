@@ -16,6 +16,13 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </summary>
 public interface IBackendCapabilityFactory
 {
+    /// <summary>Gets optional native metadata inventory authority, never inferred from legacy FileList support.</summary>
+    bool TryGetFileInventoryClientTyped(PrinterBackend backend, out ISupportsFileInventory? client)
+    {
+        client = null;
+        return false;
+    }
+
     /// <summary>
     /// Tries to get a backend client that supports file downloads.
     /// </summary>

@@ -47,6 +47,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
 
+    public DbSet<PrinterFileLocation> PrinterFileLocations => Set<PrinterFileLocation>();
+
+    public DbSet<PrinterFileScanState> PrinterFileScanStates => Set<PrinterFileScanState>();
+
+    public DbSet<PrinterFileRootScan> PrinterFileRootScans => Set<PrinterFileRootScan>();
+
+    public DbSet<PrinterFileOrigin> PrinterFileOrigins => Set<PrinterFileOrigin>();
+
+    public DbSet<PrinterFileOperation> PrinterFileOperations => Set<PrinterFileOperation>();
+
+    public DbSet<PrinterFileOperationJob> PrinterFileOperationJobs => Set<PrinterFileOperationJob>();
+
+    public DbSet<PrinterFileIoSlot> PrinterFileIoSlots => Set<PrinterFileIoSlot>();
+
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
 
     // Per-toolhead filament usage (multi-tool/MMU jobs)

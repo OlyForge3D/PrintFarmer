@@ -75,6 +75,28 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Printer detail no longer blocks on offline printers** — Opening a printer
+  from the farm list renders its last-known details immediately instead of a
+  multi-second "Loading printer…" spinner. The canonical printer, status and
+  job details then fill in progressively in the background, and a failed
+  background refresh keeps the shown content. Camera metadata and snapshot
+  fetches are skipped while the printer is offline and resume once it reports
+  online. The full-screen spinner appears only when no cached printer is
+  available. While only cached details are shown, printer controls, filament
+  actions and Start Next Job stay disabled until the server confirms the
+  printer, except Emergency Stop. NFC "ready" and guided spool-swap deep links
+  opened during that window wait and run once the printer is confirmed,
+  including after a failed first load succeeds on Retry. A
+  connectivity-only live update during a refresh no longer lets the cached
+  printer state override the server's current state.
+  A failed refresh shows a compact "Showing last known status" note with
+  Retry. Switching servers never leaves the previous server's printer on
+  screen, and a printer that comes online during a refresh keeps its live
+  status and loads its camera. NFC "ready" deep links now show the Mark
+  Printer Ready confirmation from the printer page; previously the request
+  was dropped. A refresh that restarts mid-load no longer lets an older live
+  state override the newer server state (#3507).
+
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm
   snapshot writes now use the same launch-scoped logical order as the feature

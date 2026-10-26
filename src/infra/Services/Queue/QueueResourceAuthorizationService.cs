@@ -42,6 +42,12 @@ public interface IQueueResourceAuthorizationService
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
 
+    Task<bool> CanActorAccessGcodeFileAsync(
+        string actorSubject,
+        Guid gcodeFileId,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
+
     Task<bool> CanActorAccessProjectAsync(
         string actorSubject,
         Guid projectId,
@@ -192,6 +198,27 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                          project.Id == projectId &&
                          project.OwnerUserId == userId,
                      ct));
+    }
+
+    public async Task<bool> CanActorAccessGcodeFileAsync(
+        string actorSubject,
+        Guid gcodeFileId,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(actorSubject, out Guid userId))
+        {
+            return false;
+        }
+
+        var file = await _db.GcodeFiles.AsNoTracking().Where(x => x.Id == gcodeFileId)
+            .Select(x => new { x.PrinterGroupId, x.CalibrationProjectId }).SingleOrDefaultAsync(ct);
+        return file is not null &&
+            (await IsFarmAdminAsync(userId, ct) ||
+             ((!file.PrinterGroupId.HasValue ||
+               await CanUserAccessGroupAsync(userId, file.PrinterGroupId.Value, minimumAccess, ct)) &&
+              (!file.CalibrationProjectId.HasValue ||
+               await CanActorAccessProjectAsync(actorSubject, file.CalibrationProjectId.Value, ct))));
     }
 
     public async Task<IReadOnlySet<Guid>> FilterActorAccessibleJobIdsAsync(
@@ -458,7 +485,8 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
 
         List<Guid> roles = await _db.UserRoles
             .AsNoTracking()
-            .Where(role => role.UserId == userId && role.IsActive)
+            .Where(role => role.UserId == userId && role.IsActive && role.Role.IsActive &&
+                (role.ExpiresAt == null || role.ExpiresAt > DateTime.UtcNow))
             .Select(role => role.RoleId)
             .ToListAsync(ct);
         return rules.Any(rule =>
@@ -473,6 +501,8 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                 userRole =>
                     userRole.UserId == userId &&
                     userRole.IsActive &&
+                    userRole.Role.IsActive &&
+                    (userRole.ExpiresAt == null || userRole.ExpiresAt > DateTime.UtcNow) &&
                     userRole.Role.Name == PrintFarmerPermissions.FarmAdminRole,
                 ct);
 

@@ -248,7 +248,9 @@ public sealed class MoonrakerSubscriptionService(
                 ActiveExtruderId: compositeStatus.ActiveExtruderId);
             statusUpdate = WithHttpSensors(printerId, compositeStatus, statusUpdate, observedState, factorObservation);
             _statusCacheWriter.UpdateStatus(
-                statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds),
+                statusUpdate.ToStatusDto(compositeStatus.CameraSnapshotUrl, compositeStatus.PrintTimeLeftSeconds)
+                    with
+                { RawActivityState = compositeStatus.State },
                 originWatermark);
 
             await hub!.Clients.Group(
@@ -3314,7 +3316,8 @@ public sealed class MoonrakerSubscriptionService(
             {
                 Sensors = sensors,
             };
-            _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
+            _statusCacheWriter.UpdateStatus(
+                cacheUpdate with { RawActivityState = state.State }, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             await hub!.Clients.Group(
@@ -3880,7 +3883,8 @@ public sealed class MoonrakerSubscriptionService(
                     PrinterStatusDto cacheUpdate = statusUpdate.ToStatusDto(
                         compositeStatus.CameraSnapshotUrl,
                         compositeStatus.PrintTimeLeftSeconds);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+                    _statusCacheWriter.UpdateStatus(
+                        cacheUpdate with { RawActivityState = compositeStatus.State }, originWatermark);
                     _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 
                     await hub.Clients.Group(

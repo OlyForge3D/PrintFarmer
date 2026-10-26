@@ -137,11 +137,6 @@ public static class PrinterSensorNormalizer
             return new(PrinterSensorControlValidationCode.UnknownSensor, $"Sensor '{sensorId}' is not reported by this printer.");
         }
 
-        if (!sensor.Available)
-        {
-            return new(PrinterSensorControlValidationCode.SensorUnavailable, $"Sensor '{sensor.Id}' is not currently available.");
-        }
-
         if (sensor.Writable.Count == 0)
         {
             return new(PrinterSensorControlValidationCode.ReadOnly, $"Sensor '{sensor.Id}' is read-only.");

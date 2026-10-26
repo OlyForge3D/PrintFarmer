@@ -144,9 +144,9 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     expect(setTemperaturesMock).not.toHaveBeenCalled();
   });
 
-  it('blocks an initially unknown Moonraker hotend when REST omits its null identity', () => {
+  it('allows the native Moonraker hotend command when REST omits its identity', () => {
     render(<DetailedPrinterCard printer={makePrinter({ backend: PrinterBackend.Moonraker })} />);
-    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
   });
 
   it.each([
@@ -182,7 +182,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     expect(screen.getByLabelText('Second Nozzle Temperature: 30°C')).toBeInTheDocument();
     expect(screen.getAllByRole('spinbutton', { name: /^Set / })).toHaveLength(2);
     for (const input of screen.getAllByRole('spinbutton', { name: /^Set / })) {
-      expect(input).toHaveProperty('disabled', !(allowed && enabled && online && available && control));
+      expect(input).toHaveProperty('disabled', !(allowed && enabled && online && control));
     }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toBeInTheDocument();
     expect(screen.getAllByText('Temperatures')).toHaveLength(1);

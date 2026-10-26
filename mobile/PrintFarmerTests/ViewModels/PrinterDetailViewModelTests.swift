@@ -27,7 +27,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
     // MARK: - Load Printer Detail
 
     func testEveryDetailPageTransitionStopsAndRestartsStatusCameraPolling() async throws {
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true
+        mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
             streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
@@ -56,6 +58,359 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.getPrinterCalledWith, TestData.testUUID)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    // MARK: - Instant render from cached printer (#3507)
+
+    func testCachedPrinterRendersBeforeCanonicalGetResolves() async throws {
+        let cached = try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Cached MK4")
+        )
+        let canonical = try TestData.decodePrinter()
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+
+        viewModel.seedCachedPrinter(cached)
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "Cached content must render with no network wait")
+        XCTAssertTrue(viewModel.isShowingCachedPrinter)
+
+        let request = Task { await viewModel.loadPrinter() }
+        await script.waitForCallCount(1)
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "The pending canonical load must not blank the page")
+        XCTAssertTrue(viewModel.isLoading)
+
+        await gate.succeed(canonical)
+        await request.value
+
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4")
+        XCTAssertFalse(viewModel.isShowingCachedPrinter)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testSeedIgnoresMismatchedPrinterAndCanonicalContent() async throws {
+        viewModel.seedCachedPrinter(try TestData.decodePrinter(from: TestJSON.printerMinimal))
+        XCTAssertNil(viewModel.printer, "A different printer's cached summary must never seed this page")
+
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        viewModel.seedCachedPrinter(try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Stale")
+        ))
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4", "Seeding must not overwrite canonical content")
+    }
+
+    func testFailedBackgroundRefreshKeepsCachedPrinter() async throws {
+        let cached = try TestData.decodePrinter(
+            from: TestJSON.printer.replacingOccurrences(of: "Prusa MK4", with: "Cached MK4")
+        )
+        mockService.errorToThrow = NetworkError.invalidResponse
+
+        viewModel.seedCachedPrinter(cached)
+        await viewModel.loadPrinter()
+
+        XCTAssertEqual(viewModel.printer?.name, "Cached MK4", "A failed refresh must not replace shown content")
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCanonicalPrinterPublishesBeforeSlowStatusResolves() async throws {
+        mockService.printerToReturn = try TestData.decodePrinter()
+        let statusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        let statusScript = ScriptedCanonicalResult<PrinterStatusDetail>([.gated(statusGate)])
+        mockService.statusHandler = { _ in try await statusScript.next() }
+
+        let request = Task { await viewModel.loadPrinter() }
+        await statusScript.waitForCallCount(1)
+
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4", "The printer must publish as soon as get returns")
+        XCTAssertTrue(viewModel.isLoading, "Remaining canonical data is still loading in the background")
+
+        await statusGate.fail(.forced("offline backend timeout"))
+        await request.value
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4")
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testOfflinePrinterSkipsCameraMetadataAndSnapshotFetches() async throws {
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID2)
+        vm.configure(printerService: mockService)
+        let offline = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        XCTAssertFalse(offline.isOnline)
+        mockService.printerToReturn = offline
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
+            streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+
+        await vm.loadPrinter()
+
+        XCTAssertEqual(vm.printer?.name, "Ender 3")
+        XCTAssertNil(mockService.getCameraUrlCalledWith, "Offline printers must not wait on camera metadata")
+        XCTAssertEqual(mockService.getSnapshotCallCount, 0, "Offline printers must not fetch a snapshot")
+        XCTAssertFalse(vm.isSnapshotPollingActive, "Offline printers must not poll snapshots")
+        vm.stopSnapshotPolling()
+    }
+
+    // MARK: - #3511 review findings
+
+    func testCachedPrinterBlocksMutationsUntilCanonicalLoad() async throws {
+        // R3511-V01/H01: no mutation path may run on unconfirmed cached state.
+        var cached = try TestData.decodePrinter()
+        cached.isOnline = true
+        viewModel.seedCachedPrinter(cached)
+
+        await viewModel.pausePrinter()
+        viewModel.requestCancel()
+        await viewModel.toggleMaintenance()
+        XCTAssertNil(mockService.pauseCalledWith, "Pause must not dispatch from cached state")
+        XCTAssertNil(viewModel.pendingAction, "Cancel must not be requested from cached state")
+        XCTAssertEqual(
+            viewModel.physicalFilamentCommandBlockedReason(for: .load), "Confirming printer status."
+        )
+
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        XCTAssertFalse(viewModel.isShowingCachedPrinter)
+        await viewModel.pausePrinter()
+        XCTAssertEqual(mockService.pauseCalledWith, TestData.testUUID, "Canonical data lifts the gate")
+    }
+
+    func testEmergencyStopStillDispatchesFromCachedPrinter() async throws {
+        var cached = try TestData.decodePrinter()
+        cached.isOnline = true
+        viewModel.seedCachedPrinter(cached)
+
+        viewModel.requestEmergencyStop()
+        await viewModel.confirmAction()
+
+        XCTAssertEqual(mockService.emergencyStopCalledWith, TestData.testUUID,
+                       "Emergency Stop is a fail-safe and must never wait for canonical data")
+    }
+
+    func testClearCachedPrinterDropsSeedButNeverCanonicalData() async throws {
+        viewModel.seedCachedPrinter(try TestData.decodePrinter())
+        viewModel.clearCachedPrinter()
+        XCTAssertNil(viewModel.printer, "R3511-V02: a stale-server seed must be removable")
+        XCTAssertFalse(viewModel.isShowingCachedPrinter)
+
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        viewModel.clearCachedPrinter()
+        XCTAssertEqual(viewModel.printer?.name, "Prusa MK4", "Canonical content must never be cleared")
+    }
+
+    func testFailedRefreshFlagsStaleCachedPrinter() async throws {
+        viewModel.seedCachedPrinter(try TestData.decodePrinter())
+        mockService.errorToThrow = NetworkError.invalidResponse
+        await viewModel.loadPrinter()
+        XCTAssertTrue(viewModel.isCachedRefreshFailed, "R3511-V04: a failed refresh must surface as stale")
+
+        mockService.errorToThrow = nil
+        mockService.printerToReturn = try TestData.decodePrinter()
+        await viewModel.loadPrinter()
+        XCTAssertFalse(viewModel.isCachedRefreshFailed)
+    }
+
+    private func liveUpdate(id: UUID, isOnline: Bool, state: String?) -> PrinterStatusUpdate {
+        PrinterStatusUpdate(
+            id: id, isOnline: isOnline, state: state, progress: nil,
+            jobName: nil, fileName: nil, thumbnailUrl: nil, cameraStreamUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+            hotendTarget: nil, bedTarget: nil, homedAxes: nil, spoolInfo: nil, mmuStatus: nil
+        )
+    }
+
+    /// Delivers one SignalR printer update through the VM's callback queue
+    /// and runs it to completion — no elapsed-time waits (R3528-H01).
+    private func deliver(
+        _ update: PrinterStatusUpdate,
+        via signalR: MockSignalRService,
+        queue: ShiftTaskCallbackQueue
+    ) async {
+        let target = queue.count + 1
+        signalR.simulatePrinterUpdate(update)
+        await queue.waitForCount(target)
+        await queue.runNext()
+    }
+
+    func testLiveOnlineTransitionDuringOfflinePassSchedulesCameraFetch() async throws {
+        // R3511-V03/H02, R3528-H01: the pass deferred camera metadata because
+        // `get` said offline; a live online update while the fan-out is still
+        // blocked must request the follow-up load before the pass is released.
+        let queue = ShiftTaskCallbackQueue()
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID2, callbackEnqueuer: queue.enqueuer)
+        vm.configure(printerService: mockService)
+        let offline = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var online = offline
+        online.isOnline = true
+        online.state = "idle"
+        let getScript = ScriptedCanonicalResult<Printer>([.value(offline), .value(online)])
+        mockService.getHandler = { _ in try await getScript.next() }
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil, snapshotUrl: nil, accessMode: .snapshotOnly,
+            streamFormat: .unknown, snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+        let statusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        let statusScript = ScriptedCanonicalResult<PrinterStatusDetail>([.gated(statusGate)])
+        mockService.statusHandler = { _ in try await statusScript.next() }
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+
+        let request = Task { await vm.loadPrinter() }
+        await statusScript.waitForCallCount(1)
+        XCTAssertNil(mockService.getCameraUrlCalledWith)
+        XCTAssertFalse(vm.hasPendingCanonicalLoadForTesting)
+
+        await deliver(liveUpdate(id: offline.id, isOnline: true, state: "idle"), via: signalR, queue: queue)
+        XCTAssertEqual(vm.printer?.isOnline, true)
+        XCTAssertTrue(vm.hasPendingCanonicalLoadForTesting,
+                      "The follow-up camera load must be requested while the first pass is still blocked")
+        let getCallsBeforeRelease = await getScript.callCount
+        XCTAssertEqual(getCallsBeforeRelease, 1, "The follow-up waits for the in-flight pass")
+
+        mockService.statusHandler = nil
+        await statusGate.fail(.forced("offline backend timeout"))
+        await request.value
+        await getScript.waitForCallCount(2)
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        XCTAssertEqual(mockService.getCameraUrlCalledWith, offline.id,
+                       "Coming online must run the deferred camera metadata fetch")
+        XCTAssertEqual(vm.printer?.isOnline, true)
+        vm.stopSnapshotPolling()
+    }
+
+    func testPublishKeepsNewerLiveConnectivityOverStaleSnapshot() async throws {
+        // R3511-V03/H02: a SignalR connectivity change during the pass is
+        // newer than the pass's REST reads and must survive `publish`.
+        let queue = ShiftTaskCallbackQueue()
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID, callbackEnqueuer: queue.enqueuer)
+        vm.configure(printerService: mockService)
+        mockService.printerToReturn = try TestData.decodePrinter()
+        let statusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        let statusScript = ScriptedCanonicalResult<PrinterStatusDetail>([.gated(statusGate)])
+        mockService.statusHandler = { _ in try await statusScript.next() }
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+
+        let request = Task { await vm.loadPrinter() }
+        await statusScript.waitForCallCount(1)
+        XCTAssertEqual(vm.printer?.isOnline, true)
+
+        await deliver(liveUpdate(id: TestData.testUUID, isOnline: false, state: "offline"), via: signalR, queue: queue)
+
+        await statusGate.fail(.forced("timeout"))
+        await request.value
+        XCTAssertEqual(vm.printer?.isOnline, false, "publish must not clobber newer live connectivity")
+        XCTAssertEqual(vm.printer?.state, "offline")
+    }
+
+    func testNilStateLiveUpdateDuringLoadKeepsRestStateOverCachedState() async throws {
+        // R3528-B01: a mid-load update that carries connectivity but no state
+        // must not let the cached `idle` overwrite REST's `printing`.
+        let queue = ShiftTaskCallbackQueue()
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID, callbackEnqueuer: queue.enqueuer)
+        vm.configure(printerService: mockService)
+        vm.configureOperatorServices(jobService: MockJobService(), maintenanceService: MockMaintenanceService())
+        var cached = try TestData.decodePrinter()
+        cached.isOnline = true
+        cached.state = "idle"
+        var printing = cached
+        printing.state = "printing"
+        let getGate = ShiftTaskResultGate<Printer>()
+        let getScript = ScriptedCanonicalResult<Printer>([.gated(getGate)])
+        mockService.getHandler = { _ in try await getScript.next() }
+        let statusGate = ShiftTaskResultGate<PrinterStatusDetail>()
+        let statusScript = ScriptedCanonicalResult<PrinterStatusDetail>([.gated(statusGate)])
+        mockService.statusHandler = { _ in try await statusScript.next() }
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+        vm.seedCachedPrinter(cached)
+
+        let request = Task { await vm.loadPrinter() }
+        await getScript.waitForCallCount(1)
+        await deliver(liveUpdate(id: TestData.testUUID, isOnline: true, state: nil), via: signalR, queue: queue)
+        XCTAssertEqual(vm.printer?.state, "idle", "precondition: the cached state is still shown")
+
+        await getGate.succeed(printing)
+        await statusScript.waitForCallCount(1)
+        XCTAssertEqual(vm.printer?.state, "printing", "The progressive publish must keep REST's state")
+
+        await statusGate.fail(.forced("timeout"))
+        await request.value
+        XCTAssertFalse(vm.isShowingCachedPrinter)
+        XCTAssertEqual(vm.printer?.state, "printing", "The final publish must keep REST's state")
+        XCTAssertNotNil(vm.physicalFilamentCommandBlockedReason(for: .load),
+                        "Filament load must stay blocked while printing")
+        XCTAssertNotNil(vm.physicalFilamentCommandBlockedReason(for: .unload),
+                        "Filament unload must stay blocked while printing")
+
+        let jobService = MockJobService()
+        vm.configureOperatorServices(jobService: jobService, maintenanceService: MockMaintenanceService())
+        vm.assignedQueue = [makeQueuedJob(
+            id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued",
+            position: 1, revision: "revision"
+        )]
+        await vm.startNextJob(vm.assignedQueue[0])
+        XCTAssertNil(jobService.dispatchCalledWith, "Start Next Job must stay blocked while printing")
+    }
+
+    func testRestartedPassRebaselinesLiveStateSoNewerRestStateWins() async throws {
+        // R3528 (Bishop): a pass restarted by a mid-pass request issues fresh
+        // REST reads. A live `state` seen during the superseded pass is older
+        // than those reads and must not override the restarted pass's result.
+        let queue = ShiftTaskCallbackQueue()
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID, callbackEnqueuer: queue.enqueuer)
+        vm.configure(printerService: mockService)
+        var printing = try TestData.decodePrinter()
+        printing.isOnline = true
+        printing.state = "printing"
+        var idle = printing
+        idle.state = "idle"
+        let getGate = ShiftTaskResultGate<Printer>()
+        let getScript = ScriptedCanonicalResult<Printer>([.gated(getGate), .value(idle)])
+        mockService.getHandler = { _ in try await getScript.next() }
+        mockService.statusHandler = { _ in throw NetworkError.invalidResponse }
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+
+        let first = Task { await vm.loadPrinter() }
+        await getScript.waitForCallCount(1)
+        await deliver(liveUpdate(id: TestData.testUUID, isOnline: true, state: "printing"), via: signalR, queue: queue)
+        let second = Task { await vm.loadPrinter() }
+        while !vm.hasPendingCanonicalLoadForTesting { await Task.yield() }
+
+        await getGate.succeed(printing)
+        await getScript.waitForCallCount(2)
+        await first.value
+        await second.value
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        XCTAssertEqual(vm.printer?.state, "idle",
+                       "The restarted pass's REST state is newer than the live update from the superseded pass")
+    }
+
+    func testPrepareReadyConfirmationReportsWhetherItStaged() async throws {
+        // R3528-H02: the view keeps the NFC-ready intent unless preparation
+        // actually staged (or surfaced an error for) the confirmation.
+        let vm = makeOperatorViewModel()
+        let staged = await vm.prepareReadyConfirmation()
+        XCTAssertFalse(staged, "No auto-dispatch service: nothing was staged")
+
+        let autoDispatch = MockAutoDispatchService()
+        autoDispatch.statusToReturn = AutoDispatchStatus(
+            printerId: TestData.testUUID, enabled: true, queueDepth: 1, state: "PendingReady"
+        )
+        vm.configureAutoDispatch(autoDispatch)
+        vm.isViewActive = false
+        let inactive = await vm.prepareReadyConfirmation()
+        XCTAssertFalse(inactive, "An inactive view must not stage")
+        XCTAssertNil(autoDispatch.getStatusCalledWith)
+
+        vm.isViewActive = true
+        let active = await vm.prepareReadyConfirmation()
+        XCTAssertTrue(active)
+        XCTAssertEqual(autoDispatch.getStatusCalledWith, TestData.testUUID)
+        XCTAssertTrue(vm.showNFCReadyConfirmation)
+        XCTAssertEqual(vm.reviewedReadyStatus?.state, "PendingReady")
     }
 
     func testCanonicalUnknownStatusStateReplacesStaleReadyStateAndFailsClosed() async throws {
@@ -377,7 +732,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
             .gated(oldPollGate)
         ])
         mockService.snapshotHandler = { _ in try await oldSnapshotScript.next() }
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var mockServicePrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockServicePrinter.isOnline = true  // Snapshot fetches are skipped while offline (#3507).
+        mockService.printerToReturn = mockServicePrinter
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: nil,
@@ -394,7 +751,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         viewModel.setSnapshotPollingAllowed(false)
         viewModel.isViewActive = false
         let newService = MockPrinterService()
-        newService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var newServicePrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        newServicePrinter.isOnline = true  // Snapshot fetches are skipped while offline (#3507).
+        newService.printerToReturn = newServicePrinter
         newService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: nil,
@@ -461,7 +820,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     // MARK: - Camera Branching
 
     func testSnapshotOnlyCameraStartsPollingSnapshots() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -490,7 +850,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testSnapshotOnlyDirectUrlUsesDirectSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -507,7 +868,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testStreamAndSnapshotSnapmakerStrategyWithoutUrlPollsSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
@@ -545,7 +907,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testUnsupportedStreamWithSnapshotUrlUsesDirectSnapshot() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: "rtsp://printer.local/live",
@@ -562,7 +925,8 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testUnsupportedStreamCameraUsesUnsupportedPreviewMode() async throws {
-        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
         mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: "rtsp://printer.local/live",
@@ -602,7 +966,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
     }
 
     func testRelativeSnapshotOnlyProxyRouteLoadsSnapshotThroughAuthenticatedService() async throws {
-        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        printer.isOnline = true  // Camera fetches are skipped while offline (#3507).
+        mockService.printerToReturn = printer
         mockService.cameraUrlToReturn = PrinterCameraUrl(
             streamUrl: nil,
             snapshotUrl: snapshotProxyPath,
@@ -767,16 +1133,16 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.actionError)
     }
 
-    func testPhysicalFilamentCommandsRequireFreshMeasuredTemperatureAtPolicyFloor() async throws {
+    func testPhysicalFilamentCommandsDoNotRequireMeasuredTemperatureEvidence() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         printer.isOnline = true
-        printer.state = "ready"
+        printer.state = nil
         mockService.printerToReturn = printer
         mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, state: "ready")
         var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
         capabilities.supportsFilamentLoad = true
         capabilities.supportsFilamentUnload = true
-        capabilities.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        capabilities.verifiedSafety = nil
         mockService.capabilitiesToReturn = capabilities
         var status = VerifiedSafetyFixtures.status(id: printer.id)
         status.safetyTelemetry?.measuredHotendTemperatureC.value = 219.9
@@ -784,11 +1150,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.loadPrinter()
         await viewModel.loadFilamentCommandCapabilities()
 
-        XCTAssertTrue(
-            viewModel.physicalFilamentCommandBlockedReason(for: .load)?.contains("220 °C") == true
-        )
+        XCTAssertNil(viewModel.physicalFilamentCommandBlockedReason(for: .load))
         await viewModel.loadPhysicalFilament()
-        XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty)
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load"])
 
         status.safetyTelemetry?.measuredHotendTemperatureC.value = 220
         status.safetyTelemetry?.measuredHotendTemperatureC.observedAtUtc = Date()
@@ -796,7 +1160,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         await viewModel.loadPrinter()
         XCTAssertNil(viewModel.physicalFilamentCommandBlockedReason(for: .load))
         await viewModel.loadPhysicalFilament()
-        XCTAssertEqual(mockService.physicalFilamentCalls, ["load"])
+        XCTAssertEqual(mockService.physicalFilamentCalls, ["load", "load"])
     }
 
     func testPhysicalFilamentCommandsFailClosedWhilePrintingOrWithoutBackendSupport() async throws {
@@ -2069,7 +2433,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
         await callbackQueue.waitForCount(1)
         await callbackQueue.runNext()
-        XCTAssertNil(vm.printer, "The initial canonical response is still in flight.")
+        XCTAssertNotNil(vm.printer, "The canonical printer publishes before its status fan-out resolves (#3507).")
         XCTAssertEqual(vm.statusDetail?.sensors, liveSensors)
 
         await staleStatusGate.succeed(
@@ -3066,6 +3430,67 @@ extension PrinterDetailViewModelTests {
         XCTAssertEqual(maintenance.createLogCalledWith?.performedBy, "op")
         XCTAssertEqual(vm.lastLoggedMaintenanceTaskId, taskId)
         XCTAssertNil(vm.actionError)
+    }
+
+    /// R3528-B04: every mutation entry point fails closed while the page
+    /// shows the unconfirmed cached summary — no service call of any kind.
+    func testEveryMutationIsGatedWhileCachedPrinterIsShown() async throws {
+        let jobService = MockJobService()
+        let maintenance = MockMaintenanceService()
+        let autoDispatch = MockAutoDispatchService()
+        let vm = makeOperatorViewModel(jobService: jobService, maintenanceService: maintenance)
+        vm.configureAutoDispatch(autoDispatch)
+        var cached = try TestData.decodePrinter()
+        cached.isOnline = true
+        cached.state = "idle"
+        vm.seedCachedPrinter(cached)
+        XCTAssertTrue(vm.isShowingCachedPrinter)
+
+        let job = makeQueuedJob(
+            id: UUID().uuidString, assignedTo: cached.id, status: "Queued",
+            position: 1, revision: "revision"
+        )
+        vm.assignedQueue = [job]
+        let row = PrinterDetailViewModel.OdometerRow(
+            id: "r", title: "Nozzle swap", component: "Nozzle", taskId: UUID(),
+            currentHours: 120, thresholdHours: 120, hoursUntilDue: 0,
+            isOverdue: true, isDueToday: false
+        )
+        let actions: [(name: String, run: () async -> Void)] = [
+            ("startNextJob", { await vm.startNextJob(job) }),
+            ("dispatch", { await vm.dispatch(job, to: UUID()) }),
+            ("setActiveSpool", { await vm.setActiveSpool(self.makeSpool()) }),
+            ("ejectFilament", { await vm.ejectFilament() }),
+            ("clearActiveSpoolAssignment", { await vm.clearActiveSpoolAssignment() }),
+            ("bindToolheadSpool", { await vm.bindToolheadSpool(self.makeSpool(), at: 0) }),
+            ("prepareReadyConfirmation", { await vm.prepareReadyConfirmation() }),
+            ("markPrinterReady", { await vm.markPrinterReady() }),
+            ("logMaintenanceCompletion", { await vm.logMaintenanceCompletion(row, performedBy: "op") }),
+            ("loadPhysicalFilament", { await vm.loadPhysicalFilament() }),
+            ("pausePrinter", { await vm.pausePrinter() }),
+            ("resumePrinter", { await vm.resumePrinter() }),
+            ("toggleMaintenance", { await vm.toggleMaintenance() }),
+            ("loadFilament", { vm.loadFilament() }),
+            ("requestCancel", { vm.requestCancel() }),
+        ]
+
+        for action in actions {
+            await action.run()
+            XCTAssertNil(jobService.dispatchCalledWith, "\(action.name) must not start a job")
+            XCTAssertNil(jobService.dispatchToCalledWith, "\(action.name) must not dispatch")
+            XCTAssertNil(mockService.setActiveSpoolCalledWith, "\(action.name) must not touch the spool")
+            XCTAssertTrue(mockService.bindToolheadSpoolCalls.isEmpty, "\(action.name) must not bind a spool")
+            XCTAssertTrue(mockService.physicalFilamentCalls.isEmpty, "\(action.name) must not move filament")
+            XCTAssertNil(mockService.pauseCalledWith, "\(action.name) must not pause")
+            XCTAssertNil(mockService.resumeCalledWith, "\(action.name) must not resume")
+            XCTAssertNil(mockService.maintenanceCalledWith, "\(action.name) must not toggle maintenance")
+            XCTAssertNil(autoDispatch.getStatusCalledWith, "\(action.name) must not review ready status")
+            XCTAssertNil(autoDispatch.markReadyCalledWith, "\(action.name) must not mark ready")
+            XCTAssertNil(maintenance.createLogCalledWith, "\(action.name) must not log maintenance")
+            XCTAssertFalse(vm.showSpoolPicker, "\(action.name) must not open the spool picker")
+            XCTAssertNil(vm.pendingAction, "\(action.name) must not stage a confirmation")
+            XCTAssertFalse(vm.isPerformingAction, "\(action.name) must not go busy")
+        }
     }
 }
 

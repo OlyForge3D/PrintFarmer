@@ -373,6 +373,12 @@ struct PrinterDetailView: View {
                     hasCache: true
                 )
             }
+            if viewModel.isCachedRefreshFailed {
+                PrinterDetailStaleRefreshBanner {
+                    let task = Task { await viewModel.loadPrinter() }
+                    activeTasks.append(task)
+                }
+            }
             Group {
                 if let printer = viewModel.printer {
                     printerContent(printer)
@@ -393,12 +399,26 @@ struct PrinterDetailView: View {
                 }
             }
         }
+        // Replays parked deep-link intents whenever the printer becomes
+        // confirmed: cached→canonical, or error→Retry success (#3528 B02/B06).
+        .onChange(of: viewModel.printer != nil && !viewModel.isShowingCachedPrinter) { _, isConfirmed in
+            guard isConfirmed else { return }
+            let task = Task { await consumePendingRouterIntents() }
+            activeTasks.append(task)
+        }
     }
 
     private func configureDetail() async {
         let generation = services.activeServerGeneration
         await services.awaitActiveServerSettled()
-        guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
+        // #3507: render the settled server's last-known printer immediately.
+        if let cached = services.printerSummaryCache.printer(id: printerId, generation: generation) {
+            viewModel.seedCachedPrinter(cached)
+        }
 
         let composition = services.printerControlsComposition
         controlsComposition = composition
@@ -417,7 +437,12 @@ struct PrinterDetailView: View {
             jobService: services.jobService,
             maintenanceService: services.maintenanceService
         )
+        viewModel.configureAutoDispatch(services.autoPrintService)
         await viewModel.loadPrinter()
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
         if let printer = viewModel.printer {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
@@ -431,10 +456,21 @@ struct PrinterDetailView: View {
             await viewModel.loadFilamentCommandCapabilities()
         }
         viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        await consumePendingRouterIntents()
+    }
 
+    /// Deep-link intents stay parked on the router until the printer is
+    /// confirmed; the confirmation transition replays them (#3528 B02/B06).
+    private func consumePendingRouterIntents() async {
+        guard !viewModel.isShowingCachedPrinter, viewModel.printer != nil else { return }
         if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
-            await viewModel.prepareReadyConfirmation()
+            // Clear before awaiting so a concurrent replay cannot stage twice;
+            // restore it if preparation could not be staged.
             router.pendingNFCReadyPrinterId = nil
+            let staged = await viewModel.prepareReadyConfirmation()
+            if !staged, router.pendingNFCReadyPrinterId == nil {
+                router.pendingNFCReadyPrinterId = pendingId
+            }
         }
         if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
             router.pendingFilamentSwap = nil
@@ -542,7 +578,7 @@ struct PrinterDetailView: View {
         PrinterDetailFilamentActionMapping.actions(
             printerID: printer.id,
             hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
-            isPerformingAction: viewModel.isPerformingAction,
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             nfcAvailable: services.nfcService?.isAvailable ?? false,
             isOnline: printer.isOnline,
             printerState: printer.state
@@ -687,7 +723,8 @@ struct PrinterDetailView: View {
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
-                || printer.backend == .moonraker
+                || printer.backend == .moonraker,
+            isPrinterConfirmed: !viewModel.isShowingCachedPrinter
         ) else { return }
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
@@ -759,6 +796,11 @@ struct PrinterDetailView: View {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
         .onChange(of: controlsComposition?.identity) { _, _ in
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            activeTasks.append(task)
+        }
+        .onChange(of: viewModel.isShowingCachedPrinter) { _, isCached in
+            guard !isCached else { return }
             let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
             activeTasks.append(task)
         }
@@ -921,7 +963,7 @@ struct PrinterDetailView: View {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
                 showsEjectConfirmation = true
             }
-            .disabled(viewModel.isPerformingAction)
+            .disabled(viewModel.isPerformingAction || viewModel.isShowingCachedPrinter)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
             .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
@@ -948,7 +990,9 @@ struct PrinterDetailView: View {
             isOnline: printer.isOnline,
             isPrinting: viewModel.isPrinting,
             isPaused: viewModel.isPaused,
-            isPerformingAction: viewModel.isPerformingAction,
+            // #3507: run actions wait for canonical data; Emergency Stop
+            // ignores this input and stays available.
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             pendingKinds: viewModel.pendingRunActionKinds
         )
     }
@@ -1258,6 +1302,7 @@ struct PrinterDetailView: View {
             .tint(Color.pfSuccess)
             .disabled(!printer.isOnline || !viewModel.isIdle
                       || viewModel.isDispatching || viewModel.isPerformingAction
+                      || viewModel.isShowingCachedPrinter
                       || job.job.rowVersion?.isEmpty != false)
             .disabled(!(authViewModel.currentUser?.permissions.contains("queue:start") == true
                         || authViewModel.currentUser?.roles.contains("farm_admin") == true))

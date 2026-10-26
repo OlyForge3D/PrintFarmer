@@ -1,3 +1,122 @@
+export type PrinterFileAvailability = 'Available' | 'Missing' | 'Deleted';
+export type PrinterFileVerification = 'UnverifiedSnapshot' | 'ProviderVersion' | 'ProviderDigest';
+export type PrinterFileAction = 'Copy' | 'Queue' | 'Delete';
+export type PrinterFileOperationState =
+  | 'Pending' | 'Copying' | 'Validating' | 'LocalReady' | 'AwaitingSourceConfirmation'
+  | 'Enqueueing' | 'Queued' | 'AwaitingDeleteConfirmation' | 'SendingDelete'
+  | 'ReconcilingDelete' | 'Deleted' | 'Blocked' | 'Failed' | 'Cancelled';
+
+export interface PrinterFileOperation {
+  id: string;
+  revision: number;
+  action: PrinterFileAction;
+  state: PrinterFileOperationState;
+  locationId: string;
+  gcodeFileId: string | null;
+  contentSha256: string | null;
+  sizeBytes: number | null;
+  verification: PrinterFileVerification;
+  reasonCode: string | null;
+  cancellationRequested: boolean;
+  destinationPrinterId: string | null;
+  payloadSha256: string;
+  jobIds: string[];
+}
+
+export interface PrinterFileQueueOptions {
+  copies: number;
+  priority?: PrintJobPriority;
+  deadlineAtUtc?: string;
+  projectId?: string;
+  projectFileId?: string;
+  plateIndex?: number;
+  plateName?: string;
+}
+
+export interface PrinterFileSnapshotConfirmation {
+  gcodeFileId: string;
+  contentSha256: string;
+  sizeBytes: number;
+  payloadSha256: string;
+  accept: boolean;
+}
+
+export interface PrinterFileDeleteOperation {
+  id: string;
+  revision: number;
+  state: 'AwaitingDeleteConfirmation' | 'SendingDelete' | 'ReconcilingDelete' | 'Deleted' | 'Blocked';
+  locationId: string;
+  sourcePrinterId: string;
+  storageRoot: string;
+  relativePath: string;
+  observationRevision: number;
+  configurationGeneration: number;
+  guarantee: 'Unsupported' | 'CurrentExactPath' | 'NativeConditional';
+  confirmationBinding: string;
+  currentPathRaceAccepted: boolean;
+  deleteSentAtUtc: string | null;
+  outcome: 'AwaitingConfirmation' | 'Acknowledged' | 'OutcomeUnknown' | 'ObservedAbsent' | 'Blocked';
+  reasonCode: string | null;
+}
+
+export interface PrinterFileDeleteConfirmation {
+  confirmationBinding: string;
+  acceptIrreversibleDelete: boolean;
+  acceptCurrentPathRace: boolean;
+}
+
+export type PrinterFileScanOutcome =
+  | 'NeverScanned' | 'Complete' | 'Partial' | 'Unavailable' | 'Unsupported'
+  | 'Cancelled' | 'Deferred' | 'AuthenticationRequired';
+
+export interface PrinterFileCatalogEntry {
+  id: string;
+  printerId: string;
+  printerName: string;
+  storageRoot: string;
+  relativePath: string;
+  displayName: string;
+  sizeBytes: number | null;
+  modifiedValue: string | null;
+  observationRevision: number;
+  configurationGeneration: number;
+  availability: PrinterFileAvailability;
+  lastSeenAtUtc: string;
+  lastCompleteScanAtUtc: string | null;
+  isStale: boolean;
+  localCopies: Array<{
+    gcodeFileId: string;
+    capturedAtUtc: string;
+    verification: PrinterFileVerification;
+  }>;
+}
+
+export interface PrinterFileScanStatus {
+  printerId: string;
+  enabled: boolean;
+  outcome: PrinterFileScanOutcome;
+  reasonCode: string | null;
+  lastAttemptAtUtc: string | null;
+  lastCompleteScanAtUtc: string | null;
+  nextScanAtUtc: string;
+  configurationGeneration: number;
+  isStale: boolean;
+  isScanning: boolean;
+}
+
+export interface PrinterFileCatalogPage {
+  items: PrinterFileCatalogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  printers: Array<{
+    id: string; name: string; canManage: boolean; canCopy: boolean; canDelete: boolean;
+    supportsCopy: boolean;
+  }>;
+  scans: PrinterFileScanStatus[];
+  automaticDiscoveryEnabled: boolean;
+}
+
 // DTO for a discovered file in a harvest operation
 // DTO for importing selected discovered files
 export interface ImportSelectedGcodeFilesDto {
@@ -560,6 +679,16 @@ export interface PrinterBackendCapabilitiesDto {
   supportsControlOperations: boolean;
   supportsFileMetadata: boolean;
   supportsMovement: boolean;
+  supportsRelativeMovement?: boolean;
+  supportsAbsoluteMovement?: boolean;
+  supportsHoming?: boolean;
+  supportsHomingXY?: boolean;
+  supportsHomingZ?: boolean;
+  supportsDisableMotors?: boolean;
+  supportsExtrusion?: boolean;
+  supportsFilamentLoad?: boolean;
+  supportsFilamentUnload?: boolean;
+  supportsFilamentChange?: boolean;
   supportsTemperatureControl: boolean;
   supportsPrinterInformation: boolean;
   supportsHistory: boolean;

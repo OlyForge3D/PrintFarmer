@@ -50,7 +50,6 @@ using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerTo
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
 using PrinterControlOutcome = Farm.Infrastructure.Services.Printers.PrinterControlOutcome;
 using PrinterDirectControl = Farm.Infrastructure.Services.Printers.PrinterDirectControl;
-using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
 using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
 using PrinterSafetyValidationResult = Farm.Infrastructure.Services.Printers.PrinterSafetyValidationResult;
@@ -1061,7 +1060,7 @@ public partial class PrintersController(
         }
 
         PrinterBackendCapabilitiesDto? capabilities =
-            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+            await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -1074,41 +1073,13 @@ public partial class PrintersController(
                 new CommandResult(false, "This printer backend does not support part-fan control."));
         }
 
-        (bool useActiveLease, PrinterStatusDto? status, ActionResult? stateFailure) =
-            await ResolveFanControlLeaseAsync(id, ct);
-        if (stateFailure is not null)
-        {
-            return stateFailure;
-        }
-
-        if (status?.FanSpeedPercent is not double fanSpeedPercent ||
-            !double.IsFinite(fanSpeedPercent) ||
-            fanSpeedPercent is < 0 or > 100)
-        {
-            return StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "The printer does not report a valid part-fan speed; no command was sent."));
-        }
-
-        if (!useActiveLease)
-        {
-            return await ExecuteDirectBooleanControlAsync(
-                id,
-                "set_fan_speed",
-                "set_fan_speed",
-                token => _printersService.SetFanSpeedAsync(id, speedPercent, token),
-                ct);
-        }
-
-        return await ExecuteActiveCommandControlAsync(
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "set_fan_speed",
             "set_fan_speed",
-            async token => await _printersService.SetFanSpeedAsync(id, speedPercent, token)
-                ? new CommandResult(true, null)
-                : new CommandResult(false, "The backend did not confirm whether the fan command was applied."),
+            token => _printersService.SetFanSpeedAsync(id, speedPercent, token),
             ct,
-            mapUnconfirmedAsUnavailable: true);
+            allowActivePrint: true);
     }
 
     /// <summary>
@@ -2697,31 +2668,14 @@ public partial class PrintersController(
             return BadRequest(new CommandResult(false, "Temperature targets must be finite and nonnegative."));
         }
 
-        bool useActiveLease = false;
-        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
-        if (capabilities?.SupportsTemperatureControlDuringPrint == true)
-        {
-            if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
-            {
-                return NotFound();
-            }
-
-            (bool active, _, ActionResult? stateFailure) = await ResolveFanControlLeaseAsync(id, ct);
-            if (stateFailure is not null)
-            {
-                return stateFailure;
-            }
-
-            useActiveLease = active;
-        }
-
+        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         return await ExecuteDirectOutcomeControlAsync(
             id,
             "set_temperature",
             "set_temperature",
             token => _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, token),
             ct,
-            useActiveLease: useActiveLease);
+            allowActivePrint: capabilities?.SupportsTemperatureControlDuringPrint == true);
     }
 
     [HttpPost("{id:guid}/move")]
@@ -2749,8 +2703,7 @@ public partial class PrintersController(
             "move",
             "move",
             token => _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, token),
-            ct,
-            move: new PrinterSafetyMoveRequest(req.X, req.Y, req.Z));
+            ct);
     }
 
     [HttpPost("{id:guid}/moveto")]
@@ -2778,9 +2731,7 @@ public partial class PrintersController(
             "move_to",
             "move_to",
             token => _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, token),
-            ct,
-            PrinterSafetyOperation.AbsoluteMovement,
-            new PrinterSafetyMoveRequest(req.X, req.Y, req.Z));
+            ct);
     }
 
     private static bool IsValidMove(MoveRequest request) =>
@@ -2796,32 +2747,30 @@ public partial class PrintersController(
         CancellationToken ct,
         PrinterActuationResult? acquired = null,
         PrinterSafetyOperation? safetyOperation = null,
-        PrinterSafetyMoveRequest? move = null,
-        MmuControlRequest? heatedUnload = null)
+        bool allowActivePrint = false)
     {
         CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
             operation == "emergencystop" ? TimeSpan.FromSeconds(20) :
-                PrinterDirectControl.IsManualMotion(operation) || heatedUnload is not null ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
+                PrinterDirectControl.IsInteractive(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
         PrinterActuationResult begin = acquired ?? await BeginPhysicalControlAsync(
             printerId,
             operation,
-            ct);
+            ct,
+            allowActivePrint);
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
         }
 
-        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+        ActionResult? validationFailure = begin.Lease.AttemptId.HasValue ? null : await ValidateBeforeDispatchAsync(
             begin.Lease,
             safetyOperation,
-            move,
             ct,
-            requestCancellation,
-            heatedUnload);
+            requestCancellation);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -2895,27 +2844,23 @@ public partial class PrintersController(
         string telemetryOperation,
         Func<CancellationToken, Task<Farm.Infrastructure.Services.Printers.PrinterControlOutcome>> backendCall,
         CancellationToken ct,
-        PrinterSafetyOperation? safetyOperation = null,
-        PrinterSafetyMoveRequest? move = null,
-        bool useActiveLease = false)
+        bool allowActivePrint = false)
     {
         CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
-            PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
+            PrinterDirectControl.IsInteractive(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
-        PrinterActuationResult begin = useActiveLease && _physicalActuationService is not null
-            ? await _physicalActuationService.AcquireActiveAsync(printerId, QueueActorIdentity.Resolve(User), operation, ct)
-            : await BeginPhysicalControlAsync(printerId, operation, ct);
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(printerId, operation, ct, allowActivePrint);
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
         }
 
-        ActionResult? validationFailure = useActiveLease
+        ActionResult? validationFailure = begin.Lease.AttemptId.HasValue
             ? null
-            : await ValidateBeforeDispatchAsync(begin.Lease, safetyOperation, move, ct, requestCancellation);
+            : await ValidateBeforeDispatchAsync(begin.Lease, safetyOperation: null, ct, requestCancellation);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -3007,7 +2952,6 @@ public partial class PrintersController(
         ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
             begin.Lease,
             safetyOperation,
-            move: null,
             ct);
         if (validationFailure is not null)
         {
@@ -3133,42 +3077,11 @@ public partial class PrintersController(
         }
     }
 
-    private async Task<(bool UseActiveLease, PrinterStatusDto? Status, ActionResult? Failure)> ResolveFanControlLeaseAsync(
-        Guid printerId,
-        CancellationToken ct)
-    {
-        PrinterStatusDto status = await _printersService.GetStatusDtoAsync(printerId, ct);
-        if (!status.IsOnline)
-        {
-            return (
-                false,
-                null,
-                StatusCode(
-                    StatusCodes.Status503ServiceUnavailable,
-                    new CommandResult(false, "The printer is offline; no command was sent.")));
-        }
-
-        string? state = status.State?.Trim().ToLowerInvariant();
-        if (state is "printing" or "paused")
-        {
-            return (true, status, null);
-        }
-
-        if (state is "idle" or "ready" or "standby" or "complete" or "completed" or "cancelled")
-        {
-            return (false, status, null);
-        }
-
-        return (
-            false,
-            null,
-            Conflict(new CommandResult(false, "The printer must report a known idle, printing, or paused state.")));
-    }
-
     private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
         Guid printerId,
         string operation,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allowActivePrint = false)
     {
         if (_physicalActuationService is null)
         {
@@ -3177,20 +3090,21 @@ public partial class PrintersController(
                 Detail: "The physical actuation service is unavailable.");
         }
 
-        return await _physicalActuationService.AcquireDirectAsync(
+        PrinterActuationResult result = await _physicalActuationService.AcquireDirectAsync(
             printerId,
             QueueActorIdentity.Resolve(User),
             operation,
             ct);
+        return allowActivePrint && result.Code == PrinterActuationResultCode.PrinterBusy
+            ? await _physicalActuationService.AcquireActiveAsync(printerId, QueueActorIdentity.Resolve(User), operation, ct)
+            : result;
     }
 
     private async Task<ActionResult?> ValidateBeforeDispatchAsync(
         PrinterActuationLease lease,
         PrinterSafetyOperation? safetyOperation,
-        PrinterSafetyMoveRequest? move,
         CancellationToken ct,
-        CancellationToken? requestCancellation = null,
-        MmuControlRequest? heatedUnload = null)
+        CancellationToken? requestCancellation = null)
     {
         bool dispatchAuthorized = false;
         bool leaseSettled = false;
@@ -3198,42 +3112,6 @@ public partial class PrintersController(
         try
         {
             ct.ThrowIfCancellationRequested();
-            if (PrinterDirectControl.IsManualMotion(lease.Operation) &&
-                await _printersService.FindByIdAsync(lease.PrinterId, ct) is { } printer &&
-                PrinterDirectControl.HasObservedManualMotionPreflight((PrinterBackend)printer.Backend))
-            {
-                PrinterStatusDto observed = await _printersService.GetMovementStatusAsync(printer, ct);
-                PrinterSafetyValidationResult manualSafety;
-                if (!observed.IsOnline || observed.State?.ToLowerInvariant() is not ("idle" or "ready" or "standby" or "complete" or "cancelled"))
-                {
-                    manualSafety = PrinterSafetyValidationResult.Reject(
-                        409, "printer_busy", "The printer must report ready and idle before a manual command.");
-                }
-                else if (move is not null)
-                {
-                    PrinterSafetyMoveRequest target = lease.Operation == "move"
-                        ? new PrinterSafetyMoveRequest(observed.X + (move.X ?? 0), observed.Y + (move.Y ?? 0), observed.Z + (move.Z ?? 0))
-                        : move;
-                    manualSafety = _printerSafetyGuard is null
-                        ? PrinterSafetyValidationResult.Reject(503, "printer_safety_evidence_unknown", "The printer safety guard is unavailable.")
-                        : await _printerSafetyGuard.ValidateObservedManualMoveAsync(lease.PrinterId, target, observed, ct);
-                }
-                else
-                {
-                    manualSafety = PrinterSafetyValidationResult.Allowed;
-                }
-
-                if (!manualSafety.Success)
-                {
-                    await _physicalActuationService!.CompleteDirectAsync(lease, false, manualSafety.Code, CancellationToken.None);
-                    leaseSettled = true;
-                    return SafetyProblem(manualSafety);
-                }
-
-                // Manual positioning uses travel/homing limits, not automated workflow clearance.
-                safetyOperation = null;
-            }
-
             if (safetyOperation.HasValue)
             {
                 if (_printerSafetyGuard is null)
@@ -3255,18 +3133,8 @@ public partial class PrintersController(
                     await _printerSafetyGuard.ValidateAsync(
                         lease.PrinterId,
                         safetyOperation.Value,
-                        move,
+                        move: null,
                         ct);
-                if (!safety.Success && heatedUnload is not null && safety.Code == "printer_temperature_below_minimum")
-                {
-                    (safety, bool heatingOutcomeUnknown) = await WarmMmuForUnloadAsync(lease, heatedUnload, safety, ct);
-                    if (heatingOutcomeUnknown)
-                    {
-                        leaseSettled = true;
-                        await _physicalActuationService!.MarkDirectUnknownAsync(lease, "backend_heating_outcome_unknown", CancellationToken.None);
-                        return SafetyProblem(safety);
-                    }
-                }
 
                 if (!safety.Success)
                 {
@@ -3299,29 +3167,16 @@ public partial class PrintersController(
             return null;
         }
         catch (Exception exception) when (
-            PrinterDirectControl.IsManualMotion(lease.Operation) && !(requestCancellation ?? ct).IsCancellationRequested)
+            PrinterDirectControl.IsInteractive(lease.Operation) && !(requestCancellation ?? ct).IsCancellationRequested)
         {
-            _logger.LogWarning(exception, "Unable to validate manual motion for printer {PrinterId}; no command sent", lease.PrinterId);
-            return SafetyProblem(PrinterSafetyValidationResult.Reject(
-                503, "printer_safety_evidence_unknown", "Fresh printer safety evidence is unavailable; no motion command was sent."));
-        }
-        catch (OperationCanceledException) when (heatedUnload is not null && !(requestCancellation ?? ct).IsCancellationRequested)
-        {
-            cleanupFailureCode = "printer_heating_timeout";
-            return SafetyProblem(PrinterSafetyValidationResult.Reject(
-                504, cleanupFailureCode, "The hotend did not reach the filament unload temperature within four minutes. No unload command was sent; check the printer and its heater target before retrying."));
+            _logger.LogWarning(exception, "Unable to revalidate manual command ownership for printer {PrinterId}; no command sent", lease.PrinterId);
+            return StatusCode(503, new CommandResult(false, "Printer command ownership could not be revalidated; no command was sent."));
         }
         catch (OperationCanceledException)
         {
             cleanupFailureCode =
                 "printer_operation_cancelled_before_dispatch";
             throw;
-        }
-        catch (Exception exception) when (heatedUnload is not null)
-        {
-            _logger.LogWarning(exception, "Automatic unload preparation failed for printer {PrinterId}; no unload command sent", lease.PrinterId);
-            return SafetyProblem(PrinterSafetyValidationResult.Reject(
-                503, "printer_safety_evidence_unknown", "Automatic unload preparation could not be verified. No unload command was sent; check the printer and its heater target before retrying."));
         }
         finally
         {
@@ -3331,87 +3186,6 @@ public partial class PrintersController(
                     lease,
                     cleanupFailureCode);
             }
-        }
-    }
-
-    private async Task<(PrinterSafetyValidationResult Safety, bool HeatingOutcomeUnknown)> WarmMmuForUnloadAsync(
-        PrinterActuationLease lease, MmuControlRequest request, PrinterSafetyValidationResult cold, CancellationToken ct)
-    {
-        using var heatingTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(4), timeProvider ?? TimeProvider.System);
-        using var heatingDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct, heatingTimeout.Token);
-        ct = heatingDeadline.Token;
-        if (cold.RequiredHotendTemperatureC is not double minimum || !double.IsFinite(minimum) || minimum <= 0)
-        {
-            return (cold, false);
-        }
-
-        double target;
-        try
-        {
-            target = await _printersService.GetMmuUnloadTemperatureAsync(lease.PrinterId, request, minimum, ct);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            return (PrinterSafetyValidationResult.Reject(422, "printer_unload_temperature_invalid",
-                "The filament unload temperature exceeds the installed hotend/nozzle temperature limit."), false);
-        }
-
-        if (!double.IsFinite(target) || target < minimum)
-        {
-            return (PrinterSafetyValidationResult.Reject(503, "printer_safety_evidence_unknown", "A safe filament unload temperature could not be resolved."), false);
-        }
-
-        PrinterActuationResult heatingLease = await _physicalActuationService!.RevalidateDirectAsync(lease, ct);
-        if (!heatingLease.Success)
-        {
-            return (PrinterSafetyValidationResult.Reject(409, "printer_actuation_revalidation_failed", "The printer control lease changed before heating; no heater command was sent."), false);
-        }
-
-        // The heater and unload share the same fenced lease. Never retry an uncertain heater write.
-        try
-        {
-            ct.ThrowIfCancellationRequested();
-            PrinterControlOutcome heating = await _printersService.SetTempsAsync(lease.PrinterId, target, null, ct);
-            if (heating != PrinterControlOutcome.Ok)
-            {
-                bool uncertain = heating == PrinterControlOutcome.BackendUnreachable;
-                string message = uncertain
-                    ? "The heater command outcome is unknown; check the printer before retrying. No unload command was sent."
-                    : "The printer rejected automatic heating; no unload command was sent.";
-                return (PrinterSafetyValidationResult.Reject(503, "printer_heating_failed", message), uncertain);
-            }
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Automatic unload heater command has an unknown outcome for printer {PrinterId}", lease.PrinterId);
-            return (PrinterSafetyValidationResult.Reject(503, "printer_heating_failed",
-                "The heater command outcome is unknown; check the printer before retrying. No unload command was sent."), true);
-        }
-
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            PrinterSafetyValidationResult safety = await _printerSafetyGuard!.ValidateAsync(
-                lease.PrinterId, PrinterSafetyOperation.FilamentUnload, null, ct);
-            if (!safety.Success && safety.Code != "printer_temperature_below_minimum")
-            {
-                return (safety, false);
-            }
-
-            // A heater target is not proof of heat: require the guard's fresh measured temperature.
-            if (safety.Success && safety.MeasuredHotendTemperatureC is double measured && measured >= target - 1)
-            {
-                return (safety, false);
-            }
-
-            PrinterActuationResult waitingLease = await _physicalActuationService.RevalidateDirectAsync(lease, ct);
-            if (!waitingLease.Success)
-            {
-                return (PrinterSafetyValidationResult.Reject(409, "printer_actuation_revalidation_failed",
-                    "The printer control lease changed during heating; no unload command was sent."), false);
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(2), timeProvider ?? TimeProvider.System, ct);
         }
     }
 
@@ -3795,7 +3569,7 @@ public partial class PrintersController(
         }
 
         PrinterBackendCapabilitiesDto? capabilities =
-            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+            await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -3808,40 +3582,13 @@ public partial class PrintersController(
                 new CommandResult(false, "This printer backend does not support transient Z-offset adjustment."));
         }
 
-        (bool useActiveLease, PrinterStatusDto? status, ActionResult? stateFailure) =
-            await ResolveFanControlLeaseAsync(id, ct);
-        if (stateFailure is not null)
-        {
-            return stateFailure;
-        }
-
-        if (status?.LiveZOffsetMm is not double liveZOffsetMm ||
-            !double.IsFinite(liveZOffsetMm))
-        {
-            return StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "The printer does not report a valid live Z offset; no command was sent."));
-        }
-
-        if (!useActiveLease)
-        {
-            return await ExecuteDirectBooleanControlAsync(
-                id,
-                "adjust_z_offset",
-                "adjust_z_offset",
-                token => _printersService.AdjustZOffsetAsync(id, offsetMm, token),
-                ct);
-        }
-
-        return await ExecuteActiveCommandControlAsync(
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "adjust_z_offset",
             "adjust_z_offset",
-            async token => await _printersService.AdjustZOffsetAsync(id, offsetMm, token)
-                ? new CommandResult(true, null)
-                : new CommandResult(false, "The backend did not confirm whether the Z-offset command was applied."),
+            token => _printersService.AdjustZOffsetAsync(id, offsetMm, token),
             ct,
-            mapUnconfirmedAsUnavailable: true);
+            allowActivePrint: true);
     }
 
     /// <summary>
@@ -3896,7 +3643,6 @@ public partial class PrintersController(
             ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
                 physicalLease,
                 PrinterSafetyOperation.FirmwareZOffsetSave,
-                move: null,
                 ct);
             if (validationFailure is not null)
             {
@@ -4005,8 +3751,7 @@ public partial class PrintersController(
             "filament_load",
             "load_filament",
             token => _printersService.LoadFilamentAsync(id, token),
-            ct,
-            PrinterSafetyOperation.FilamentLoad);
+            ct);
     }
 
     /// <summary>
@@ -4052,8 +3797,7 @@ public partial class PrintersController(
 
         ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
             begin.Lease,
-            PrinterSafetyOperation.FilamentUnload,
-            move: null,
+            safetyOperation: null,
             ct);
         if (validationFailure is not null)
         {
@@ -4120,8 +3864,7 @@ public partial class PrintersController(
             "filament_change",
             "change_filament",
             token => _printersService.ChangeFilamentAsync(id, token),
-            ct,
-            PrinterSafetyOperation.FilamentChange);
+            ct);
     }
 
     /// <summary>Performs a bounded relative extrusion or retraction for maintenance.</summary>
@@ -4155,8 +3898,7 @@ public partial class PrintersController(
             "extrude_filament",
             "extrude_filament",
             token => _printersService.ExtrudeFilamentAsync(id, request.DistanceMm, request.FeedrateMmPerMinute, token),
-            ct,
-            safetyOperation: PrinterSafetyOperation.Extrusion);
+            ct);
     }
 
     // ── MMU (Multi-Material Unit) control endpoints ──
@@ -4188,8 +3930,7 @@ public partial class PrintersController(
             "mmu_change_tool",
             "mmu_change_tool",
             token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.ChangeTool, Tool: tool), token),
-            ct,
-            safetyOperation: PrinterSafetyOperation.MmuChangeTool);
+            ct);
     }
 
     /// <summary>
@@ -4210,8 +3951,7 @@ public partial class PrintersController(
             "mmu_eject",
             "mmu_eject",
             token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Eject), token),
-            ct,
-            safetyOperation: PrinterSafetyOperation.MmuEject);
+            ct);
     }
 
     /// <summary>
@@ -4232,8 +3972,7 @@ public partial class PrintersController(
             "mmu_load",
             "mmu_load",
             token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Load), token),
-            ct,
-            safetyOperation: PrinterSafetyOperation.MmuLoad);
+            ct);
     }
 
     /// <summary>
@@ -4355,22 +4094,12 @@ public partial class PrintersController(
                 "Unsupported or invalid MMU gate action."));
         }
 
-        PrinterSafetyOperation? safetyOperation = (protocol, action) switch
-        {
-            ("qidibox", "load") => PrinterSafetyOperation.FilamentLoad,
-            ("afc", "load") => PrinterSafetyOperation.FilamentChange,
-            (_, "unload" or "eject") =>
-                PrinterSafetyOperation.FilamentUnload,
-            _ => null,
-        };
         return await ExecuteDirectBooleanControlAsync(
             id,
             $"mmu_{protocol}_{action}",
             "mmu_gate_action",
             token => _printersService.ExecuteMmuAsync(id, control, token),
-            ct,
-            safetyOperation: safetyOperation,
-            heatedUnload: control.Action == MmuControlAction.Unload ? control : null);
+            ct);
     }
 
     /// <summary>
@@ -5429,74 +5158,23 @@ public partial class PrintersController(
     }
 
     [HttpDelete("{id:guid}/files")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
-    [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(typeof(CommandResult), 500)]
+    [RequirePermission(PrintFarmerPermissions.PrinterFiles.Delete)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
     public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(request?.FileName))
-        {
-            return BadRequest(new CommandResult(false, "fileName is required"));
-        }
-
         if (!await CanAccessPrinterAsync(
                 id,
-                PrinterGroupAccessLevel.Submit,
+                PrinterGroupAccessLevel.Manage,
                 ct))
         {
             return NotFound(new CommandResult(false, "Printer not found."));
         }
 
-        PrinterActuationResult begin = await BeginPhysicalControlAsync(
-            id,
-            "printer_file_delete",
-            ct);
-        if (!begin.Success || begin.Lease is null)
-        {
-            return MapActuationDenial(begin);
-        }
-
-        try
-        {
-            bool success = await _printersService.DeletePrinterFileAsync(
-                id,
-                request.FileName,
-                ct);
-            await _physicalActuationService!.CompleteDirectAsync(
-                begin.Lease,
-                accepted: success,
-                failureCode: success ? null : "printer_file_delete_rejected",
-                ct: ct);
-            return success
-                ? Ok(new CommandResult(true, "File deleted successfully"))
-                : Conflict(new CommandResult(
-                    false,
-                    "The printer did not accept the file deletion."));
-        }
-        catch (OperationCanceledException)
-        {
-            await _physicalActuationService!.MarkDirectUnknownAsync(
-                begin.Lease,
-                "printer_file_delete_cancelled_after_send",
-                CancellationToken.None);
-            throw;
-        }
-        catch (Exception exception) when (!ct.IsCancellationRequested)
-        {
-            await _physicalActuationService!.MarkDirectUnknownAsync(
-                begin.Lease,
-                "printer_file_delete_outcome_unknown",
-                CancellationToken.None);
-            _logger.LogWarning(
-                exception,
-                "Printer file deletion outcome unknown for {PrinterId}",
-                id);
-            return StatusCode(
-                StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The file deletion outcome is unknown; reconciliation is required."));
-        }
+        // A fileName cannot identify a registered root, observation or irreversible consent.
+        // Keep this route fail-closed for old clients; never fall back to legacy boolean delete.
+        return Conflict(new CommandResult(
+            false,
+            "safe_delete_intent_required: use the printer-file catalog location delete and confirmation flow."));
     }
 
     /// <summary>

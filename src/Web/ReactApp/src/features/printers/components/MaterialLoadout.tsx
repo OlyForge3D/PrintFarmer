@@ -37,6 +37,8 @@ export interface FilamentMacroControl {
   /** Why the macros cannot run right now (offline, disabled, printing); `undefined` when they can. */
   blockedReason?: string;
   pending?: boolean;
+  supportsLoad?: boolean;
+  supportsUnload?: boolean;
   onAction: (action: 'load' | 'unload') => void | Promise<void>;
 }
 
@@ -248,13 +250,13 @@ export function MaterialLoadout({
           kind: 'load',
           label: slotActionLabel('load', t, view.id),
           onClick: () => void filamentControl.onAction('load'),
-          disabledReason: reason,
+          disabledReason: filamentControl.supportsLoad === false ? 'Filament loading is not supported' : reason,
         },
         {
           kind: 'unload',
           label: slotActionLabel('unload', t, view.id),
           onClick: () => void filamentControl.onAction('unload'),
-          disabledReason: reason,
+          disabledReason: filamentControl.supportsUnload === false ? 'Filament unloading is not supported' : reason,
         },
       );
     }

@@ -210,16 +210,34 @@ internal static class MoonrakerSensorMapper
             return null;
         }
 
-        (string type, string name) = Split(sensorId);
-        return type switch
+        return TryBuildNativeCommand(sensorId, quantity, value);
+    }
+
+    /// <summary>Builds a native write without re-querying firmware configuration or object membership.</summary>
+    internal static string? TryBuildNativeCommand(string? sensorId, PrinterSensorQuantity quantity, double value)
+    {
+        if (!IsSafeObjectName(sensorId) || !double.IsFinite(value))
         {
-            PartFan => BuildPartFanCommand((int)Math.Round(value, MidpointRounding.AwayFromZero)),
-            FanGeneric => string.Create(CultureInfo.InvariantCulture, $"SET_FAN_SPEED FAN={name} SPEED={value / 100d:0.###}"),
-            TemperatureFan => string.Create(CultureInfo.InvariantCulture, $"SET_TEMPERATURE_FAN_TARGET temperature_fan={name} target={value:0.##}"),
-            HeaterGeneric => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={name} TARGET={value:0.##}"),
-            HeaterBed => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
-            _ when IsExtruder(type) => string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
-            FilamentSwitchSensor or FilamentMotionSensor => $"SET_FILAMENT_SENSOR SENSOR={name} ENABLE={(value is 1 ? 1 : 0)}",
+            return null;
+        }
+
+        (string type, string name) = Split(sensorId!);
+        return (type, quantity) switch
+        {
+            (PartFan, PrinterSensorQuantity.FanSpeed) when name.Length == 0 && value is >= 0 and <= 100 =>
+                BuildPartFanCommand((int)Math.Round(value, MidpointRounding.AwayFromZero)),
+            (FanGeneric, PrinterSensorQuantity.FanSpeed) when name.Length > 0 && value is >= 0 and <= 100 =>
+                string.Create(CultureInfo.InvariantCulture, $"SET_FAN_SPEED FAN={name} SPEED={value / 100d:0.###}"),
+            (TemperatureFan, PrinterSensorQuantity.TargetTemperature) when name.Length > 0 && value >= 0 =>
+                string.Create(CultureInfo.InvariantCulture, $"SET_TEMPERATURE_FAN_TARGET temperature_fan={name} target={value:0.##}"),
+            (HeaterGeneric, PrinterSensorQuantity.TargetTemperature) when name.Length > 0 && value >= 0 =>
+                string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={name} TARGET={value:0.##}"),
+            (HeaterBed, PrinterSensorQuantity.TargetTemperature) when name.Length == 0 && value >= 0 =>
+                string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
+            (_, PrinterSensorQuantity.TargetTemperature) when name.Length == 0 && IsExtruder(type) && value >= 0 =>
+                string.Create(CultureInfo.InvariantCulture, $"SET_HEATER_TEMPERATURE HEATER={type} TARGET={value:0.##}"),
+            (FilamentSwitchSensor or FilamentMotionSensor, PrinterSensorQuantity.Enabled) when name.Length > 0 && value is 0 or 1 =>
+                $"SET_FILAMENT_SENSOR SENSOR={name} ENABLE={(value is 1 ? 1 : 0)}",
             _ => null,
         };
     }

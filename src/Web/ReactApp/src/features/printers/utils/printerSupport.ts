@@ -42,7 +42,7 @@ export function getPrinterSupport(
 ): PrinterSupport {
   return {
     supportsControlOperations: backendCapabilities?.supportsControlOperations ?? defaults?.supportsControlOperations ?? true,
-    supportsMovement: backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? true,
+    supportsMovement: backendCapabilities?.supportsRelativeMovement ?? backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? true,
     supportsTemperatureControl: backendCapabilities?.supportsTemperatureControl ?? defaults?.supportsTemperatureControl ?? true,
     supportsHistory: backendCapabilities?.supportsHistory ?? defaults?.supportsHistory ?? true,
     supportsFileList: backendCapabilities?.supportsFileList ?? defaults?.supportsFileList ?? true,

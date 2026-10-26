@@ -41,7 +41,6 @@ import {
 import {
   getPresetTargets,
   temperatureTargetLimitError,
-  getExtrudeMinTemp,
   EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
   EXTRUDE_SPEED_OPTIONS,
@@ -439,7 +438,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = !motion.blocked && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canDisableMotorsNow = !motion.blocked && backendCapabilities?.supportsDisableMotors !== false && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
@@ -450,8 +449,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
   const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
 
-  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
-  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
+  const canExtrudeNow = isOnline && isEnabled && !isPrinting && !isShutdown && backendCapabilities?.supportsExtrusion === true;
 
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
@@ -513,7 +511,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const result = await motion.execute({ kind: axes === 'xy' ? 'HomeXY' : axes === 'z' ? 'HomeZ' : 'HomeAll' });
       if (!result.success) {
         console.error('Failed to home:', result.error);
-        toast.error(result.error || 'Failed to home printer');
+        toast.error(result.error || result.message || 'Failed to home printer');
       }
     } catch (error) {
       console.error('Error homing:', error);
@@ -535,7 +533,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const result = await motion.execute({ kind: 'Jog', ...move });
       if (!result.success) {
         console.error(`Failed to move ${axis}:`, result.error);
-        toast.error(result.error || `Failed to move ${axis}`);
+        toast.error(result.error || result.message || `Failed to move ${axis}`);
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
@@ -550,7 +548,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });
-      if (!result.success) toast.error(result.error || 'Movement did not succeed');
+      if (!result.success) toast.error(result.error || result.message || 'Movement did not succeed');
     } catch (error) {
       toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
     } finally {
@@ -603,16 +601,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
     setFilamentActionPending(true);
     try {
-      const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
+      const methodMap = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
         console.error(`Failed to ${action} filament:`, result.error);
+        toast.error(result.error || result.message || `Failed to ${action} filament`);
       }
     } catch (error) {
       console.error(`Error during filament ${action}:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to ${action} filament`));
     } finally {
       setFilamentActionPending(false);
     }
@@ -623,6 +623,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     ? {
       blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
       pending: filamentActionPending,
+      supportsLoad: backendCapabilities?.supportsFilamentLoad,
+      supportsUnload: backendCapabilities?.supportsFilamentUnload,
       onAction: (action) => void handleFilamentAction(action),
     }
     : undefined;
@@ -642,7 +644,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
-        toast.error(result.error || `Failed to ${direction}`);
+        toast.error(result.error || result.message || `Failed to ${direction}`);
       }
     } catch (error) {
       console.error(`Error ${direction}ing:`, error);
@@ -1014,7 +1016,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHoming === false}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
                 padSize="small"
@@ -1050,7 +1052,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ArrowLeftIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingXY === false}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
                 padSize="small"
@@ -1092,7 +1094,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 Z+
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingZ === false}
                 onClick={() => handleHome('z')}
                 title="Home Z"
                 padSize="small"
@@ -1135,7 +1137,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('extrude')}
-                  title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                  title="Extrude filament"
                   aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >
@@ -1145,7 +1147,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('retract')}
-                  title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                  title="Retract filament"
                   aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >
@@ -1186,7 +1188,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
             disabled={movementActionPending || !canManualMoveNow}
             onMove={handleMove}
-            onMoveTo={handleMoveTo}
+            onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
           />
           <PrinterMotionHelp />
         </CollapsibleSection>

@@ -54,7 +54,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
     }
 
-    func test_combinedTargets_unsupportedIsRejectedOmittedIsSafeAndZeroNeedsNoMaximum() async throws {
+    func test_combinedTargets_rejectUnsupportedPreserveOmissionsAndDispatchWithoutMaximum() async throws {
         let service = MockPrinterService()
         let printer = try idlePrinter()
         let model = makeViewModel(printer: printer, capabilities: Self.noBedCaps, service: service)
@@ -67,10 +67,14 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         model.cancelPendingCommand()
         service.detailsToReturn = nil
         await model.loadHardware()
+        XCTAssertEqual(service.setTemperaturesCallCount, 1, "A limits read never replays a target")
         await model.setHeaterTargets(hotend: 200, bed: nil)
-        XCTAssertEqual(service.setTemperaturesCallCount, 1)
-        await model.setHeaterTargets(hotend: 0, bed: nil)
         XCTAssertEqual(service.setTemperaturesCallCount, 2)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        model.cancelPendingCommand()
+        await model.setHeaterTargets(hotend: 0, bed: nil)
+        XCTAssertEqual(service.setTemperaturesCallCount, 3)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         model.cancelPendingCommand()

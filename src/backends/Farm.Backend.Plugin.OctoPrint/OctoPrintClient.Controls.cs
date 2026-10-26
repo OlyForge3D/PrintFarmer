@@ -15,6 +15,7 @@ public partial class OctoPrintClient : ISupportsPrinterControlCapabilities, ISup
         SupportsHomingZ = true,
         SupportsHotendTemperature = true,
         SupportsBedTemperature = true,
+        SupportsTemperatureControlDuringPrint = true,
         SupportedAxes = Array.AsReadOnly(new[] { "x", "y", "z" }),
     };
 

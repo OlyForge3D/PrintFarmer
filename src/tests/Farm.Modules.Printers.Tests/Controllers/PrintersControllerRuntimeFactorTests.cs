@@ -29,7 +29,7 @@ public sealed class PrintersControllerRuntimeFactorTests
         _printers.Setup(s => s.FindByIdAsync(_id, It.IsAny<CancellationToken>())).ReturnsAsync(new Printer { Id = _id });
         _printers.Setup(s => s.SetSpeedFactorAsync(_id, 123.45, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _printers.Setup(s => s.SetFlowFactorAsync(_id, 123.45, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _capabilities.Setup(s => s.GetByPrinterIdAsync(_id, It.IsAny<CancellationToken>()))
+        _capabilities.Setup(s => s.GetControlCapabilitiesAsync(_id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(exists ? new PrinterBackendCapabilitiesDto(_id, "fixture", PrinterBackend.Moonraker)
             {
                 SupportsSpeedFactorControl = supported,
@@ -72,7 +72,7 @@ public sealed class PrintersControllerRuntimeFactorTests
         _printers.Verify(s => s.SetFlowFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()), speed ? Times.Never() : Times.Once());
         string operation = speed ? "set_speed_factor" : "set_flow_factor";
         _actuation.Verify(s => s.AcquireActiveAsync(_id, It.IsAny<string>(), operation, It.IsAny<CancellationToken>()), active ? Times.Once() : Times.Never());
-        _actuation.Verify(s => s.AcquireDirectAsync(_id, It.IsAny<string>(), operation, It.IsAny<CancellationToken>()), active ? Times.Never() : Times.Once());
+        _actuation.Verify(s => s.AcquireDirectAsync(_id, It.IsAny<string>(), operation, It.IsAny<CancellationToken>()), Times.Once());
         _actuation.Verify(s => s.CompleteDirectAsync(It.IsAny<PrinterActuationLease>(), true, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -95,15 +95,10 @@ public sealed class PrintersControllerRuntimeFactorTests
         }
 
         VerifyNoDispatch();
-        _capabilities.Verify(s => s.GetByPrinterIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _capabilities.Verify(s => s.GetControlCapabilitiesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
-    [InlineData("idle", false, true, true, 503)]
-    [InlineData("error", true, true, true, 409)]
-    [InlineData("shutdown", true, true, true, 409)]
-    [InlineData("starting", true, true, true, 409)]
-    [InlineData(null, true, true, true, 409)]
     [InlineData("idle", true, false, true, 501)]
     [InlineData("idle", true, true, false, 404)]
     public async Task SetRuntimeFactorAsync_UnavailableOrUnsupported_RejectsBothRoutes(
@@ -132,20 +127,39 @@ public sealed class PrintersControllerRuntimeFactorTests
         Assert.IsType<NotFoundResult>((await SetAsync(controller, true)).Result);
         Assert.IsType<NotFoundResult>((await SetAsync(controller, false)).Result);
         VerifyNoDispatch();
-        _capabilities.Verify(s => s.GetByPrinterIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _capabilities.Verify(s => s.GetControlCapabilitiesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
-    public async Task SetRuntimeFactorAsync_DisabledOrMaintenance_DispatchesNothing(bool enabled, bool maintenance)
+    public async Task SetRuntimeFactorAsync_DisabledOrMaintenance_DoesNotBlockOperatorControl(bool enabled, bool maintenance)
     {
         PrintersController controller = CreateController();
         _printers.Setup(s => s.FindByIdAsync(_id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = _id, IsEnabled = enabled, InMaintenance = maintenance });
-        Assert.IsType<ConflictObjectResult>((await SetAsync(controller, true)).Result);
-        Assert.IsType<ConflictObjectResult>((await SetAsync(controller, false)).Result);
-        VerifyNoDispatch();
+        Assert.True((await SetAsync(controller, true)).Value!.Success);
+        Assert.True((await SetAsync(controller, false)).Value!.Success);
+        _printers.Verify(s => s.SetSpeedFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()), Times.Once);
+        _printers.Verify(s => s.SetFlowFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("idle", false)]
+    [InlineData("error", true)]
+    [InlineData("shutdown", true)]
+    [InlineData("starting", true)]
+    [InlineData(null, true)]
+    public async Task SetRuntimeFactorAsync_StaleOrMissingStatus_DelegatesToNativeBackend(string? state, bool online)
+    {
+        PrintersController controller = CreateController(state, online);
+
+        Assert.True((await SetAsync(controller, true)).Value!.Success);
+        Assert.True((await SetAsync(controller, false)).Value!.Success);
+
+        _printers.Verify(s => s.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _printers.Verify(s => s.SetSpeedFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()), Times.Once);
+        _printers.Verify(s => s.SetFlowFactorAsync(_id, 123.45, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]

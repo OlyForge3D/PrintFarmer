@@ -1,4 +1,5 @@
-﻿using Farm.Modules.Abstractions;
+﻿using Farm.Infrastructure.Services.Gcode.PrinterFiles;
+using Farm.Modules.Abstractions;
 using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode.Safety;
@@ -36,6 +37,23 @@ public sealed class GcodeApiModule : IApiModule
     {
         // Gcode library service: queries, retrieval, deletion of harvested gcode files.
         _ = services.AddScoped<IGcodeFilesService, GcodeFilesService>();
+        _ = services.AddScoped<IPrinterFileAccessService, PrinterFileAccessService>();
+        _ = services.AddScoped<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
+        _ = services.AddScoped<PrinterFileCatalogService>();
+        _ = services.AddHostedService<PrinterFileIndexWorker>();
+        _ = services.AddScoped<PrinterFileCopyService>();
+        _ = services.AddScoped<IPrinterFileCopyService>(sp => sp.GetRequiredService<PrinterFileCopyService>());
+        _ = services.AddScoped<IPrinterFileLibraryIngest>(sp =>
+            (IPrinterFileLibraryIngest)sp.GetRequiredService<IGcodeFilesService>());
+        _ = services.AddScoped<PrinterFileCopyProcessor>();
+        _ = services.AddHostedService<PrinterFileCopyWorker>();
+        _ = services.AddScoped<PrinterFileQueueService>();
+        _ = services.AddScoped<IPrinterFileDeleteService, PrinterFileDeleteService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterFileQueueAdmission,
+            Farm.Infrastructure.Services.Queue.JobQueueService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IPrinterFileTargetValidator,
+            Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
+        _ = services.AddHostedService<PrinterFileQueueWorker>();
 
         // Gcode safety validation (thermal/geometry sanity checks ahead of print dispatch).
         services.TryAddSingleton<IGcodeSafetyValidator, GcodeSafetyValidator>();

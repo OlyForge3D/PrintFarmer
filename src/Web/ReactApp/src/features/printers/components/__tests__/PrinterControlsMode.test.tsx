@@ -25,7 +25,7 @@ function render(element: ReactElement) {
 }
 function MotionControls() {
   return <MovementControlSection
-    moveX="" moveY="" moveZ="" step={1} extrudeStep={5} extrudeSpeed={5} extrudeMinTemp={170}
+    moveX="" moveY="" moveZ="" step={1} extrudeStep={5} extrudeSpeed={5}
     movementActionPending={false} canMove canDisableMotors canSetStep canManualMove canExtrude
     onMoveXChange={vi.fn()} onMoveYChange={vi.fn()} onMoveZChange={vi.fn()} onStepChange={vi.fn()}
     onExtrudeStepChange={vi.fn()} onExtrudeSpeedChange={vi.fn()} onMove={vi.fn()}
