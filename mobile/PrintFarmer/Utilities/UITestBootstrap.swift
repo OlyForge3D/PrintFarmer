@@ -875,8 +875,12 @@ enum UITestBootstrap {
         ]
 
         if appStoreScreenshotDate != nil {
+            // Keep the pending-ready Bambu X1C and trim two printing cards so the iPhone Farm image
+            // shows "Ready to harvest" and "Ready to seed" above the fold (#3518).
             printers.removeAll {
-                !$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")
+                $0.id == issue3259PrusaXLID || $0.id == DemoData.bambuP1S_ID
+                    || ($0.id != DemoData.bambuX1C_ID
+                        && (!$0.isOnline || ["paused", "completed", "error"].contains($0.state?.lowercased() ?? "")))
             }
         }
 

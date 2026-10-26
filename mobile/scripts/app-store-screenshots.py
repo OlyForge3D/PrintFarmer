@@ -14,7 +14,8 @@ import tempfile
 
 MOBILE = Path(__file__).resolve().parents[1]
 RESOLVER = MOBILE.parent / "scripts/ci/resolve-ios-simulator.sh"
-SCREENS = ("01-farm", "02-printer-status", "03-queue", "04-filament", "05-scan")
+SCREENS = ("01-farm", "02-printer-status", "03-queue", "04-filament", "05-scan",
+           "06-printer-control", "07-printer-camera")
 DEVICES = {
     "iPhone": ("iPhone 17 Pro Max", "iPhone-17-Pro-Max", (1320, 2868)),
     "iPad": ("iPad Pro 13-inch (M5)", "iPad-Pro-13-inch-M5-12GB", (2064, 2752)),
@@ -28,10 +29,14 @@ def run(arguments, *, env=None):
 def resolve(family):
     name, device_type, _ = DEVICES[family]
     env = os.environ.copy()
+    # Optional dedicated simulator, e.g. "iPhone 17 Pro Max Store"; it must keep the class name prefix.
+    preferred = os.environ.get(f"APP_STORE_{family.upper()}_SIMULATOR", name)
+    if not preferred.startswith(name):
+        raise RuntimeError(f"APP_STORE_{family.upper()}_SIMULATOR must start with '{name}'.")
     # Prefix excludes smaller resolver fallbacks; a preference alone does not.
     env.update(IOS_SIMULATOR_DEVICE_FAMILY=family,
                IOS_SIMULATOR_DEVICE_PREFIX=name,
-               IOS_SIMULATOR_DEVICE_PREFERENCE=name)
+               IOS_SIMULATOR_DEVICE_PREFERENCE=preferred)
     env.pop("GITHUB_ENV", None)
     udid = run(["bash", str(RESOLVER), "--udid"], env=env).strip()
     devices = json.loads(run(["xcrun", "simctl", "list", "devices", "available", "-j"]))
