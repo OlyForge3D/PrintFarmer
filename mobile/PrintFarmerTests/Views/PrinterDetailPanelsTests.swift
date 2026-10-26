@@ -459,8 +459,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
             "printer.controls.sensor.rpi-fan.TargetTemperature.increase",
             "printer.controls.runtime.fan.increase", "printer.controls.runtime.fan.decrease",
             "printer.controls.hotend.increase", "printer.controls.hotend.decrease",
-            "printer.controls.bed.increase", "printer.controls.bed.decrease",
-            "printer.controls.heat.set-targets"
+            "printer.controls.bed.increase", "printer.controls.bed.decrease"
         ] {
             XCTAssertNil(tune.find(identifier), "\(identifier) must not render: Tune is Speed, Flow and babystep only")
         }
@@ -1839,10 +1838,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(Panel.isBabystepPending(raise, raise: false))
         XCTAssertFalse(Panel.isBabystepPending(speedUp, raise: true))
 
-        typealias Preheat = PreheatSubgroup.IndividualHeaterControls
-        XCTAssertTrue(Preheat.isHeaterTargetPending(.heaterTargets(hotend: 200, bed: 60)))
-        XCTAssertFalse(Preheat.isHeaterTargetPending(speedUp))
-        XCTAssertFalse(Preheat.isHeaterTargetPending(nil))
     }
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {

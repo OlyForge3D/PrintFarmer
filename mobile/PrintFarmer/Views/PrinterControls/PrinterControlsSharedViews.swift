@@ -47,12 +47,12 @@ struct PrinterControlCommandFeedback: View {
 }
 
 /// Inputs for writable non-fan sensor entries. Fans are not adjustable from the
-/// app; read-only entries and descriptors never get controls.
+/// app; read-only entries and descriptors never get controls. Each entry uses
+/// the shared `HeatTargetRow`, so Chamber and Heater Box rows match Nozzle and
+/// Bed exactly (#3547).
 struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
-    /// Heat passes its shared value column so sensor and heater steppers align.
-    var valueColumnWidth: CGFloat?
 
     var body: some View {
         let activeExtruderId = viewModel.printer.activeExtruderId
@@ -61,63 +61,76 @@ struct PrinterSensorControlRows: View {
                 && !PrinterSensorFormatting.steppableDescriptors($0, activeExtruderId: activeExtruderId).isEmpty
         }
         if !sensors.isEmpty {
-            ForEach(sensors) { sensor in
-                ForEach(PrinterSensorFormatting.steppableDescriptors(sensor, activeExtruderId: activeExtruderId), id: \.quantity) { descriptor in
-                    row(sensor: sensor, descriptor: descriptor)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(sensors) { sensor in
+                    ForEach(PrinterSensorFormatting.steppableDescriptors(sensor, activeExtruderId: activeExtruderId), id: \.quantity) { descriptor in
+                        row(sensor: sensor, descriptor: descriptor)
+                    }
                 }
             }
         }
+    }
+
+    static func title(sensor: PrinterSensor, quantity: SensorQuantity) -> String {
+        let name = PrinterSensorFormatting.displayName(sensor.displayName)
+        return quantity == .targetTemperature
+            ? name : "\(name) \(PrinterSensorFormatting.quantityTitle(quantity).lowercased())"
     }
 
     private func row(sensor: PrinterSensor, descriptor: SensorWritable) -> some View {
-        let reading = sensor.reading(descriptor.quantity)
-        let current = reading?.value.number
-        let canAdjust = viewModel.sensorControlUnavailableReason == nil
-        let title = "\(PrinterSensorFormatting.displayName(sensor.displayName)) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
+        let name = PrinterSensorFormatting.displayName(sensor.displayName)
+        let spokenTitle = "\(name) \(PrinterSensorFormatting.quantityTitle(descriptor.quantity).lowercased())"
+        let current = sensor.reading(descriptor.quantity)?.value.number
+        let measuredQuantity: SensorQuantity = descriptor.quantity == .targetTemperature ? .temperature : descriptor.quantity
         let id = "printer.controls.sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(title).font(.subheadline.weight(.medium))
-                Spacer(minLength: 0)
-                HStack(spacing: valueColumnWidth == nil ? 8 : 4) {
-                    if let current, canAdjust {
-                        stepButton("minus", "Decrease \(title)", id + ".decrease",
-                                   increasing: false, current: current, descriptor: descriptor, sensor: sensor)
-                    }
-                    Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
-                        .font(.subheadline.monospacedDigit())
-                        .frame(minWidth: valueColumnWidth)
-                        .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
-                        .accessibilityIdentifier(id + ".value")
-                    if let current, canAdjust {
-                        stepButton("plus", "Increase \(title)", id + ".increase",
-                                   increasing: true, current: current, descriptor: descriptor, sensor: sensor)
-                    }
+        let pending: Bool = {
+            if case .sensorControl(let sensorId, let quantity, _) = viewModel.pendingCommand?.kind {
+                return sensorId == sensor.id && quantity == descriptor.quantity
+            }
+            return false
+        }()
+        let unitSpoken = descriptor.unit.spoken
+        let allowsOff = descriptor.allowZero == true && descriptor.quantity == .targetTemperature
+        let key = "sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
+        let title = Self.title(sensor: sensor, quantity: descriptor.quantity)
+        return HeatTargetRow(
+            title: title,
+            measured: sensor.reading(measuredQuantity)?.value.number,
+            identifier: id,
+            fieldIdentifier: id + ".value",
+            fieldLabel: spokenTitle + (unitSpoken.isEmpty ? "" : " in \(unitSpoken)"),
+            fieldHint: "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
+                + (allowsOff ? "; zero switches it off." : "."),
+            stepLabel: { "\($0 ? "Increase" : "Decrease") \(spokenTitle)" },
+            unit: descriptor.unit,
+            currentTarget: current,
+            allowsOff: allowsOff,
+            isPending: pending,
+            queued: viewModel.queuedHeatTargets[key],
+            // At a limit the clamped step equals the base, so ± disables instead of resending it.
+            next: { base, increasing in
+                base.flatMap { base in
+                    let target = PrinterSensorFormatting.steppedTarget(current: base, increasing: increasing, descriptor: descriptor)
+                    return target == base ? nil : target
+                }
+            },
+            parse: { text in
+                guard let value = try ControlNumberInput.optional(text) else { return nil }
+                if let message = viewModel.sensorValueError(sensorId: sensor.id, quantity: descriptor.quantity, value: value) {
+                    throw PrinterControlError.invalidRequest(message)
+                }
+                return value
+            },
+            schedule: { value, delay in
+                viewModel.scheduleHeatTarget(
+                    key: key, title: title, value: value, after: delay,
+                    isSendable: { $0.canControlSensors && !$0.isPrintingOrPaused }
+                ) {
+                    await $0.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: value)
                 }
             }
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func stepButton(
-        _ symbol: String, _ label: String, _ identifier: String,
-        increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
-    ) -> some View {
-        let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
-        // Native 44 pt stepper, matching the other Heat controls.
-        return ControlActionButton(
-            title: "",
-            identifier: identifier,
-            accessibilityTitle: label,
-            compact: true,
-            systemImage: symbol,
-            minimumHeight: 44
-        ) {
-            Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
-        }
-        .frame(minWidth: 44, minHeight: 44)
-        .fixedSize()
-        .disabled(viewModel.pendingCommand != nil)
+        )
+        .disabled(!viewModel.canControlSensors || current == nil)
     }
 }
 

@@ -119,7 +119,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let commands: [(ControlCommand.Kind, ControlCommand.Section)] = [
             (.preheat(.pla, hotendTarget: 200, bedTarget: 60), .heat),
             (.heater(.hotend, target: 200), .heat),
-            (.heaterTargets(hotend: 200, bed: 60), .heat),
+            (.sensorControl(sensorId: "chamber", quantity: .targetTemperature, value: 45), .heat),
             (.home(axes: ["X", "Y", "Z"]), .motion),
             (.jog(axis: "X", distanceMm: 1), .motion),
             (.moveTo(x: 1, y: 1, z: 1, feedrateMmMin: nil), .motion),
@@ -700,7 +700,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
     func test_sharedLease_retentionMatchesDirectRequestOrHeaterObservationLifetime() async throws {
         let kinds: [ControlCommand.Kind] = [
             .heater(.hotend, target: 200),
-            .heaterTargets(hotend: 210, bed: 70),
+            .heater(.bed, target: 70),
             .preheat(.pla, hotendTarget: 200, bedTarget: 60),
             .jog(axis: "X", distanceMm: 1),
             .home(axes: ["X", "Y", "Z"]), .home(axes: ["X", "Y"]), .home(axes: ["Z"]),
@@ -718,11 +718,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             switch kind {
             case .heater(let heater, let target):
                 await original.setHeaterTarget(heater, target: target)
-                confirmed.hotendTarget = target
-            case .heaterTargets(let hotend, let bed):
-                await original.setHeaterTargets(hotend: hotend, bed: bed)
-                confirmed.hotendTarget = hotend
-                confirmed.bedTarget = bed
+                if heater == .hotend { confirmed.hotendTarget = target } else { confirmed.bedTarget = target }
             case .preheat(let preset, let hotend, let bed):
                 await original.preheat(preset)
                 confirmed.hotendTarget = hotend
@@ -2379,9 +2375,12 @@ final class PrinterControlsViewModelTests: XCTestCase {
             }
 
             if state != "starting" {
-                await vm.setHeaterTargets(hotend: 215, bed: 65)
+                await vm.setHeaterTarget(.hotend, target: 215)
                 XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 215, state)
+                vm.cancelPendingCommand()
+                await vm.setHeaterTarget(.bed, target: 65)
                 XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 65, state)
+                vm.cancelPendingCommand()
             }
         }
     }

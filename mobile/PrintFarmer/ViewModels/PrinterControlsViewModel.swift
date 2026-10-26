@@ -50,14 +50,14 @@ struct ControlCommand: Equatable, Sendable {
 
     var section: Section {
         switch kind {
-        case .preheat, .heater, .heaterTargets:
+        case .preheat, .heater, .sensorControl:
             return .heat
         case .home, .jog, .moveTo, .disableMotors,
              .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
             return .motion
         case .extrusion, .filament:
             return .material
-        case .transientZOffset, .sensorControl, .runtimeFactor:
+        case .transientZOffset, .runtimeFactor:
             return .runtime
         }
     }
@@ -72,7 +72,6 @@ struct ControlCommand: Equatable, Sendable {
         case home(axes: [String])
         case jog(axis: String, distanceMm: Double)
         case heater(Heater, target: Double)
-        case heaterTargets(hotend: Double?, bed: Double?)
         case moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)
         case disableMotors
         case extrusion(distanceMm: Double, feedrateMmMin: Int)
@@ -1247,12 +1246,41 @@ final class PrinterControlsViewModel: ObservableObject {
         printer.sensors.filter { !$0.writable.isEmpty }
     }
 
-    var sensorControlUnavailableReason: String? {
-        guard let capabilities else { return "Checking sensor control support…" }
+    /// Caption for sensor rows: genuine unsupported/access reasons only. Loading
+    /// and in-flight states disable the row instead of printing text (#3547).
+    var sensorRowMessage: String? {
+        guard let capabilities else { return nil }
         guard capabilities.supportsSensorControl else {
             return "Sensor control is unavailable on this printer."
         }
-        return runtimeControlAccessReason
+        return runtimeControlAccessReason(includingPending: false)
+    }
+
+    /// An in-flight request elsewhere never disables sensor rows, so a field
+    /// being edited keeps focus and its draft (#3547).
+    var canControlSensors: Bool {
+        capabilities?.supportsSensorControl == true
+            && runtimeControlAccessReason(includingPending: false) == nil
+    }
+
+    /// User-facing validation for a sensor value, or nil when it can be sent.
+    /// Shared by `setSensorValue` and the row's typed entry.
+    func sensorValueError(sensorId: String, quantity: SensorQuantity, value: Double) -> String? {
+        guard capabilities?.supportsSensorControl == true,
+              let sensor = printer.sensors.first(where: { $0.id == sensorId }),
+              let descriptor = sensor.descriptor(for: quantity) else {
+            return "Sensor control is unavailable for this entry."
+        }
+        let allowsOff = descriptor.allowZero == true && quantity == .targetTemperature
+        guard value.isFinite,
+              (value == 0 && allowsOff) || (value >= descriptor.min && value <= descriptor.max),
+              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
+            let step = descriptor.step ?? 0
+            return "Enter \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
+                + (allowsOff ? ", or 0 for off" : "")
+                + (step > 0 ? " in steps of \(step.formatted())." : ".")
+        }
+        return nil
     }
 
     func setSensorValue(sensorId: String, quantity: SensorQuantity, value: Double) async {
@@ -1262,13 +1290,7 @@ final class PrinterControlsViewModel: ObservableObject {
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
-        guard capabilities?.supportsSensorControl == true,
-              value.isFinite,
-              let sensor = printer.sensors.first(where: { $0.id == sensorId }),
-              let descriptor = sensor.descriptor(for: quantity),
-              ((value == 0 && descriptor.allowZero == true && quantity == .targetTemperature) ||
-                (value >= descriptor.min && value <= descriptor.max)),
-              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
+        guard sensorValueError(sensorId: sensorId, quantity: quantity, value: value) == nil else {
             setError(command: command, message: "Sensor control requires a supported writable entry and a value within its limits and step.", isRetryable: false)
             return
         }
@@ -1463,6 +1485,69 @@ final class PrinterControlsViewModel: ObservableObject {
         return nil
     }
 
+    // MARK: - Queued heat-row targets (#3547)
+
+    /// Targets a Heat row has accepted but not yet settled, keyed by row. The
+    /// model owns the queue so leaving the view never silently drops a send.
+    @Published private(set) var queuedHeatTargets: [String: Double] = [:]
+    private var heatTargetTasks: [String: Task<Void, Never>] = [:]
+    /// Counts commands that acquired the single-flight slot, so a queued send can tell rejection from dispatch.
+    private var beganCommandCount = 0
+    /// How long a sent target stays queued while readback catches up.
+    var heatTargetSettleGrace: Duration = .seconds(5)
+    /// Longest a queued target waits for another request's single-flight slot.
+    var heatTargetBusyTimeout: Duration = .seconds(30)
+
+    /// Queues `value` for the row `key`, replacing any earlier queued value,
+    /// and sends it after `delay`. Idle and access are re-checked right before
+    /// sending; a target that can no longer be sent is dropped with feedback
+    /// on the Heat panel instead of being sent into a print.
+    func scheduleHeatTarget(
+        key: String,
+        title: String,
+        value: Double,
+        after delay: Duration?,
+        isSendable: @escaping @MainActor (PrinterControlsViewModel) -> Bool = { $0.canControl },
+        apply: @escaping @MainActor (PrinterControlsViewModel) async -> Void
+    ) {
+        heatTargetTasks[key]?.cancel()
+        queuedHeatTargets[key] = value
+        heatTargetTasks[key] = Task { @MainActor [weak self] in
+            if let delay {
+                do { try await Task.sleep(for: delay) } catch { return }
+            }
+            var waited = Duration.zero
+            while let model = self, model.isExecuting, waited < model.heatTargetBusyTimeout {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                waited += .milliseconds(100)
+            }
+            guard let self, !Task.isCancelled else { return }
+            guard isSendable(self), !isExecuting else {
+                dropQueuedHeatTarget(key: key, title: title, value: value)
+                return
+            }
+            let began = beganCommandCount
+            await apply(self)
+            guard !Task.isCancelled else { return }
+            // A rejected or failed send has nothing to settle; release the row now.
+            if beganCommandCount == began || lastError != nil {
+                if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
+                return
+            }
+            do { try await Task.sleep(for: heatTargetSettleGrace) } catch { return }
+            if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
+        }
+    }
+
+    private func dropQueuedHeatTarget(key: String, title: String, value: Double) {
+        guard queuedHeatTargets[key] == value else { return }
+        queuedHeatTargets[key] = nil
+        let reason = blockedReason ?? (isExecuting ? Self.operationPendingReason : "Controls are unavailable.")
+        feedbackSection = .heat
+        lastError = nil
+        commandNotice = "\(title) target not sent. \(reason)"
+    }
+
     func setHeaterTarget(_ heater: Heater, target: Double) async {
         let command = ControlCommand(kind: .heater(heater, target: target), startedAt: clock())
         guard beginCommand(command) else { return }
@@ -1477,25 +1562,6 @@ final class PrinterControlsViewModel: ObservableObject {
                 printerId: printer.id, hotend: heater == .hotend ? target : nil,
                 bed: heater == .bed ? target : nil
             )
-        }
-    }
-
-    func setHeaterTargets(hotend: Double?, bed: Double?) async {
-        let command = ControlCommand(kind: .heaterTargets(hotend: hotend, bed: bed), startedAt: clock())
-        guard beginCommand(command) else { return }
-        defer { endCommand(command) }
-        guard hotend != nil || bed != nil else {
-            setError(command: command, message: "Enter at least one target. Blank leaves a heater unchanged.", isRetryable: false)
-            return
-        }
-        guard (hotend == nil || supports(.hotend)), (bed == nil || supports(.bed)) else {
-            setError(command: command, message: "A requested heater is unavailable. Refresh heater support before setting targets.", isRetryable: false)
-            return
-        }
-        guard validateTemperature(hotend, heater: .hotend, command: command),
-              validateTemperature(bed, heater: .bed, command: command) else { return }
-        await perform(command) { [printerService, printer] in
-            try await printerService.setTemperatures(printerId: printer.id, hotend: hotend, bed: bed)
         }
     }
 
@@ -1636,9 +1702,6 @@ final class PrinterControlsViewModel: ObservableObject {
                 hotendTarget: heater == .hotend ? target : nil,
                 bedTarget: heater == .bed ? target : nil, in: updated
             )
-        case let .heaterTargets(hotend, bed):
-            return (hotend != nil || bed != nil)
-                && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
         case let .transientZOffset(targetMm, _):
             guard let targetMm, let actual = updated.liveZOffsetMm, actual.isFinite,
                   previous.liveZOffsetMm != actual else { return false }
@@ -1730,13 +1793,17 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     private var runtimeControlAccessReason: String? {
+        runtimeControlAccessReason(includingPending: true)
+    }
+
+    private func runtimeControlAccessReason(includingPending: Bool) -> String? {
         if commandIdentity == nil { return "Controls require a registered server identity." }
         if !hasConfiguredAccess { return "Waiting for registered-server access confirmation." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
         if !runtimePrinterStateIsSupported { return "Printer is shut down." }
-        if isExecuting { return Self.operationPendingReason }
+        if includingPending, isExecuting { return Self.operationPendingReason }
         return nil
     }
 
@@ -1747,7 +1814,7 @@ final class PrinterControlsViewModel: ObservableObject {
             permitsActivePrint = true
         case .preheat:
             permitsActivePrint = false
-        case .heater, .heaterTargets:
+        case .heater:
             permitsActivePrint = supportsHeatDuringPrint
         default:
             permitsActivePrint = false
@@ -1774,6 +1841,16 @@ final class PrinterControlsViewModel: ObservableObject {
             return "Another controls view is waiting for this printer's request outcome."
         }
         return nil
+    }
+
+    /// `blockedReason` for heater rows: an in-flight request elsewhere only
+    /// disables the row; it never surfaces as a caption (#3547).
+    var heatRowBlockedReason: String? {
+        if pendingCommand == nil, isExecuting, printer.isOnline, !isPrintingOrPaused,
+           commandIdentity != nil, hasConfiguredAccess, isActive, accessCheck() == nil {
+            return nil
+        }
+        return blockedReason
     }
 
     var isPrintingOrPaused: Bool {
@@ -1842,6 +1919,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)
+        beganCommandCount += 1
         feedbackSection = command.section
         lastError = nil
         commandNotice = nil
