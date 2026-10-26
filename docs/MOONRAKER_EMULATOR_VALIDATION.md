@@ -234,6 +234,11 @@ The supported command subset is `SET_FAN_SPEED FAN=auxiliary SPEED=0.5`,
 `SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0` (also `SENSOR=encoder`).
 `SET_HEATER_TEMPERATURE` also updates the existing `extruder` and `heater_bed`
 targets, just like their legacy `M104`/`M140` paths.
+
+`M104` addresses the active extruder at command execution, including a preceding
+`T0`-`T3` selection in the same script in Snapmaker U1 mode. Its zero target
+cools only that tool; other nozzle and bed targets remain unchanged. Indexed
+extruders retain their configured temperature limits.
 Snapmaker U1 mode additionally exposes independent `extruder1`, `extruder2` and
 `extruder3` objects, with `T0`-`T3` selecting `toolhead.extruder`. Their heating
 minimum is 10 Celsius, with maxima 290, 280 and 270 Celsius respectively; zero
