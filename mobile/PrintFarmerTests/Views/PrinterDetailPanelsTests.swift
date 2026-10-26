@@ -307,9 +307,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
         failing.withLock { $0 = false }
         await detail.loadPrinter() // The error view's Retry action.
-        try await waitForHost("Retry success must replay the parked intent", in: controller.view) {
-            detail.printer != nil && router.pendingNFCReadyPrinterId == nil
+        try await waitForHost("Retry success must stage the ready confirmation", in: controller.view) {
+            detail.printer != nil && detail.showNFCReadyConfirmation
         }
+        await detail.waitForCanonicalLoadToBecomeIdle()
+        for _ in 0..<50 { await Task.yield() }
+        XCTAssertNil(router.pendingNFCReadyPrinterId, "A staged intent is consumed")
+        XCTAssertEqual(detail.reviewedReadyStatus?.nextJobName, "Deep link bracket")
+        let readyStatusRequests = fixture.api.capturedRequests.filter {
+            $0.url?.path == "/api/auto-dispatch/\(fixture.printer.id)/status"
+        }
+        XCTAssertEqual(readyStatusRequests.count, 1,
+                       "R3528-H02/B07: the ready confirmation is prepared exactly once")
     }
 
     func testRuntimeReadbackResolvesAfterControlPageIsOffscreen() async throws {
@@ -842,6 +851,12 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 } else {
                     data = capabilities
                 }
+            } else if path.hasPrefix("/api/auto-dispatch/") {
+                data = Data("""
+                {"printerId":"\(printerID)","printerName":"Deep link printer","enabled":true,
+                 "isReady":false,"queueDepth":1,"readyGateChecks":[],"state":"PendingReady",
+                 "bedPreConfirmed":false,"nextJobName":"Deep link bracket"}
+                """.utf8)
             } else if path.hasSuffix("/status") {
                 data = statusData
             } else if path.hasSuffix("/details") {

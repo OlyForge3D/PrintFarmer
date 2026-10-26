@@ -440,6 +440,7 @@ struct PrinterDetailView: View {
             jobService: services.jobService,
             maintenanceService: services.maintenanceService
         )
+        viewModel.configureAutoDispatch(services.autoPrintService)
         await viewModel.loadPrinter()
         guard !Task.isCancelled, services.activeServerGeneration == generation else {
             viewModel.clearCachedPrinter()
@@ -466,8 +467,13 @@ struct PrinterDetailView: View {
     private func consumePendingRouterIntents() async {
         guard !viewModel.isShowingCachedPrinter, viewModel.printer != nil else { return }
         if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
+            // Clear before awaiting so a concurrent replay cannot stage twice;
+            // restore it if preparation could not be staged.
             router.pendingNFCReadyPrinterId = nil
-            await viewModel.prepareReadyConfirmation()
+            let staged = await viewModel.prepareReadyConfirmation()
+            if !staged, router.pendingNFCReadyPrinterId == nil {
+                router.pendingNFCReadyPrinterId = pendingId
+            }
         }
         if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
             router.pendingFilamentSwap = nil

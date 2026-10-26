@@ -354,6 +354,65 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertNil(jobService.dispatchCalledWith, "Start Next Job must stay blocked while printing")
     }
 
+    func testRestartedPassRebaselinesLiveStateSoNewerRestStateWins() async throws {
+        // R3528 (Bishop): a pass restarted by a mid-pass request issues fresh
+        // REST reads. A live `state` seen during the superseded pass is older
+        // than those reads and must not override the restarted pass's result.
+        let queue = ShiftTaskCallbackQueue()
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID, callbackEnqueuer: queue.enqueuer)
+        vm.configure(printerService: mockService)
+        var printing = try TestData.decodePrinter()
+        printing.isOnline = true
+        printing.state = "printing"
+        var idle = printing
+        idle.state = "idle"
+        let getGate = ShiftTaskResultGate<Printer>()
+        let getScript = ScriptedCanonicalResult<Printer>([.gated(getGate), .value(idle)])
+        mockService.getHandler = { _ in try await getScript.next() }
+        mockService.statusHandler = { _ in throw NetworkError.invalidResponse }
+        let signalR = MockSignalRService()
+        vm.configureSignalR(signalR)
+
+        let first = Task { await vm.loadPrinter() }
+        await getScript.waitForCallCount(1)
+        await deliver(liveUpdate(id: TestData.testUUID, isOnline: true, state: "printing"), via: signalR, queue: queue)
+        let second = Task { await vm.loadPrinter() }
+        while !vm.hasPendingCanonicalLoadForTesting { await Task.yield() }
+
+        await getGate.succeed(printing)
+        await getScript.waitForCallCount(2)
+        await first.value
+        await second.value
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        XCTAssertEqual(vm.printer?.state, "idle",
+                       "The restarted pass's REST state is newer than the live update from the superseded pass")
+    }
+
+    func testPrepareReadyConfirmationReportsWhetherItStaged() async throws {
+        // R3528-H02: the view keeps the NFC-ready intent unless preparation
+        // actually staged (or surfaced an error for) the confirmation.
+        let vm = makeOperatorViewModel()
+        let staged = await vm.prepareReadyConfirmation()
+        XCTAssertFalse(staged, "No auto-dispatch service: nothing was staged")
+
+        let autoDispatch = MockAutoDispatchService()
+        autoDispatch.statusToReturn = AutoDispatchStatus(
+            printerId: TestData.testUUID, enabled: true, queueDepth: 1, state: "PendingReady"
+        )
+        vm.configureAutoDispatch(autoDispatch)
+        vm.isViewActive = false
+        let inactive = await vm.prepareReadyConfirmation()
+        XCTAssertFalse(inactive, "An inactive view must not stage")
+        XCTAssertNil(autoDispatch.getStatusCalledWith)
+
+        vm.isViewActive = true
+        let active = await vm.prepareReadyConfirmation()
+        XCTAssertTrue(active)
+        XCTAssertEqual(autoDispatch.getStatusCalledWith, TestData.testUUID)
+        XCTAssertTrue(vm.showNFCReadyConfirmation)
+        XCTAssertEqual(vm.reviewedReadyStatus?.state, "PendingReady")
+    }
+
     func testCanonicalUnknownStatusStateReplacesStaleReadyStateAndFailsClosed() async throws {
         var ready = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         ready.state = "ready"

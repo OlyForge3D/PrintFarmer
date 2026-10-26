@@ -662,17 +662,26 @@ final class PrinterDetailViewModel {
 
     // MARK: - Mark Ready (NFC Deep Link)
 
-    func prepareReadyConfirmation() async {
-        guard !isShowingCachedPrinter else { return }
-        guard isViewActive, let autoDispatchService else { return }
+    /// Returns `false` when the confirmation could not be staged (cached
+    /// printer, inactive view, or no auto-dispatch service) so the caller can
+    /// keep the deep-link intent for a later attempt. A server error is shown
+    /// to the user and counts as handled.
+    @discardableResult
+    func prepareReadyConfirmation() async -> Bool {
+        guard !isShowingCachedPrinter else { return false }
+        guard isViewActive, let autoDispatchService else { return false }
         do {
-            reviewedReadyStatus = try await autoDispatchService.getStatus(
+            let status = try await autoDispatchService.getStatus(
                 printerId: printerId
             )
+            guard isViewActive else { return false }
+            reviewedReadyStatus = status
             showNFCReadyConfirmation = true
         } catch {
+            guard isViewActive else { return false }
             setOperationError(error.localizedDescription, source: .prepareReadyConfirmation)
         }
+        return true
     }
 
     func markPrinterReady() async {
@@ -1160,7 +1169,11 @@ final class PrinterDetailViewModel {
             canonicalLoadRequested = false
             canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
             canonicalPendingRecoveryDemand = false
-            startCanonicalPass(authority: authority)
+            // The restarted pass issues fresh REST reads, so live updates seen
+            // during the superseded pass are older than its results. Re-baseline
+            // the live revisions; token, epoch and service identities are
+            // unchanged because isCanonicalLoadCurrent just held.
+            startCanonicalPass(authority: makeCanonicalAuthority(token: authority.token))
             return
         }
 

@@ -45,7 +45,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   A failed refresh shows a compact "Showing last known status" note with
   Retry. Switching servers never leaves the previous server's printer on
   screen, and a printer that comes online during a refresh keeps its live
-  status and loads its camera (#3507).
+  status and loads its camera. NFC "ready" deep links now show the Mark
+  Printer Ready confirmation from the printer page; previously the request
+  was dropped. A refresh that restarts mid-load no longer lets an older live
+  state override the newer server state (#3507).
 
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm
