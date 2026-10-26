@@ -1222,7 +1222,8 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         )
     }
 
-    func testCompactHeatStepperRequiresApplyAndUsesAuthenticatedAPI() {
+    /// #3547: ± applies that heater on its own after a short pause; there is no Go button.
+    func testCompactHeatStepperAppliesAfterPauseAndUsesAuthenticatedAPI() {
         openFarmCard("10000000-0001-0000-0000-000000000001")
 
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
@@ -1235,9 +1236,7 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(increase.waitForExistence(timeout: 8))
         increase.tap()
 
-        let apply = app.buttons["printer.controls.heat.set-targets"]
-        XCTAssertTrue(apply.waitForExistence(timeout: 5))
-        apply.tap()
+        XCTAssertFalse(app.buttons["printer.controls.heat.set-targets"].exists, "Targets apply without a Go button")
         // Success is silent (#3496): no progress or confirmation text, and no error banner.
         XCTAssertFalse(app.buttons["printer.controls.dismiss-error"].waitForExistence(timeout: 3))
         for phrase in ["Command pending", "Request accepted", "Matching telemetry", "Command accepted"] {
@@ -1665,7 +1664,7 @@ final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
             "\(sensor).value", "\(sensor).increase", "\(sensor).decrease",
             "printer.controls.sensor.fan.FanSpeed.value",
             "printer.controls.runtime.temperatures", "printer.controls.heat-group",
-            "printer.controls.hotend.increase", "printer.controls.bed.increase", "printer.controls.heat.set-targets"
+            "printer.controls.hotend.increase", "printer.controls.bed.increase"
         ] {
             XCTAssertFalse(any[id].exists, "\(id) must not render: Tune is Speed, Flow and babystep only")
         }
@@ -2002,7 +2001,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
                     userInfo: [NSLocalizedDescriptionKey: "\(printer.name) must show its live \(sensorID) sensor."]
                 )
             }
-            assertLabelContains(status, text: baselineValue.formatted(), timeout: 20)
+            assertFieldValueContains(status, text: baselineValue.formatted(), timeout: 20)
         }
 
         let temperatureUpdateCount = observer.updateCount
@@ -2033,7 +2032,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             "A sensor-only printerupdated must not alter non-sensor printer fields."
         )
         if sensorIsWritable {
-            assertLabelContains(status, text: temperatureValue.formatted(), timeout: 20)
+            assertFieldValueContains(status, text: temperatureValue.formatted(), timeout: 20)
             attachScreenshot(named: "\(printer.name) live Heat sensor readout")
         }
 
@@ -2059,7 +2058,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
         let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
-        assertLabelContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
+        assertFieldValueContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"
@@ -2106,7 +2105,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         let connectionStatus = app.buttons["connection-status-bar"]
         assertLabelContains(connectionStatus, text: "Connected", timeout: 45)
         if sensorIsWritable {
-            assertLabelContains(status, text: ", 0", timeout: 30)
+            assertFieldValue(status, anyOf: ["Off", "0"], timeout: 30)
         }
         attachScreenshot(named: "\(printer.name) reconnect resync")
     }
@@ -2147,6 +2146,21 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             object: element
         )
         XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed)
+    }
+
+    /// The sensor `.value` element is the tap-to-edit target field (#3547): its label is the
+    /// fixed spoken name, so the live reading is its value (the current target placeholder).
+    private func assertFieldValueContains(_ element: XCUIElement, text: String, timeout: TimeInterval) {
+        assertFieldValue(element, anyOf: [text], timeout: timeout)
+    }
+
+    private func assertFieldValue(_ element: XCUIElement, anyOf texts: [String], timeout: TimeInterval) {
+        let predicate = NSCompoundPredicate(orPredicateWithSubpredicates: texts.flatMap { text in
+            [NSPredicate(format: "value CONTAINS %@", text), NSPredicate(format: "placeholderValue CONTAINS %@", text)]
+        })
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed,
+                       "\(element.identifier) value \(String(describing: element.value)) must contain one of \(texts)")
     }
 
     private func attachScreenshot(named name: String) {
