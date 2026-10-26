@@ -2065,12 +2065,17 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCallCount, 0, "Capability resolution cannot replay a command")
     }
 
-    func test_instrumentPanel_activeJobsGateTuneAndHeatersByCapability() async throws {
+    /// #3540/#3545: active jobs gate Tune, and Tune is Speed, Flow and babystep
+    /// only. Heater targets never render during a job, even when the backend
+    /// advertises temperature control during a print.
+    func test_instrumentPanel_activeJobsGateTuneAndOmitHeatersRegardlessOfCapability() async throws {
         for (state, canTune) in [("starting", false), ("printing", true), ("paused", true)] {
             for supportsHeat in [false, true] {
                 let printer = try makePrinter(backend: .moonraker, state: state)
                 var caps = Self.layoutCaps
                 caps.supportsTemperatureControlDuringPrint = supportsHeat
+                caps.supportsSpeedFactorControl = true
+                caps.supportsFlowFactorControl = true
                 let service = makeService(caps: caps)
                 let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
                 await model.loadCapabilities()
@@ -2083,20 +2088,24 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 let tune = try XCTUnwrap(try panelControl("printer.controls.segment.tune", in: controller) as? UIButton)
                 XCTAssertEqual(tune.isEnabled, canTune, state)
                 XCTAssertEqual(tune.isSelected, canTune, state)
-                for heater in ["hotend", "bed"] {
-                    for action in ["target", "decrease", "increase"] {
-                        let identifier = "printer.controls.\(heater).\(action)"
-                        let control = nativeControls(in: controller.view).first {
-                            $0.accessibilityIdentifier == identifier
-                        }
-                        if canTune && supportsHeat {
-                            let control = try XCTUnwrap(control, "\(state) \(identifier)")
-                            XCTAssertTrue(control.isEnabled, "\(state) \(identifier)")
-                            XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, identifier)
-                        } else {
-                            XCTAssertNil(control, "\(state) must not expose unsupported Tune heater actions")
-                        }
+                if canTune {
+                    for identifier in [
+                        "printer.controls.runtime.speed-factor.increase", "printer.controls.runtime.speed-factor.decrease",
+                        "printer.controls.runtime.flow-factor.increase", "printer.controls.runtime.flow-factor.decrease",
+                        "printer.controls.runtime.z-offset.increase", "printer.controls.runtime.z-offset.decrease"
+                    ] {
+                        let control = try panelControl(identifier, in: controller)
+                        XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, "\(state) \(identifier)")
                     }
+                }
+                let heaterControls = ["hotend", "bed"].flatMap { heater in
+                    ["target", "decrease", "increase"].map { "printer.controls.\(heater).\($0)" }
+                } + ["printer.controls.heat.set-targets"]
+                for identifier in heaterControls {
+                    XCTAssertNil(
+                        nativeControls(in: controller.view).first { $0.accessibilityIdentifier == identifier },
+                        "\(state) heat=\(supportsHeat): \(identifier) must not render during an active job"
+                    )
                 }
                 XCTAssertEqual(service.setTemperaturesCallCount, 0)
                 XCTAssertNil(service.moveCalledWith)
