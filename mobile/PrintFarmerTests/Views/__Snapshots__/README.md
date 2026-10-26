@@ -22,7 +22,7 @@ was re-recorded and no precision was changed.
 | `test_snapshot_disabledState_printerStarting` | Unreachable setup banner, not current Control/Tune; volatile copy. | **Replace** with `test_instrumentPanel_activeJobsSelectTuneAndGateTemperaturesByCapability`, covering starting, printing and paused, with/without active-print heat support. |
 | `test_snapshot_lockoutBanner_printingState` | Same unreachable banner; redundant disabled-state pixels. | **Replace** with the active-job matrix plus production native Move/Heat/Tune selection and enablement assertions. No compatibility requirement justifies keeping either legacy banner golden. |
 | `test_controlSensorRows` | `PrinterSensorControlRows` is mounted by production Tune; actively evolving composition. | **Replace** pixels with named 44pt targets, bounds, accessible names, fan/read-only exclusion, exact chamber target dispatch, and absent actions for unsupported/offline/missing readings. |
-| `test_snapshot_printerDetailBorderedDestructiveControls_darkMode` | Shared bordered destructive style; `.eject` is mounted by `PrinterDetailView`'s filament action; stable, self-contained chrome. | **Retain** unchanged: dark theme contrast, destructive tint, icon/title/border and sibling spacing are visual properties. `.cancel` is a synthetic sibling style variant, not a claim that current Cancel uses this component. State/dispatch evidence comes from action tests, not this image. |
+| `test_snapshot_printerDetailBorderedDestructiveControls_darkMode` | Stable shared chrome; production `PrinterDetailView` filament action mounts `.eject`. | **Retain** unchanged: dark contrast, destructive tint, icon/title/border and sibling spacing are visual properties. `.cancel` is a synthetic style variant, not the current Cancel UI. Action tests cover state/dispatch. |
 
 `PrinterDetailView` mounts `PrinterInstrumentPanelControls`, not
 `PrinterControlsSection` or `PrinterSetupControlsContent`. The legacy ownership,
@@ -50,7 +50,8 @@ live backend/firmware proof, or exact-pixel gates**. Screenshot differences alon
 never fail them; focused state/geometry/interaction assertions still can.
 
 Existing card/legacy setup evidence in the same source file is also
-attachment-only. Those legacy captures must not be presented as the current
+attachment-only and now names its production component or legacy fixture
+explicitly. Those legacy captures must not be presented as the current
 Control screen. For full-screen provenance use the existing
 `PrinterDetailPanelsUITests`/`Issue3259ControlIdleUITests` capture methods in
 `PrintFarmerUITests/PrinterDetailPanelsUITests.swift`; they navigate the real

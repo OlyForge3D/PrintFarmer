@@ -35,7 +35,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
                         host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
                     }
                     let attachment = XCTAttachment(image: image)
-                    attachment.name = "printer-card-\(Int(width))-\(scheme)-\(size)-\(UIDevice.current.userInterfaceIdiom)"
+                    attachment.name = "review-only-production-PrinterCardView-mock-\(Int(width))-\(scheme)-\(size)-\(UIDevice.current.userInterfaceIdiom)"
                     attachment.lifetime = .keepAlways
                     add(attachment)
                     window.isHidden = true
@@ -834,7 +834,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
                 }
                 let attachment = XCTAttachment(image: image)
-                attachment.name = "essential-exact-\(Int(size.width))x\(Int(size.height))-page\(page)"
+                attachment.name = "review-only-legacy-PrinterSetupControlsContent-mock-\(Int(size.width))x\(Int(size.height))-page\(page)"
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
@@ -928,7 +928,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "essential-complete-controls-\(Int(size.width))-host-\(snapshotName ?? "iPhone")"
+            attachment.name = "review-only-legacy-PrinterSetupControlsContent-in-panels-host-mock-\(Int(size.width))-\(snapshotName ?? "iPhone")"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -975,7 +975,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                         XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
                     }
                     let attachment = XCTAttachment(image: image)
-                    attachment.name = "selector-\(Int(width))-\(textSize)-\(selection.rawValue)"
+                    attachment.name = "review-only-production-PrinterDetailPanelsHost-empty-page-fixtures-\(Int(width))-\(textSize)-\(selection.rawValue)"
                     attachment.lifetime = .keepAlways
                     add(attachment)
                 }
@@ -1216,7 +1216,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     XCTAssertTrue(captureController.view.drawHierarchy(in: captureController.view.bounds, afterScreenUpdates: true))
                 }
                 let attachment = XCTAttachment(image: image)
-                attachment.name = "command-feedback-\(name)-\(textSize)-\(snapshotName ?? "iPhone")"
+                attachment.name = "review-only-legacy-PrinterSetupControlsContent-command-feedback-mock-\(name)-\(textSize)-\(snapshotName ?? "iPhone")"
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
@@ -1412,7 +1412,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "unknown-heater-limits-native-controls"
+        attachment.name = "review-only-legacy-PrinterSetupControlsContent-mock-unknown-heater-limits"
         attachment.lifetime = .keepAlways
         add(attachment)
 
@@ -1522,7 +1522,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "explicit-precision-validation"
+        attachment.name = "review-only-legacy-PrinterSetupControlsContent-mock-precision-validation"
         attachment.lifetime = .keepAlways
         add(attachment)
 
@@ -1698,7 +1698,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "blocked-controls-\(reason)"
+            attachment.name = "review-only-legacy-PrinterSetupControlsContent-mock-blocked-\(reason)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -1765,7 +1765,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "issue-2598-\(snapshotName ?? "iPhone")-\(name)"
+        attachment.name = "review-only-legacy-PrinterSetupControlsContent-mock-\(snapshotName ?? "iPhone")-\(name)"
         attachment.lifetime = XCTAttachment.Lifetime.keepAlways
         add(attachment)
         XCTAssertTrue(model.supports(.hotend))
@@ -1867,7 +1867,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "issue-2599-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)-page\(page)"
+            attachment.name = "review-only-legacy-MaterialControls-mock-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)-page\(page)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -1920,7 +1920,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "verified-calibration-\(snapshotName ?? "iPhone")-\(step.rawValue)"
+            attachment.name = "review-only-legacy-PrinterZOffsetCalibrationControls-mock-\(snapshotName ?? "iPhone")-\(step.rawValue)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -2048,7 +2048,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
         defer { window.isHidden = true }
         try await settle(controller)
-        XCTAssertFalse(try panelControl("printer.controls.jog.x.positive", in: controller).isEnabled)
+        XCTAssertNil(model.capabilities)
+        XCTAssertTrue(model.isLoadingCapabilities)
+        XCTAssertNil(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.jog.x.positive"
+        }, "Unproven motion support must not expose jog actions")
         try panelControl("printer.controls.segment.heat", in: controller).sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertFalse(try panelControl("printer.controls.hotend.target", in: controller).isEnabled)
@@ -2093,7 +2097,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 }
                 XCTAssertEqual(service.setTemperaturesCallCount, 0)
                 XCTAssertNil(service.moveCalledWith)
-                attachPanelReview(controller, scenario: "\(state)-tune-heat-\(supportsHeat)")
+                attachPanelReview(controller, scenario: "\(state)-tune-synthetic-all-controls-heat-\(supportsHeat)")
             }
         }
     }
@@ -2142,8 +2146,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         }
     }
 
-    private func panelControl(_ identifier: String, in controller: UIViewController) throws -> UIControl {
-        try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityIdentifier == identifier }, identifier)
+    private func panelControl(
+        _ identifier: String, in controller: UIViewController,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws -> UIControl {
+        try XCTUnwrap(
+            nativeControls(in: controller.view).first { $0.accessibilityIdentifier == identifier },
+            identifier, file: file, line: line
+        )
     }
 
     private func attachPanelReview(_ controller: UIViewController, scenario: String) {
@@ -2151,7 +2161,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "review-only-production-PrinterInstrumentPanelControls-mock-\(scenario)-\(UIDevice.current.userInterfaceIdiom)"
+        let size = controller.view.bounds.size
+        attachment.name = "review-only-production-PrinterInstrumentPanelControls-mock-\(scenario)-\(Int(size.width))x\(Int(size.height))-\(UIDevice.current.userInterfaceIdiom)"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
