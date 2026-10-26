@@ -779,6 +779,8 @@ public interface IPrintersService
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>
+    /// <remarks>Legacy backend seam only. Never use for catalog or HTTP deletion;
+    /// use IPrinterFileDeleteService for authority, consent, fencing and durable outcomes.</remarks>
     /// <param name="id">The printer ID</param>
     /// <param name="filename">The filename to delete (backend-specific path format)</param>
     /// <param name="ct">Cancellation token</param>

@@ -1,0 +1,523 @@
+﻿using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using Farm.Backend.Plugin.FlashForge;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
+using Farm.Backend.Plugin.Sdcp;
+using Farm.Infrastructure.Contracts.Printers;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+
+namespace Farm.Backend.Plugins.Tests.Backends;
+
+public sealed class PrinterFileInventoryTests
+{
+    [Theory]
+    [InlineData("moonraker", """{"result":[]}""", "gcodes")]
+    [InlineData("octoprint", """{"files":[]}""", "local")]
+    [InlineData("prusalink", """{"storage_list":[{"path":"/usb/","available":true}]}""", "usb")]
+    public async Task GetFileInventoryAsync_ExplicitEmptyListing_ProvesCompleteEmptyRoot(
+        string backend, string json, string storageRoot)
+    {
+        using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath == "/api/v1/files/usb"
+            ? Reply("""{"type":"FOLDER","children":[]}""") : Reply(json));
+        using HttpClient http = new(handler);
+        ISupportsFileInventory client = CreateClient(backend, http);
+
+        PrinterFileInventoryResult result = await client.GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
+        Assert.Empty(result.Entries);
+        PrinterFileInventoryCoverage coverage = Assert.Single(result.Coverage);
+        Assert.Equal(storageRoot, coverage.StorageRoot);
+        Assert.Equal(string.Empty, coverage.Subtree);
+        Assert.True(coverage.IsComplete);
+        Assert.NotEqual(PrinterFileInventoryEvidence.None, coverage.Evidence);
+        Assert.All(handler.Methods, method => Assert.Equal(HttpMethod.Get, method));
+    }
+
+    [Theory]
+    [InlineData("moonraker")]
+    [InlineData("octoprint")]
+    [InlineData("prusalink")]
+    public async Task GetFileInventoryAsync_AuthenticationFailure_IsNotAnEmptySuccess(string backend)
+    {
+        using InventoryHandler handler = new(_ => Reply("secret body", HttpStatusCode.Forbidden));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http)
+            .GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Unavailable, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.AuthenticationRequired, result.Reason);
+        Assert.Empty(result.Coverage);
+        Assert.Empty(result.Entries);
+        Assert.Single(handler.Paths);
+    }
+
+    [Theory]
+    [InlineData("moonraker", "{}")]
+    [InlineData("moonraker", """{"result":null}""")]
+    [InlineData("moonraker", """{"result":[],"error":{"message":"failed"}}""")]
+    [InlineData("octoprint", "{}")]
+    [InlineData("octoprint", """{"files":[{"name":"folder","type":"folder"}]}""")]
+    [InlineData("prusalink", "{}")]
+    [InlineData("prusalink", """{"storage_list":null}""")]
+    [InlineData("moonraker", """{"result":[""")]
+    public async Task GetFileInventoryAsync_MalformedResponse_HasNoCompleteCoverage(string backend, string json)
+    {
+        using InventoryHandler handler = new(_ => Reply(json));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http)
+            .GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Unavailable, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.MalformedResponse, result.Reason);
+        Assert.DoesNotContain(result.Coverage, coverage => coverage.IsComplete);
+    }
+
+    [Theory]
+    [InlineData("moonraker", """{"result":[],"truncated":true}""")]
+    [InlineData("octoprint", """{"files":[],"next":"/next"}""")]
+    [InlineData("prusalink", """{"storage_list":[],"has_more":true}""")]
+    public async Task GetFileInventoryAsync_TruncatedListing_IsPartialNotComplete(string backend, string json)
+    {
+        using InventoryHandler handler = new(_ => Reply(json));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http)
+            .GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.IncompleteResponse, result.Reason);
+        Assert.DoesNotContain(result.Coverage, coverage => coverage.IsComplete);
+    }
+
+    [Theory]
+    [InlineData("moonraker")]
+    [InlineData("octoprint")]
+    [InlineData("prusalink")]
+    public async Task GetFileInventoryAsync_TransportFailure_IsUnavailable(string backend)
+    {
+        using InventoryHandler handler = new(_ => throw new HttpRequestException("sensitive diagnostic"));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http)
+            .GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Unavailable, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.TransportFailure, result.Reason);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Theory]
+    [InlineData("moonraker")]
+    [InlineData("octoprint")]
+    [InlineData("prusalink")]
+    public async Task GetFileInventoryAsync_MissingNativeEndpoint_IsExplicitlyUnsupported(string backend)
+    {
+        using InventoryHandler handler = new(_ => Reply("{}", HttpStatusCode.NotFound));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Unsupported, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.Unsupported, result.Reason);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Theory]
+    [InlineData("moonraker", false)]
+    [InlineData("moonraker", true)]
+    [InlineData("octoprint", false)]
+    [InlineData("octoprint", true)]
+    [InlineData("prusalink", false)]
+    [InlineData("prusalink", true)]
+    public async Task GetFileInventoryAsync_CancelOrDeadline_PreservesDistinctFailure(string backend, bool callerCancel)
+    {
+        using InventoryHandler handler = new(async (_, token) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return Reply("{}");
+        });
+        using HttpClient http = new(handler);
+        using CancellationTokenSource cancellation = new();
+        if (callerCancel)
+        {
+            cancellation.Cancel();
+        }
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http).GetFileInventoryAsync(
+            "http://printer/", options: new() { Deadline = TimeSpan.FromMilliseconds(30) }, ct: cancellation.Token);
+
+        Assert.Equal(callerCancel ? PrinterFileInventoryOutcome.Cancelled : PrinterFileInventoryOutcome.Unavailable,
+            result.Outcome);
+        Assert.Equal(callerCancel ? PrinterFileInventoryReason.Cancelled : PrinterFileInventoryReason.Timeout,
+            result.Reason);
+        Assert.Empty(result.Coverage);
+        Assert.Equal(callerCancel ? 0 : 1, handler.Paths.Count);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_MoonrakerListing_PreservesNestedCaseAndUnknownMetadataWithoutFanout()
+    {
+        using InventoryHandler handler = new(_ =>
+            Reply("""{"result":[{"path":"Folder/Part.gcode"},{"path":"folder/Part.gcode","size":0,"modified":1700000000}]}"""));
+        using HttpClient http = new(handler);
+        PrinterCredential credential = new() { ApiKey = "test-key" };
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http)
+            .GetFileInventoryAsync("http://printer/", credential);
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(["Folder/Part.gcode", "folder/Part.gcode"], result.Entries.Select(entry => entry.RelativePath));
+        Assert.Null(result.Entries[0].SizeBytes);
+        Assert.Null(result.Entries[0].ModifiedAt);
+        Assert.Null(result.Entries[0].ModifiedValue);
+        Assert.Equal(0, result.Entries[1].SizeBytes);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700000000), result.Entries[1].ModifiedAt);
+        Assert.Equal("1700000000", result.Entries[1].ModifiedValue);
+        Assert.Equal(["/server/files/list?root=gcodes"], handler.Paths);
+        Assert.Equal(["test-key"], handler.ApiKeys);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_OctoPrintRecursiveListing_RetainsPathsAndProvidedHashWithoutFanout()
+    {
+        using InventoryHandler handler = new(_ => Reply("""
+            {"files":[{"name":"Dir","path":"Dir","type":"folder","children":[
+              {"name":"Part.gcode","path":"Dir/Part.gcode","type":"machinecode","size":123,"date":1700000000,"hash":"provider-hash"},
+              {"name":"shape.stl","type":"model"}]}]}
+            """));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("octoprint", http)
+            .GetFileInventoryAsync("http://printer/", new() { ApiKey = "test-key" });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry file = Assert.Single(result.Entries);
+        Assert.Equal("local", file.StorageRoot);
+        Assert.Equal("Dir/Part.gcode", file.RelativePath);
+        Assert.Equal(123, file.SizeBytes);
+        Assert.Equal("provider-hash", file.ProviderHash);
+        Assert.Equal(["/api/files/local?recursive=true"], handler.Paths);
+        Assert.Equal(["test-key"], handler.ApiKeys);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDeclaredRoots_TraversesFoldersWithoutGuessingUsbOrDownloadingFiles()
+    {
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/Custom","available":true},{"path":"/Other","available":true}]}""",
+            "/api/v1/files/Custom" => """{"type":"FOLDER","children":[{"name":"Sub","type":"FOLDER"}]}""",
+            "/api/v1/files/Custom/Sub" => """{"type":"FOLDER","children":[{"name":"Part.bgcode","type":"PRINT_FILE","size":77}]}""",
+            "/api/v1/files/Other" => """{"type":"FOLDER","children":[{"name":"Part.bgcode","type":"PRINT_FILE","m_timestamp":1700000000}]}""",
+            _ => throw new InvalidOperationException("Unexpected metadata fanout or guessed storage")
+        }));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(["Custom", "Other"], result.Entries.Select(entry => entry.StorageRoot));
+        Assert.Equal(["Sub/Part.bgcode", "Part.bgcode"], result.Entries.Select(entry => entry.RelativePath));
+        Assert.Equal(77, result.Entries[0].SizeBytes);
+        Assert.Null(result.Entries[1].SizeBytes);
+        Assert.Null(result.Entries[0].ModifiedAt);
+        Assert.All(result.Coverage, coverage => Assert.True(coverage.IsComplete));
+        Assert.Equal(4, handler.Paths.Count);
+    }
+
+    [Theory]
+    [InlineData(1, PrinterFileInventoryReason.RequestLimit, 1)]
+    [InlineData(3, PrinterFileInventoryReason.DepthLimit, 2)]
+    public async Task GetFileInventoryAsync_PrusaTraversalBudget_NeverClaimsRootComplete(
+        int requests, PrinterFileInventoryReason expected, int expectedCalls)
+    {
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath == "/api/v1/storage"
+            ? """{"storage_list":[{"path":"/custom","available":true}]}"""
+            : """{"type":"FOLDER","children":[{"name":"Nested","type":"FOLDER"}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { MaxRequests = requests, MaxDepth = 0 });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(expected, result.Reason);
+        Assert.DoesNotContain(result.Coverage, coverage => coverage.IsComplete);
+        Assert.Equal(expectedCalls, handler.Paths.Count);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_EntryBudget_PreservesObservedFilesWithoutCompleteCoverage()
+    {
+        using InventoryHandler handler = new(_ =>
+            Reply("""{"result":[{"path":"first.gcode"},{"path":"second.gcode"}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http)
+            .GetFileInventoryAsync("http://printer/", options: new() { MaxEntries = 1 });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.EntryLimit, result.Reason);
+        Assert.Equal("first.gcode", Assert.Single(result.Entries).RelativePath);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_FractionalProviderTimestamp_RetainsRawPrecision()
+    {
+        using InventoryHandler handler = new(_ =>
+            Reply("""{"result":[{"path":"part.gcode","modified":1700000000.123456}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal("1700000000.123456", Assert.Single(result.Entries).ModifiedValue);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_InvalidOptionalMetadata_PreservesUnknownInsteadOfZero()
+    {
+        using InventoryHandler handler = new(_ =>
+            Reply("""{"result":[{"path":"part.gcode","size":"unknown","modified":1e1000}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry file = Assert.Single(result.Entries);
+        Assert.Null(file.SizeBytes);
+        Assert.Null(file.ModifiedAt);
+        Assert.Null(file.ModifiedValue);
+        Assert.Null(file.ProviderHash);
+        Assert.Null(file.ProviderVersion);
+    }
+
+    [Theory]
+    [InlineData("moonraker", """{"result":[{"path":"dir/file.gcode"}]}""")]
+    [InlineData("octoprint", """{"files":[{"name":"dir","type":"folder","children":[]}]}""")]
+    public async Task GetFileInventoryAsync_DepthBudget_HasNoCompleteCoverage(string backend, string json)
+    {
+        using InventoryHandler handler = new(_ => Reply(json));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient(backend, http)
+            .GetFileInventoryAsync("http://printer/", options: new() { MaxDepth = 0 });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.DepthLimit, result.Reason);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_UnavailableDeclaredStorage_IsNotCompleteEmptyStorage()
+    {
+        using InventoryHandler handler = new(_ =>
+            Reply("""{"storage_list":[{"path":"/usb","available":false}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.StorageUnavailable, result.Reason);
+        Assert.False(Assert.Single(result.Coverage).IsComplete);
+        Assert.Single(handler.Paths);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_ResponseSizeBudget_DoesNotReadUnboundedMetadata()
+    {
+        using InventoryHandler handler = new(_ =>
+        {
+            HttpResponseMessage response = Reply("""{"result":[]}""");
+            response.Content.Headers.ContentLength = 9 * 1024 * 1024;
+            return response;
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.NotEqual(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.ResponseLimit, result.Reason);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDigestReservation_RespectsWireRequestCeiling()
+    {
+        using InventoryHandler handler = new(_ => throw new InvalidOperationException("No network request was budgeted"));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", new() { ApiKey = "test-key" }, new() { MaxRequests = 1 });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
+        Assert.Empty(handler.Paths);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDigestChallenge_CountsRetryInsideRequestCeiling()
+    {
+        using InventoryHandler handler = new(request =>
+        {
+            if (request.Headers.Authorization?.Scheme == "Digest")
+            {
+                return Reply("""{"storage_list":[{"path":"/usb","available":true}]}""");
+            }
+
+            HttpResponseMessage challenge = Reply("{}", HttpStatusCode.Unauthorized);
+            challenge.Headers.WwwAuthenticate.ParseAdd("""Digest realm="printer", nonce="test-nonce", qop="auth" """);
+            return challenge;
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", new() { Username = "maker", Password = "test-password" }, new() { MaxRequests = 2 });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
+        Assert.Equal(["/api/v1/storage", "/api/v1/storage"], handler.Paths);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_DuplicateProviderIdentity_IsPartialWithNoAbsenceAuthority()
+    {
+        using InventoryHandler handler = new(_ => Reply("""{"result":[{"path":"part.gcode"},{"path":"part.gcode"}]}"""));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.InvalidPath, result.Reason);
+        Assert.Single(result.Entries);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_CallerCancelsDuringTraversal_StopsFurtherMetadataRequests()
+    {
+        using CancellationTokenSource cancellation = new();
+        using InventoryHandler handler = new(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/v1/storage")
+            {
+                return Reply("""{"storage_list":[{"path":"/custom","available":true}]}""");
+            }
+
+            cancellation.Cancel();
+            return Reply("""{"type":"FOLDER","children":[{"name":"Nested","type":"FOLDER"}]}""");
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http)
+            .GetFileInventoryAsync("http://printer/", ct: cancellation.Token);
+
+        Assert.Equal(PrinterFileInventoryOutcome.Cancelled, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.Cancelled, result.Reason);
+        Assert.Equal(2, handler.Paths.Count);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Theory]
+    [InlineData("../part.gcode")]
+    [InlineData("/part.gcode")]
+    [InlineData("dir\\part.gcode")]
+    [InlineData("dir//part.gcode")]
+    [InlineData("dir/./part.gcode")]
+    public async Task GetFileInventoryAsync_UnsafeProviderPath_HasNoCompleteCoverage(string path)
+    {
+        string json = System.Text.Json.JsonSerializer.Serialize(new { result = new[] { new { path } } });
+        using InventoryHandler handler = new(_ => Reply(json));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("moonraker", http).GetFileInventoryAsync("http://printer/");
+
+        Assert.Equal(PrinterFileInventoryReason.InvalidPath, result.Reason);
+        Assert.NotEqual(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Empty(result.Coverage);
+    }
+
+    [Fact]
+    public void ComputeIdentity_RootPathAndCaseVariations_UsesOrdinalNulDelimitedSha256()
+    {
+        string expected = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("Root\0Folder/Part.gcode")));
+
+        Assert.Equal(expected, PrinterInventoryPath.ComputeIdentity("/Root/", "Folder/Part.gcode"));
+        Assert.NotEqual(expected, PrinterInventoryPath.ComputeIdentity("root", "Folder/Part.gcode"));
+        Assert.NotEqual(expected, PrinterInventoryPath.ComputeIdentity("Root", "folder/Part.gcode"));
+        Assert.NotEqual(PrinterInventoryPath.ComputeIdentity("a", "b/c"),
+            PrinterInventoryPath.ComputeIdentity("a/b", "c"));
+    }
+
+    [Fact]
+    public void TryGetFileInventoryClientTyped_ActualCapabilityOnly_UnknownAndLegacyFailClosed()
+    {
+        Mock<IBackendClientFactory> clients = new();
+        Mock<IBackendClient> inventory = new();
+        inventory.As<ISupportsFileInventory>();
+        Mock<IBackendClient> legacy = new();
+        legacy.As<ISupportsFileList>();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker)).Returns(inventory.Object);
+        clients.Setup(factory => factory.GetClient(PrinterBackend.SDCP)).Returns(legacy.Object);
+        BackendCapabilityFactory factory = new(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+
+        Assert.True(factory.TryGetFileInventoryClientTyped(PrinterBackend.Moonraker, out ISupportsFileInventory? native));
+        Assert.Same(inventory.Object, native);
+        Assert.False(factory.TryGetFileInventoryClientTyped(PrinterBackend.SDCP, out _));
+        Assert.False(factory.TryGetFileInventoryClientTyped(PrinterBackend.Unknown, out _));
+        Assert.False(typeof(ISupportsFileInventory).IsAssignableFrom(typeof(SdcpClient)));
+        Assert.False(typeof(ISupportsFileInventory).IsAssignableFrom(typeof(FlashForgeClient)));
+    }
+
+    private static ISupportsFileInventory CreateClient(string backend, HttpClient http) => backend switch
+    {
+        "moonraker" => new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings()),
+        "octoprint" => new OctoPrintClient(http),
+        "prusalink" => new PrusaLinkClient(http),
+        _ => throw new ArgumentOutOfRangeException(nameof(backend))
+    };
+
+    private static HttpResponseMessage Reply(string json, HttpStatusCode status = HttpStatusCode.OK) =>
+        new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
+    private sealed class InventoryHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _respond;
+
+        public InventoryHandler(Func<HttpRequestMessage, HttpResponseMessage> respond)
+            : this((request, _) => Task.FromResult(respond(request)))
+        {
+        }
+
+        public InventoryHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond)
+        {
+            _respond = respond;
+        }
+
+        public List<string> Paths { get; } = [];
+
+        public List<HttpMethod> Methods { get; } = [];
+
+        public List<string?> ApiKeys { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Paths.Add(request.RequestUri!.PathAndQuery);
+            Methods.Add(request.Method);
+            ApiKeys.Add(request.Headers.TryGetValues("X-Api-Key", out IEnumerable<string>? keys) ? keys.Single() : null);
+            return _respond(request, cancellationToken);
+        }
+    }
+}

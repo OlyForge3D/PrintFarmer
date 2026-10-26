@@ -66,7 +66,7 @@ namespace Farm.Modules.Gcode.Services.Gcode;
 /// <param name="fileOperations">Service for stored file operations including thumbnail URL building.</param>
 /// <param name="telemetry">Telemetry service for recording file operation metrics.</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null.</exception>
-public class GcodeFilesService(
+public partial class GcodeFilesService(
     IGcodeRepository gcodeRepo,
     IUnitOfWork unitOfWork,
     ILogger<GcodeFilesService> logger,

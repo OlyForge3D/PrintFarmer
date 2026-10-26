@@ -23,6 +23,21 @@ public static class PrintFarmerPermissions
         "Design",
         "CA1034:Nested types should not be visible",
         Justification = "Nested permission groups keep the public resource:action contract discoverable and typo-resistant.")]
+    [SuppressMessage(
+        "Naming",
+        "CA1724:Type names should not match namespaces",
+        Justification = "PrinterFiles is the stable external resource group, distinct from the implementation namespace.")]
+    public static class PrinterFiles
+    {
+        public const string Read = "printer_files:read";
+        public const string Copy = "printer_files:copy";
+        public const string Delete = "printer_files:delete";
+    }
+
+    [SuppressMessage(
+        "Design",
+        "CA1034:Nested types should not be visible",
+        Justification = "Nested permission groups keep the public resource:action contract discoverable and typo-resistant.")]
     public static class Calibration
     {
         public const string Create = "calibration:create";

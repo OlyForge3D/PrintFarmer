@@ -21,6 +21,25 @@ public sealed class GcodeSafetyValidatorTests
 
     private static readonly GcodeSafetyValidator Validator = new();
 
+    [Theory]
+    [InlineData("M104 S0\nM140 S0\nM84\n", true)]
+    [InlineData("M140 S0\nM104 S0\nM18\n", true)]
+    [InlineData("M104 S0\nM84\n", false)]
+    [InlineData("M140 S0\nM84\n", false)]
+    [InlineData("TURN_OFF_HEATERS\nM104 S200\nM84\n", false)]
+    [InlineData("TURN_OFF_HEATERS\nM84\nG1 X1 Y1\n", false)]
+    [InlineData("TURN_OFF_HEATERS\nM84\nM17\n", false)]
+    public void Validate_StandardShutdownRequiresAllHeatersAndFinalMotorReset(string shutdown, bool accepted)
+    {
+        GcodeSafetyResult<GcodeSafetyReport> result = Validator.Validate(new(
+            GcodeSafetyLimits.Empty, "G28\n" + shutdown, GcodeSafetyCheckpoint.BeforeQueueing));
+        Assert.Equal(accepted, result.IsValid);
+        if (!accepted)
+        {
+            Assert.Contains(result.Problems, problem => problem.Code == GcodeSafetyProblemCodes.MissingFinalReset);
+        }
+    }
+
     [Fact]
     public void Validate_WithCleanNonCalibrationProgram_AndNoAllowlist_ReturnsCleanReport()
     {

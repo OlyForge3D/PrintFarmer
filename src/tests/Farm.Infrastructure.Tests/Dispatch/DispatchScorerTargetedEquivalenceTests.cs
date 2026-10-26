@@ -179,6 +179,29 @@ public class DispatchScorerTargetedEquivalenceTests : IDisposable
     /// have produced for that printer.
     /// </summary>
     [Fact]
+    public async Task CanQueueAsync_PreviewsHardGatesWithoutCreatingJobsOrRequiringIdle()
+    {
+        Printer busy = CreateTestPrinter("Busy catalog target", "PLA", isAvailable: false);
+        Printer incompatible = CreateTestPrinter("Incompatible catalog target", "PLA", supportedMaterials: ["PLA"]);
+        Printer disabled = CreateTestPrinter("Disabled catalog target", "PLA", isEnabled: false);
+        GcodeFile pla = CreateTestJob("PLA capture", "PLA").GcodeFile!;
+        GcodeFile abs = CreateTestJob("ABS capture", "ABS").GcodeFile!;
+        _context.Printers.AddRange(busy, incompatible, disabled);
+        _context.GcodeFiles.AddRange(pla, abs);
+        await _context.SaveChangesAsync();
+        var scorer = new DispatchScorer(_context, NullLogger<DispatchScorer>.Instance);
+
+        Assert.True(await scorer.CanQueueAsync(pla, busy.Id, default));
+        Assert.False(await scorer.CanQueueAsync(abs, incompatible.Id, default));
+        Assert.False(await scorer.CanQueueAsync(pla, disabled.Id, default));
+        Assert.False(await scorer.CanQueueAsync(pla, Guid.NewGuid(), default));
+        pla.PrinterModelId = incompatible.ModelId;
+        Assert.False(await scorer.CanQueueAsync(pla, busy.Id, default));
+        Assert.Empty(await _context.PrintJobs.ToArrayAsync());
+        Assert.Empty(await _context.QueueDispatchOutbox.ToArrayAsync());
+    }
+
+    [Fact]
     [Trait("Category", "Dispatch")]
     public async Task ScorePrinterForJobAsync_MatrixOfJobsAndPrinters_MatchesFleetScoringEntry()
     {
