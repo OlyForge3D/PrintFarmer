@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { HubConnectionState } from '@microsoft/signalr';
-import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import { printerSignalRService } from '@/services/printer-signalr';
-import { PrinterStatusUpdate, HarvestUpdateDto, JobQueueUpdateDto } from '@/types/api';
+import { PrinterStatusUpdate } from '@/types/api';
 
 // ============ Connection Hook ============
 
-export function useSignalRConnection(service: 'harvest' | 'printer' = 'harvest') {
-  // Choose which SignalR service to observe. Default preserves existing behavior (harvest).
-  const svc = service === 'printer' ? printerSignalRService : harvestSignalRService;
+export function useSignalRConnection() {
+  const svc = printerSignalRService;
 
   const [connectionState, setConnectionState] = useState<HubConnectionState>(
     svc.connectionState
@@ -19,7 +17,7 @@ export function useSignalRConnection(service: 'harvest' | 'printer' = 'harvest')
   );
 
   useEffect(() => {
-    // Connect on mount for the selected service
+    // Connect on mount
     svc.connect();
 
     // Subscribe to connection state changes - callback is async so it's allowed
@@ -31,7 +29,7 @@ export function useSignalRConnection(service: 'harvest' | 'printer' = 'harvest')
     return () => {
       unsubscribe();
     };
-  }, [service, svc]);
+  }, [svc]);
 
   return {
     connectionState,
@@ -197,185 +195,6 @@ export function usePrinterStatusUpdates(
     getPrinterStatus,
     clearPrinterStatus,
     clearAllStatuses,
-  };
-}
-
-// ============ Harvest Updates Hook ============
-
-export function useHarvestUpdates(
-  onUpdate?: (operationId: string, status: HarvestUpdateDto) => void,
-  operationIds?: string[]
-) {
-  const [latestUpdate, setLatestUpdate] = useState<{ operationId: string; status: HarvestUpdateDto } | null>(null);
-  const [harvestStatuses, setHarvestStatuses] = useState<Map<string, HarvestUpdateDto>>(new Map());
-
-  const onUpdateRef = useRef(onUpdate);
-  const operationIdsRef = useRef(operationIds);
-
-  useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
-
-  useEffect(() => {
-    operationIdsRef.current = operationIds;
-  }, [operationIds]);
-
-  useEffect(() => {
-  const handleHarvestUpdate = (operationId: string, status: HarvestUpdateDto) => {
-      if (operationIdsRef.current && !operationIdsRef.current.includes(operationId)) {
-        return;
-      }
-
-      setLatestUpdate({ operationId, status });
-      setHarvestStatuses(prev => new Map(prev.set(operationId, status)));
-      onUpdateRef.current?.(operationId, status);
-    };
-
-  const unsubscribe = harvestSignalRService.onHarvestUpdate(handleHarvestUpdate);
-
-    return unsubscribe;
-  }, []);
-
-  const getHarvestStatus = useCallback((operationId: string) => {
-    return harvestStatuses.get(operationId);
-  }, [harvestStatuses]);
-
-  return {
-    latestUpdate,
-    harvestStatuses,
-    getHarvestStatus,
-  };
-}
-
-// ============ Job Queue Updates Hook ============
-
-export function useJobQueueUpdates(onUpdate?: (update: JobQueueUpdateDto) => void) {
-  const [latestUpdate, setLatestUpdate] = useState<JobQueueUpdateDto | null>(null);
-
-  const onUpdateRef = useRef(onUpdate);
-
-  useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
-
-  useEffect(() => {
-  const handleJobQueueUpdate = (update: JobQueueUpdateDto) => {
-      setLatestUpdate(update);
-      onUpdateRef.current?.(update);
-    };
-
-  const unsubscribe = harvestSignalRService.onJobQueueUpdate(handleJobQueueUpdate);
-
-    return unsubscribe;
-  }, []);
-
-  return {
-    latestUpdate,
-  };
-}
-
-// ============ Printer Group Management Hook ============
-
-export function usePrinterGroup(printerId: string | null, autoJoin = true) {
-  const [isInGroup, setIsInGroup] = useState(false);
-  const printerIdRef = useRef(printerId);
-
-  useEffect(() => {
-    printerIdRef.current = printerId;
-  }, [printerId]);
-
-  const joinGroup = useCallback(async (id?: string) => {
-    const targetId = id || printerIdRef.current;
-    if (!targetId) return;
-
-    try {
-  await harvestSignalRService.joinPrinterGroup(targetId);
-      setIsInGroup(true);
-    } catch (error) {
-      console.error('Failed to join printer group:', error);
-    }
-  }, []);
-
-  const leaveGroup = useCallback(async (id?: string) => {
-    const targetId = id || printerIdRef.current;
-    if (!targetId) return;
-
-    try {
-  await harvestSignalRService.leavePrinterGroup(targetId);
-      setIsInGroup(false);
-    } catch (error) {
-      console.error('Failed to leave printer group:', error);
-    }
-  }, []);
-
-  const requestStatus = useCallback(async (id?: string) => {
-    const targetId = id || printerIdRef.current;
-    if (!targetId) return;
-
-    try {
-  await harvestSignalRService.requestPrinterStatus(targetId);
-    } catch (error) {
-      console.error('Failed to request printer status:', error);
-    }
-  }, []);
-
-  // Auto-join/leave when printerId changes
-  useEffect(() => {
-    if (!autoJoin || !printerId) return;
-
-    const handleJoin = async () => {
-      await joinGroup(printerId);
-    };
-
-    // Only join when connected
-  if (harvestSignalRService.isConnected) {
-      handleJoin();
-    }
-
-    return () => {
-      if (printerId) {
-        leaveGroup(printerId);
-      }
-    };
-  }, [printerId, autoJoin, joinGroup, leaveGroup]);
-
-  return {
-    isInGroup,
-    joinGroup,
-    leaveGroup,
-    requestStatus,
-  };
-}
-
-// ============ Comprehensive SignalR Hook ============
-
-export function useSignalR(options: {
-  printerIds?: string[];
-  harvestOperationIds?: string[];
-  autoConnect?: boolean;
-  onPrinterUpdate?: (status: PrinterStatusUpdate) => void;
-  onHarvestUpdate?: (operationId: string, status: HarvestUpdateDto) => void;
-  onJobQueueUpdate?: (update: JobQueueUpdateDto) => void;
-} = {}) {
-  const {
-    printerIds,
-    harvestOperationIds,
-    // autoConnect intentionally unused currently; reserved for future manual connect toggle
-    onPrinterUpdate,
-    onHarvestUpdate,
-    onJobQueueUpdate,
-  } = options;
-
-  const connection = useSignalRConnection();
-  const printerUpdates = usePrinterStatusUpdates(onPrinterUpdate, printerIds);
-  const harvestUpdates = useHarvestUpdates(onHarvestUpdate, harvestOperationIds);
-  const jobQueueUpdates = useJobQueueUpdates(onJobQueueUpdate);
-
-  return {
-    connection,
-    printerUpdates,
-    harvestUpdates,
-    jobQueueUpdates,
   };
 }
 

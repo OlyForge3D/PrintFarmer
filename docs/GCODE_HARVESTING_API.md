@@ -2,6 +2,12 @@
 
 This document provides detailed reference for the G-code Harvesting endpoints.
 
+The legacy backend endpoints and stored history remain supported. The React
+G-code harvest UI and client transport are retired; use **Files > On printers**
+(`/files?source=printers`, optionally `&printer=<printerId>`) instead. Its
+explicit Copy action handles one file at a time; it does not provide bulk
+import. Printed-parts inventory harvesting and mobile workflows are unchanged.
+
 ## Overview
 The harvesting system scans a printer's G-code storage, filters candidate files, records discovered files, and optionally imports them into the central library. Operations are asynchronous and progress is observable via the REST API or real-time SignalR events on `/hubs/printers`.
 
@@ -249,8 +255,9 @@ The canonical `/files` page separates **Local library** from **On printers**.
 The latter offers metadata search, availability/freshness filters, scan controls,
 and single-location actions. It never downloads remote previews or thumbnails.
 Captured local versions are links, not a claim that current remote bytes match.
-Legacy harvest remains available; part/stock harvesting and immediate printer
-Print controls are unchanged.
+Legacy harvest remains available through the backend, not the React UI. Copy
+handles one file at a time; bulk import is unavailable. Part/stock harvesting
+and immediate printer Print controls are unchanged.
 
 | Endpoint | Behavior |
 | --- | --- |

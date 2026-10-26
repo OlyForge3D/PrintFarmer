@@ -23,7 +23,6 @@ declare global {
     // separate flag from printerSignalR so enabling it can't self-enable the
     // console.debug gates that read printerSignalR.
     printerSignalRVerbose?: boolean;
-    harvestSignalR?: boolean;
     usePrinterStatusUpdates?: boolean;
     
     // Pages and features

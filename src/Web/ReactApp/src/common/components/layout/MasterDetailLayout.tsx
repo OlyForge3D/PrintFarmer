@@ -76,7 +76,7 @@ interface MasterDetailLayoutProps {
  * **Horizontal Mode:**
  * - Desktop: Shows master nav (tabs, top) + detail content (below, full-width)
  * - Mobile: Shows either master nav OR detail (stacked/toggled)
- * - Best for: Tabbed interfaces (Models/GCode/Harvest on FilesPage)
+ * - Best for: Tabbed interfaces with a shared detail panel
  *
  * Usage:
  * ```tsx

@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const moduleLoads = vi.hoisted(() => ({
   printablesBrowser: vi.fn(),
   printablesImport: vi.fn(),
-  harvest: vi.fn(),
   queue: vi.fn(),
   quickSlice: vi.fn(),
   remoteCatalog: vi.fn(),
@@ -44,13 +43,6 @@ vi.mock('@/features/models3d/components/PrintablesImportModal', async () => {
         <button type="button" onClick={onClose}>Close import</button>
       </Modal>
     ),
-  };
-});
-
-vi.mock('@/features/gcode/components/harvest/HarvestWizardModal', () => {
-  moduleLoads.harvest();
-  return {
-    HarvestWizardModal: () => <div role="dialog" aria-label="Harvest wizard mock" />,
   };
 });
 
@@ -125,7 +117,6 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 
 vi.mock('@/services/api', () => ({
   apiClient: {
-    getAllActiveHarvests: vi.fn().mockResolvedValue([]),
     getPrinterFileCatalog: moduleLoads.remoteCatalog.mockResolvedValue({
       items: [], total: 0, page: 1, pageSize: 25, printers: [], scans: [],
       automaticDiscoveryEnabled: false,
@@ -146,6 +137,26 @@ import { FilesPage } from '../FilesPage';
 
 describe('FilesPage lazy interactions', () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it.each(['/files/harvest?harvest=retired', '/files?tab=harvest'])(
+    'does not expose the retired harvest workflow at %s',
+    (url) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[url]}>
+            <FilesPage />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByText('Owned local browser')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Local library' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'On printers' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /harvest/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    },
+  );
 
   it('mounts one URL-selected source and stops remote polling on return to the local library', async () => {
     moduleLoads.remoteCatalog.mockClear();
@@ -190,7 +201,6 @@ describe('FilesPage lazy interactions', () => {
 
     expect(moduleLoads.printablesBrowser).not.toHaveBeenCalled();
     expect(moduleLoads.printablesImport).not.toHaveBeenCalled();
-    expect(moduleLoads.harvest).not.toHaveBeenCalled();
     expect(moduleLoads.queue).not.toHaveBeenCalled();
     expect(moduleLoads.quickSlice).not.toHaveBeenCalled();
 
@@ -211,13 +221,8 @@ describe('FilesPage lazy interactions', () => {
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     expect(screen.getByRole('button', { name: 'Printables' })).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
-    expect(await screen.findByRole('dialog', { name: 'Harvest wizard mock' })).toBeInTheDocument();
-    expect(moduleLoads.harvest).toHaveBeenCalledTimes(1);
-
     await user.click(screen.getByTitle('Queue for printing'));
     expect(await screen.findByRole('dialog', { name: 'Queue G-code mock' })).toBeInTheDocument();
     expect(moduleLoads.queue).toHaveBeenCalledTimes(1);
-
   });
 });
