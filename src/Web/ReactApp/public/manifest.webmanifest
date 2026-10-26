@@ -1,7 +1,7 @@
 {
   "name": "PrintFarmer",
   "short_name": "PrintFarmer",
-  "description": "Manage and monitor multiple 3D printers with real-time status, slicing, and harvesting.",
+  "description": "Manage and monitor multiple 3D printers with real-time status, slicing, and printer-file management.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#071426",

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
-import { Button, ProgressBar, Select } from '@/common/components/ui';
+import { Link } from 'react-router';
+import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
-import { signalRService, type SingleFileHarvestProgressEvent, type SingleFileHarvestCompleteEvent } from '@/services/harvest-signalr';
 import { usePrinterFileThumbnails } from '@/features/printers/hooks/usePrinterFileThumbnails';
 import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
@@ -17,11 +17,6 @@ interface PrinterFilesModalProps {
 type SortBy = 'name' | 'modified' | 'size';
 type SortOrder = 'asc' | 'desc';
 
-interface FileHarvestProgress {
-  percentComplete: number;
-  message: string;
-}
-
 export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModalProps) {
   const [files, setFiles] = useState<PrinterFileDto[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +26,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
-  const [harvestProgress, setHarvestProgress] = useState<Record<string, FileHarvestProgress>>({});
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print'; file: PrinterFileDto } | null>(null);
   const [visibleFileNames, setVisibleFileNames] = useState<Set<string>>(new Set());
   const thumbnailObserverRef = useRef<IntersectionObserver | null>(null);
@@ -158,48 +152,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     }
   }, [isOpen, printer.id, loadFiles]);
 
-  // Subscribe to single file harvest events
-  useEffect(() => {
-    if (!isOpen) return;
-
-    // Subscribe to progress events
-    const unsubscribeProgress = signalRService.onSingleFileHarvestProgress((evt: SingleFileHarvestProgressEvent) => {
-      setHarvestProgress(prev => ({
-        ...prev,
-        [evt.fileName]: {
-          percentComplete: evt.percentComplete,
-          message: evt.message
-        }
-      }));
-    });
-
-    // Subscribe to complete events
-    const unsubscribeComplete = signalRService.onSingleFileHarvestComplete((evt: SingleFileHarvestCompleteEvent) => {
-      // Mark as complete with 100% to show final state
-      setHarvestProgress(prev => ({
-        ...prev,
-        [evt.fileName]: {
-          percentComplete: 100,
-          message: evt.success ? 'Harvested successfully' : 'Harvest failed'
-        }
-      }));
-      
-      // Clear progress after showing completion for 3 seconds
-      setTimeout(() => {
-        setHarvestProgress(prev => {
-          const updated = { ...prev };
-          delete updated[evt.fileName];
-          return updated;
-        });
-      }, 3000); // Show completion for 3 seconds before clearing, prevents accidental re-clicks
-    });
-
-    return () => {
-      unsubscribeProgress();
-      unsubscribeComplete();
-    };
-  }, [isOpen]);
-
   const handleQueueFile = async (fileName: string) => {
     const file = files.find(f => f.fileName === fileName);
     if (file) {
@@ -259,19 +211,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
         window.URL.revokeObjectURL(downloadUrl);
       }
       setIsDownloading(null);
-    }
-  };
-
-  const handleHarvestFile = async (fileName: string) => {
-    try {
-      // Start a harvest operation for this specific file
-      await apiClient.harvestSingleFile(printer.id, fileName);
-      // Progress will be shown via the inline progress bar as SignalR events arrive
-      // No toast, no file list reload - progress bar handles UX feedback
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to start harvest';
-      toast.error(errorMessage);
-      console.error('Error harvesting file:', err);
     }
   };
 
@@ -345,6 +284,16 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       <p className="mb-4 text-sm text-pf-text-secondary">
         {printer.name} - Available G-code files
       </p>
+      <p className="mb-4 text-sm text-pf-text-secondary">
+        To copy a file to the library or manage printer locations, open{' '}
+        <Link
+          to={`/files?source=printers&printer=${encodeURIComponent(printer.id)}`}
+          onClick={onClose}
+          className="text-pf-accent underline"
+        >
+          Files &gt; On printers
+        </Link>.
+      </p>
       <div>
         {isLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -405,8 +354,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
 
                 <div className="space-y-2">
                   {getSortedFiles().map((file) => {
-                    const isHarvesting = harvestProgress[file.fileName];
-                    
                     return (
                       <div
                         key={file.fileName}
@@ -487,22 +434,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                               type="button"
                               variant="subtle"
                               size="sm"
-                              onClick={() => handleHarvestFile(file.fileName)}
-                              disabled={!!isHarvesting}
-                              className="!p-2 !h-auto disabled:opacity-50 disabled:cursor-not-allowed"
-                              title={isHarvesting ? 'Harvesting...' : 'Harvest file metadata'}
-                              aria-label={isHarvesting ? 'Harvesting...' : 'Harvest file metadata'}
-                              iconCenter={isHarvesting ? (
-                                <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <SaveIcon className="h-4 w-4" />
-                              )}
-                            ></Button>
-
-                            <Button
-                              type="button"
-                              variant="subtle"
-                              size="sm"
                               disabled
                               className="!p-2 !h-auto text-pf-error-text enabled:hover:bg-pf-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Use the printer-file catalog to safely delete a confirmed location"
@@ -512,20 +443,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                           </div>
                         </div>
 
-                        {/* Inline progress bar for harvest */}
-                        {isHarvesting && (
-                          <div className="mt-4 pt-4 border-t border-pf-border">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-xs text-pf-text-secondary font-medium">{isHarvesting.message}</span>
-                              <span className="text-xs font-semibold text-pf-accent">{isHarvesting.percentComplete}%</span>
-                            </div>
-                            <ProgressBar
-                              value={isHarvesting.percentComplete}
-                              ariaLabel="File harvest progress"
-                              showPercent={false}
-                            />
-                          </div>
-                        )}
                       </div>
                     );
                   })}

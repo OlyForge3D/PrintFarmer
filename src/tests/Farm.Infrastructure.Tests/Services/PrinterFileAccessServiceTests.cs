@@ -159,6 +159,202 @@ public sealed class PrinterFileAccessServiceTests
         Assert.False(await fixture.Service.CanActAsync(fixture.Actor, fixture.Source, PrinterFileAction.Delete));
     }
 
+    [Theory]
+    [InlineData("full")]
+    [InlineData("readOnly")]
+    [InlineData("copyNoDelete")]
+    [InlineData("deleteDenied")]
+    [InlineData("noRead")]
+    [InlineData("admin")]
+    [InlineData("adminExpired")]
+    [InlineData("inactiveUser")]
+    [InlineData("libraryRevoked")]
+    [InlineData("libraryReadDenied")]
+    public async Task CatalogAuthority_MixedLivePermissions_MatchesSingleResourceChecks(string profile)
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        await fixture.SeedAccessMatrixAsync();
+        fixture.Grants.AddRange([("printer_files", "read"), ("printer_files", "copy"), ("printer_files", "delete")]);
+        switch (profile)
+        {
+            case "readOnly":
+                fixture.Grants.RemoveAll(x => x.Resource == "printer_files" && x.Action != "read");
+                break;
+            case "copyNoDelete":
+                fixture.Grants.Remove(("printer_files", "delete"));
+                break;
+            case "deleteDenied":
+                fixture.Grants.Add(("printer_files", "admin"));
+                fixture.Denies.Add(("printer_files", "delete"));
+                break;
+            case "noRead":
+                fixture.Grants.Remove(("printer_files", "read"));
+                break;
+            case "admin":
+            case "adminExpired":
+                fixture.Grants.Clear();
+                fixture.Db.UserRoles.Add(new UserRole
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = fixture.Actor,
+                    Role = new Role { Id = Guid.NewGuid(), Name = "farm_admin", IsActive = true },
+                    IsActive = true,
+                    ExpiresAt = profile == "adminExpired" ? DateTime.UtcNow.AddDays(-1) : null,
+                });
+                break;
+            case "inactiveUser":
+                (await fixture.Db.Users.SingleAsync()).IsActive = false;
+                break;
+            case "libraryRevoked":
+                fixture.Grants.Remove(("gcode_library", "create"));
+                break;
+            case "libraryReadDenied":
+                fixture.Denies.Add(("gcode_library", "read"));
+                break;
+        }
+
+        await fixture.Db.SaveChangesAsync();
+        await AssertCatalogMatchesSingleChecksAsync(fixture);
+    }
+
+    [Fact]
+    public async Task CatalogAuthority_RoleRevokedBetweenRequests_RecomputesLiveAuthority()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        await fixture.SeedAccessMatrixAsync();
+        fixture.Grants.AddRange([("printer_files", "read"), ("printer_files", "copy"), ("printer_files", "delete")]);
+        var resources = new QueueResourceAuthorizationService(fixture.Db);
+        var service = new PrinterFileAccessService(fixture.Db, fixture.Users.Object, resources);
+        Guid[] ids = await fixture.Db.Printers.Select(x => x.Id).ToArrayAsync();
+        PrinterFileCatalogAuthority before = await service.GetCatalogAuthorityAsync(fixture.Actor, ids);
+
+        Role manager = await fixture.Db.Roles.SingleAsync(x => x.Name == "manager");
+        manager.IsActive = false;
+        await fixture.Db.SaveChangesAsync();
+
+        PrinterFileCatalogAuthority after = await service.GetCatalogAuthorityAsync(fixture.Actor, ids);
+        Assert.True(before.Manageable.Count > after.Manageable.Count);
+        await AssertCatalogMatchesSingleChecksAsync(fixture);
+    }
+
+    [Theory]
+    [InlineData("user")]
+    [InlineData("admin")]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData(QueueActorIdentity.AutoDispatch)]
+    [InlineData(QueueActorIdentity.Scheduler)]
+    public async Task ResourceFilters_MixedScopesAndActors_MatchSingleResourceChecks(string actor)
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync();
+        await fixture.SeedAccessMatrixAsync();
+        if (actor == "admin")
+        {
+            fixture.Db.UserRoles.Add(new UserRole
+            {
+                Id = Guid.NewGuid(),
+                UserId = fixture.Actor,
+                Role = new Role { Id = Guid.NewGuid(), Name = "farm_admin", IsActive = true },
+                IsActive = true,
+            });
+            await fixture.Db.SaveChangesAsync();
+        }
+
+        string subject = actor is "user" or "admin" ? fixture.Actor.ToString() : actor;
+        var resources = new QueueResourceAuthorizationService(fixture.Db);
+        Guid[] printers = [.. await fixture.Db.Printers.Select(x => x.Id).ToListAsync(), Guid.NewGuid(), fixture.Source];
+        Guid[] files = [.. await fixture.Db.GcodeFiles.Select(x => x.Id).ToListAsync(), Guid.NewGuid()];
+        foreach (PrinterGroupAccessLevel level in Enum.GetValues<PrinterGroupAccessLevel>())
+        {
+            var expectedPrinters = new HashSet<Guid>();
+            var expectedFiles = new HashSet<Guid>();
+            foreach (Guid id in printers)
+            {
+                if (await resources.CanActorAccessPrinterAsync(subject, id, level))
+                {
+                    expectedPrinters.Add(id);
+                }
+            }
+
+            foreach (Guid id in files)
+            {
+                if (await resources.CanActorAccessGcodeFileAsync(subject, id, level))
+                {
+                    expectedFiles.Add(id);
+                }
+            }
+
+            Assert.Equal(expectedPrinters.Order(),
+                (await resources.FilterActorAccessiblePrinterIdsAsync(subject, printers, level)).Order());
+            Assert.Equal(expectedFiles.Order(),
+                (await resources.FilterActorAccessibleGcodeFileIdsAsync(subject, files, level)).Order());
+            Assert.Empty(await resources.FilterActorAccessiblePrinterIdsAsync(subject, [], level));
+            Assert.Empty(await resources.FilterActorAccessibleGcodeFileIdsAsync(subject, [], level));
+        }
+    }
+
+    private static async Task AssertCatalogMatchesSingleChecksAsync(Fixture fixture)
+    {
+        var resources = new QueueResourceAuthorizationService(fixture.Db);
+        var service = new PrinterFileAccessService(fixture.Db, fixture.Users.Object, resources);
+        Guid[] printers = [.. await fixture.Db.Printers.Select(x => x.Id).ToListAsync(), Guid.NewGuid(), fixture.Source];
+        var readable = new HashSet<Guid>();
+        var manageable = new HashSet<Guid>();
+        var copyable = new HashSet<Guid>();
+        var deletable = new HashSet<Guid>();
+        foreach (Guid id in printers)
+        {
+            if (await service.CanReadAsync(fixture.Actor, id))
+            {
+                readable.Add(id);
+                if (await resources.CanActorAccessPrinterAsync(fixture.Actor.ToString(), id, PrinterGroupAccessLevel.Manage))
+                {
+                    manageable.Add(id);
+                }
+            }
+
+            if (await service.CanActAsync(fixture.Actor, id, PrinterFileAction.Copy))
+            {
+                copyable.Add(id);
+            }
+
+            if (await service.CanActAsync(fixture.Actor, id, PrinterFileAction.Delete))
+            {
+                deletable.Add(id);
+            }
+        }
+
+        PrinterFileCatalogAuthority actual = await service.GetCatalogAuthorityAsync(fixture.Actor, printers);
+        Assert.Equal(readable.Order(), actual.Readable.Order());
+        Assert.Equal(manageable.Order(), actual.Manageable.Order());
+        Assert.Equal(copyable.Order(), actual.Copyable.Order());
+        Assert.Equal(deletable.Order(), actual.Deletable.Order());
+        Assert.Empty((await service.GetCatalogAuthorityAsync(fixture.Actor, [])).Readable);
+        Assert.Empty((await service.GetCatalogAuthorityAsync(Guid.Empty, printers)).Readable);
+
+        Guid[] files = [.. await fixture.Db.GcodeFiles.Select(x => x.Id).ToListAsync(), Guid.NewGuid()];
+        foreach (PrinterGroupAccessLevel level in Enum.GetValues<PrinterGroupAccessLevel>())
+        {
+            var expectedFiles = new HashSet<Guid>();
+            foreach (Guid id in files)
+            {
+                if (await service.CanAccessLocalAsync(fixture.Actor, id, level))
+                {
+                    expectedFiles.Add(id);
+                }
+            }
+
+            Assert.Equal(expectedFiles.Order(),
+                (await service.FilterAccessibleLocalAsync(fixture.Actor, files, level)).Order());
+            Assert.Empty(await service.FilterAccessibleLocalAsync(fixture.Actor, [], level));
+            Assert.Empty(await service.FilterAccessibleLocalAsync(Guid.Empty, files, level));
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public Fixture()
@@ -200,6 +396,84 @@ public sealed class PrinterFileAccessServiceTests
             Db.Printers.AddRange(
                 new Printer { Id = Source, Name = "Source", ServerUrl = "http://source.invalid", IsEnabled = true },
                 new Printer { Id = Target, Name = "Target", ServerUrl = "http://target.invalid", IsEnabled = true });
+            await Db.SaveChangesAsync();
+        }
+
+        public async Task SeedAccessMatrixAsync()
+        {
+            var folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+            var owned = new CalibrationProject { Id = Guid.NewGuid(), Name = "owned", OwnerUserId = Actor };
+            var foreign = new CalibrationProject { Id = Guid.NewGuid(), Name = "foreign", OwnerUserId = Guid.NewGuid() };
+            Db.AddRange(folder, owned, foreign);
+            foreach ((string name, PrinterGroupAccessLevel level) in new[]
+                     {
+                         ("viewer", PrinterGroupAccessLevel.View),
+                         ("submitter", PrinterGroupAccessLevel.Submit),
+                         ("manager", PrinterGroupAccessLevel.Manage),
+                         ("expired", PrinterGroupAccessLevel.Manage),
+                         ("inactiveRole", PrinterGroupAccessLevel.Manage),
+                         ("inactiveAssignment", PrinterGroupAccessLevel.Manage),
+                         ("foreign", PrinterGroupAccessLevel.Manage),
+                         ("ruleless", PrinterGroupAccessLevel.Manage),
+                         ("ungrouped", PrinterGroupAccessLevel.Manage),
+                     })
+            {
+                Guid? groupId = null;
+                if (name != "ungrouped")
+                {
+                    var group = new PrinterGroup { Id = Guid.NewGuid(), Name = name };
+                    groupId = group.Id;
+                    Db.Add(group);
+                    if (name != "ruleless")
+                    {
+                        var role = new Role { Id = Guid.NewGuid(), Name = name, IsActive = name != "inactiveRole" };
+                        Db.AddRange(role, new PrinterGroupAccess
+                        {
+                            Id = Guid.NewGuid(),
+                            PrinterGroupId = group.Id,
+                            RoleId = role.Id,
+                            AccessLevel = level,
+                        });
+                        if (name != "foreign")
+                        {
+                            Db.UserRoles.Add(new UserRole
+                            {
+                                Id = Guid.NewGuid(),
+                                UserId = Actor,
+                                RoleId = role.Id,
+                                IsActive = name != "inactiveAssignment",
+                                ExpiresAt = name == "expired" ? DateTime.UtcNow.AddDays(-1) : null,
+                            });
+                        }
+                    }
+                }
+
+                foreach (bool enabled in new[] { true, false })
+                {
+                    Db.Printers.Add(new Printer
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = $"{name}-{enabled}",
+                        ServerUrl = $"http://{name}.invalid",
+                        PrinterGroupId = groupId,
+                        IsEnabled = enabled,
+                    });
+                }
+
+                foreach (Guid? projectId in new Guid?[] { null, owned.Id, foreign.Id })
+                {
+                    Db.GcodeFiles.Add(new GcodeFile
+                    {
+                        Id = Guid.NewGuid(),
+                        FileName = $"{name}.gcode",
+                        FileHash = Guid.NewGuid().ToString(),
+                        FolderId = folder.Id,
+                        PrinterGroupId = groupId,
+                        CalibrationProjectId = projectId,
+                    });
+                }
+            }
+
             await Db.SaveChangesAsync();
         }
 

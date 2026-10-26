@@ -13,7 +13,6 @@ interface GcodeUploadModalProps {
     onProgress?: (fileName: string, progress: number) => void,
     onItemComplete?: (fileName: string, status: 'done' | 'error', error?: string) => void
   ) => void;
-  harvestId?: string;
   printerId?: string;
 }
 

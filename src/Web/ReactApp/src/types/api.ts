@@ -6,19 +6,21 @@ export type PrinterFileOperationState =
   | 'Enqueueing' | 'Queued' | 'AwaitingDeleteConfirmation' | 'SendingDelete'
   | 'ReconcilingDelete' | 'Deleted' | 'Blocked' | 'Failed' | 'Cancelled';
 
+// Printer-file DTOs: the API omits null properties (WhenWritingNull), so nullable
+// fields may be absent on the wire. Guard them with `== null`, never `=== null`.
 export interface PrinterFileOperation {
   id: string;
   revision: number;
   action: PrinterFileAction;
   state: PrinterFileOperationState;
   locationId: string;
-  gcodeFileId: string | null;
-  contentSha256: string | null;
-  sizeBytes: number | null;
+  gcodeFileId?: string | null;
+  contentSha256?: string | null;
+  sizeBytes?: number | null;
   verification: PrinterFileVerification;
-  reasonCode: string | null;
+  reasonCode?: string | null;
   cancellationRequested: boolean;
-  destinationPrinterId: string | null;
+  destinationPrinterId?: string | null;
   payloadSha256: string;
   jobIds: string[];
 }
@@ -54,9 +56,9 @@ export interface PrinterFileDeleteOperation {
   guarantee: 'Unsupported' | 'CurrentExactPath' | 'NativeConditional';
   confirmationBinding: string;
   currentPathRaceAccepted: boolean;
-  deleteSentAtUtc: string | null;
+  deleteSentAtUtc?: string | null;
   outcome: 'AwaitingConfirmation' | 'Acknowledged' | 'OutcomeUnknown' | 'ObservedAbsent' | 'Blocked';
-  reasonCode: string | null;
+  reasonCode?: string | null;
 }
 
 export interface PrinterFileDeleteConfirmation {
@@ -76,13 +78,13 @@ export interface PrinterFileCatalogEntry {
   storageRoot: string;
   relativePath: string;
   displayName: string;
-  sizeBytes: number | null;
-  modifiedValue: string | null;
+  sizeBytes?: number | null;
+  modifiedValue?: string | null;
   observationRevision: number;
   configurationGeneration: number;
   availability: PrinterFileAvailability;
   lastSeenAtUtc: string;
-  lastCompleteScanAtUtc: string | null;
+  lastCompleteScanAtUtc?: string | null;
   isStale: boolean;
   localCopies: Array<{
     gcodeFileId: string;
@@ -95,9 +97,9 @@ export interface PrinterFileScanStatus {
   printerId: string;
   enabled: boolean;
   outcome: PrinterFileScanOutcome;
-  reasonCode: string | null;
-  lastAttemptAtUtc: string | null;
-  lastCompleteScanAtUtc: string | null;
+  reasonCode?: string | null;
+  lastAttemptAtUtc?: string | null;
+  lastCompleteScanAtUtc?: string | null;
   nextScanAtUtc: string;
   configurationGeneration: number;
   isStale: boolean;
@@ -117,62 +119,6 @@ export interface PrinterFileCatalogPage {
   automaticDiscoveryEnabled: boolean;
 }
 
-// DTO for a discovered file in a harvest operation
-// DTO for importing selected discovered files
-export interface ImportSelectedGcodeFilesDto {
-  harvestOperationId: string;
-  fileIds: string[];
-}
-
-// Result DTO for G-code harvest import
-export interface GcodeHarvestResultDto {
-  operationId: string;
-  success: boolean;
-  message: string;
-  discoveredFiles: number;
-  importedFiles: number;
-  errors?: string[];
-  importedFileIds: string[];
-  skippedFileIds: string[];
-  failedFileIds: string[];
-  errorDetails?: Record<string, string>;
-}
-export interface DiscoveredGcodeFileDto {
-  id: string;
-  harvestOperationId: string;
-  printerPath: string;
-  fileName: string;
-  fileSizeBytes: number;
-  modifiedAt?: string;
-  fileHash?: string;
-  isSelected?: boolean;
-  alreadyInLibrary: boolean;
-  existingLibraryFileId?: string;
-  processingFailed: boolean;
-  errorMessage?: string;
-  thumbnailUrl?: string;
-  extractedSlicerName?: string;
-  extractedSlicerVersion?: string;
-  extractedPrintTime?: number;
-  extractedFilamentLength?: number;
-  extractedNozzleDiameter?: number;
-  extractedMaterial?: string;
-  extractedLayerHeight?: string;
-  extractedInfill?: string;
-  // Computed/UI fields (not from backend)
-  status?: HarvestFileStatus;
-  error?: string;
-  filePath?: string; // Alias for printerPath
-}
-
-export enum HarvestFileStatus {
-  Pending = 'Pending',
-  InProgress = 'InProgress',
-  Complete = 'Complete',
-  Failed = 'Failed',
-  Cancelled = 'Cancelled',
-  Skipped = 'Skipped',
-}
 // PrintJobStatusDto for Moonraker print job status
 export interface PrintJobStatusDto {
   state: string;
@@ -2124,73 +2070,6 @@ export interface GcodeLibraryFile {
   slicerSettings?: string;
 }
 
-// G-code harvest operations
-export enum GcodeHarvestStatus {
-  Running = "Running",
-  Completed = "Completed",
-  Failed = "Failed",
-  Cancelled = "Cancelled",
-}
-
-export interface HarvestOptions {
-  includeSubfolders: boolean;
-  fileTypes: string[];
-  minFileSize: number;
-  maxFileAge?: number;
-  duplicateHandling: "skip" | "overwrite" | "rename";
-}
-
-export interface GcodeHarvestOperation {
-  id: string;
-  printerId: string;
-  printerName: string;
-  status: GcodeHarvestStatus;
-  filesFound: number;
-  filesProcessed: number; // Now calculated by backend: FilesAdded + FilesSkipped + FilesErrored
-  filesAdded: number;
-  filesSkipped: number;
-  filesErrored: number;
-  duplicatesSkipped: number;
-  totalSizeBytes: number;
-  startedAt: string; // API returns ISO date string
-  completedAt?: string; // API returns ISO date string
-  error?: string;
-  errorType?: string; // ConnectionError, AuthenticationError, FileSystemError, ValidationError, UnknownError
-  errorPhase?: string; // Discovery, Download, Processing, Completion
-  errorDetails?: string; // JSON with exception details
-  failedResource?: string; // File path or URL that caused failure
-  isRetryable?: boolean; // Whether this error can be retried
-  errorOccurredAt?: string; // ISO date string of when error occurred
-  options?: HarvestOptions;
-  filesPaths?: string[];
-}
-
-export interface HarvestProgress {
-  operationId: string;
-  filesProcessed: number;
-  filesFound: number;
-  currentFile?: string;
-  phase: "discovering" | "processing" | "completing";
-}
-
-// SignalR real-time harvest update envelope
-export interface HarvestUpdateDto {
-  operationId: string;
-  status: GcodeHarvestStatus; // mapped enum status
-  filesFound: number;
-  filesProcessed: number;
-  filesAdded: number;
-  filesSkipped: number;
-  filesErrored: number;
-  duplicatesSkipped?: number;
-  progressPercent?: number; // convenience precomputed value (0-100)
-  currentFile?: string;
-  phase?: "discovering" | "processing" | "completing";
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
-}
-
 // SignalR job queue event payloads
 export interface JobQueueUpdateDto {
   jobs: JobQueuePrintJob[];
@@ -2200,11 +2079,6 @@ export interface JobQueueUpdateDto {
   addedIds?: string[];
   updatedIds?: string[];
   removedIds?: string[];
-}
-
-export interface StartBulkHarvestRequest {
-  printerIds: string[];
-  options: HarvestOptions;
 }
 
 // Lightweight file browser entry for hierarchical navigation
@@ -2259,7 +2133,6 @@ export interface GcodeFile {
 
 export interface GetGcodeFilesRequest {
   path?: string;
-  harvestId?: string;
   printerId?: string;
   sortBy?: "name" | "size" | "date";
   sortOrder?: "asc" | "desc";
@@ -2289,7 +2162,6 @@ export interface UnifiedFilesQueryRequest {
   sortBy: UnifiedFileSortBy;
   sortOrder: UnifiedFileSortOrder;
   filter: UnifiedFileTypeFilter;
-  harvestId?: string;
   printerId?: string;
 }
 

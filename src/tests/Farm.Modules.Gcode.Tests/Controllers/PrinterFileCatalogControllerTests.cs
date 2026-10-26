@@ -1,7 +1,11 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Common;
+using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
@@ -77,13 +81,21 @@ public sealed class PrinterFileCatalogControllerTests
         }
 
         await fixture.Db.SaveChangesAsync();
-        fixture.Access.Setup(x => x.CanAccessLocalAsync(fixture.Actor, permitted.Id,
-            PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        IReadOnlyCollection<Guid>? candidates = null;
+        fixture.Access.Setup(x => x.FilterAccessibleLocalAsync(fixture.Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+            .Callback<Guid, IReadOnlyCollection<Guid>, PrinterGroupAccessLevel, CancellationToken>(
+                (_, ids, _, _) => candidates = ids)
+            .ReturnsAsync(new HashSet<Guid> { permitted.Id });
         IActionResult result = await fixture.Controller.ListAsync(null, null);
         string json = JsonSerializer.Serialize(Assert.IsType<OkObjectResult>(result).Value,
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.Contains(permitted.Id.ToString(), json);
         Assert.DoesNotContain(restricted.Id.ToString(), json);
+        Assert.NotNull(candidates);
+        Assert.Equal(new[] { permitted.Id, restricted.Id }.Order(), candidates!.Order());
+        fixture.Access.Verify(x => x.CanAccessLocalAsync(It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -114,26 +126,364 @@ public sealed class PrinterFileCatalogControllerTests
         Assert.IsType<BadRequestObjectResult>(await fixture.Controller.ListAsync(null, null, pageSize: 201));
     }
 
+    [Fact]
+    public async Task ListAsync_CapabilityFlagsComeFromOneBatchedAuthorityCall()
+    {
+        Mock<IBackendClientFactory> backends = CreateBackends();
+        await using Fixture fixture = await Fixture.CreateAsync(backendClients: backends.Object);
+        Guid full = await fixture.AddPrinterAsync("a-full");
+        Guid prusa = await fixture.AddPrinterAsync("b-prusalink", PrinterBackend.PrusaLink);
+        Guid copyOnly = await fixture.AddPrinterAsync("c-copy-only");
+        Guid manageOnly = await fixture.AddPrinterAsync("d-manage-only");
+        Guid readOnly = await fixture.AddPrinterAsync("e-read-only");
+        Guid unreadable = await fixture.AddPrinterAsync("f-unreadable");
+        Guid disabled = await fixture.AddPrinterAsync("g-disabled", enabled: false);
+        Guid[]? candidates = null;
+        fixture.Access.Setup(x => x.GetCatalogAuthorityAsync(fixture.Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, IReadOnlyCollection<Guid>, CancellationToken>((_, ids, _) => candidates = [.. ids])
+            .ReturnsAsync(new PrinterFileCatalogAuthority(
+                new HashSet<Guid> { full, prusa, copyOnly, manageOnly, readOnly },
+                new HashSet<Guid> { full, prusa, manageOnly },
+                new HashSet<Guid> { full, prusa, copyOnly },
+                new HashSet<Guid> { full, prusa }));
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null));
+
+        Assert.NotNull(candidates);
+        Assert.Equal(
+            new[] { fixture.Visible, fixture.Hidden, full, prusa, copyOnly, manageOnly, readOnly, unreadable }.Order(),
+            candidates!.Order());
+        Assert.DoesNotContain(disabled, candidates!);
+        var flags = document.RootElement.GetProperty("printers").EnumerateArray().Select(x => (
+            Name: x.GetProperty("name").GetString(),
+            Manage: x.GetProperty("canManage").GetBoolean(),
+            Supports: x.GetProperty("supportsCopy").GetBoolean(),
+            Copy: x.GetProperty("canCopy").GetBoolean(),
+            Delete: x.GetProperty("canDelete").GetBoolean())).ToArray();
+        Assert.Equal(
+            [
+                ("a-full", true, true, true, true),
+                ("b-prusalink", true, false, false, true),
+                ("c-copy-only", false, true, true, false),
+                ("d-manage-only", true, true, false, false),
+                ("e-read-only", false, true, false, false),
+            ],
+            flags);
+        fixture.Access.Verify(x => x.GetCatalogAuthorityAsync(fixture.Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Access.Verify(x => x.CanReadAsync(It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Access.Verify(x => x.CanAccessLocalAsync(It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Resources.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("benchy", "Models/Benchy_PLA.gcode")]
+    [InlineData("BENCHY", "Models/Benchy_PLA.gcode")]
+    [InlineData("benchy_pla", "Models/Benchy_PLA.gcode")]
+    [InlineData("MODELS/", "Models/Benchy_PLA.gcode|Models/axb.gcode")]
+    [InlineData("werkstatt", "Werkstatt/Müller.gcode|Werkstatt/ÄBC.gcode")]
+    [InlineData("Müller", "Werkstatt/Müller.gcode")]
+    [InlineData("ÄBC", "Werkstatt/ÄBC.gcode")]
+    [InlineData("a_b", "")]
+    [InlineData("secret", "")]
+    public async Task ListAsync_SearchIgnoresCaseWithinAuthorizedSources(string search, string expected)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        foreach (string path in new[]
+                 {
+                     "Models/Benchy_PLA.gcode", "Models/axb.gcode", "Werkstatt/Müller.gcode", "Werkstatt/ÄBC.gcode",
+                 })
+        {
+            await fixture.AddLocationAsync(fixture.Visible, path);
+        }
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, search));
+
+        string[] actual = document.RootElement.GetProperty("items").EnumerateArray()
+            .Select(x => x.GetProperty("relativePath").GetString()!).Order(StringComparer.Ordinal).ToArray();
+        string[] wanted = expected.Split('|', StringSplitOptions.RemoveEmptyEntries)
+            .Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(wanted, actual);
+        Assert.Equal(wanted.Length, document.RootElement.GetProperty("total").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    public void WherePathContains_TranslatesLoweredMatchForEveryProvider(string provider)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        _ = provider switch
+        {
+            "sqlite" => options.UseSqlite("Data Source=:memory:"),
+            "postgres" => options.UseNpgsql("Host=localhost;Database=model_only;Username=model_only"),
+            "sqlserver" => options.UseSqlServer("Server=(localdb)\\model_only;Database=model_only;Trusted_Connection=True"),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider)),
+        };
+        using AppDbContext db = new(options.Options);
+
+        string sql = PrinterFileCatalogSearch.WherePathContains(db.PrinterFileLocations, "Benchy").ToQueryString();
+
+        Assert.Matches(new Regex(@"lower\([^)]*RelativePath", RegexOptions.IgnoreCase), sql);
+        Assert.Contains("Benchy", sql, StringComparison.Ordinal);
+        Assert.Contains("benchy", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListAsync_AuthorizationQueryCountDoesNotGrowWithPrinterCount()
+    {
+        CatalogMeasurement one = await MeasureCatalogAsync(1);
+        CatalogMeasurement twenty = await MeasureCatalogAsync(20);
+
+        Assert.True(one.Catalog == twenty.Catalog,
+            $"catalog SQL commands must not depend on printer count (1 printer: {one.Catalog}, 20: {twenty.Catalog})");
+        Assert.True(one.Authority == twenty.Authority && twenty.Authority <= 13,
+            $"batched authority must stay constant and bounded (1 printer: {one.Authority}, 20: {twenty.Authority})");
+        Assert.True(twenty.Catalog <= 29,
+            $"catalog listing issued {twenty.Catalog} commands ({twenty.Authority} on printer authority); measured baseline is 29");
+        Assert.True(twenty.Legacy - one.Legacy >= 19,
+            $"control: the per-printer loop should grow with printer count (1: {one.Legacy}, 20: {twenty.Legacy})");
+    }
+
+    private static async Task<CatalogMeasurement> MeasureCatalogAsync(int printerCount)
+    {
+        CommandCountingInterceptor counter = new();
+        Mock<IBackendClientFactory> backends = CreateBackends();
+        await using Fixture fixture = await Fixture.CreateAsync(counter, backends.Object);
+        AppDbContext db = fixture.Db;
+        Role role = new() { Id = Guid.NewGuid(), Name = "catalog-test-operator", DisplayName = "Catalog test", IsActive = true };
+        db.Users.Add(new User
+        {
+            Id = fixture.Actor,
+            Username = $"catalog-{fixture.Actor:N}",
+            Email = $"catalog-{fixture.Actor:N}@example.invalid",
+            PasswordHash = "not-a-hash",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        db.Roles.Add(role);
+        foreach ((string resource, string action) in new[]
+                 {
+                     ("printer_files", "read"), ("printer_files", "copy"), ("printer_files", "delete"),
+                     ("gcode_library", "read"), ("gcode_library", "create"),
+                 })
+        {
+            Resource resourceRow = await db.Resources.FirstOrDefaultAsync(x => x.Name == resource) ??
+                db.Resources.Local.FirstOrDefault(x => x.Name == resource) ??
+                db.Resources.Add(new Resource
+                {
+                    Id = Guid.NewGuid(),
+                    Name = resource,
+                    DisplayName = resource,
+                    ResourceType = "system",
+                    IsActive = true,
+                }).Entity;
+            UserAction actionRow = await db.UserActions.FirstOrDefaultAsync(x => x.Name == action) ??
+                db.UserActions.Local.FirstOrDefault(x => x.Name == action) ??
+                db.UserActions.Add(new UserAction { Id = Guid.NewGuid(), Name = action, DisplayName = action }).Entity;
+            db.RolePermissions.Add(new RolePermission
+            {
+                Id = Guid.NewGuid(),
+                RoleId = role.Id,
+                ResourceId = resourceRow.Id,
+                ActionId = actionRow.Id,
+                Granted = true,
+            });
+        }
+
+        db.UserRoles.Add(new UserRole
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.Actor,
+            RoleId = role.Id,
+            AssignedAt = DateTime.UtcNow,
+            IsActive = true,
+        });
+        PrinterGroup group = new() { Id = Guid.NewGuid(), Name = "catalog-test-group" };
+        db.PrinterGroups.Add(group);
+        db.PrinterGroupAccesses.Add(new PrinterGroupAccess
+        {
+            Id = Guid.NewGuid(),
+            PrinterGroupId = group.Id,
+            RoleId = role.Id,
+            AccessLevel = PrinterGroupAccessLevel.Manage,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        FolderNode folder = new() { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+        db.Add(folder);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        List<Guid> grouped = [];
+        for (int i = 0; i < printerCount; i++)
+        {
+            Guid printerId = await fixture.AddPrinterAsync($"grouped-{i:D2}", groupId: group.Id);
+            PrinterFileLocation location = await fixture.AddLocationAsync(printerId, $"grouped/{i:D2}.gcode");
+            GcodeFile file = new()
+            {
+                Id = Guid.NewGuid(),
+                FolderId = folder.Id,
+                FileName = $"grouped-{i:D2}.gcode",
+                FileHash = $"hash-{i:D2}",
+                PrinterGroupId = group.Id,
+            };
+            db.GcodeFiles.Add(file);
+            db.PrinterFileOrigins.Add(new PrinterFileOrigin
+            {
+                Id = Guid.NewGuid(),
+                OperationId = Guid.NewGuid(),
+                LocationId = location.Id,
+                GcodeFileId = file.Id,
+                SourcePrinterId = printerId,
+                StorageRoot = location.StorageRoot,
+                RelativePath = location.RelativePath,
+            });
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+            grouped.Add(printerId);
+        }
+
+        db.ChangeTracker.Clear();
+        QueueResourceAuthorizationService resources = new(db);
+        PrinterFileAccessService access = new(db, new EfUsersRepository(db), resources);
+        PrinterFileCatalogController controller = fixture.CreateController(access, resources, backends.Object);
+
+        counter.Reset();
+        IActionResult result = await controller.ListAsync(null, null, pageSize: 200);
+        int catalog = counter.CommandCount;
+        using (JsonDocument document = ReadOk(result))
+        {
+            Assert.Equal(printerCount + 2, document.RootElement.GetProperty("total").GetInt32());
+            JsonElement[] printers = [.. document.RootElement.GetProperty("printers").EnumerateArray()];
+            Assert.Equal(printerCount + 2, printers.Length);
+            foreach (JsonElement printer in printers.Where(x => grouped.Contains(x.GetProperty("id").GetGuid())))
+            {
+                Assert.True(printer.GetProperty("canManage").GetBoolean());
+                Assert.True(printer.GetProperty("canCopy").GetBoolean());
+                Assert.True(printer.GetProperty("canDelete").GetBoolean());
+            }
+
+            JsonElement[] groupedItems = [.. document.RootElement.GetProperty("items").EnumerateArray()
+                .Where(x => grouped.Contains(x.GetProperty("printerId").GetGuid()))];
+            Assert.Equal(printerCount, groupedItems.Length);
+            Assert.All(groupedItems, item => Assert.Single(item.GetProperty("localCopies").EnumerateArray()));
+        }
+
+        Guid[] enabled = [.. grouped, fixture.Visible, fixture.Hidden];
+        counter.Reset();
+        PrinterFileCatalogAuthority authority = await access.GetCatalogAuthorityAsync(fixture.Actor, enabled);
+        int authorityCount = counter.CommandCount;
+        Assert.Equal(enabled.Order(), authority.Readable.Order());
+
+        counter.Reset();
+        foreach (Guid printerId in enabled)
+        {
+            Assert.True(await access.CanReadAsync(fixture.Actor, printerId));
+        }
+
+        return new CatalogMeasurement(catalog, authorityCount, counter.CommandCount);
+    }
+
+    private static Mock<IBackendClientFactory> CreateBackends()
+    {
+        Mock<IBackendClientFactory> backends = new();
+        backends.Setup(x => x.IsBackendSupported(It.IsAny<PrinterBackend>())).Returns(true);
+        backends.Setup(x => x.GetClient((int)PrinterBackend.Moonraker)).Returns(new CopyCapableClient());
+        backends.Setup(x => x.GetClient((int)PrinterBackend.PrusaLink)).Returns(new PlainClient());
+        return backends;
+    }
+
+    private static JsonDocument ReadOk(IActionResult result) =>
+        JsonDocument.Parse(JsonSerializer.Serialize(Assert.IsType<OkObjectResult>(result).Value,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+    private sealed record CatalogMeasurement(int Catalog, int Authority, int Legacy);
+
+    private sealed class CopyCapableClient : IBackendClient, ISupportsPrinterFileCopy
+    {
+        public Task<PrinterFileCopyBytes> CopyFileToAsync(
+            string baseUrl, string storageRoot, string relativePath, PrinterCredential? credential,
+            Stream destination, long maximumBytes, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class PlainClient : IBackendClient;
+
+    private sealed class CommandCountingInterceptor : DbCommandInterceptor
+    {
+        public int CommandCount { get; private set; }
+
+        public void Reset() => CommandCount = 0;
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
+        {
+            CommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
+        }
+
+        public override InterceptionResult<object> ScalarExecuting(
+            DbCommand command, CommandEventData eventData, InterceptionResult<object> result)
+        {
+            CommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<object> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
+        }
+
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result)
+        {
+            CommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            CommandCount++;
+            return ValueTask.FromResult(result);
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
 
-        private Fixture(SqliteConnection connection, AppDbContext db)
+        private Fixture(SqliteConnection connection, AppDbContext db, IBackendClientFactory? backendClients)
         {
             _connection = connection;
             Db = db;
             Access.Setup(x => x.CanReadAsync(Actor, Visible, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-            Controller = new PrinterFileCatalogController(db, Access.Object, Resources.Object)
-            {
-                ControllerContext = new ControllerContext
-                {
-                    HttpContext = new DefaultHttpContext
-                    {
-                        User = new ClaimsPrincipal(new ClaimsIdentity(
-                            [new Claim(ClaimTypes.NameIdentifier, Actor.ToString())], "test")),
-                    },
-                },
-            };
+            Access.Setup(x => x.GetCatalogAuthorityAsync(Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PrinterFileCatalogAuthority(
+                    new HashSet<Guid> { Visible }, new HashSet<Guid>(), new HashSet<Guid>(), new HashSet<Guid>()));
+            Access.Setup(x => x.FilterAccessibleLocalAsync(Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
+                    It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new HashSet<Guid>());
+            Controller = CreateController(Access.Object, Resources.Object, backendClients);
         }
 
         public Guid Actor { get; } = Guid.NewGuid();
@@ -150,7 +500,67 @@ public sealed class PrinterFileCatalogControllerTests
 
         public PrinterFileCatalogController Controller { get; }
 
-        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
+        public PrinterFileCatalogController CreateController(
+            IPrinterFileAccessService access,
+            IQueueResourceAuthorizationService resources,
+            IBackendClientFactory? backendClients = null) =>
+            new(Db, access, resources, backendClients)
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                            [new Claim(ClaimTypes.NameIdentifier, Actor.ToString())], "test")),
+                    },
+                },
+            };
+
+        public async Task<Guid> AddPrinterAsync(
+            string name,
+            PrinterBackend backend = PrinterBackend.Moonraker,
+            bool enabled = true,
+            Guid? groupId = null)
+        {
+            Printer template = await Db.Printers.AsNoTracking().SingleAsync(x => x.Id == Visible);
+            Printer printer = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                ServerUrl = $"http://{name}-{Guid.NewGuid():N}.invalid",
+                Backend = (int)backend,
+                IsEnabled = enabled,
+                ManufacturerId = template.ManufacturerId,
+                ModelId = template.ModelId,
+                PrinterGroupId = groupId,
+            };
+            Db.Printers.Add(printer);
+            await Db.SaveChangesAsync();
+            Db.ChangeTracker.Clear();
+            return printer.Id;
+        }
+
+        public async Task<PrinterFileLocation> AddLocationAsync(Guid printerId, string relativePath)
+        {
+            PrinterFileLocation location = new()
+            {
+                Id = Guid.NewGuid(),
+                SourcePrinterId = printerId,
+                RegisteredPrinterId = printerId,
+                StorageRoot = "gcodes",
+                RelativePath = relativePath,
+                IdentityKey = PrinterInventoryPath.ComputeIdentity("gcodes", relativePath),
+                DisplayName = Path.GetFileName(relativePath),
+            };
+            Db.PrinterFileLocations.Add(location);
+            await Db.SaveChangesAsync();
+            Db.ChangeTracker.Clear();
+            return location;
+        }
+
+        public static async Task<Fixture> CreateAsync(
+            IInterceptor? interceptor = null,
+            IBackendClientFactory? backendClients = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
             await connection.OpenAsync();
@@ -161,7 +571,7 @@ public sealed class PrinterFileCatalogControllerTests
             }
 
             var db = new AppDbContext(options.Options);
-            var fixture = new Fixture(connection, db);
+            var fixture = new Fixture(connection, db, backendClients);
             await db.Database.EnsureCreatedAsync();
             var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "API test" };
             var model = new PrinterModel { Id = Guid.NewGuid(), Name = "API test", Manufacturer = manufacturer };

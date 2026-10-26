@@ -50,7 +50,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   const startDiscoveryMutation = useStartDiscoveryStream();
   const cancelDiscoveryMutation = useCancelDiscoveryStream();
   const registerPrinterMutation = useRegisterDiscoveredPrinter();
-  const { isConnected: isSignalRConnected } = useSignalRConnection('printer');
+  const { isConnected: isSignalRConnected } = useSignalRConnection();
   const [startError, setStartError] = useState<string | null>(null);
   
   // Load manufacturers and models

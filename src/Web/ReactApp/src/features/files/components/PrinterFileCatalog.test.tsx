@@ -59,6 +59,13 @@ function LocationProbe() {
   return <output data-testid="url">{useLocation().search}</output>;
 }
 
+// The API omits null properties (WhenWritingNull); mirror that wire shape exactly.
+function omitted<T extends object>(value: T, ...keys: Array<keyof T>): T {
+  const copy = { ...value };
+  for (const key of keys) Reflect.deleteProperty(copy, key);
+  return copy;
+}
+
 function renderCatalog(url = '/files?source=printers') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const result = render(
@@ -96,6 +103,28 @@ describe('Printer file catalog', () => {
       availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('renders wire-shaped observations whose null metadata was omitted by the API', async () => {
+    const wireEntry = omitted(catalog.items[0], 'sizeBytes', 'modifiedValue', 'lastCompleteScanAtUtc');
+    const wireScan = omitted(catalog.scans[0], 'reasonCode', 'lastAttemptAtUtc', 'lastCompleteScanAtUtc');
+    mocks.catalog.mockResolvedValue({ ...catalog, items: [wireEntry], scans: [wireScan] });
+    renderCatalog();
+    expect(await screen.findByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
+    expect(screen.getByText('Unknown size')).toBeInTheDocument();
+    expect(screen.getByText('Modified: Unknown')).toBeInTheDocument();
+    expect(screen.getByText('Complete scan: Unknown')).toBeInTheDocument();
+    expect(screen.getByText(/Last complete: Unknown/)).toBeInTheDocument();
+  });
+
+  it('refuses snapshot confirmation when the captured size was omitted', async () => {
+    mocks.operation.mockResolvedValue(omitted(captured, 'sizeBytes'));
+    const user = userEvent.setup();
+    renderCatalog('/files?source=printers&operation=operation');
+    await user.click(await screen.findByRole('checkbox', { name: 'I accept this captured snapshot for this enqueue intent' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm snapshot and queue' }));
+    await waitFor(() => expect(mocks.operation).toHaveBeenCalled());
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 

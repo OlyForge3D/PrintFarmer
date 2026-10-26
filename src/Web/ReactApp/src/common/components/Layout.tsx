@@ -358,7 +358,7 @@ function mergeNavigationGroupItems(
 }
 
 export function Layout() {
-  const { isConnected } = useSignalRConnection('printer');
+  const { isConnected } = useSignalRConnection();
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const { pinnedIds: adminPinnedIds } = useAdminNavPins();
   const { isSlicerAvailable } = useSlicer();

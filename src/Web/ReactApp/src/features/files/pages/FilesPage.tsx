@@ -13,7 +13,6 @@ import {
   type UseFileBrowserConfig,
 } from '@/features/fileBrowser/types';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { usePrinters } from '@/common/hooks/useApi';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
@@ -29,7 +28,6 @@ import { TaggingModal } from '@/components/TaggingModal';
 import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import {
-  ActivityIcon,
   ClipboardListIcon,
   CubeIcon,
   DeleteIcon,
@@ -55,7 +53,6 @@ type FileSource = 'model' | 'gcode';
 type PrintablesImportModalComponent = typeof import('@/features/models3d/components/PrintablesImportModal')['PrintablesImportModal'];
 type PrintablesBrowserModalComponent = typeof import('@/features/models3d/components/PrintablesBrowserModal')['PrintablesBrowserModal'];
 type QuickSliceModalComponent = typeof import('@/features/slicer/components/QuickSliceModal')['QuickSliceModal'];
-type HarvestWizardModalComponent = typeof import('@/features/gcode/components/harvest/HarvestWizardModal')['HarvestWizardModal'];
 type QueueGcodeModalComponent = typeof import('@/features/gcode/components/QueueGcodeModal')['QueueGcodeModal'];
 
 const PrintablesImportModal = lazyWithPreload<React.ComponentProps<PrintablesImportModalComponent>, PrintablesImportModalComponent>(
@@ -66,9 +63,6 @@ const PrintablesBrowserModal = lazyWithPreload<React.ComponentProps<PrintablesBr
 );
 const QuickSliceModal = lazyWithPreload<React.ComponentProps<QuickSliceModalComponent>, QuickSliceModalComponent>(
   () => import('@/features/slicer/components/QuickSliceModal').then((module) => ({ default: module.QuickSliceModal })),
-);
-const HarvestWizardModal = lazyWithPreload<React.ComponentProps<HarvestWizardModalComponent>, HarvestWizardModalComponent>(
-  () => import('@/features/gcode/components/harvest/HarvestWizardModal').then((module) => ({ default: module.HarvestWizardModal })),
 );
 const QueueGcodeModal = lazyWithPreload<React.ComponentProps<QueueGcodeModalComponent>, QueueGcodeModalComponent>(
   () => import('@/features/gcode/components/QueueGcodeModal').then((module) => ({ default: module.QueueGcodeModal })),
@@ -119,7 +113,6 @@ const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
   '3d-models': 'models',
   gcode: 'gcode',
 };
-const LEGACY_ACTION_SEGMENTS = new Set(['harvest']);
 const MODEL_FILE_EXTENSIONS = new Set(['3mf', 'stl', 'step', 'stp']);
 const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'bgcode', 'gco', 'g', 'ngc', 'gc']);
 const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
@@ -454,7 +447,6 @@ export function FilesPage() {
   const [searchParams] = useSearchParams();
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-files-viewmode');
   const { hasPermission } = useAuth();
-  const { data: printers = [] } = usePrinters({ staleTime: 30_000 });
   const onPrinters = searchParams.get('source') === 'printers';
   const linkedFileId = onPrinters ? null : searchParams.get('file');
   const linkedFile = useQuery({
@@ -470,45 +462,6 @@ export function FilesPage() {
   const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
   const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
   const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
-  const [showHarvestModal, setShowHarvestModal] = useState(false);
-
-  // Only poll active harvest operations while the harvest wizard modal is open —
-  // it is the sole consumer of this data and defaults to closed. Use the
-  // dedicated active-operations endpoint so completed history is never fetched.
-  const canExecuteHarvest = hasPermission('gcode_harvest', 'execute');
-  const shouldFetchHarvestOperations = showHarvestModal && canExecuteHarvest;
-
-  // Give every modal open its own query-cache entry (an incrementing epoch in
-  // the query key) so react-query never reuses a response from a previous
-  // open. Without this, the global 30s staleTime means reopening the modal
-  // within that window would reuse the previous open's cached response
-  // without refetching, and `isLoading` (isPending && isFetching) never
-  // re-arms once a query key has resolved once — so the loading gate below
-  // would silently pass through stale conflict data instead of protecting
-  // against it. A fresh key starts with no cached data, so `isLoading` is
-  // correctly true again on every open until that open's fetch resolves.
-  // Derived during render (React's "adjusting state when a prop changes"
-  // pattern) rather than in an effect, so there is no extra render/flash
-  // before the value is available.
-  const [harvestQueryEpoch, setHarvestQueryEpoch] = useState(0);
-  const [prevShowHarvestModal, setPrevShowHarvestModal] = useState(showHarvestModal);
-  if (showHarvestModal !== prevShowHarvestModal) {
-    setPrevShowHarvestModal(showHarvestModal);
-    if (showHarvestModal) {
-      setHarvestQueryEpoch((epoch) => epoch + 1);
-    }
-  }
-
-  const {
-    data: harvestOperations = [],
-    isLoading: isLoadingHarvestOperations,
-  } = useQuery({
-    queryKey: ['files-harvest-operations', harvestQueryEpoch],
-    queryFn: () => apiClient.getAllActiveHarvests(),
-    refetchInterval: shouldFetchHarvestOperations ? 5_000 : false,
-    enabled: shouldFetchHarvestOperations,
-  });
-
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -522,18 +475,10 @@ export function FilesPage() {
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
   const selectedFilter = getFilterValueFromSearchParams(searchParams);
-  const harvestId = searchParams.get('harvest') ?? undefined;
   const printerId = searchParams.get('printer') ?? undefined;
 
   useEffect(() => {
     const legacySegment = location.pathname.replace(/^\/files\/?/, '').split('/')[0];
-
-    // Legacy /files/harvest → open harvest modal at /files
-    if (LEGACY_ACTION_SEGMENTS.has(legacySegment)) {
-      const frame = window.requestAnimationFrame(() => setShowHarvestModal(true));
-      navigate('/files', { replace: true });
-      return () => window.cancelAnimationFrame(frame);
-    }
 
     const normalizedFilter = LEGACY_SEGMENT_TO_FILTER[legacySegment];
     const tabFilter = LEGACY_SEGMENT_TO_FILTER[searchParams.get('tab') ?? ''];
@@ -621,7 +566,6 @@ export function FilesPage() {
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
       filter: query.filter,
-      harvestId,
       printerId,
     }, signal);
 
@@ -634,7 +578,7 @@ export function FilesPage() {
       folders: [],
       currentPath: '/',
     };
-  }, [harvestId, printerId]);
+  }, [printerId]);
 
   const config: UseFileBrowserConfig<UnifiedFileRecord> = useMemo(() => ({
     fetcher,
@@ -989,19 +933,6 @@ export function FilesPage() {
           Upload G-Code
         </Button>
       )}
-      {hasPermission('gcode_harvest', 'execute') && (
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          iconLeft={<ActivityIcon className="h-4 w-4" />}
-          onClick={() => setShowHarvestModal(true)}
-          onFocus={() => void HarvestWizardModal.preload()}
-          onPointerEnter={() => void HarvestWizardModal.preload()}
-        >
-          Start Harvest
-        </Button>
-      )}
     </div>
   );
 
@@ -1187,25 +1118,6 @@ export function FilesPage() {
               setShowPrintablesImportModal(false);
               setSelectedPrintablesUrl(null);
               void handleRefresh();
-            }}
-          />
-        </LazyModalBoundary>
-      )}
-      {showHarvestModal && (
-        <LazyModalBoundary
-          label="harvest wizard"
-          onCancel={() => setShowHarvestModal(false)}
-          onRetry={HarvestWizardModal.retry}
-        >
-          <HarvestWizardModal
-            isOpen={showHarvestModal}
-            onClose={() => setShowHarvestModal(false)}
-            printers={printers}
-            activeHarvests={harvestOperations}
-            isLoadingActiveHarvests={isLoadingHarvestOperations}
-            onComplete={() => {
-              toast.success('Harvest completed');
-              handleRefresh();
             }}
           />
         </LazyModalBoundary>
