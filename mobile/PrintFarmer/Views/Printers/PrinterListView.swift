@@ -289,10 +289,13 @@ struct PrinterListView: View {
                     statusFilterChips(allowsWrapping: true)
                 }
             } else {
-                HStack(spacing: 8) {
-                    statusFilterChips(allowsWrapping: false)
+                // Scroll rather than fixedSize-overflow: an over-wide chip row would
+                // widen the whole Farm root and push the header title off-screen (#3550).
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        statusFilterChips(allowsWrapping: false)
+                    }
                 }
-                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

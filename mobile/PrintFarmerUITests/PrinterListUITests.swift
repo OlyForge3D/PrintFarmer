@@ -107,3 +107,60 @@ final class PrinterListUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["farm-card-\(printerID)"].exists)
     }
 }
+
+/// Regression coverage for #3550: the Farm root title must share the leading
+/// inset of the Queue and Filament root titles instead of bleeding off-screen.
+@MainActor
+class RootTitleAlignmentUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+
+    func testFarmTitleSharesQueueAndFilamentLeadingInset() {
+        let farm = titleFrame(tab: "tab.farm", title: "Farm")
+        let queue = titleFrame(tab: "tab.queue", title: "Queue")
+        let filament = titleFrame(tab: "tab.filament", title: "Filament")
+        let window = app.windows.firstMatch.frame
+
+        for (name, frame) in [("Farm", farm), ("Queue", queue), ("Filament", filament)] {
+            XCTAssertGreaterThanOrEqual(
+                frame.minX - window.minX, 8,
+                "\(name) title must keep a standard leading margin; frame=\(frame) window=\(window)"
+            )
+        }
+        XCTAssertEqual(farm.minX, queue.minX, accuracy: 1, "Farm=\(farm) Queue=\(queue)")
+        XCTAssertEqual(farm.minX, filament.minX, accuracy: 1, "Farm=\(farm) Filament=\(filament)")
+        XCTAssertEqual(farm.minY, queue.minY, accuracy: 1, "Farm and Queue titles share a display mode")
+    }
+
+    private func titleFrame(tab: String, title: String) -> CGRect {
+        let destination = shellDestinationButton(tabIdentifier: tab, timeout: 8)
+        XCTAssertTrue(destination.exists, "\(tab) must be reachable")
+        destination.tap()
+
+        let labelled = NSPredicate(format: "label == %@", title)
+        let compactTitle = app.staticTexts.matching(identifier: "navigation.title")
+            .matching(labelled).firstMatch
+        let barTitle = app.navigationBars.staticTexts.matching(labelled).firstMatch
+        let element: XCUIElement
+        if compactTitle.waitForExistence(timeout: 8) {
+            element = compactTitle
+        } else {
+            XCTAssertTrue(barTitle.waitForExistence(timeout: 4), "\(title) title must render")
+            element = barTitle
+        }
+
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "root-title-\(title.lowercased())"
+        shot.lifetime = .keepAlways
+        add(shot)
+        return element.frame
+    }
+}
+
+/// Larger (non-accessibility) text widens the Farm filter chips past the
+/// compact width, which previously widened the whole root and shifted the title.
+@MainActor
+final class RootTitleAlignmentLargeTypeUITests: RootTitleAlignmentUITests {
+    override var additionalLaunchArguments: [String] {
+        ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+    }
+}
