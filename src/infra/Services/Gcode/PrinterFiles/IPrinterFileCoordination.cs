@@ -20,6 +20,35 @@ public interface IPrinterFileAccessService
         PrinterFileAction action,
         Guid? destinationPrinterId = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Set-based catalog authority over candidate printers, equal per printer to
+    /// <see cref="CanReadAsync"/>, Manage group access on readable printers, and
+    /// <see cref="CanActAsync"/> for Copy and Delete. Uses a bounded number of queries
+    /// independent of the candidate count and never caches authority across calls.
+    /// </summary>
+    Task<PrinterFileCatalogAuthority> GetCatalogAuthorityAsync(
+        Guid actorId,
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken ct = default);
+
+    /// <summary>Set-based equivalent of <see cref="CanAccessLocalAsync"/>.</summary>
+    Task<IReadOnlySet<Guid>> FilterAccessibleLocalAsync(
+        Guid actorId,
+        IReadOnlyCollection<Guid> gcodeFileIds,
+        PrinterGroupAccessLevel minimumAccess = PrinterGroupAccessLevel.View,
+        CancellationToken ct = default);
+}
+
+/// <summary>Per-printer catalog authority for one actor at one point in time.</summary>
+public sealed record PrinterFileCatalogAuthority(
+    IReadOnlySet<Guid> Readable,
+    IReadOnlySet<Guid> Manageable,
+    IReadOnlySet<Guid> Copyable,
+    IReadOnlySet<Guid> Deletable)
+{
+    public static PrinterFileCatalogAuthority None { get; } =
+        new(new HashSet<Guid>(), new HashSet<Guid>(), new HashSet<Guid>(), new HashSet<Guid>());
 }
 
 /// <summary>Shared finite I/O slots and one exclusive feature owner per printer.</summary>

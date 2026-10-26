@@ -64,12 +64,77 @@ public sealed class PrinterFileAccessService(
         await HasPermissionAsync(actorId, "gcode_library:read", ct) &&
         await resources.CanActorAccessGcodeFileAsync(actorId.ToString(), gcodeFileId, minimumAccess, ct);
 
-    private async Task<bool> HasPermissionAsync(Guid actorId, string permission, CancellationToken ct)
+    public async Task<PrinterFileCatalogAuthority> GetCatalogAuthorityAsync(
+        Guid actorId,
+        IReadOnlyCollection<Guid> printerIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(printerIds);
+        if (printerIds.Count == 0)
+        {
+            return PrinterFileCatalogAuthority.None;
+        }
+
+        PermissionSnapshot permissions = await LoadPermissionsAsync(actorId, ct);
+        if (!permissions.Grants(PrintFarmerPermissions.PrinterFiles.Read))
+        {
+            return PrinterFileCatalogAuthority.None;
+        }
+
+        string actor = actorId.ToString();
+        Guid[] viewable = (await resources.FilterActorAccessiblePrinterIdsAsync(
+            actor, printerIds, PrinterGroupAccessLevel.View, ct)).ToArray();
+        HashSet<Guid> readable = viewable.Length == 0
+            ? []
+            : (await db.Printers.AsNoTracking()
+                .Where(x => viewable.Contains(x.Id) && x.IsEnabled)
+                .Select(x => x.Id)
+                .ToListAsync(ct)).ToHashSet();
+        if (readable.Count == 0)
+        {
+            return PrinterFileCatalogAuthority.None;
+        }
+
+        IReadOnlySet<Guid> manageGrants = await resources.FilterActorAccessiblePrinterIdsAsync(
+            actor, readable, PrinterGroupAccessLevel.Manage, ct);
+        HashSet<Guid> manageable = readable.Where(manageGrants.Contains).ToHashSet();
+        bool canCopy = permissions.Grants(PrintFarmerPermissions.PrinterFiles.Copy) &&
+            permissions.Grants("gcode_library:read") &&
+            permissions.Grants("gcode_library:create");
+        bool canDelete = permissions.Grants(PrintFarmerPermissions.PrinterFiles.Delete);
+        return new PrinterFileCatalogAuthority(
+            readable,
+            manageable,
+            canCopy ? readable : new HashSet<Guid>(),
+            canDelete ? manageable : new HashSet<Guid>());
+    }
+
+    public async Task<IReadOnlySet<Guid>> FilterAccessibleLocalAsync(
+        Guid actorId,
+        IReadOnlyCollection<Guid> gcodeFileIds,
+        PrinterGroupAccessLevel minimumAccess = PrinterGroupAccessLevel.View,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeFileIds);
+        if (gcodeFileIds.Count == 0 ||
+            !(await LoadPermissionsAsync(actorId, ct)).Grants("gcode_library:read"))
+        {
+            return new HashSet<Guid>();
+        }
+
+        return await resources.FilterActorAccessibleGcodeFileIdsAsync(
+            actorId.ToString(), gcodeFileIds, minimumAccess, ct);
+    }
+
+    private async Task<bool> HasPermissionAsync(Guid actorId, string permission, CancellationToken ct) =>
+        (await LoadPermissionsAsync(actorId, ct)).Grants(permission);
+
+    private async Task<PermissionSnapshot> LoadPermissionsAsync(Guid actorId, CancellationToken ct)
     {
         if (actorId == Guid.Empty ||
             !await db.Users.AsNoTracking().AnyAsync(user => user.Id == actorId && user.IsActive, ct))
         {
-            return false;
+            return PermissionSnapshot.Nothing;
         }
 
         if (await db.UserRoles.AsNoTracking().AnyAsync(
@@ -77,13 +142,29 @@ public sealed class PrinterFileAccessService(
                     (role.ExpiresAt == null || role.ExpiresAt > DateTime.UtcNow) &&
                     role.Role.Name == PrintFarmerPermissions.FarmAdminRole, ct))
         {
-            return true;
+            return PermissionSnapshot.FarmAdmin;
         }
 
         HashSet<string> granted = (await users.GetGrantedPermissionsAsync(actorId, ct))
             .Select(pair => $"{pair.Resource}:{pair.Action}").ToHashSet(StringComparer.Ordinal);
         HashSet<string> denied = (await users.GetDeniedPermissionsAsync(actorId, ct))
             .Select(pair => $"{pair.Resource}:{pair.Action}").ToHashSet(StringComparer.Ordinal);
-        return PrintFarmerPermissions.SetGrantsPermission(granted, denied, permission);
+        return new PermissionSnapshot(IsFarmAdmin: false, granted, denied);
+    }
+
+    /// <summary>One request's view of an actor's live permissions; never retained across calls.</summary>
+    private sealed record PermissionSnapshot(
+        bool IsFarmAdmin,
+        IReadOnlySet<string> Granted,
+        IReadOnlySet<string> Denied)
+    {
+        public static PermissionSnapshot Nothing { get; } =
+            new(false, new HashSet<string>(), new HashSet<string>());
+
+        public static PermissionSnapshot FarmAdmin { get; } =
+            new(true, new HashSet<string>(), new HashSet<string>());
+
+        public bool Grants(string permission) =>
+            IsFarmAdmin || PrintFarmerPermissions.SetGrantsPermission(Granted, Denied, permission);
     }
 }

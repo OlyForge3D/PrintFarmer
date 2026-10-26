@@ -227,12 +227,20 @@ Listing accepts `printerId`, `search` (at most 200 characters), `availability`
 pagination, filtering, origins, and scan status. Responses contain canonical
 root/path observations, not credentials or printer URLs.
 
-Search follows the database provider's collation and can have different case
-matching across deployments; location identity remains strictly ordinal.
-Current-authority checks scale with the number of enabled printers, including
-printer choices outside the current file page. Large farms should measure
-catalog polling load before rollout; no constant-time authorization or
-large-farm throughput guarantee is claimed.
+Search ignores case on SQLite, PostgreSQL, and SQL Server. It lowers the stored
+path and the search text explicitly instead of relying on provider collation,
+and an exact-case match is always accepted. SQLite's built-in `lower()` folds
+ASCII only, so `ä` does not match `Ä` there; folding non-ASCII letters the same
+way on every provider would need a normalized column and a migration, which is
+not implemented. Location identity remains strictly ordinal.
+
+Current authority is evaluated for every enabled printer, including printer
+choices outside the current file page, and for local-copy associations on the
+page, using a bounded number of database queries that does not grow with the
+printer count. Each request reads the actor's current permissions and group
+access; nothing is cached across requests, so revocation takes effect on the
+next request. Large farms should still measure catalog polling load before
+rollout; no throughput guarantee is claimed.
 
 Read access requires current `printer_files:read` and source-printer View.
 Refresh and per-printer control additionally require source Manage. Copy

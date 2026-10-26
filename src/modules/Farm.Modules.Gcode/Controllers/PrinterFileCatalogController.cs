@@ -44,14 +44,8 @@ public sealed class PrinterFileCatalogController(
 
         Guid[] candidates = await db.Printers.AsNoTracking().Where(x => x.IsEnabled)
             .Select(x => x.Id).ToArrayAsync(ct);
-        List<Guid> allowed = [];
-        foreach (Guid id in candidates)
-        {
-            if (await access.CanReadAsync(actor, id, ct))
-            {
-                allowed.Add(id);
-            }
-        }
+        PrinterFileCatalogAuthority authority = await access.GetCatalogAuthorityAsync(actor, candidates, ct);
+        Guid[] allowed = [.. authority.Readable];
 
         IQueryable<PrinterFileLocation> query = db.PrinterFileLocations.AsNoTracking()
             .Where(x => x.RegisteredPrinterId.HasValue && allowed.Contains(x.RegisteredPrinterId.Value));
@@ -62,7 +56,7 @@ public sealed class PrinterFileCatalogController(
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(x => x.RelativePath.Contains(search));
+            query = PrinterFileCatalogSearch.WherePathContains(query, search);
         }
 
         var policy = await PrinterFileIndexPolicy.ReadAsync(db, ct);
@@ -84,14 +78,7 @@ public sealed class PrinterFileCatalogController(
         Guid[] localCandidates = await db.PrinterFileOrigins.AsNoTracking()
             .Where(x => x.LocationId.HasValue && pageIds.Contains(x.LocationId.Value) && x.GcodeFileId.HasValue)
             .Select(x => x.GcodeFileId!.Value).Distinct().ToArrayAsync(ct);
-        List<Guid> allowedLocal = [];
-        foreach (Guid id in localCandidates)
-        {
-            if (await access.CanAccessLocalAsync(actor, id, ct: ct))
-            {
-                allowedLocal.Add(id);
-            }
-        }
+        Guid[] allowedLocal = [.. await access.FilterAccessibleLocalAsync(actor, localCandidates, ct: ct)];
 
         var items = await query.OrderBy(x => x.DisplayName).ThenBy(x => x.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
@@ -126,8 +113,6 @@ public sealed class PrinterFileCatalogController(
         List<object> printers = [];
         foreach (var printer in printerRows)
         {
-            bool canManage = await resources.CanActorAccessPrinterAsync(
-                actor.ToString(), printer.Id, PrinterGroupAccessLevel.Manage, ct);
             bool supportsCopy = backendClients is not null &&
                 backendClients.IsBackendSupported((PrinterBackend)printer.Backend) &&
                 backendClients.GetClient(printer.Backend) is ISupportsPrinterFileCopy;
@@ -135,10 +120,10 @@ public sealed class PrinterFileCatalogController(
             {
                 printer.Id,
                 printer.Name,
-                canManage,
+                canManage = authority.Manageable.Contains(printer.Id),
                 supportsCopy,
-                canCopy = supportsCopy && await access.CanActAsync(actor, printer.Id, PrinterFileAction.Copy, ct: ct),
-                canDelete = await access.CanActAsync(actor, printer.Id, PrinterFileAction.Delete, ct: ct),
+                canCopy = supportsCopy && authority.Copyable.Contains(printer.Id),
+                canDelete = authority.Deletable.Contains(printer.Id),
             });
         }
 

@@ -785,6 +785,13 @@ public sealed class PrinterFileCopyServiceTests
             Task.FromResult(Allowed && actorId == actor && printerId == source);
         public Task<bool> CanActAsync(Guid actorId, Guid printerId, PrinterFileAction action,
             Guid? destinationPrinterId = null, CancellationToken ct = default) => CanReadAsync(actorId, printerId, ct);
+        public Task<PrinterFileCatalogAuthority> GetCatalogAuthorityAsync(
+            Guid actorId, IReadOnlyCollection<Guid> printerIds, CancellationToken ct = default) =>
+            throw new NotSupportedException("Copy commands must use live per-item authority.");
+        public Task<IReadOnlySet<Guid>> FilterAccessibleLocalAsync(
+            Guid actorId, IReadOnlyCollection<Guid> gcodeFileIds,
+            PrinterGroupAccessLevel minimumAccess = PrinterGroupAccessLevel.View, CancellationToken ct = default) =>
+            throw new NotSupportedException("Copy commands must use live per-item authority.");
         public async Task<bool> CanAccessLocalAsync(Guid actorId, Guid gcodeFileId,
             PrinterGroupAccessLevel minimumAccess = PrinterGroupAccessLevel.View, CancellationToken ct = default)
         {
