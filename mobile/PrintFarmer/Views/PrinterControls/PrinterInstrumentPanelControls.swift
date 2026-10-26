@@ -501,9 +501,6 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
-            // UIButton keeps a leading-aligned content layout after an
-            // enabled round-trip; rebuild it so labels stay centred (#3496 N09).
-            .id(canAdjust)
             if Self.showsTuneTemperatures(isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint) {
                 Divider()
                 tuneTemperatures

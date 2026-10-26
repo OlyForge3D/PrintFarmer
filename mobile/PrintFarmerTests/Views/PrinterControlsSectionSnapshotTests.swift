@@ -1247,7 +1247,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 await gate.waitUntilArrived()
                 try await layout()
                 XCTAssertNotNil(model.pendingCommand)
-                XCTAssertEqual(origin.configuration?.showsActivityIndicator, true, "Pending must be visible, not only an accessibility value")
+                XCTAssertTrue(origin.subviews.contains {
+                    ($0 as? UIActivityIndicatorView)?.isAnimating == true && !$0.isHidden
+                }, "Pending must be visible, not only an accessibility value")
                 XCTAssertFalse(origin.isEnabled)
                 XCTAssertFalse(nativeControls(in: controller.view).contains {
                     $0.accessibilityIdentifier == "printer.controls.stop-waiting"
@@ -1259,7 +1261,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 gate.release()
                 service.beforeMotion = nil
                 try await layout()
-                XCTAssertEqual(origin.configuration?.showsActivityIndicator, false)
+                XCTAssertFalse(origin.subviews.contains { ($0 as? UIActivityIndicatorView)?.isAnimating == true })
                 XCTAssertTrue(model.commandNotice?.contains("Physical outcome is unknown") == true)
             }
 
@@ -1267,7 +1269,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             try button("home.xy").sendActions(for: .touchUpInside)
             try await layout()
             XCTAssertNotNil(model.lastError)
-            XCTAssertEqual(try button("home.xy").configuration?.showsActivityIndicator, false)
+            XCTAssertFalse(try button("home.xy").subviews.contains { ($0 as? UIActivityIndicatorView)?.isAnimating == true })
             let dismiss = try button("dismiss-error")
             try assertMotionLocal(dismiss)
             try await capture("failed")
@@ -1284,7 +1286,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertNil(model.pendingCommand)
             XCTAssertEqual(model.feedbackSection, .motion)
             XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
-            XCTAssertEqual(try button("home.xy").configuration?.showsActivityIndicator, false)
+            XCTAssertFalse(try button("home.xy").subviews.contains { ($0 as? UIActivityIndicatorView)?.isAnimating == true })
             try await capture("confirmed")
         }
     }
