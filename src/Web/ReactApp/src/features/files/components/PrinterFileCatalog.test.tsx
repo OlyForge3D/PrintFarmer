@@ -10,9 +10,10 @@ const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
   confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), enabled: vi.fn(),
   preview: vi.fn(), thumbnail: vi.fn(), download: vi.fn(), prepareDelete: vi.fn(), confirmDelete: vi.fn(),
-  hasPermission: vi.fn(), toastError: vi.fn(),
+  hasPermission: vi.fn(), toastError: vi.fn(), toastSuccess: vi.fn(),
 }));
 const media = vi.hoisted(() => ({ lg: false }));
+const printerList = vi.hoisted(() => ({ value: [] as Array<{ id: string; name: string; isEnabled: boolean; isOnline: boolean }> }));
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterFileCatalog: mocks.catalog, getPrinterFileOperations: mocks.operations,
@@ -29,17 +30,14 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: mocks.hasPermission }),
 }));
 vi.mock('@/common/hooks/useApi', () => ({
-  usePrinters: () => ({ data: [
-    { id: 'source', name: 'Source printer', isEnabled: true },
-    { id: 'other', name: 'Other printer', isEnabled: true },
-  ] }),
+  usePrinters: () => ({ data: printerList.value }),
 }));
 vi.mock('@/common/hooks/useMediaQuery', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/common/hooks/useMediaQuery')>(),
   useIsLgBreakpoint: () => media.lg,
 }));
 vi.mock('sonner', () => ({
-  toast: { error: mocks.toastError, success: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  toast: { error: mocks.toastError, success: mocks.toastSuccess, warning: vi.fn(), info: vi.fn() },
 }));
 
 const entry: PrinterFileCatalogEntry = {
@@ -158,6 +156,10 @@ describe('Printer file catalog', () => {
     window.localStorage.clear();
     media.lg = false;
     observers.length = 0;
+    printerList.value = [
+      { id: 'source', name: 'Source printer', isEnabled: true, isOnline: true },
+      { id: 'other', name: 'Other printer', isEnabled: true, isOnline: true },
+    ];
     mocks.hasPermission.mockReturnValue(true);
     mocks.catalog.mockResolvedValue(catalog);
     mocks.operations.mockResolvedValue([]);
@@ -189,8 +191,8 @@ describe('Printer file catalog', () => {
       .toEqual(['Available', 'Stale']);
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute('href', '/admin/settings?q=printer%20file');
-    // Discovery toggles/refresh now live in Edit printer > Files.
-    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+    // Per-printer discovery toggles live in Edit printer > Files; only the all-printers Refresh is here.
+    expect(screen.getByRole('button', { name: 'Refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
     expect(mocks.catalog).toHaveBeenCalledWith({ printerId: undefined, search: undefined,
       availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
@@ -199,6 +201,70 @@ describe('Printer file catalog', () => {
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.queue).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  describe('Refresh all online printers', () => {
+    const managed = (id: string, name: string, canManage = true) => ({ ...catalog.printers[0], id, name, canManage });
+
+    it('sits right of the view toggle and requests a scan only on online printers the user manages', async () => {
+      printerList.value = [
+        { id: 'source', name: 'Source printer', isEnabled: true, isOnline: true },
+        { id: 'other', name: 'Other printer', isEnabled: true, isOnline: false },
+        { id: 'viewer', name: 'Viewer printer', isEnabled: true, isOnline: true },
+      ];
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [
+        managed('source', 'Source printer'), managed('other', 'Other printer'), managed('viewer', 'Viewer printer', false),
+      ] });
+      mocks.refresh.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Refresh all online printers' });
+      expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
+      expect(mocks.refresh).not.toHaveBeenCalled();
+
+      await user.click(refresh);
+
+      await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        'Refresh requested for 1 printer. Scans run when each printer is idle.'));
+      expect(mocks.refresh.mock.calls).toEqual([['source']]);
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    });
+
+    it('requests every target even when one fails and names the failed printer', async () => {
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer'), managed('other', 'Other printer')] });
+      mocks.refresh.mockImplementation(async (id: string) => {
+        if (id === 'source') throw new Error('Request failed');
+      });
+      const user = userEvent.setup();
+      renderCatalog();
+      await user.click(await screen.findByRole('button', { name: 'Refresh all online printers' }));
+
+      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to refresh: Source printer'));
+      expect(mocks.refresh.mock.calls).toEqual([['source'], ['other']]);
+      expect(mocks.toastSuccess).toHaveBeenCalledWith('Refresh requested for 1 printer. Scans run when each printer is idle.');
+    });
+
+    it('explains why it is unavailable when no printer the user manages is online', async () => {
+      printerList.value = printerList.value.map(printer => ({ ...printer, isOnline: false }));
+      const user = userEvent.setup();
+      renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Refresh all online printers' });
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('title', 'No online printers you can manage');
+
+      await user.click(refresh);
+
+      expect(mocks.refresh).not.toHaveBeenCalled();
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    });
+
+    it('is hidden when the user manages none of the listed printers', async () => {
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer', false)] });
+      renderCatalog();
+      await findRow('part.gcode');
+      expect(screen.queryByRole('button', { name: 'Refresh all online printers' })).not.toBeInTheDocument();
+    });
   });
 
   it.each(['table', 'grid'])('selects eligible files in the %s without opening details and exposes mixed select-all state', async viewMode => {

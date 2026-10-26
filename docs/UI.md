@@ -95,6 +95,11 @@ Per-printer automatic discovery, scan status, and **Refresh now** live in the
 and are not part of the form save. Global discovery cadence and budgets remain
 under Admin Settings > Files.
 
+**Refresh**, to the right of the table/card view toggle on **On printers**,
+sends the same refresh request to every online printer you can manage. Each
+scan still runs only when that printer is idle and respects its discovery
+setting. It does not re-fetch previews that were already captured.
+
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are
 retired, and the legacy harvest backend, its history tables, and the

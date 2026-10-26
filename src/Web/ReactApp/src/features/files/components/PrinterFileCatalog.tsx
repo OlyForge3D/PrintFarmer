@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
-import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
+import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
@@ -57,6 +57,14 @@ interface Selection {
 
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
+const REFRESH_ALL_LABEL = 'Refresh all online printers';
+const REFRESH_ALL_TITLE = 'Request a file scan on every online printer you manage. Scans run when each printer is idle.';
+const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
+
+interface RefreshTarget {
+  id: string;
+  name: string;
+}
 
 function byteCount(value?: number | null) {
   return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
@@ -190,6 +198,21 @@ export function PrinterFileCatalog() {
       }
     },
   });
+  // Same request as Edit printer > Files > Refresh now, sent to each target; one failure never hides the rest.
+  const refreshAll = useMutation({
+    mutationFn: async (targets: RefreshTarget[]) => {
+      const results = await Promise.allSettled(targets.map(target => apiClient.refreshPrinterFileIndex(target.id)));
+      return targets.filter((_, index) => results[index].status === 'rejected').map(target => target.name);
+    },
+    onSuccess: async (failedNames, targets) => {
+      const requested = targets.length - failedNames.length;
+      if (requested > 0) {
+        toast.success(`Refresh requested for ${requested} printer${requested === 1 ? '' : 's'}. Scans run when each printer is idle.`);
+      }
+      if (failedNames.length > 0) toast.error(`Failed to refresh: ${failedNames.join(', ')}`);
+      await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+    },
+  });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
     setIntent({ entry, action, key: generateUUID() });
     setDestination(entry.printerId);
@@ -201,6 +224,11 @@ export function PrinterFileCatalog() {
 
   const sourceFor = (entry: PrinterFileCatalogEntry) =>
     catalog.data?.printers.find(printer => printer.id === entry.printerId);
+  const onlinePrinterIds = new Set(destinations.filter(printer => printer.isOnline).map(printer => printer.id));
+  const manageableSources = catalog.data?.printers.filter(printer => printer.canManage) ?? [];
+  const refreshTargets: RefreshTarget[] = manageableSources
+    .filter(printer => onlinePrinterIds.has(printer.id))
+    .map(({ id, name }) => ({ id, name }));
   const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
     const source = sourceFor(entry);
     if (!source) return [];
@@ -322,7 +350,25 @@ export function PrinterFileCatalog() {
               {viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
               <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
             </div>
-            <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+            <div className="flex items-center gap-1">
+              <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+              {manageableSources.length > 0 && (
+                <Button
+                  type="button"
+                  size="md"
+                  variant="secondary"
+                  aria-label={REFRESH_ALL_LABEL}
+                  title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+                  explainedDisabled
+                  disabled={refreshTargets.length === 0}
+                  loading={refreshAll.isPending}
+                  iconLeft={<RefreshIcon className={ACTION_ICON_CLASS} />}
+                  onClick={() => refreshAll.mutate(refreshTargets)}
+                >
+                  Refresh
+                </Button>
+              )}
+            </div>
           </div>
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
