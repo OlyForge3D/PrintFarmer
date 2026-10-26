@@ -119,19 +119,29 @@ class RootTitleAlignmentUITests: PrintFarmerUITestCase {
         let queue = titleFrame(tab: "tab.queue", title: "Queue")
         let filament = titleFrame(tab: "tab.filament", title: "Filament")
         let window = app.windows.firstMatch.frame
+        let titles = [("Farm", farm), ("Queue", queue), ("Filament", filament)]
 
-        for (name, frame) in [("Farm", farm), ("Queue", queue), ("Filament", filament)] {
+        for (name, title) in titles {
+            XCTAssertEqual(title.inNavigationBar, farm.inNavigationBar, "\(name) must use the same title display as Farm")
             XCTAssertGreaterThanOrEqual(
-                frame.minX - window.minX, 8,
-                "\(name) title must keep a standard leading margin; frame=\(frame) window=\(window)"
+                title.frame.minX - window.minX, 8,
+                "\(name) title must keep a standard leading margin; frame=\(title.frame) window=\(window)"
+            )
+            XCTAssertLessThanOrEqual(
+                title.frame.maxX, window.maxX,
+                "\(name) title must not be clipped; frame=\(title.frame) window=\(window)"
             )
         }
-        XCTAssertEqual(farm.minX, queue.minX, accuracy: 1, "Farm=\(farm) Queue=\(queue)")
-        XCTAssertEqual(farm.minX, filament.minX, accuracy: 1, "Farm=\(farm) Filament=\(filament)")
-        XCTAssertEqual(farm.minY, queue.minY, accuracy: 1, "Farm and Queue titles share a display mode")
+        // Compact draws a leading-aligned header; regular width uses the
+        // system inline navigation bar title, which is centered.
+        let anchor: (CGRect) -> CGFloat = farm.inNavigationBar ? { $0.midX } : { $0.minX }
+        XCTAssertEqual(anchor(farm.frame), anchor(queue.frame), accuracy: 1, "Farm=\(farm.frame) Queue=\(queue.frame)")
+        XCTAssertEqual(anchor(farm.frame), anchor(filament.frame), accuracy: 1, "Farm=\(farm.frame) Filament=\(filament.frame)")
+        XCTAssertEqual(farm.frame.minY, queue.frame.minY, accuracy: 1, "Farm and Queue titles share a display mode")
+        XCTAssertEqual(farm.frame.minY, filament.frame.minY, accuracy: 1, "Farm and Filament titles share a display mode")
     }
 
-    private func titleFrame(tab: String, title: String) -> CGRect {
+    private func titleFrame(tab: String, title: String) -> (frame: CGRect, inNavigationBar: Bool) {
         let destination = shellDestinationButton(tabIdentifier: tab, timeout: 8)
         XCTAssertTrue(destination.exists, "\(tab) must be reachable")
         destination.tap()
@@ -141,18 +151,21 @@ class RootTitleAlignmentUITests: PrintFarmerUITestCase {
             .matching(labelled).firstMatch
         let barTitle = app.navigationBars.staticTexts.matching(labelled).firstMatch
         let element: XCUIElement
+        let inNavigationBar: Bool
         if compactTitle.waitForExistence(timeout: 8) {
             element = compactTitle
+            inNavigationBar = false
         } else {
             XCTAssertTrue(barTitle.waitForExistence(timeout: 4), "\(title) title must render")
             element = barTitle
+            inNavigationBar = true
         }
 
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "root-title-\(title.lowercased())"
         shot.lifetime = .keepAlways
         add(shot)
-        return element.frame
+        return (element.frame, inNavigationBar)
     }
 }
 
