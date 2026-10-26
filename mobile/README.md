@@ -128,10 +128,18 @@ Requires Xcode, Python 3 and approved **iOS 26.5 (23F77)** simulators:
 **iPhone 17 Pro Max** (1320x2868) and **iPad Pro 13-inch (M5)** (2064x2752).
 The script captures Farm, printer Status, Queue, Filament, Scan, printer
 Control (Tune) and the camera header once per device in dark mode with default
-Dynamic Type, using DEBUG-only API fixtures. The camera image is a synthetic
-placeholder frame. Missing device classes are errors; images are never resized.
+Dynamic Type, using DEBUG-only API fixtures. The camera still is a project-owned
+Blender render (`DebugAssets.xcassets/AppStoreCameraFrame`); regenerate it with
+`/Applications/Blender.app/Contents/MacOS/Blender -b -P scripts/render-app-store-camera-frame.py`.
+Missing device classes are errors; images are never resized.
 To use a dedicated simulator, set `APP_STORE_IPHONE_SIMULATOR` or
-`APP_STORE_IPAD_SIMULATOR` to its name; it must start with the device name above.
+`APP_STORE_IPAD_SIMULATOR` to its exact name; it must start with the device name
+above, and a name that does not match exactly one simulator fails rather than
+falling back. Each screen is asserted free of "unknown" status text on the
+settled frame that is captured. The status bar shows full signal and battery.
+On iPad the script turns Stage Manager and windowed apps off (Full Screen Apps,
+via `com.apple.springboard` `SBMedusaMultitaskingEnabled`/`SBChamoisWindowingEnabled`)
+and reboots the simulator so no resize handle appears; that setting is left in place.
 
 Review the fourteen PNGs under git-ignored `mobile/build/app-store/<run>/iPhone/`
 and `iPad/`, then upload them by hand in **App Store Connect**. Logs and result

@@ -30,7 +30,8 @@ def resolve(family):
     name, device_type, _ = DEVICES[family]
     env = os.environ.copy()
     # Optional dedicated simulator, e.g. "iPhone 17 Pro Max Store"; it must keep the class name prefix.
-    preferred = os.environ.get(f"APP_STORE_{family.upper()}_SIMULATOR", name)
+    override = os.environ.get(f"APP_STORE_{family.upper()}_SIMULATOR")
+    preferred = override or name
     if not preferred.startswith(name):
         raise RuntimeError(f"APP_STORE_{family.upper()}_SIMULATOR must start with '{name}'.")
     # Prefix excludes smaller resolver fallbacks; a preference alone does not.
@@ -46,6 +47,11 @@ def resolve(family):
     )
     if device is None or device["deviceTypeIdentifier"] != f"com.apple.CoreSimulator.SimDeviceType.{device_type}":
         raise RuntimeError(f"No approved {family} of the required display class; install/create {name}.")
+    # A dedicated simulator must be used exactly; never fall back to a shared one.
+    if override and device["name"] != override:
+        raise RuntimeError(
+            f"APP_STORE_{family.upper()}_SIMULATOR='{override}' resolved to '{device['name']}'; "
+            "create that simulator on the approved runtime.")
     return device
 
 
@@ -75,7 +81,29 @@ def export(bundle, directory):
     return images
 
 
-def capture(device, directory, derived_data):
+# Settings > Multitasking & Gestures > Full Screen Apps: windowed modes draw a resize handle.
+FULL_SCREEN_APPS = ("SBMedusaMultitaskingEnabled", "SBChamoisWindowingEnabled")
+
+
+def use_full_screen_apps(udid):
+    """Switch an iPad to Full Screen Apps and reboot if needed; the setting is left in place."""
+    def enabled(key):
+        result = subprocess.run(["xcrun", "simctl", "spawn", udid, "defaults", "read",
+                                 "com.apple.springboard", key],
+                                cwd=MOBILE, capture_output=True, text=True)
+        return result.returncode != 0 or result.stdout.strip() != "0"
+
+    if not any(enabled(key) for key in FULL_SCREEN_APPS):
+        return
+    for key in FULL_SCREEN_APPS:
+        run(["xcrun", "simctl", "spawn", udid, "defaults", "write",
+             "com.apple.springboard", key, "-bool", "false"])
+    run(["xcrun", "simctl", "shutdown", udid])
+    run(["xcrun", "simctl", "boot", udid])
+    run(["xcrun", "simctl", "bootstatus", udid, "-b"])
+
+
+def capture(family, device, directory, derived_data):
     directory.mkdir(parents=True)
     udid = device["udid"]
     inventory = json.loads(run(["xcrun", "simctl", "list", "devices", "available", "-j"]))
@@ -87,6 +115,8 @@ def capture(device, directory, derived_data):
     if current["state"] != "Booted":
         run(["xcrun", "simctl", "boot", udid])
     run(["xcrun", "simctl", "bootstatus", udid, "-b"])
+    if family == "iPad":
+        use_full_screen_apps(udid)
     appearance = run(["xcrun", "simctl", "ui", udid, "appearance"]).strip()
     content_size = run(["xcrun", "simctl", "ui", udid, "content_size"]).strip()
     bundle = directory / "Screenshots.xcresult"
@@ -103,7 +133,8 @@ def capture(device, directory, derived_data):
         run(["xcrun", "simctl", "ui", udid, "content_size", "large"])
         run(["xcrun", "simctl", "status_bar", udid, "override",
              "--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active",
-             "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100"])
+             "--wifiBars", "3", "--cellularMode", "active", "--cellularBars", "4",
+             "--batteryState", "discharging", "--batteryLevel", "100"])
         with (directory / "test.log").open("w") as log:
             subprocess.run(command, cwd=MOBILE, stdout=log, stderr=subprocess.STDOUT, check=True)
         return export(bundle, directory)
@@ -136,7 +167,7 @@ def main():
     for family, device in devices.items():
         directory = output / family
         print(f"Capturing {family}; log: {directory / 'test.log'}", flush=True)
-        images = capture(device, directory, root / "DerivedData")
+        images = capture(family, device, directory, root / "DerivedData")
         for image in images:
             dimensions = run(["sips", "-g", "pixelWidth", "-g", "pixelHeight", str(image)])
             width = re.search(r"pixelWidth:\s+(\d+)", dimensions)

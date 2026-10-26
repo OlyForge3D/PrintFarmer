@@ -245,7 +245,7 @@ struct PrinterCardPresentation {
 
     var stateLabel: String {
         if failureReason != nil { return "Failure suspected" }
-        if isReadyToHarvest { return "Bed clear" }
+        if isReadyToHarvest { return "Bed clear?" }
         if !printer.isOnline { return "Offline" }
         if printer.inMaintenance { return "Maintenance" }
         switch printer.state?.lowercased() {
