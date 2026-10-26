@@ -46,6 +46,12 @@
 
 ### Fixes
 
+- iOS: remove the Heat **Go** button. Nozzle, Bed, Chamber, Heater Box and
+  other settable heaters now share one row: name, current reading, a tappable
+  target and ±. Steppers apply that heater after a short pause; typed targets
+  apply on **Set** and **Cancel** reverts. Pending commands no longer show
+  caption text on heater rows (#3547).
+
 - Align the detailed printer card and sidebar with working **Materials** and
   **Tuning** disclosures. Group filament slots and single-spool details under
   Materials and retain pending control state while collapsed (#3489).
