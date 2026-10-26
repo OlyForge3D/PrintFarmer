@@ -71,6 +71,11 @@ struct ControlNumberField: UIViewRepresentable {
     /// any other end of editing calls `onCancel` so the draft reverts.
     var onSubmit: (() -> Bool)?
     var onCancel: (() -> Void)?
+    /// Called when the field gains focus, before any typing.
+    var onBeginEditing: (() -> Void)?
+    /// Replaces the spoken value (e.g. "Applying" while a heat row is in
+    /// flight). Stepper fields otherwise speak their visible value.
+    var accessibilityValueOverride: String?
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -124,6 +129,7 @@ struct ControlNumberField: UIViewRepresentable {
         context.coordinator.text = $text
         context.coordinator.onSubmit = onSubmit
         context.coordinator.onCancel = onCancel
+        context.coordinator.onBeginEditing = onBeginEditing
         if field.text != text { field.text = text }
         // A stepper's placeholder is the live target, so it reads as the value.
         let valueFont = stepperValueStyle
@@ -141,6 +147,8 @@ struct ControlNumberField: UIViewRepresentable {
         field.accessibilityLabel = label
         field.accessibilityIdentifier = identifier
         field.accessibilityHint = hint
+        field.accessibilityValue = accessibilityValueOverride
+            ?? (stepperValueStyle ? (text.isEmpty ? placeholder : text) : nil)
         field.textColor = UIColor(Color.pfTextPrimary)
         field.textAlignment = stepperValueStyle ? .center : .natural
         field.borderStyle = stepperValueStyle ? .none : .roundedRect
@@ -166,6 +174,7 @@ struct ControlNumberField: UIViewRepresentable {
         weak var field: UITextField?
         var onSubmit: (() -> Bool)?
         var onCancel: (() -> Void)?
+        var onBeginEditing: (() -> Void)?
         private var submitted = false
         init(text: Binding<String>, focusRequest: Int = 0) {
             self.text = text
@@ -180,7 +189,10 @@ struct ControlNumberField: UIViewRepresentable {
             }
             return true
         }
-        func textFieldDidBeginEditing(_ textField: UITextField) { submitted = false }
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            submitted = false
+            onBeginEditing?()
+        }
         func textFieldDidEndEditing(_ textField: UITextField) {
             if !submitted { onCancel?() }
             submitted = false
@@ -220,8 +232,9 @@ extension EnvironmentValues {
 /// other writable target (#3547): name and measured value on the left, a
 /// tap-to-edit target with − and + on the right. A row applies only its own
 /// target: ± bursts collapse into one request after `heatTargetDebounce`, and
-/// a typed value applies only on Set (Cancel reverts). In-flight state is a
-/// dimmed row plus a small spinner, never caption text.
+/// a typed value applies only on Set (Cancel reverts). The view model owns the
+/// queued value, so in-flight state is a small spinner, never caption text,
+/// and a draft being edited is never replaced by a settling send.
 struct HeatTargetRow: View {
     let title: String
     let measured: Double?
@@ -232,23 +245,25 @@ struct HeatTargetRow: View {
     let stepLabel: (_ increasing: Bool) -> String
     let unit: SensorUnit
     let currentTarget: Double?
+    /// Whether 0 reads as "Off" (heaters and sensor target temperatures that allow it).
+    var allowsOff = true
     var isPending = false
-    /// Next target one step from `base` (pending draft or reported target), or nil.
+    /// Target this row has queued in the view model and not yet settled.
+    let queued: Double?
+    /// Next target one step from `base` (queued or reported target), or nil.
     let next: (_ base: Double?, _ increasing: Bool) -> Double?
     /// Parses typed text; nil means blank (no change). Throws a user-facing message.
     let parse: (String) throws -> Double?
-    let isBusy: @MainActor () -> Bool
-    let apply: @MainActor (Double) async -> Void
+    /// Queues a value in the view model, sent after the delay (nil: now).
+    let schedule: @MainActor (_ value: Double, _ delay: Duration?) -> Void
     var focusRequest = 0
 
     @State private var draft = ""
-    @State private var pendingValue: Double?
+    @State private var isEditing = false
     @State private var inputError: String?
-    @State private var applyTask: Task<Void, Never>?
+    @State private var rowWidth: CGFloat = .infinity
     @Environment(\.heatTargetDebounce) private var debounce
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    static let postApplyGrace: Duration = .seconds(5)
 
     static func draftText(_ value: Double) -> String {
         value.formatted(.number.locale(Locale(identifier: "en_US_POSIX")).grouping(.never))
@@ -260,9 +275,17 @@ struct HeatTargetRow: View {
         return currentTarget.formatted(.number.precision(.fractionLength(0...1)))
     }
 
+    /// Queued value first, then the reported target.
+    private var displayedTarget: Double? { queued ?? currentTarget }
+
+    private var showsOff: Bool {
+        !isEditing && allowsOff && displayedTarget == 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            let layout = dynamicTypeSize.isAccessibilitySize
+            let isAccessibilitySize = dynamicTypeSize.isAccessibilitySize
+            let layout = isAccessibilitySize
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
                 : AnyLayout(HStackLayout(spacing: 8))
             layout {
@@ -270,57 +293,71 @@ struct HeatTargetRow: View {
                     Text(title)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(isAccessibilitySize ? nil : 1)
+                        .minimumScaleFactor(isAccessibilitySize ? 1 : 0.8)
+                        .fixedSize(horizontal: false, vertical: isAccessibilitySize)
+                    // One line at every width so all rows share one height.
                     Text(measuredText)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Color.pfTextSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .accessibilityIdentifier("\(identifier).measured")
                         .accessibilityLabel(measuredAccessibilityLabel)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                editor
+                editor(fillsWidth: isAccessibilitySize, narrow: !isAccessibilitySize && rowWidth < Self.narrowWidth)
             }
             .frame(minHeight: 48)
+            // Every row in a panel shares this width, so all rows switch together.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
             if let inputError {
                 Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("\(identifier).error")
             }
         }
-        .onChange(of: currentTarget) { _, reported in
-            guard let pendingValue, reported == pendingValue, draft == Self.draftText(pendingValue) else { return }
-            clearDraft()
-        }
-        .onDisappear { applyTask?.cancel() }
     }
 
-    private var editor: some View {
+    /// Below this row width (for example a 256 pt column) the editor drops the
+    /// separate unit slot and narrows the field so names stay readable.
+    static let narrowWidth: CGFloat = 300
+
+    private func editor(fillsWidth: Bool, narrow: Bool) -> some View {
         HStack(spacing: 4) {
             stepButton(increasing: false)
             ControlNumberField(
-                placeholder: Self.placeholder(currentTarget: currentTarget), text: $draft,
+                placeholder: Self.placeholder(currentTarget: displayedTarget, allowsOff: allowsOff),
+                text: Binding(get: { isEditing ? draft : "" }, set: { draft = $0; isEditing = true }),
                 label: fieldLabel, identifier: fieldIdentifier, hint: fieldHint,
                 keyboardType: .decimalPad, stepperValueStyle: true, focusRequest: focusRequest,
-                onSubmit: submit, onCancel: cancelEditing
+                onSubmit: submit, onCancel: cancelEditing, onBeginEditing: beginEditing,
+                accessibilityValueOverride: isPending ? "Applying" : nil
             )
-            .frame(width: 72)
+            // Accessibility sizes stack the row, so the field takes the free width.
+            .frame(width: fillsWidth ? nil : (narrow ? 52 : 72))
+            .frame(maxWidth: fillsWidth ? .infinity : nil)
             .overlay(alignment: .topTrailing) {
                 if isPending {
                     ProgressView().controlSize(.mini)
+                        .tint(Color.pfTextPrimary)
                         .padding(3)
                         .accessibilityHidden(true)
                 }
             }
-            .accessibilityValue(isPending ? "Applying" : "")
-            Text(unit.symbol).font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                .fixedSize()
-                .accessibilityHidden(true)
+            // "Off" carries no unit; the slot keeps its width so columns align.
+            if !narrow {
+                Text(unit.symbol).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize()
+                    .opacity(showsOff ? 0 : 1)
+                    .accessibilityHidden(true)
+            }
             stepButton(increasing: true)
         }
     }
 
     private func stepButton(increasing: Bool) -> some View {
-        let target = next(pendingValue ?? currentTarget, increasing)
+        let target = next(displayedTarget, increasing)
         return ControlActionButton(
             title: "",
             identifier: "\(identifier).\(increasing ? "increase" : "decrease")",
@@ -330,11 +367,9 @@ struct HeatTargetRow: View {
             systemImage: increasing ? "plus" : "minus",
             minimumHeight: 44
         ) {
-            guard let target = next(pendingValue ?? currentTarget, increasing) else { return }
+            guard let target = next(displayedTarget, increasing) else { return }
             inputError = nil
-            pendingValue = target
-            draft = Self.draftText(target)
-            schedule(target, after: debounce)
+            schedule(target, debounce)
         }
         .frame(minWidth: 44, minHeight: 44)
         .fixedSize()
@@ -352,16 +387,19 @@ struct HeatTargetRow: View {
         return "Current \(measured.formatted(.number.precision(.fractionLength(0...1))))\(spoken.isEmpty ? "" : " " + spoken)"
     }
 
+    private func beginEditing() {
+        draft = queued.map(Self.draftText) ?? ""
+        isEditing = true
+    }
+
     private func submit() -> Bool {
         do {
-            guard let value = try parse(draft) else {
-                inputError = nil
-                return true
+            if let value = try parse(draft) {
+                schedule(value, nil)
             }
             inputError = nil
-            pendingValue = value
-            draft = Self.draftText(value)
-            schedule(value, after: nil)
+            isEditing = false
+            draft = ""
             return true
         } catch {
             inputError = error.localizedDescription
@@ -371,32 +409,8 @@ struct HeatTargetRow: View {
 
     private func cancelEditing() {
         inputError = nil
-        draft = pendingValue.map(Self.draftText) ?? ""
-    }
-
-    private func clearDraft() {
-        pendingValue = nil
+        isEditing = false
         draft = ""
-    }
-
-    private func schedule(_ value: Double, after delay: Duration?) {
-        applyTask?.cancel()
-        applyTask = Task { @MainActor in
-            if let delay {
-                do { try await Task.sleep(for: delay) } catch { return }
-            }
-            // Another request owns the printer's single-flight slot; wait so
-            // this row's target is not silently dropped.
-            var waited = Duration.zero
-            while isBusy(), waited < .seconds(30) {
-                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
-                waited += .milliseconds(100)
-            }
-            guard !Task.isCancelled else { return }
-            await apply(value)
-            do { try await Task.sleep(for: Self.postApplyGrace) } catch { return }
-            if pendingValue == value { clearDraft() }
-        }
     }
 }
 
@@ -623,10 +637,10 @@ struct PreheatSubgroup: View {
     @Environment(\.preheatPresetsFillRow) private var presetsFillRow
     @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
 
-    /// The Control tab's filled preset row shows Cool down as a snowflake;
-    /// VoiceOver still speaks "Cool down" via `accessibilityLabel(preset:isPending:)`.
-    static func detailPresetSymbol(_ preset: PreheatPreset, fillsRow: Bool) -> String? {
-        fillsRow && preset == .coolDown ? "snowflake" : nil
+    /// Cool down is an icon-only snowflake in every layout; VoiceOver still
+    /// speaks "Cool down" via `accessibilityLabel(preset:isPending:)`.
+    static func detailPresetSymbol(_ preset: PreheatPreset) -> String? {
+        preset == .coolDown ? "snowflake" : nil
     }
 
     /// Fixed display order matching the UX spec.
@@ -646,6 +660,7 @@ struct PreheatSubgroup: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Presets sit above the heat rows in every layout (mockup v3).
             if compactForDetail {
                 // The Heat segment already names this panel, so detail mode shows only presets.
                 Group {
@@ -662,14 +677,13 @@ struct PreheatSubgroup: View {
                 .padding(.bottom, 8)
             } else {
                 heatHeading.padding(.bottom, 14)
+                grid.padding(.bottom, 14)
             }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
 
             IndividualHeaterControls(viewModel: viewModel, nozzleFocusRequest: nozzleFocusRequest)
 
             if !compactForDetail {
-                grid.padding(.top, 14).padding(.bottom, 8)
-
                 Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
                     .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
                     .padding(.top, 10)
@@ -694,10 +708,11 @@ struct PreheatSubgroup: View {
     private var detailPresets: some View {
         HStack(spacing: 4) {
             ForEach(visiblePresets, id: \.self) { preset in
+                // Equal-width slots, so the snowflake matches the materials.
                 button(for: preset, compactForDetail: true)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     enum PresetSlot: Hashable {
@@ -708,15 +723,24 @@ struct PreheatSubgroup: View {
     /// Mockup v3: PLA · PETG · ABS · More · Cool down in one row; from
     /// xxLarge (including every accessibility size) the materials wrap above
     /// More + Cool down, so More stays reachable at every text size.
-    static func presetRows(dynamicTypeSize: DynamicTypeSize) -> [[PresetSlot]] {
+    static func presetRows(dynamicTypeSize: DynamicTypeSize, wrapped: Bool = false) -> [[PresetSlot]] {
         let materials = PreheatPreset.rowMaterials.map(PresetSlot.preset)
         let trailing: [PresetSlot] = [.more, .preset(.coolDown)]
-        return dynamicTypeSize >= .xxLarge ? [materials, trailing] : [materials + trailing]
+        return wrapped || dynamicTypeSize >= .xxLarge ? [materials, trailing] : [materials + trailing]
     }
 
+    /// One row when every slot fits at its natural width; otherwise (e.g. a
+    /// 256pt column) two rows, so a temperature pair is never squeezed or split.
     private var filledPresetRow: some View {
+        ViewThatFits(in: .horizontal) {
+            presetRowsView(Self.presetRows(dynamicTypeSize: dynamicTypeSize))
+            presetRowsView(Self.presetRows(dynamicTypeSize: dynamicTypeSize, wrapped: true))
+        }
+    }
+
+    private func presetRowsView(_ rows: [[PresetSlot]]) -> some View {
         VStack(spacing: 8) {
-            ForEach(Self.presetRows(dynamicTypeSize: dynamicTypeSize), id: \.self) { row in
+            ForEach(rows, id: \.self) { row in
                 // Every slot stretches to the tallest one, so More matches
                 // Cool down when accessibility sizes grow the row.
                 HStack(spacing: 8) {
@@ -893,14 +917,9 @@ struct PreheatSubgroup: View {
                 HeaterTargetEditor(viewModel: viewModel, heater: .hotend, focusRequest: nozzleFocusRequest)
                 HeaterTargetEditor(viewModel: viewModel, heater: .bed)
             }
-            .disabled(!viewModel.canControl || viewModel.isExecuting)
-        }
-
-        static func isHeaterTargetPending(_ kind: ControlCommand.Kind?) -> Bool {
-            switch kind {
-            case .heater, .heaterTargets: true
-            default: false
-            }
+            // Another row's send never disables these rows: disabling a
+            // focused field would resign it and discard the draft.
+            .disabled(!viewModel.canControl)
         }
     }
 
@@ -908,11 +927,6 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
         let heater: Heater
         var focusRequest = 0
-
-        static func temperatureText(_ value: Double?) -> String {
-            guard let value, value.isFinite else { return "Not reported" }
-            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
-        }
 
         private var currentTarget: Double? {
             heater == .hotend ? viewModel.printer.hotendTarget : viewModel.printer.bedTarget
@@ -932,7 +946,6 @@ struct PreheatSubgroup: View {
         private var isPending: Bool {
             switch viewModel.pendingCommand?.kind {
             case .heater(let pending, _): pending == heater
-            case .heaterTargets: true
             default: false
             }
         }
@@ -951,6 +964,7 @@ struct PreheatSubgroup: View {
                 unit: .celsius,
                 currentTarget: viewModel.supports(heater) ? currentTarget : nil,
                 isPending: isPending,
+                queued: viewModel.queuedHeatTargets[heater.rawValue],
                 next: { base, increasing in
                     Self.steppedTarget(draft: "", current: base, maximum: maximum, delta: increasing ? 5 : -5)
                 },
@@ -961,8 +975,11 @@ struct PreheatSubgroup: View {
                     }
                     return value
                 },
-                isBusy: { viewModel.isExecuting },
-                apply: { await viewModel.setHeaterTarget(heater, target: $0) },
+                schedule: { value, delay in
+                    viewModel.scheduleHeatTarget(key: heater.rawValue, title: title, value: value, after: delay) {
+                        await $0.setHeaterTarget(heater, target: value)
+                    }
+                },
                 focusRequest: focusRequest
             )
             .disabled(!viewModel.supports(heater))
@@ -999,17 +1016,15 @@ struct PreheatSubgroup: View {
         compactForDetail: Bool = false
     ) -> some View {
         VStack(spacing: 3) {
-            if compactForDetail, let symbol = Self.detailPresetSymbol(preset, fillsRow: presetsFillRow) {
+            if compactForDetail, let symbol = Self.detailPresetSymbol(preset) {
                 Image(systemName: symbol)
                     .font(.body.weight(.semibold))
-                    .opacity(isPending ? 0 : 1)
                     .accessibilityHidden(true)
             } else if compactForDetail {
-                Text(preset == .coolDown ? "Off" : preset.displayLabel)
+                Text(preset.displayLabel)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .opacity(isPending ? 0 : 1)
                 if preset != .coolDown {
                     Text(Self.compactTargetsText(
                         preset, hasBed: viewModel.supports(.bed),
@@ -1021,21 +1036,18 @@ struct PreheatSubgroup: View {
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                         .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.8)
                         .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
-                        .opacity(isPending ? 0 : 1)
                         .accessibilityHidden(true)
                 }
             } else if preset == .coolDown {
                 // Larger snowflake icon with no text, matching web UI styling.
                 Image(systemName: "snowflake")
                     .font(.system(size: presetFontSize * 1.5, weight: .semibold))
-                    .opacity(isPending ? 0 : 1)
                     .accessibilityHidden(true)
             } else {
                 Text(preset.displayLabel)
                     .font(.system(size: presetFontSize))
                 Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                     .font(.caption2.monospacedDigit())
-                    .opacity(isPending ? 0 : 1)
             }
         }
         // Height comes from the type metrics alone, never the rendered label, so
@@ -1047,11 +1059,15 @@ struct PreheatSubgroup: View {
             : max(54, presetFontSize * 2 + 14))
         .frame(minHeight: compactForDetail ? 48 : nil)
         .frame(maxWidth: .infinity, maxHeight: compactForDetail && presetsFillRow ? .infinity : nil)
-        .overlay {
+        // The preset name stays visible during a send; a small corner
+        // spinner in the primary text colour marks it in flight.
+        .overlay(alignment: .topTrailing) {
             if isPending {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.mini)
                     .tint(Color.pfTextPrimary)
+                    .padding(4)
+                    .accessibilityHidden(true)
             }
         }
     }

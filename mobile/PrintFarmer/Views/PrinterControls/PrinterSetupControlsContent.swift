@@ -362,44 +362,47 @@ struct PrinterSensorControlRows: View {
             return false
         }()
         let unitSpoken = descriptor.unit.spoken
+        let allowsOff = descriptor.allowZero == true && descriptor.quantity == .targetTemperature
+        let key = "sensor.\(sensor.id).\(descriptor.quantity.rawValue)"
+        let title = Self.title(sensor: sensor, quantity: descriptor.quantity)
         return HeatTargetRow(
-            title: Self.title(sensor: sensor, quantity: descriptor.quantity),
+            title: title,
             measured: sensor.reading(measuredQuantity)?.value.number,
             identifier: id,
             fieldIdentifier: id + ".value",
             fieldLabel: spokenTitle + (unitSpoken.isEmpty ? "" : " in \(unitSpoken)"),
             fieldHint: "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
-                + (descriptor.allowZero == true ? "; zero switches it off." : "."),
+                + (allowsOff ? "; zero switches it off." : "."),
             stepLabel: { "\($0 ? "Increase" : "Decrease") \(spokenTitle)" },
             unit: descriptor.unit,
             currentTarget: current,
+            allowsOff: allowsOff,
             isPending: pending,
+            queued: viewModel.queuedHeatTargets[key],
+            // At a limit the clamped step equals the base, so ± disables instead of resending it.
             next: { base, increasing in
-                base.map { PrinterSensorFormatting.steppedTarget(current: $0, increasing: increasing, descriptor: descriptor) }
+                base.flatMap { base in
+                    let target = PrinterSensorFormatting.steppedTarget(current: base, increasing: increasing, descriptor: descriptor)
+                    return target == base ? nil : target
+                }
             },
             parse: { text in
                 guard let value = try ControlNumberInput.optional(text) else { return nil }
-                guard Self.accepts(value, descriptor: descriptor) else {
-                    throw PrinterControlError.invalidRequest(
-                        "Enter \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
-                            + (descriptor.allowZero == true ? ", or 0 for off" : "")
-                            + ((descriptor.step ?? 0) > 0 ? " in steps of \(descriptor.step!.formatted())." : ".")
-                    )
+                if let message = viewModel.sensorValueError(sensorId: sensor.id, quantity: descriptor.quantity, value: value) {
+                    throw PrinterControlError.invalidRequest(message)
                 }
                 return value
             },
-            isBusy: { viewModel.isExecuting },
-            apply: { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: $0) }
+            schedule: { value, delay in
+                viewModel.scheduleHeatTarget(
+                    key: key, title: title, value: value, after: delay,
+                    isSendable: { $0.canControlSensors }
+                ) {
+                    await $0.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: value)
+                }
+            }
         )
         .disabled(!viewModel.canControlSensors || current == nil)
-    }
-
-    /// Mirrors `PrinterControlsViewModel.setSensorValue` validation.
-    static func accepts(_ value: Double, descriptor: SensorWritable) -> Bool {
-        value.isFinite
-            && ((value == 0 && descriptor.allowZero == true && descriptor.quantity == .targetTemperature)
-                || (value >= descriptor.min && value <= descriptor.max))
-            && PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor)
     }
 }
 

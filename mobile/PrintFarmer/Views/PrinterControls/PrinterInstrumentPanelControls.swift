@@ -410,11 +410,14 @@ struct PrinterInstrumentPanelControls: View {
     // MARK: - Heat
 
     private var heatPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             PreheatSubgroup(viewModel: viewModel, compactForDetail: true)
             // Writable sensors are idle-only here; Tune carries only Speed, Flow and babystep (#3540).
             PrinterSensorControlRows(viewModel: viewModel, compact: true)
         }
+        // Same width cap as Move, so iPad rows don't stretch edge to edge.
+        .frame(maxWidth: Self.maximumJogPadWidth)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.heat-group")
     }
