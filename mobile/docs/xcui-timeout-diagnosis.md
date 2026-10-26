@@ -588,6 +588,20 @@ bundles and text logs. An exceptional forced stop can leave a partial bundle;
 raw logs, stream and timing JSON are still retained/uploaded with `if: always()`.
 This does not promise Xcode can finish a valid bundle after a hard kill.
 
+#### Runner self-test shutdown scheduling
+
+CI runs the Python subprocess contract suite before building Swift tests. In
+PR #3533, the graceful-flush fixture exceeded its test-only 100ms shutdown window
+and was killed instead of exiting 0. A controlled 200ms teardown reproduces
+that failure without Xcode or a simulator.
+
+The graceful-timeout and cancellation cases now exercise that delayed teardown
+with a test-only 2s flush window, 2.5s finalization budget and 5s invocation
+ceiling. They still require native exit 0, the exact flushed artifact, and
+nonzero wrapper exits 124/143. The unresponsive-process/descendant test retains
+its short hard-stop bound. Production 120s/10s/1440s budgets, XCTest settings,
+pixel precision and reference images are unchanged.
+
 #### Finalization validation
 
 Validated runner code at `2edca220baaf6957df62dc3807bc3ffce833dc2e` after
