@@ -55,7 +55,7 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     /// Move and Heat lock during a job (mockup B): presets would change
-    /// temperatures mid-print, and Tune already carries the hotend/bed targets.
+    /// temperatures mid-print. Tune carries only Speed, Flow and Z babystep (#3540).
     /// Tune (speed, flow, babystep) only applies to a running or paused print
     /// (#3496), so it is disabled while idle.
     /// `isLocked` defaults to `isPrinting`; pass it separately for transitional

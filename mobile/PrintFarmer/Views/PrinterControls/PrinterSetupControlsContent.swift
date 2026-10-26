@@ -316,7 +316,7 @@ struct PrinterMaterialControls: View {
 struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
-    /// Tune passes its shared value column so sensor and Speed/Flow steppers align.
+    /// Heat passes its shared value column so sensor and heater steppers align.
     var valueColumnWidth: CGFloat?
 
     var body: some View {
@@ -373,7 +373,7 @@ struct PrinterSensorControlRows: View {
         increasing: Bool, current: Double, descriptor: SensorWritable, sensor: PrinterSensor
     ) -> some View {
         let clamped = PrinterSensorFormatting.steppedTarget(current: current, increasing: increasing, descriptor: descriptor)
-        // Native 44 pt stepper, matching the other Tune controls.
+        // Native 44 pt stepper, matching the other Heat controls.
         return ControlActionButton(
             title: "",
             identifier: identifier,

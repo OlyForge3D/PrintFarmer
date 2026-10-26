@@ -453,6 +453,20 @@ final class PrinterDetailPanelsTests: XCTestCase {
             panel.find(sensorIncrease)?.isEnabled == true
         }
         XCTAssertNotNil(panel.find("printer.controls.sensor.chamber.TargetTemperature.decrease"))
+        try XCTUnwrap(panel.find(sensorIncrease)).sendActions(for: .touchUpInside)
+        let sensorPath = "/api/printers/\(panel.printerId)/sensors/chamber"
+        try await waitForHost("Heat's writable sensor must reach the registered sensor API", in: panel.controller.view) {
+            panel.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path == sensorPath }
+        }
+        let sensorPost = try XCTUnwrap(
+            panel.api.capturedRequests.first { $0.httpMethod == "POST" && $0.url?.path == sensorPath }
+        )
+        XCTAssertEqual(sensorPost.value(forHTTPHeaderField: "Authorization"), "Bearer detail-host-test-token",
+                       "Sensor writes must be authenticated")
+        XCTAssertFalse(
+            panel.api.capturedRequests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/fan") == true },
+            "Heat's sensor control must never reach the part fan endpoint"
+        )
     }
 
     func testTuneShowsSpeedAndFlowAboveBabystepAndPostsFactorAPI() async throws {
