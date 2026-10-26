@@ -44,10 +44,33 @@ Main overview page showing all printers with real-time status.
   tag, preview, slice models, and queue local G-code. Use `?type=models` or
   `?type=gcode` to filter by file type.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
-  availability and freshness, inspect scan status, and explicitly copy a
-  selected location to the local library. Add `&printer=<printerId>` to scope
-  the catalog to one printer. Browsing does not download remote previews or
-  file contents.
+  availability and freshness, and act on one location at a time. Add
+  `&printer=<printerId>` to scope the catalog to one printer.
+
+Both sources share the same compact card grid and 12px table, with the same
+file, status, and action glyphs. Selecting a card or file name opens a details
+panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
+it and returns focus). The panel shows a larger preview, type, size, path,
+source, print time, and layer height. Values the source cannot provide are shown
+as **Unavailable**. File dates display as dates only; hover for the full
+timestamp.
+
+On-printer files offer two distinct actions:
+
+- **Copy to local library** (folder-arrow glyph) creates or reuses an owned
+  local asset. It never queues a print.
+- **Download** (tray-arrow glyph) saves the bytes to your browser only. It does
+  not create a library asset or a queue entry.
+
+Remote previews load lazily, only for visible items on printers whose backend
+supports them. They are fetched only when the printer is idle, cached per file
+version, and labelled with their capture date. Indexing itself remains
+metadata-only.
+
+Per-printer automatic discovery, scan status, and **Refresh now** live in the
+**Files** section of the printer's Edit dialog. Those changes apply immediately
+and are not part of the form save. Global discovery cadence and budgets remain
+under Admin Settings > Files.
 
 The printer-file dialog links to the printer-scoped catalog. Copy operates
 **one file at a time**; bulk import is not available. The React G-code harvest

@@ -4,6 +4,7 @@ using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode.Safety;
 using Farm.Web.Api.Services.Gcode.Safety;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +41,21 @@ public sealed class GcodeApiModule : IApiModule
         _ = services.AddScoped<IPrinterFileAccessService, PrinterFileAccessService>();
         _ = services.AddScoped<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
         _ = services.AddScoped<PrinterFileCatalogService>();
+        _ = services.AddSingleton(sp =>
+        {
+            IWebHostEnvironment environment = sp.GetRequiredService<IWebHostEnvironment>();
+            string directory = Path.GetFullPath(Path.Join(environment.ContentRootPath, "App_Data", "printer-file-previews"));
+            if (!string.IsNullOrEmpty(environment.WebRootPath) &&
+                directory.StartsWith(
+                    Path.GetFullPath(environment.WebRootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Printer preview cache must be outside the web root.");
+            }
+
+            return new PrinterFilePreviewCache(directory);
+        });
+        _ = services.AddScoped<PrinterFileContentService>();
         _ = services.AddHostedService<PrinterFileIndexWorker>();
         _ = services.AddScoped<PrinterFileCopyService>();
         _ = services.AddScoped<IPrinterFileCopyService>(sp => sp.GetRequiredService<PrinterFileCopyService>());

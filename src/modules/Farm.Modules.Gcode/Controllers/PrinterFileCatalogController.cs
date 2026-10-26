@@ -113,9 +113,12 @@ public sealed class PrinterFileCatalogController(
         List<object> printers = [];
         foreach (var printer in printerRows)
         {
-            bool supportsCopy = backendClients is not null &&
-                backendClients.IsBackendSupported((PrinterBackend)printer.Backend) &&
-                backendClients.GetClient(printer.Backend) is ISupportsPrinterFileCopy;
+            object? backend = backendClients is not null &&
+                backendClients.IsBackendSupported((PrinterBackend)printer.Backend)
+                    ? backendClients.GetClient(printer.Backend) : null;
+            bool supportsCopy = backend is ISupportsPrinterFileCopy;
+            bool supportsPreview = backend is ISupportsPrinterFilePreview;
+            bool supportsDownload = backend is ISupportsPrinterFileCopy and ISupportsFileInventory;
             printers.Add(new
             {
                 printer.Id,
@@ -123,6 +126,10 @@ public sealed class PrinterFileCatalogController(
                 canManage = authority.Manageable.Contains(printer.Id),
                 supportsCopy,
                 canCopy = supportsCopy && authority.Copyable.Contains(printer.Id),
+                supportsPreview,
+                canPreview = supportsPreview && authority.Readable.Contains(printer.Id),
+                supportsDownload,
+                canDownload = supportsDownload && authority.Copyable.Contains(printer.Id),
                 canDelete = authority.Deletable.Contains(printer.Id),
             });
         }

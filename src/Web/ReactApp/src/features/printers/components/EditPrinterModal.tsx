@@ -18,6 +18,7 @@ import { isSafeHttpUrl } from '@/common/utils/validation';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { hasExternalSpoolHolder } from '@/features/printers/utils/materialLoadout';
 import { PrinterCamerasSection } from '@/features/printers/components/PrinterCamerasSection';
+import { PrinterFileDiscoverySection } from '@/features/printers/components/PrinterFileDiscoverySection';
 
 export interface EditPrinterModalProps {
   printerId: string | null;
@@ -1042,6 +1043,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 </>
               )}
             </div>
+
+            {/* Files on printer (discovery) — applies immediately, outside the form submit */}
+            {printerId && <PrinterFileDiscoverySection printerId={printerId} />}
 
             {/* Camera Configuration */}
             <div className="border-t pt-5 mt-5">

@@ -16,6 +16,8 @@ interface FileBrowserProps<TDomain> {
   extraToolbarActions?: ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  /** Opt-in dense presentation: auto-fill grid of small cards and a 12px table. */
+  compact?: boolean;
   ref?: Ref<FileBrowserHandle>;
 }
 
@@ -38,6 +40,7 @@ export function FileBrowser<TDomain>({
     extraToolbarActions,
     viewMode,
     onViewModeChange,
+    compact = false,
     ref,
   }: FileBrowserProps<TDomain>) {
     const browser = useFileBrowser({ ...config, viewMode, onViewModeChange });
@@ -90,6 +93,7 @@ export function FileBrowser<TDomain>({
             totalPages={browser.totalPages}
             onPageChange={browser.setPage}
             isBusy={browser.isMutating}
+            compact={compact}
           />
         ) : (
           <ExplorerView
@@ -115,6 +119,7 @@ export function FileBrowser<TDomain>({
             onPageChange={browser.setPage}
             columns={columns}
             isBusy={browser.isMutating}
+            compact={compact}
           />
         )}
         </div>

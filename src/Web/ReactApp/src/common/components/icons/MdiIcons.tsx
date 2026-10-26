@@ -121,6 +121,9 @@ import {
   mdiRuler,
   mdiFormatText,
   mdiFan,
+  mdiFolderArrowDownOutline,
+  mdiImageOffOutline,
+  mdiFileDocumentOutline,
 } from '@mdi/js';
 
 interface IconProps {
@@ -3371,6 +3374,65 @@ export function FireIcon({ className = 'w-4 h-4', ariaLabel = 'Forge theme' }: O
       role="img"
     >
       <path fill="currentColor" d={mdiFire} />
+    </svg>
+  );
+}
+
+/**
+ * Copy-to-local-library icon (folder with inward arrow).
+ *
+ * Distinct from {@link DownloadIcon} (tray arrow), which saves bytes to the browser only.
+ * @example
+ * <CopyLocalIcon className="w-4 h-4" ariaLabel="Copy to local library" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function CopyLocalIcon({ className = 'w-4 h-4', ariaLabel = 'Copy to local library' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFolderArrowDownOutline} />
+    </svg>
+  );
+}
+
+/**
+ * Preview-unavailable icon.
+ * @example
+ * <ImageOffIcon className="w-6 h-6" ariaLabel="Preview unavailable" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ImageOffIcon({ className = 'w-4 h-4', ariaLabel = 'Preview unavailable' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiImageOffOutline} />
+    </svg>
+  );
+}
+
+/**
+ * G-code / document file icon.
+ * @example
+ * <GcodeFileIcon className="w-4 h-4" ariaLabel="G-code file" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function GcodeFileIcon({ className = 'w-4 h-4', ariaLabel = 'G-code file' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFileDocumentOutline} />
     </svg>
   );
 }

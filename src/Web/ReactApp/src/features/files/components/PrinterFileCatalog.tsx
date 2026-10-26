@@ -2,19 +2,40 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Alert, Badge, Button, Checkbox, FormField, Input, Select, Spinner, Toggle } from '@/common/components/ui';
+import clsx from 'clsx';
+import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
+import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
+import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { usePrinters } from '@/common/hooks/useApi';
+import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { apiClient } from '@/services/api';
 import { generateUUID } from '@/utils/uuid';
 import type { PrinterFileAvailability, PrinterFileCatalogEntry } from '@/types/api';
 import { PrinterFileDeleteControl, type PrinterFileDeleteIntent } from '@/features/files/components/PrinterFileDeleteControl';
+import { CompactFileCard } from '@/features/files/components/CompactFileCard';
+import { FileActionIconButtons, type FileAction } from '@/features/files/components/FileActions';
+import { FileNameButton } from '@/features/files/components/FileNameButton';
+import { PrinterFileStatusGlyphs } from '@/features/files/components/FileGlyphs';
+import { PrinterFileDetails, PrinterFileModified } from '@/features/files/components/PrinterFileDetails';
+import { PrinterFileThumbnail } from '@/features/files/components/PrinterFileThumbnail';
+import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
+import { canDownloadSource } from '@/features/files/hooks/usePrinterFilePreview';
+import { formatSizeLabel } from '@/features/files/utils/fileDisplay';
+import {
+  COMPACT_FILE_GRID_CLASS,
+  COMPACT_FILE_TABLE_CELL_CLASS,
+  COMPACT_FILE_TABLE_CLASS,
+  FILE_TABLE_HEADER_CELL_CLASS,
+} from '@/features/fileBrowser/fileBrowserStyles';
 
 const CATALOG_POLL_MS = 30_000;
 const OPERATION_POLL_MS = 2_000;
 const PAGE_SIZE = 25;
 const ACTIVE_STATES = new Set(['Pending', 'Copying', 'Validating', 'LocalReady', 'Enqueueing']);
+const VIEW_MODE_STORAGE_KEY = 'printfarmer-printer-files-viewmode';
+const ACTION_ICON_CLASS = 'h-4 w-4';
 
 interface Intent {
   entry: PrinterFileCatalogEntry;
@@ -22,12 +43,18 @@ interface Intent {
   key: string;
 }
 
-function observedAt(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : 'Unknown';
-}
-
 function byteCount(value?: number | null) {
   return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
+}
+
+/** Download errors arrive as the shared ApiError shape; blob bodies carry no parsed reason. */
+function downloadFailure(error: unknown): { message: string; observationChanged: boolean } {
+  const failure = error as { statusCode?: number; message?: string; data?: { reasonCode?: unknown } } | null;
+  const observationChanged = failure?.statusCode === 409 || failure?.data?.reasonCode === 'source_observation_changed';
+  if (observationChanged) {
+    return { message: 'The file changed on the printer. The list was refreshed; try again.', observationChanged };
+  }
+  return { message: failure?.message || 'Unknown error', observationChanged };
 }
 
 export function PrinterFileCatalog() {
@@ -52,6 +79,8 @@ export function PrinterFileCatalog() {
   const canRead = hasPermission('printer_files', 'read');
   const { data: destinations = [] } = usePrinters({ enabled: canRead });
   const canQueue = hasPermission('queue', 'write');
+  const { viewMode, setViewMode } = useViewModePreference(VIEW_MODE_STORAGE_KEY);
+  const details = useFileDetailSelection<string>();
 
   const changeFilter = (key: string, value: string) => {
     setParams(previous => {
@@ -138,14 +167,18 @@ export function PrinterFileCatalog() {
     },
     onError: (error: Error) => toast.error(`Failed to update operation: ${error.message}`),
   });
-  const scan = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled?: boolean }) =>
-      enabled === undefined ? apiClient.refreshPrinterFileIndex(id) : apiClient.setPrinterFileIndexEnabled(id, enabled),
-    onSuccess: async () => {
-      toast.success('Discovery request saved. It still requires an idle printer.');
-      await invalidate();
+  // Browser-only download: streams the printer's bytes to this computer. It never creates a
+  // local-library asset, an operation, or a queue job (that is "Copy to local library").
+  const download = useMutation({
+    mutationFn: (entry: PrinterFileCatalogEntry) =>
+      apiClient.downloadPrinterFile(entry.id, entry.observationRevision, entry.displayName),
+    onError: async (error: unknown) => {
+      const failure = downloadFailure(error);
+      toast.error(`Failed to download: ${failure.message}`);
+      if (failure.observationChanged) {
+        await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+      }
     },
-    onError: (error: Error) => toast.error(`Failed to update discovery: ${error.message}`),
   });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
     setIntent({ entry, action, key: generateUUID() });
@@ -155,6 +188,34 @@ export function PrinterFileCatalog() {
   };
 
   if (!canRead) return <Alert>You do not have permission to view printer-file observations.</Alert>;
+
+  const sourceFor = (entry: PrinterFileCatalogEntry) =>
+    catalog.data?.printers.find(printer => printer.id === entry.printerId);
+  const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
+    const source = sourceFor(entry);
+    if (!source) return [];
+    const available = entry.availability === 'Available';
+    const actions: FileAction[] = [];
+    if (source.canCopy) {
+      actions.push({ id: 'copy', label: 'Copy to local library', icon: <CopyLocalIcon className={ACTION_ICON_CLASS} />,
+        disabled: !available, onClick: () => selectIntent(entry, 'Copy') });
+    }
+    if (available && canDownloadSource(source)) {
+      actions.push({ id: 'download', label: 'Download', icon: <DownloadIcon className={ACTION_ICON_CLASS} />,
+        disabled: download.isPending && download.variables?.id === entry.id, onClick: () => download.mutate(entry) });
+    }
+    if (source.canCopy && canQueue) {
+      actions.push({ id: 'queue', label: 'Queue', icon: <PlayIcon className={ACTION_ICON_CLASS} />, tone: 'primary',
+        disabled: !available, onClick: () => selectIntent(entry, 'Queue') });
+    }
+    if (source.canDelete) {
+      actions.push({ id: 'delete', label: 'Delete from printer', icon: <DeleteIcon className={ACTION_ICON_CLASS} />, tone: 'danger',
+        disabled: !available, onClick: () => setDeleteIntent({ entry, key: generateUUID() }) });
+    }
+    return actions;
+  };
+  const selectedEntry = details.selected
+    ? catalog.data?.items.find(entry => entry.id === details.selected) ?? null : null;
 
   return (
     <section aria-labelledby="printer-catalog-heading" className="space-y-4">
@@ -194,79 +255,83 @@ export function PrinterFileCatalog() {
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}
       {catalog.data && (
         <>
-          <div className="grid gap-2 md:grid-cols-2">
-            {catalog.data.printers.filter(printer => !printerId || printer.id === printerId).map(printer => {
-              const status = catalog.data.scans.find(item => item.printerId === printer.id);
-              return (
-                <div key={printer.id} className="rounded-sm border border-pf-border bg-pf-bg-1 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <strong>{printer.name}</strong>
-                    <Badge variant={status?.isStale ? 'warning' : 'default'}>
-                      {status?.isScanning ? 'Scanning / file I/O active' : status?.outcome ?? 'Never scanned'}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-pf-text-secondary">
-                    Last complete: {observedAt(status?.lastCompleteScanAtUtc ?? null)}
-                    {status?.isStale ? ' · Stale' : ''}{status && !status.enabled ? ' · Discovery disabled' : ''}
-                  </p>
-                  {status?.reasonCode && <p className="break-words">{status.reasonCode.replaceAll('_', ' ')}</p>}
-                  {!printer.supportsCopy && <p>Listing only: authenticated local staging is not supported by this backend.</p>}
-                  {status?.nextScanAtUtc && <p className="text-pf-text-secondary">Next eligible scan: {observedAt(status.nextScanAtUtc)}</p>}
-                  {printer.canManage && (
-                    <div className="mt-2 flex flex-wrap items-center gap-3">
-                      <Button size="sm" variant="secondary" disabled={scan.isPending} onClick={() => scan.mutate({ id: printer.id })}>Request refresh</Button>
-                      <Toggle label={`Automatic discovery for ${printer.name}`} checked={status?.enabled ?? true}
-                        disabled={scan.isPending} onChange={event => scan.mutate({ id: printer.id, enabled: event.target.checked })} />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
+            <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           </div>
-          <div className="overflow-x-auto rounded-sm border border-pf-border">
-            <table className="w-full text-left text-sm">
-              <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
-              <thead className="bg-pf-bg-1 text-pf-text-secondary"><tr>
-                <th scope="col" className="p-3">Source / exact path</th><th scope="col" className="p-3">Observation</th>
-                <th scope="col" className="p-3">Captured local copies</th><th scope="col" className="p-3">Actions</th>
-              </tr></thead>
-              <tbody>
-                {catalog.data.items.map(entry => {
-                  const source = catalog.data.printers.find(printer => printer.id === entry.printerId);
-                  return (
-                    <tr key={entry.id} className="border-t border-pf-border align-top">
-                      <th scope="row" className="max-w-md p-3 font-normal">
-                        <strong>{entry.printerName}</strong><div className="break-all font-mono">{entry.storageRoot}/{entry.relativePath}</div>
-                      </th>
-                      <td className="p-3">
-                        <Badge variant={entry.isStale || entry.availability !== 'Available' ? 'warning' : 'default'}>{entry.availability}{entry.isStale ? ' · Stale' : ''}</Badge>
-                        <p className="mt-1">{byteCount(entry.sizeBytes)}</p><p>Modified: {entry.modifiedValue ?? 'Unknown'}</p>
-                        <p className="text-pf-text-secondary">Last seen: {observedAt(entry.lastSeenAtUtc)}</p>
-                        <p className="text-pf-text-secondary">Complete scan: {observedAt(entry.lastCompleteScanAtUtc)}</p>
-                      </td>
-                      <td className="p-3">
-                        {entry.localCopies.length === 0 ? 'None captured' : entry.localCopies.map(local => (
-                          <div key={`${local.gcodeFileId}-${local.capturedAtUtc}`} className="mb-2">
-                            <Link to={`/files?type=gcode&file=${encodeURIComponent(local.gcodeFileId)}`} className="text-pf-accent underline">Local copy</Link>
-                            <p>{observedAt(local.capturedAtUtc)} · {local.verification === 'UnverifiedSnapshot' ? 'Captured snapshot' : local.verification}</p>
-                          </div>
-                        ))}
-                        {entry.localCopies.length > 0 && <p className="text-pf-text-secondary">Not proof of current remote byte equality.</p>}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex flex-wrap gap-2">
-                          {source?.canCopy && <Button size="sm" variant="secondary" disabled={entry.availability !== 'Available'} onClick={() => selectIntent(entry, 'Copy')}>Copy locally</Button>}
-                          {source?.canCopy && canQueue && <Button size="sm" disabled={entry.availability !== 'Available'} onClick={() => selectIntent(entry, 'Queue')}>Queue</Button>}
-                          {source?.canDelete && <Button size="sm" variant="danger" disabled={entry.availability !== 'Available'}
-                            onClick={() => setDeleteIntent({ entry, key: generateUUID() })}>Delete from printer</Button>}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {catalog.data.items.length === 0 && <p className="p-5 text-pf-text-secondary">No matching observations. Only a complete scan establishes an empty source; never-scanned or failed sources are not proof of absence.</p>}
+          <div className="flex items-start gap-4">
+            <div className="min-w-0 flex-1">
+              {catalog.data.items.length === 0 ? (
+                <p className="rounded-lg border border-pf-border p-5 text-pf-text-secondary">No matching observations. Only a complete scan establishes an empty source; never-scanned or failed sources are not proof of absence.</p>
+              ) : viewMode === 'grid' ? (
+                <div role="region" className={COMPACT_FILE_GRID_CLASS} aria-label="Files on printers">
+                  {catalog.data.items.map(entry => {
+                    const source = sourceFor(entry);
+                    return (
+                      <div key={entry.id} role="group" aria-label={entry.displayName}>
+                        <CompactFileCard
+                          name={entry.displayName}
+                          thumbnail={<PrinterFileThumbnail entry={entry} source={source} size="card" />}
+                          status={<PrinterFileStatusGlyphs entry={entry} />}
+                          meta={<span title={entry.printerName}>{formatSizeLabel(entry.sizeBytes)} · {entry.printerName}</span>}
+                          actions={entryActions(entry)}
+                          isActive={details.selected === entry.id}
+                          onOpen={invoker => details.open(entry.id, invoker)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-pf-border">
+                  <table className={COMPACT_FILE_TABLE_CLASS} aria-label="Files on printers">
+                    <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
+                    <thead className="border-b border-pf-border bg-pf-bg-1"><tr>
+                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Preview</th>
+                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Name</th>
+                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Printer</th>
+                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Status</th>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Size</th>
+                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Modified</th>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Actions</th>
+                    </tr></thead>
+                    <tbody>
+                      {catalog.data.items.map(entry => {
+                        const path = `${entry.storageRoot}/${entry.relativePath}`;
+                        const isActive = details.selected === entry.id;
+                        return (
+                          <tr key={entry.id} className={clsx('border-b border-pf-border last:border-b-0', isActive ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
+                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                              <PrinterFileThumbnail entry={entry} source={sourceFor(entry)} size="row" />
+                            </td>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'max-w-xs')}>
+                              <FileNameButton name={entry.displayName} onOpen={invoker => details.open(entry.id, invoker)} />
+                              <div className="truncate font-mono text-pf-text-secondary" title={path}>{path}</div>
+                            </td>
+                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>{entry.printerName}</td>
+                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}><PrinterFileStatusGlyphs entry={entry} showLabels /></td>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap text-right')}>{formatSizeLabel(entry.sizeBytes)}</td>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap')}><PrinterFileModified value={entry.modifiedValue} /></td>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'text-right')}>
+                              <div className="flex justify-end gap-1"><FileActionIconButtons actions={entryActions(entry)} /></div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            {selectedEntry && (
+              <PrinterFileDetails
+                key={selectedEntry.id}
+                entry={selectedEntry}
+                source={sourceFor(selectedEntry)}
+                actions={entryActions(selectedEntry)}
+                onClose={details.close}
+              />
+            )}
           </div>
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-pf-text-secondary">{catalog.data.total} observations · Page {page}</p>

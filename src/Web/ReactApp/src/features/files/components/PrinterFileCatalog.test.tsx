@@ -1,16 +1,18 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PrinterFileCatalogPage, PrinterFileOperation } from '@/types/api';
+import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileOperation } from '@/types/api';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
   confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), enabled: vi.fn(),
-  hasPermission: vi.fn(),
+  preview: vi.fn(), thumbnail: vi.fn(), download: vi.fn(),
+  hasPermission: vi.fn(), toastError: vi.fn(),
 }));
+const media = vi.hoisted(() => ({ lg: false }));
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterFileCatalog: mocks.catalog, getPrinterFileOperations: mocks.operations,
@@ -18,6 +20,8 @@ vi.mock('@/services/api', () => ({
     queueIndexedPrinterFile: mocks.queue, confirmPrinterFileSnapshot: mocks.confirm,
     cancelPrinterFileOperation: mocks.cancel, retryPrinterFileOperation: mocks.retry,
     refreshPrinterFileIndex: mocks.refresh, setPrinterFileIndexEnabled: mocks.enabled,
+    getPrinterFilePreview: mocks.preview, getPrinterFileLocationThumbnail: mocks.thumbnail,
+    downloadPrinterFile: mocks.download,
   },
 }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -29,15 +33,23 @@ vi.mock('@/common/hooks/useApi', () => ({
     { id: 'other', name: 'Other printer', isEnabled: true },
   ] }),
 }));
+vi.mock('@/common/hooks/useMediaQuery', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/hooks/useMediaQuery')>(),
+  useIsLgBreakpoint: () => media.lg,
+}));
+vi.mock('sonner', () => ({
+  toast: { error: mocks.toastError, success: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}));
 
+const entry: PrinterFileCatalogEntry = {
+  id: 'location', printerId: 'source', printerName: 'Source printer', storageRoot: 'gcodes',
+  relativePath: 'Parts/part.gcode', displayName: 'part.gcode', sizeBytes: null, modifiedValue: null,
+  observationRevision: 7, configurationGeneration: 1, availability: 'Available',
+  lastSeenAtUtc: '2026-10-25T12:00:00Z', lastCompleteScanAtUtc: null, isStale: true,
+  localCopies: [],
+};
 const catalog: PrinterFileCatalogPage = {
-  items: [{
-    id: 'location', printerId: 'source', printerName: 'Source printer', storageRoot: 'gcodes',
-    relativePath: 'Parts/part.gcode', displayName: 'part.gcode', sizeBytes: null, modifiedValue: null,
-    observationRevision: 7, configurationGeneration: 1, availability: 'Available',
-    lastSeenAtUtc: '2026-10-25T12:00:00Z', lastCompleteScanAtUtc: null, isStale: true,
-    localCopies: [],
-  }],
+  items: [entry],
   total: 1, page: 1, pageSize: 25,
   printers: [{ id: 'source', name: 'Source printer', canManage: true, canCopy: true, canDelete: false, supportsCopy: true }],
   scans: [{
@@ -47,6 +59,7 @@ const catalog: PrinterFileCatalogPage = {
   }],
   automaticDiscoveryEnabled: false,
 };
+const previewSource = { ...catalog.printers[0], supportsPreview: true, canPreview: true };
 const captured: PrinterFileOperation = {
   id: 'operation', revision: 3, action: 'Queue', state: 'AwaitingSourceConfirmation',
   locationId: 'location', gcodeFileId: 'asset', contentSha256: 'actual-local-digest',
@@ -78,9 +91,58 @@ function renderCatalog(url = '/files?source=printers') {
   return { ...result, queryClient };
 }
 
+/** The table cell for `row` under the column whose header text is `header`. */
+function cellUnder(header: string, row: HTMLElement) {
+  const table = row.closest('table');
+  if (!table) throw new Error('row is not inside a table');
+  const headers = within(table).getAllByRole('columnheader').map(cell => cell.textContent);
+  const index = headers.indexOf(header);
+  if (index < 0) throw new Error(`no "${header}" column in ${headers.join(', ')}`);
+  return within(row).getAllByRole('cell')[index];
+}
+
+async function findRow(name: string) {
+  const button = await screen.findByRole('button', { name: `${name}, show details` });
+  const row = button.closest('tr');
+  if (!row) throw new Error(`${name} is not rendered as a table row`);
+  return row;
+}
+
+/** Definition-list value for `term` inside a detail panel. */
+function detailValue(panel: HTMLElement, term: string) {
+  const definition = within(panel).getByText(term, { selector: 'dt' }).nextElementSibling;
+  if (!(definition instanceof HTMLElement)) throw new Error(`no value for ${term}`);
+  return definition;
+}
+
+// jsdom has no IntersectionObserver; this fake reports visibility only when a test says so.
+const observers: FakeIntersectionObserver[] = [];
+class FakeIntersectionObserver {
+  readonly elements = new Set<Element>();
+  constructor(readonly callback: IntersectionObserverCallback) { observers.push(this); }
+  observe(element: Element) { this.elements.add(element); }
+  unobserve(element: Element) { this.elements.delete(element); }
+  disconnect() { this.elements.clear(); }
+  takeRecords() { return []; }
+}
+function scrollIntoView(element: Element) {
+  act(() => {
+    for (const observer of [...observers]) {
+      if (!observer.elements.has(element)) continue;
+      observer.callback(
+        [{ isIntersecting: true, target: element } as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      );
+    }
+  });
+}
+
 describe('Printer file catalog', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.localStorage.clear();
+    media.lg = false;
+    observers.length = 0;
     mocks.hasPermission.mockReturnValue(true);
     mocks.catalog.mockResolvedValue(catalog);
     mocks.operations.mockResolvedValue([]);
@@ -88,34 +150,67 @@ describe('Printer file catalog', () => {
     mocks.copy.mockResolvedValue({ ...captured, action: 'Copy', state: 'Pending' });
     mocks.queue.mockResolvedValue({ ...captured, state: 'Pending' });
     mocks.confirm.mockResolvedValue({ ...captured, state: 'LocalReady' });
+    mocks.download.mockResolvedValue(undefined);
   });
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(URL, 'createObjectURL');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
+  });
 
-  it('browses metadata with unknown values and honest partial/disabled/stale states', async () => {
+  it('lists observations in the compact 12px table with honest unknowns and no per-printer discovery controls', async () => {
     renderCatalog();
-    expect(await screen.findByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
-    expect(screen.getByText('Unknown size')).toBeInTheDocument();
-    expect(screen.getByText('Modified: Unknown')).toBeInTheDocument();
-    expect(screen.getByText('Partial')).toBeInTheDocument();
+    const row = await findRow('part.gcode');
+    const table = row.closest('table');
+    expect(table).toHaveClass('text-xs');
+    expect(within(table!).getAllByRole('columnheader').map(cell => cell.textContent))
+      .toEqual(['Preview', 'Name', 'Printer', 'Status', 'Size', 'Modified', 'Actions']);
+    expect(within(row).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
+    expect(cellUnder('Size', row)).toHaveTextContent(/^Unknown$/);
+    expect(cellUnder('Modified', row)).toHaveTextContent(/^Unknown$/);
+    expect(within(cellUnder('Status', row)).getAllByRole('listitem').map(item => item.textContent))
+      .toEqual(['Available', 'Stale']);
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
-    expect(screen.getByText(/Discovery disabled/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute('href', '/admin/settings?q=printer%20file');
+    // Discovery toggles/refresh now live in Edit printer > Files.
+    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
     expect(mocks.catalog).toHaveBeenCalledWith({ printerId: undefined, search: undefined,
       availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.enabled).not.toHaveBeenCalled();
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.queue).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
   it('renders wire-shaped observations whose null metadata was omitted by the API', async () => {
-    const wireEntry = omitted(catalog.items[0], 'sizeBytes', 'modifiedValue', 'lastCompleteScanAtUtc');
+    const wireEntry = omitted(entry, 'sizeBytes', 'modifiedValue', 'lastCompleteScanAtUtc');
     const wireScan = omitted(catalog.scans[0], 'reasonCode', 'lastAttemptAtUtc', 'lastCompleteScanAtUtc');
     mocks.catalog.mockResolvedValue({ ...catalog, items: [wireEntry], scans: [wireScan] });
+    const user = userEvent.setup();
     renderCatalog();
-    expect(await screen.findByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
-    expect(screen.getByText('Unknown size')).toBeInTheDocument();
-    expect(screen.getByText('Modified: Unknown')).toBeInTheDocument();
-    expect(screen.getByText('Complete scan: Unknown')).toBeInTheDocument();
-    expect(screen.getByText(/Last complete: Unknown/)).toBeInTheDocument();
+    const row = await findRow('part.gcode');
+    expect(cellUnder('Size', row)).toHaveTextContent(/^Unknown$/);
+    expect(cellUnder('Modified', row)).toHaveTextContent(/^Unknown$/);
+    await user.click(within(row).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    expect(detailValue(panel, 'Size')).toHaveTextContent(/^Unknown$/);
+    expect(detailValue(panel, 'Modified')).toHaveTextContent(/^Unknown$/);
+    expect(detailValue(panel, 'Last complete scan')).toHaveTextContent(/^Unknown$/);
+  });
+
+  it('shows provider modification times date-only with the full timestamp in the tooltip', async () => {
+    const epochSeconds = 1_761_393_600;
+    const modified = new Date(epochSeconds * 1000);
+    mocks.catalog.mockResolvedValue({ ...catalog, items: [{ ...entry, modifiedValue: String(epochSeconds) }] });
+    renderCatalog();
+    const time = within(cellUnder('Modified', await findRow('part.gcode'))).getByText(modified.toLocaleDateString());
+    expect(time.tagName).toBe('TIME');
+    expect(time).toHaveAttribute('dateTime', modified.toISOString());
+    expect(time).toHaveAttribute('title', modified.toLocaleString());
+    expect(time.textContent).toBe(modified.toLocaleDateString());
   });
 
   it('refuses snapshot confirmation when the captured size was omitted', async () => {
@@ -138,13 +233,53 @@ describe('Printer file catalog', () => {
   it('Copy posts one explicit durable intent and never queues', async () => {
     const user = userEvent.setup();
     renderCatalog();
-    await user.click(await screen.findByRole('button', { name: 'Copy locally' }));
+    await user.click(await screen.findByRole('button', { name: 'Copy to local library' }));
     expect(screen.getByRole('dialog', { name: 'Copy into local library' })).toBeInTheDocument();
     expect(mocks.copy).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Copy locally' }));
     await waitFor(() => expect(mocks.copy).toHaveBeenCalledWith('location', 7, expect.any(String)));
     expect(mocks.queue).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+  });
+
+  it('offers Copy to local library and Download as distinct, named actions; Download is browser-only', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    const copy = within(row).getByRole('button', { name: 'Copy to local library' });
+    const download = within(row).getByRole('button', { name: 'Download' });
+    expect(copy).not.toBe(download);
+    expect(copy).toHaveAttribute('title', 'Copy to local library');
+    expect(download).toHaveAttribute('title', 'Download');
+    await user.click(download);
+    await waitFor(() => expect(mocks.download).toHaveBeenCalledWith('location', 7, 'part.gcode'));
+    expect(mocks.download).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(mocks.copy).not.toHaveBeenCalled();
+    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unsupported', { supportsDownload: false, canDownload: true }],
+    ['not permitted', { supportsDownload: true, canDownload: false }],
+  ])('hides Download when the source reports it %s but keeps Copy', async (_label, capability) => {
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [{ ...catalog.printers[0], ...capability }] });
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    expect(within(row).getByRole('button', { name: 'Copy to local library' })).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('reports a changed observation on Download and refreshes the listing instead of retrying', async () => {
+    mocks.download.mockRejectedValue({ message: 'Conflict', statusCode: 409, isAxiosError: true });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'Download' }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/changed/i)));
+    await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    expect(mocks.download).toHaveBeenCalledTimes(1);
   });
 
   it.each(['source', 'other'])('Queue stages locally for destination %s without implicit snapshot consent', async destination => {
@@ -157,6 +292,125 @@ describe('Printer file catalog', () => {
       'location', 7, destination, { copies: 1 }, expect.any(String)));
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('opens details from the filename, labels every action and restores focus on Escape', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+    const name = within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' });
+    await user.click(name);
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    expect(detailValue(panel, 'Path')).toHaveTextContent('gcodes/Parts/part.gcode');
+    expect(detailValue(panel, 'Source')).toHaveTextContent('Source printer');
+    expect(detailValue(panel, 'Type')).toHaveTextContent('G-code file (GCODE)');
+    // This source does not offer previews, so nothing is invented.
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unavailable$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unavailable$/);
+    expect(within(panel).getByText('Preview unavailable')).toBeInTheDocument();
+    expect(within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button').map(button => button.textContent))
+      .toEqual(['Copy to local library', 'Download', 'Queue']);
+    expect(mocks.preview).not.toHaveBeenCalled();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'part.gcode' })).not.toBeInTheDocument());
+    await waitFor(() => expect(name).toHaveFocus());
+  });
+
+  it('docks details beside a grid card on wide screens; Escape closes it only when no dialog is above it', async () => {
+    media.lg = true;
+    const user = userEvent.setup();
+    renderCatalog();
+    await findRow('part.gcode');
+    await user.click(screen.getByRole('button', { name: 'Grid view' }));
+    const card = screen.getByRole('group', { name: 'part.gcode' });
+    expect(card.parentElement).toHaveClass('grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]');
+    await user.click(within(card).getByText(/Source printer/));
+    const panel = screen.getByRole('complementary', { name: 'part.gcode' });
+    expect(within(panel).getByRole('button', { name: 'Close details' })).toHaveFocus();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.click(within(panel).getByRole('button', { name: 'Copy to local library' }));
+    expect(screen.getByRole('dialog', { name: 'Copy into local library' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('complementary', { name: 'part.gcode' })).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Copy into local library' })).not.toBeInTheDocument());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('complementary', { name: 'part.gcode' })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(card).getByRole('button', { name: 'part.gcode, show details' })).toHaveFocus());
+    expect(mocks.copy).not.toHaveBeenCalled();
+  });
+
+  it('requests a preview only for items scrolled into view on sources that support and permit it', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: vi.fn(() => 'blob:thumbnail') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: vi.fn() });
+    const hidden = { ...entry, id: 'location-2', relativePath: 'Parts/other.gcode', displayName: 'other.gcode', observationRevision: 3 };
+    mocks.catalog.mockResolvedValue({ ...catalog, items: [entry, hidden], total: 2, printers: [previewSource] });
+    mocks.preview.mockResolvedValue({
+      locationId: 'location', observationRevision: 7, state: 'Available', hasImage: true,
+      capturedAtUtc: '2026-10-25T12:00:00Z', printTimeSeconds: 5400, layerHeightMm: 0.2,
+    });
+    mocks.thumbnail.mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    await findRow('other.gcode');
+    expect(mocks.preview).not.toHaveBeenCalled();
+
+    const thumbnail = within(row).getByTestId('printer-file-thumbnail');
+    scrollIntoView(thumbnail);
+    await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledWith('location', 7, expect.any(AbortSignal)));
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    expect(mocks.preview).toHaveBeenCalledWith('location', 7, expect.any(AbortSignal));
+    // Decorative row image (the filename names it); the blob is shown through an object URL.
+    await waitFor(() => expect(thumbnail.querySelector('img')).toHaveAttribute('src', 'blob:thumbnail'));
+    expect(mocks.preview).not.toHaveBeenCalledWith('location-2', expect.anything(), expect.anything());
+  });
+
+  it('shows preview metadata and capture date in the panel from the cached preview', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [previewSource] });
+    mocks.preview.mockResolvedValue({
+      locationId: 'location', observationRevision: 7, state: 'Available', hasImage: false,
+      capturedAtUtc: '2026-10-25T12:00:00Z', printTimeSeconds: 5400, layerHeightMm: 0.2,
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    await waitFor(() => expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/));
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
+    const capturedAt = new Date('2026-10-25T12:00:00Z');
+    expect(within(panel).getByText(/Preview captured/)).toHaveTextContent(`Preview captured ${capturedAt.toLocaleDateString()}`);
+    expect(within(panel).getByText('Preview unavailable')).toBeInTheDocument();
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    expect(mocks.thumbnail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unsupported', { supportsPreview: false, canPreview: true }],
+    ['not permitted', { supportsPreview: true, canPreview: false }],
+  ])('never requests previews when the source reports them %s', async (_label, capability) => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [{ ...catalog.printers[0], ...capability }] });
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    scrollIntoView(within(row).getByTestId('printer-file-thumbnail'));
+    await act(async () => { await Promise.resolve(); });
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.thumbnail).not.toHaveBeenCalled();
+  });
+
+  it('shows an explicit unavailable fallback with the server reason when the printer is busy', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [previewSource] });
+    mocks.preview.mockResolvedValue({
+      locationId: 'location', observationRevision: 7, state: 'Deferred', reasonCode: 'printer_busy', hasImage: false,
+    });
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    scrollIntoView(within(row).getByTestId('printer-file-thumbnail'));
+    expect(await within(row).findByRole('img', { name: 'Preview unavailable: printer busy' })).toBeInTheDocument();
+    expect(mocks.thumbnail).not.toHaveBeenCalled();
   });
 
   it('a resumed snapshot requires a fresh explicit checkbox and exact content-bound decision', async () => {
@@ -211,10 +465,12 @@ describe('Printer file catalog', () => {
   it('does not expose mutation controls when the server denies source authority', async () => {
     mocks.catalog.mockResolvedValue({ ...catalog, printers: [{ ...catalog.printers[0], canCopy: false, canManage: false }] });
     renderCatalog();
-    await screen.findByText('gcodes/Parts/part.gcode');
-    expect(screen.queryByRole('button', { name: 'Copy locally' })).not.toBeInTheDocument();
+    const row = await findRow('part.gcode');
+    expect(within(row).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy to local library' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Queue' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Request refresh' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete from printer' })).not.toBeInTheDocument();
   });
 
   it('never fetches without catalog permission', () => {

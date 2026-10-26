@@ -27,6 +27,11 @@ vi.mock('@/features/printers/components/PrinterCamerasSection', () => ({
   PrinterCamerasSection: () => null,
 }));
 
+// Discovery controls fetch on their own; covered by PrinterFileDiscoverySection.test.tsx.
+vi.mock('@/features/printers/components/PrinterFileDiscoverySection', () => ({
+  PrinterFileDiscoverySection: () => null,
+}));
+
 vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
   usePrinterCameras: () => ({ data: [] }),
 }));
