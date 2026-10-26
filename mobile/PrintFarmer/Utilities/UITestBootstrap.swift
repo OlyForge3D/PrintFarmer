@@ -1233,6 +1233,10 @@ enum UITestBootstrap {
                     "supportsSensorControl": ProcessInfo.processInfo.arguments.contains(
                         UITestBootstrap.issue3496TuneSensorsLaunchArgument
                     ),
+                    // #3540: proves Tune omits heater targets even when the backend could apply them.
+                    "supportsTemperatureControlDuringPrint": ProcessInfo.processInfo.arguments.contains(
+                        UITestBootstrap.issue3496TuneSensorsLaunchArgument
+                    ),
                     "verifiedSafety": safety
                 ])
                 let userData = try encoder.encode(visualAcceptanceDemoUser())

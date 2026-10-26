@@ -39,12 +39,6 @@ struct PrinterInstrumentPanelControls: View {
         PrinterControlsViewModel.isPrintingOrPaused(state: state)
     }
 
-    /// Tune shows heater targets only when the backend can apply them during a
-    /// print; otherwise the block is omitted entirely (#3496).
-    static func showsTuneTemperatures(isPrinting: Bool, heatDuringPrint: Bool) -> Bool {
-        isPrinting && heatDuringPrint
-    }
-
     /// iPad keeps the jog pad at a thumb-sized width, centred in the panel.
     static let maximumJogPadWidth: CGFloat = 480
     /// Shared Tune stepper value column so every row's − / + buttons line up.
@@ -61,7 +55,7 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     /// Move and Heat lock during a job (mockup B): presets would change
-    /// temperatures mid-print, and Tune already carries the hotend/bed targets.
+    /// temperatures mid-print. Tune carries only Speed, Flow and Z babystep (#3540).
     /// Tune (speed, flow, babystep) only applies to a running or paused print
     /// (#3496), so it is disabled while idle.
     /// `isLocked` defaults to `isPrinting`; pass it separately for transitional
@@ -418,7 +412,7 @@ struct PrinterInstrumentPanelControls: View {
     private var heatPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
-            // Writable sensors stay reachable while idle; Tune carries them mid-print.
+            // Writable sensors are idle-only here; Tune carries only Speed, Flow and babystep (#3540).
             PrinterSensorControlRows(
                     viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
                 )
@@ -486,29 +480,9 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
-            if Self.showsTuneTemperatures(isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint) {
-                Divider()
-                tuneTemperatures
-            }
-            PrinterSensorControlRows(
-                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
-                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime")
-    }
-
-    /// Hotend and bed target steppers, shown only when the backend can apply
-    /// them during a print. No caption: disabled rows speak for themselves.
-    private var tuneTemperatures: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
-            PreheatSubgroup.IndividualHeaterControls(
-                viewModel: viewModel, usesSteppers: true, compactForDetail: true, allowsActivePrint: true
-            )
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.controls.runtime.temperatures")
     }
 
     /// Mockup B: Speed and Flow percentage steppers above babystep. Each is

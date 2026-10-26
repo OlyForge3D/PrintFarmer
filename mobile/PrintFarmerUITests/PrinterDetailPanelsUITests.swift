@@ -1633,12 +1633,14 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
     }
 }
 
-/// A printing printer with a writable chamber heater and a read-only part fan (#3496 N16).
+/// A printing printer with a writable chamber heater, a read-only part fan and
+/// backend support for temperature control during a print. Tune still shows
+/// only Speed, Flow and babystep (#3540).
 @MainActor
 final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
     override var cameraLaunchArgument: String { "--uitesting-issue3496-tune-sensors" }
 
-    func testTuneWhilePrintingShowsWritableSensorRows() {
+    func testTuneWhilePrintingShowsOnlySpeedFlowAndBabystep() {
         openPrimaryPrinterStatus()
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         XCTAssertTrue(selector.waitForExistence(timeout: 8))
@@ -1647,17 +1649,28 @@ final class Issue3496TuneSensorsUITests: Issue3496CameraLayoutUITests {
         XCTAssertTrue(tune.waitForExistence(timeout: 8))
         XCTAssertTrue(tune.isEnabled, "Tune is available while printing")
         tune.tap()
-        let id = "printer.controls.sensor.heater_generic chamber.TargetTemperature"
-        let value = app.staticTexts["\(id).value"]
         let control = app.descendants(matching: .any)["printer.controls.runtime"]
-        for _ in 0..<4 where !value.exists { control.swipeUp() }
-        XCTAssertTrue(value.waitForExistence(timeout: 8), "The writable chamber heater row shows on Tune")
-        XCTAssertTrue(app.buttons["\(id).increase"].exists)
-        XCTAssertTrue(app.buttons["\(id).decrease"].exists)
-        // Fans are read-only in the app, so the part fan gets no controls.
-        XCTAssertFalse(app.descendants(matching: .any)["printer.controls.sensor.fan.FanSpeed.value"].exists)
+        XCTAssertTrue(control.waitForExistence(timeout: 8))
+        let lower = app.buttons["printer.controls.runtime.z-offset.decrease"]
+        for _ in 0..<4 where !lower.exists { control.swipeUp() }
+        for id in [
+            "printer.controls.runtime.speed-factor.increase", "printer.controls.runtime.flow-factor.increase",
+            "printer.controls.runtime.z-offset.increase", "printer.controls.runtime.z-offset.decrease"
+        ] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 8), "\(id) shows on Tune")
+        }
+        let any = app.descendants(matching: .any)
+        let sensor = "printer.controls.sensor.heater_generic chamber.TargetTemperature"
+        for id in [
+            "\(sensor).value", "\(sensor).increase", "\(sensor).decrease",
+            "printer.controls.sensor.fan.FanSpeed.value",
+            "printer.controls.runtime.temperatures", "printer.controls.heat-group",
+            "printer.controls.hotend.increase", "printer.controls.bed.increase", "printer.controls.heat.set-targets"
+        ] {
+            XCTAssertFalse(any[id].exists, "\(id) must not render: Tune is Speed, Flow and babystep only")
+        }
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "Issue 3496 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-tune-printing-sensors"
+        screenshot.name = "Issue 3540 \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")-tune-printing-speed-flow-babystep"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
@@ -1932,7 +1945,8 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         }
         card.tap()
         // Status no longer renders sensors; writable ones are read back from
-        // the Control tab's Tune row. Read-only sensors are verified via SignalR only.
+        // the Control tab's Heat segment (idle-only; Tune has no sensors, #3540).
+        // Read-only sensors are verified via SignalR only.
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         guard selector.waitForExistence(timeout: 8) else {
             throw NSError(
@@ -1942,9 +1956,9 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             )
         }
         selector.buttons["Control"].tap()
-        let tune = app.buttons["printer.controls.segment.tune"]
-        XCTAssertTrue(tune.waitForExistence(timeout: 12), "\(printer.name) must expose the Tune segment.")
-        tune.tap()
+        let heat = app.buttons["printer.controls.segment.heat"]
+        XCTAssertTrue(heat.waitForExistence(timeout: 12), "\(printer.name) must expose the Heat segment.")
+        heat.tap()
         let sensorIsWritable = reconnectTemperatureValue == nil
         let status = app.descendants(matching: .any)[
             "printer.controls.sensor.\(sensorID).\(temperatureQuantity).value"
@@ -2020,7 +2034,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         )
         if sensorIsWritable {
             assertLabelContains(status, text: temperatureValue.formatted(), timeout: 20)
-            attachScreenshot(named: "\(printer.name) live Tune sensor readout")
+            attachScreenshot(named: "\(printer.name) live Heat sensor readout")
         }
 
         let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])

@@ -1698,20 +1698,9 @@ final class PrinterControlsViewModel: ObservableObject {
         capabilities?.supportsTemperatureControlDuringPrint == true
     }
 
-    var canControlHeat: Bool {
-        guard supportsHeatDuringPrint, isPrintingOrPaused else { return canControl }
-        return commandIdentity != nil && hasConfiguredAccess && isActive && accessCheck() == nil
-            && printer.isOnline && runtimePrinterStateIsSupported
-    }
-
-    var heatBlockedReason: String? {
-        guard supportsHeatDuringPrint, isPrintingOrPaused else { return blockedReason }
-        return runtimeControlAccessReason
-    }
-
-    /// Heat presets, including Cool down, are idle-only: mid-print
-    /// temperature changes belong to Tune, and Emergency Stop covers stopping
-    /// an active print.
+    /// Heat presets, including Cool down, are idle-only: the app offers no
+    /// mid-print temperature changes (Tune is Speed, Flow and babystep only,
+    /// #3540), and Emergency Stop covers stopping an active print.
     func canRunPreheat(_ preset: PreheatPreset) -> Bool {
         canControl
     }
