@@ -1491,6 +1491,8 @@ final class PrinterControlsViewModel: ObservableObject {
     /// model owns the queue so leaving the view never silently drops a send.
     @Published private(set) var queuedHeatTargets: [String: Double] = [:]
     private var heatTargetTasks: [String: Task<Void, Never>] = [:]
+    /// Counts commands that acquired the single-flight slot, so a queued send can tell rejection from dispatch.
+    private var beganCommandCount = 0
     /// How long a sent target stays queued while readback catches up.
     var heatTargetSettleGrace: Duration = .seconds(5)
     /// Longest a queued target waits for another request's single-flight slot.
@@ -1524,8 +1526,14 @@ final class PrinterControlsViewModel: ObservableObject {
                 dropQueuedHeatTarget(key: key, title: title, value: value)
                 return
             }
+            let began = beganCommandCount
             await apply(self)
             guard !Task.isCancelled else { return }
+            // A rejected or failed send has nothing to settle; release the row now.
+            if beganCommandCount == began || lastError != nil {
+                if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
+                return
+            }
             do { try await Task.sleep(for: heatTargetSettleGrace) } catch { return }
             if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
         }
@@ -1928,6 +1936,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)
+        beganCommandCount += 1
         feedbackSection = command.section
         lastError = nil
         commandNotice = nil

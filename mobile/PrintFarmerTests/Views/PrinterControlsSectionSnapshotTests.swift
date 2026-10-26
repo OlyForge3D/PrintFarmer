@@ -806,7 +806,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
-            XCTAssertEqual(up.minY, tablet ? 166.09375 : 603, accuracy: 4)
+            // #3555 N3555-10: the shared 48pt preset tile replaces the 54pt phone tile.
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 597, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")

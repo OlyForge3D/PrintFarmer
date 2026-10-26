@@ -76,6 +76,9 @@ struct ControlNumberField: UIViewRepresentable {
     /// Replaces the spoken value (e.g. "Applying" while a heat row is in
     /// flight). Stepper fields otherwise speak their visible value.
     var accessibilityValueOverride: String?
+    /// Right-aligns the value with a fixed trailing inset, so a wide field keeps
+    /// the same gap to its unit whatever the value's length.
+    var trailingAligned = false
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
@@ -121,6 +124,8 @@ struct ControlNumberField: UIViewRepresentable {
         return field
     }
 
+    static let trailingInset: CGFloat = 6
+
     private static let padKeyboardTypesWithoutReturnKey: Set<UIKeyboardType> = [
         .numberPad, .decimalPad, .phonePad, .asciiCapableNumberPad
     ]
@@ -150,7 +155,15 @@ struct ControlNumberField: UIViewRepresentable {
         field.accessibilityValue = accessibilityValueOverride
             ?? (stepperValueStyle ? (text.isEmpty ? placeholder : text) : nil)
         field.textColor = UIColor(Color.pfTextPrimary)
-        field.textAlignment = stepperValueStyle ? .center : .natural
+        field.textAlignment = trailingAligned ? .right : (stepperValueStyle ? .center : .natural)
+        if trailingAligned {
+            if field.rightView == nil {
+                field.rightView = UIView(frame: CGRect(x: 0, y: 0, width: Self.trailingInset, height: 1))
+                field.rightViewMode = .always
+            }
+        } else {
+            field.rightView = nil
+        }
         field.borderStyle = stepperValueStyle ? .none : .roundedRect
         field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
         field.layer.cornerRadius = stepperValueStyle ? 8 : 0
@@ -332,7 +345,8 @@ struct HeatTargetRow: View {
                 label: fieldLabel, identifier: fieldIdentifier, hint: fieldHint,
                 keyboardType: .decimalPad, stepperValueStyle: true, focusRequest: focusRequest,
                 onSubmit: submit, onCancel: cancelEditing, onBeginEditing: beginEditing,
-                accessibilityValueOverride: isPending ? "Applying" : nil
+                accessibilityValueOverride: isPending ? "Applying" : nil,
+                trailingAligned: fillsWidth
             )
             // Accessibility sizes stack the row, so the field takes the free width.
             .frame(width: fillsWidth ? nil : (narrow ? 52 : 72))
@@ -633,7 +647,6 @@ struct PreheatSubgroup: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .subheadline) private var presetFontSize: CGFloat = 14
     @Environment(\.preheatPresetsFillRow) private var presetsFillRow
     @Environment(\.controlActionCornerRadius) private var cornerRadiusOverride
 
@@ -891,7 +904,6 @@ struct PreheatSubgroup: View {
         }
         .buttonStyle(PreheatButtonStyle(
             preset: preset, isEnabled: isInteractive, isPending: isPending,
-            compact: compactForDetail || !dynamicTypeSize.isAccessibilitySize,
             cornerRadius: cornerRadiusOverride ?? 10
         ))
         .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
@@ -1010,78 +1022,53 @@ struct PreheatSubgroup: View {
         !canControl && !shouldRevealDisabledTooltipOnTap
     }
 
+    /// One shared tile in every layout (#3555): the name over a mono
+    /// "200/60" caption that never wraps, or an icon-only snowflake.
     private func buttonLabel(
         preset: PreheatPreset,
         isPending: Bool,
         compactForDetail: Bool = false
     ) -> some View {
         VStack(spacing: 3) {
-            if compactForDetail, let symbol = Self.detailPresetSymbol(preset) {
+            if let symbol = Self.detailPresetSymbol(preset) {
                 Image(systemName: symbol)
                     .font(.body.weight(.semibold))
                     .accessibilityHidden(true)
-            } else if compactForDetail {
-                Text(preset.displayLabel)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if preset != .coolDown {
-                    Text(Self.compactTargetsText(
-                        preset, hasBed: viewModel.supports(.bed),
-                        dynamicTypeSize: dynamicTypeSize
-                    ))
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.8)
-                        .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
-                        .accessibilityHidden(true)
-                }
-            } else if preset == .coolDown {
-                // Larger snowflake icon with no text, matching web UI styling.
-                Image(systemName: "snowflake")
-                    .font(.system(size: presetFontSize * 1.5, weight: .semibold))
-                    .accessibilityHidden(true)
             } else {
                 Text(preset.displayLabel)
-                    .font(.system(size: presetFontSize))
-                Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
-                    .font(.caption2.monospacedDigit())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isPending ? Color.pfPresetHeatingName : Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(Self.compactTargetsText(preset, hasBed: viewModel.supports(.bed)))
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .accessibilityHidden(true)
             }
         }
         // Height comes from the type metrics alone, never the rendered label, so
-        // every preset matches Cool down and the row keeps one height whichever
-        // readings the backend supports.
-        // Accessibility sizes let the compact row grow so captions aren't clipped.
-        .frame(height: compactForDetail
-            ? (dynamicTypeSize.isAccessibilitySize ? nil : 48)
-            : max(54, presetFontSize * 2 + 14))
-        .frame(minHeight: compactForDetail ? 48 : nil)
+        // every preset matches Cool down; accessibility sizes let the row grow.
+        .frame(height: dynamicTypeSize.isAccessibilitySize ? nil : 48)
+        .frame(minHeight: 48)
         .frame(maxWidth: .infinity, maxHeight: compactForDetail && presetsFillRow ? .infinity : nil)
         // The preset name stays visible during a send; a small corner
-        // spinner in the primary text colour marks it in flight.
+        // spinner in the heating accent marks it in flight.
         .overlay(alignment: .topTrailing) {
             if isPending {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(Color.pfTextPrimary)
+                    .tint(Color.pfPresetHeatingName)
                     .padding(4)
                     .accessibilityHidden(true)
             }
         }
     }
 
-    /// Compact preset caption, e.g. "200/60" (nozzle only without a heated bed).
-    /// Accessibility sizes stack the targets ("200°" over "60°") so the bed
-    /// target wraps instead of truncating.
-    static func compactTargetsText(
-        _ preset: PreheatPreset, hasBed: Bool,
-        dynamicTypeSize: DynamicTypeSize = .large
-    ) -> String {
-        if dynamicTypeSize.isAccessibilitySize {
-            return hasBed ? "\(Int(preset.hotend))°\n\(Int(preset.bed))°" : "\(Int(preset.hotend))°"
-        }
+    /// Preset caption, e.g. "200/60" (nozzle only without a heated bed), at
+    /// every text size; it scales down rather than wrapping.
+    static func compactTargetsText(_ preset: PreheatPreset, hasBed: Bool) -> String {
         return hasBed ? "\(Int(preset.hotend))/\(Int(preset.bed))" : "\(Int(preset.hotend))"
     }
 
@@ -1154,10 +1141,6 @@ private extension PreheatPreset {
     var displayLabel: String { definition.name }
 
     var spokenName: String { self == .coolDown ? "cool down" : definition.name }
-
-    var temperatureLabel: String {
-        "\(Int(hotend))° / \(Int(bed))°"
-    }
 }
 
 extension PreheatPreset {
@@ -1184,18 +1167,24 @@ extension PreheatPreset {
 
 // MARK: - Button style
 
+extension Color {
+    /// In-flight preset tile (mockup v3 `.pbtn.heating`): a subtle accent tint
+    /// under an accent border. The name and the pfTextSecondary caption both
+    /// stay at or above 4.5:1 on this fill in light and dark.
+    static let pfPresetHeatingFill = adaptive(light: "#ecfdf5", dark: "#0b2a2a")
+    static let pfPresetHeatingName = adaptive(light: "#047857", dark: "#34d399")
+}
+
 /// Preheat-specific button style with per-state visual treatment per spec §2.4.
 private struct PreheatButtonStyle: ButtonStyle {
     let preset: PreheatPreset
     let isEnabled: Bool
     let isPending: Bool
-    let compact: Bool
     let cornerRadius: CGFloat
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, compact ? 4 : 8)
-            .padding(.vertical, compact ? 0 : 8)
+            .padding(.horizontal, 4)
             .background(background)
             .foregroundStyle(foreground)
             .overlay(border)
@@ -1207,7 +1196,7 @@ private struct PreheatButtonStyle: ButtonStyle {
     private var background: some View {
         Group {
             if isPending {
-                Color.pfAssigned
+                Color.pfPresetHeatingFill
             } else if !isEnabled {
                 Color.pfBackgroundTertiary
             } else {
@@ -1225,7 +1214,7 @@ private struct PreheatButtonStyle: ButtonStyle {
     private var border: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .strokeBorder(
-                isPending ? Color.pfAssigned : Color.pfBorder,
+                isPending ? Color.pfAccent : Color.pfBorder,
                 lineWidth: isPending ? 1.5 : 1
             )
     }

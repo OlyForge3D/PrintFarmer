@@ -41,7 +41,9 @@ final class PreheatSubgroupTests: XCTestCase {
                     $0.accessibilityIdentifier == "printer.controls.\(heater.rawValue).target"
                 } as? UITextField)
                 XCTAssertEqual(field.accessibilityLabel, "\(heater.title) target in degrees Celsius")
-                XCTAssertEqual(field.textAlignment, .center, "The target reads as a tappable value chip")
+                // Accessibility sizes right-align so every row keeps one gap to °C (N12).
+                XCTAssertEqual(field.textAlignment, type.isAccessibilitySize ? .right : .center,
+                               "The target reads as a tappable value chip")
                 XCTAssertEqual(field.borderStyle, .none)
                 XCTAssertEqual(field.layer.cornerRadius, 8)
                 XCTAssertNotNil(field.inputAccessoryView, "Numeric entry offers Set and Cancel")
@@ -594,6 +596,54 @@ final class PreheatSubgroupTests: XCTestCase {
         idleModel.cancelPendingCommand()
     }
 
+    /// #3555 B11: a queued sensor target is never sent once a print starts.
+    func test_queuedSensorTarget_droppedWhenPrintStarts() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await multiHeaterModel()
+        defer { model.deactivate() }
+        let (window, controller) = try await installMultiHeater(model, debounce: .milliseconds(300))
+        defer { window.isHidden = true }
+        try control("printer.controls.sensor.chamber.TargetTemperature.increase", in: controller)
+            .sendActions(for: .touchUpInside)
+        let key = "sensor.chamber.TargetTemperature"
+        XCTAssertEqual(model.queuedHeatTargets[key], 41)
+        var printing = model.printer
+        printing.state = "printing"
+        model.handlePrinterUpdate(printing)
+        try await Task.sleep(for: .milliseconds(900))
+        XCTAssertEqual(service.setSensorValueCallCount, 0, "Never dispatched mid-print")
+        XCTAssertNil(model.queuedHeatTargets[key])
+        XCTAssertEqual(model.feedbackSection, .heat)
+        XCTAssertTrue(model.commandNotice?.hasPrefix("Chamber target not sent.") == true, "\(model.commandNotice ?? "nil")")
+    }
+
+    /// #3555 B12: a rejected or failed send clears its queued value at once, not after the grace.
+    func test_rejectedOrFailedSend_clearsQueuedTargetImmediately() async throws {
+        executionTimeAllowance = 120
+        let (model, service) = try await thermalModel()
+        model.heatTargetSettleGrace = .seconds(30)
+        // Rejected: apply never begins a command.
+        model.scheduleHeatTarget(key: "hotend", title: "Nozzle", value: 210, after: .milliseconds(50)) { _ in }
+        var deadline = ContinuousClock.now + .seconds(3)
+        while model.queuedHeatTargets["hotend"] != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertNil(model.queuedHeatTargets["hotend"], "Rejected send clears without the 30 s grace")
+
+        // Failed: the service throws.
+        service.errorToThrow = URLError(.notConnectedToInternet)
+        model.scheduleHeatTarget(key: "bed", title: "Bed", value: 70, after: .milliseconds(50)) {
+            await $0.setHeaterTarget(.bed, target: 70)
+        }
+        deadline = ContinuousClock.now + .seconds(3)
+        while model.queuedHeatTargets["bed"] != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertNil(model.queuedHeatTargets["bed"], "Failed send clears without the 30 s grace")
+    }
+
     private func thermalModel(
         knownLimits: Bool = true, hotendOnly: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
@@ -1047,25 +1097,13 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    /// N-AX1: accessibility sizes stack nozzle over bed so the bed target
-    /// wraps onto a second line instead of truncating.
-    func test_compactTargetsText_stacksTargetsAtAccessibilitySizes() {
+    /// #3555 N10: one shared tile caption, mono "200/60", at every text size.
+    func test_compactTargetsText_isOneLineAtEveryTextSize() {
         for preset in PreheatPreset.rowMaterials {
             let hotend = Int(preset.definition.hotend), bed = Int(preset.definition.bed)
-            for size in [DynamicTypeSize.accessibility1, .accessibility3, .accessibility5] {
-                XCTAssertEqual(
-                    PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: size),
-                    "\(hotend)°\n\(bed)°"
-                )
-                XCTAssertEqual(
-                    PreheatSubgroup.compactTargetsText(preset, hasBed: false, dynamicTypeSize: size),
-                    "\(hotend)°"
-                )
-            }
-            XCTAssertEqual(
-                PreheatSubgroup.compactTargetsText(preset, hasBed: true, dynamicTypeSize: .xxxLarge),
-                "\(hotend)/\(bed)"
-            )
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: true), "\(hotend)/\(bed)")
+            XCTAssertEqual(PreheatSubgroup.compactTargetsText(preset, hasBed: false), "\(hotend)")
+            XCTAssertFalse(PreheatSubgroup.compactTargetsText(preset, hasBed: true).contains("\n"))
         }
     }
 

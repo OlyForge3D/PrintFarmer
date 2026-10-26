@@ -396,7 +396,7 @@ struct PrinterSensorControlRows: View {
             schedule: { value, delay in
                 viewModel.scheduleHeatTarget(
                     key: key, title: title, value: value, after: delay,
-                    isSendable: { $0.canControlSensors }
+                    isSendable: { $0.canControlSensors && !$0.isPrintingOrPaused }
                 ) {
                     await $0.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: value)
                 }

@@ -2058,7 +2058,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
         let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
-        assertLabelContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
+        assertFieldValueContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"
