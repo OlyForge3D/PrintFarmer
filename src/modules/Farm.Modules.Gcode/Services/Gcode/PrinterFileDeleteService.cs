@@ -141,18 +141,7 @@ public sealed class PrinterFileDeleteService(
 
         Snapshot snapshot = Read(operation);
         string binding = Binding(operation);
-        if (confirmation.ConfirmationBinding != binding || !confirmation.AcceptIrreversibleDelete ||
-            (snapshot.Guarantee == PrinterFileDeleteGuarantee.CurrentExactPath && !confirmation.AcceptCurrentPathRace))
-        {
-            throw new PrinterFileCommandException("delete_confirmation_required");
-        }
-
-        if (operation.DeleteConfirmationSha256 is not null &&
-            (operation.DeleteConfirmationSha256 != binding ||
-             operation.CurrentPathRaceAccepted != confirmation.AcceptCurrentPathRace))
-        {
-            throw new PrinterFileCommandException("delete_confirmation_mismatch");
-        }
+        ValidateConfirmation(operation, snapshot, binding, confirmation);
 
         // CRITICAL: a persisted send boundary can NEVER lead to another mutation, even after a
         // process restart or if a client repeats this POST. Failure before boundary requires a new intent.
@@ -176,7 +165,9 @@ public sealed class PrinterFileDeleteService(
         try
         {
             // Re-read after acquiring the exclusive slot: a second confirmer may have waited.
-            await db.Entry(operation).ReloadAsync(token);
+            db.Entry(operation).State = EntityState.Detached;
+            operation = await db.PrinterFileOperations.SingleAsync(
+                x => x.Id == operationId && x.ActorId == actorId && x.Action == PrinterFileAction.Delete, token);
             if (operation.State != PrinterFileOperationState.AwaitingDeleteConfirmation ||
                 operation.DeleteSentAtUtc.HasValue)
             {
@@ -544,6 +535,23 @@ public sealed class PrinterFileDeleteService(
     private static bool Matches(Snapshot snapshot, PrinterFileInventoryEntry entry) =>
         snapshot.SizeBytes == entry.SizeBytes && snapshot.ModifiedValue == entry.ModifiedValue &&
         snapshot.ProviderVersion == entry.ProviderVersion && snapshot.ProviderDigest == entry.ProviderHash;
+
+    private static void ValidateConfirmation(PrinterFileOperation operation, Snapshot snapshot, string binding,
+        PrinterFileDeleteConfirmation confirmation)
+    {
+        if (confirmation.ConfirmationBinding != binding || !confirmation.AcceptIrreversibleDelete ||
+            (snapshot.Guarantee == PrinterFileDeleteGuarantee.CurrentExactPath && !confirmation.AcceptCurrentPathRace))
+        {
+            throw new PrinterFileCommandException("delete_confirmation_required");
+        }
+
+        if (operation.DeleteConfirmationSha256 is not null &&
+            (operation.DeleteConfirmationSha256 != binding ||
+             operation.CurrentPathRaceAccepted != confirmation.AcceptCurrentPathRace))
+        {
+            throw new PrinterFileCommandException("delete_confirmation_mismatch");
+        }
+    }
 
     private static void ValidateLocation(PrinterFileLocation location, long revision)
     {

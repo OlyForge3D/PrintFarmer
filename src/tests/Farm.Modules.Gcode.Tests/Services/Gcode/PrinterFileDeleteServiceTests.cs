@@ -104,6 +104,54 @@ public sealed class PrinterFileDeleteServiceTests
     }
 
     [Fact]
+    public async Task ConfirmAsync_RevokedAuthorityWithValidConsent_NeverAcquiresLeaseOrSendsAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync();
+        await using AppDbContext db = test.Open();
+        PrinterFileDeleteService service = test.Service(db);
+        PrinterFileDeleteOperation intent = await test.IntentAsync(service);
+        test.Allowed = false;
+        bool acquired = false;
+        test.Leases.AfterAcquire = () =>
+        {
+            acquired = true;
+            return Task.CompletedTask;
+        };
+
+        Assert.Null(await service.ConfirmAsync(test.Actor, intent.Id, Consent(intent)));
+        Assert.False(acquired);
+        Assert.Equal(0, test.Backend.Sends);
+        Assert.Null((await db.PrinterFileOperations.SingleAsync()).DeleteSentAtUtc);
+    }
+
+    [Theory]
+    [InlineData(PrinterFileOperationState.SendingDelete, false)]
+    [InlineData(PrinterFileOperationState.AwaitingDeleteConfirmation, true)]
+    public async Task ConfirmAsync_OperationChangesDuringLeaseAcquisition_NeverSendsAsync(
+        PrinterFileOperationState state, bool sent)
+    {
+        await using Fixture test = await Fixture.CreateAsync();
+        await using AppDbContext db = test.Open();
+        PrinterFileDeleteService service = test.Service(db);
+        PrinterFileDeleteOperation intent = await test.IntentAsync(service);
+        test.Leases.AfterAcquire = async () =>
+        {
+            await using AppDbContext concurrent = test.Open();
+            PrinterFileOperation operation = await concurrent.PrinterFileOperations.SingleAsync();
+            operation.State = state;
+            operation.DeleteSentAtUtc = sent ? DateTime.UtcNow : null;
+            await concurrent.SaveChangesAsync();
+        };
+
+        PrinterFileDeleteOperation result = (await service.ConfirmAsync(test.Actor, intent.Id, Consent(intent)))!;
+        Assert.Equal(state, result.State);
+        Assert.Equal(sent, result.DeleteSentAtUtc.HasValue);
+        Assert.Equal(0, test.Backend.Sends);
+        test.Physical.Verify(x => x.AcquireDirectAsync(It.IsAny<Guid>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task NativeConditional_PassesExactVersionWithoutRequiringWeakConsentAsync()
     {
         await using Fixture test = await Fixture.CreateAsync();
@@ -568,16 +616,22 @@ public sealed class PrinterFileDeleteServiceTests
         private bool occupied;
         private long fence;
         public bool Current { get; set; } = true;
+        public Func<Task>? AfterAcquire { get; set; }
 
-        public Task<IPrinterFileLease?> TryAcquireAsync(Guid printerId, bool interactive, CancellationToken ct = default)
+        public async Task<IPrinterFileLease?> TryAcquireAsync(Guid printerId, bool interactive, CancellationToken ct = default)
         {
             if (occupied)
             {
-                return Task.FromResult<IPrinterFileLease?>(null);
+                return null;
             }
 
             occupied = true;
-            return Task.FromResult<IPrinterFileLease?>(new Lease(this, printerId, ++fence));
+            if (AfterAcquire is not null)
+            {
+                await AfterAcquire();
+            }
+
+            return new Lease(this, printerId, ++fence);
         }
 
         private sealed class Lease(LeaseCoordinator owner, Guid printer, long fence) : IPrinterFileLease

@@ -368,6 +368,11 @@ may replace or start a file after metadata/idle checks. These checks are not
 atomic delete-if-unchanged. A Queue snapshot confirmation never authorizes
 Delete. No automatic backup is created.
 
+Confirmation is validated only after actor/source authorization and never grants
+that authority. After acquiring the exclusive file-operation lease, confirmation
+reads a fresh tracked operation from storage; either a changed state or a
+persisted send timestamp independently prevents another delete.
+
 The binding includes actor, operation, printer, configuration generation,
 case-sensitive root/path, observation/mutation revisions, captured metadata,
 and guarantee. UI confirmation must display the exact printer/root/path and

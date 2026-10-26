@@ -66,7 +66,7 @@ public sealed class PrinterFileCatalogController(
         }
 
         var policy = await PrinterFileIndexPolicy.ReadAsync(db, ct);
-        DateTime staleBefore = DateTime.UtcNow.AddMinutes(-2 * policy.ScanIntervalMinutes);
+        DateTime staleBefore = DateTime.UtcNow.AddMinutes(-2.0 * policy.ScanIntervalMinutes);
         if (availability.HasValue)
         {
             query = query.Where(x => x.Availability == availability.Value);
