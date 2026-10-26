@@ -46,7 +46,7 @@ public interface IGcodeFilesService
 
     /// <summary>
     /// Efficient query endpoint that pushes all filtering, sorting, and pagination to the database.
-    /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
+    /// Supports comprehensive filtering including path, search, tags, printer model, and source printer.
     /// </summary>
     /// <param name="path">Virtual directory path. Null/empty returns all files. Non-null returns files in that directory only.</param>
     /// <param name="sortBy">Sort field: 'name', 'size', or 'date'.</param>

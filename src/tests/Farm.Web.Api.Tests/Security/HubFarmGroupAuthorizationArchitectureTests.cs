@@ -562,13 +562,13 @@ public sealed class HubFarmGroupAuthorizationArchitectureTests
         }
 
         // Sanity check: this test is only meaningful if it actually found the guarded joins in
-        // HarvestHub/MaintenanceHub that motivate it — an empty scan (e.g. a moved/renamed hub
+        // MaintenanceHub that motivate it — an empty scan (e.g. a moved/renamed hub
         // directory breaking the OnConnectedAsync regex) would let this test pass vacuously
         // while providing zero regression coverage.
         Assert.True(
             foundAnyFarmGroupJoin,
             "Expected to find at least one OnConnectedAsync method referencing " +
-            "AuthorizedHubGroups.Farm (e.g. HarvestHub, MaintenanceHub) — if none was found, " +
+            "AuthorizedHubGroups.Farm (e.g. MaintenanceHub) — if none was found, " +
             "this test's scan roots or OnConnectedAsync detection regex may need updating.");
 
         Assert.True(

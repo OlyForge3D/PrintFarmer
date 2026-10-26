@@ -22,11 +22,16 @@ struct TemperatureView: View {
                 HStack(spacing: 4) {
                     Text(current?.temperatureFormatted ?? "--")
                         .font(.title3.monospacedDigit().weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
 
                     if let target, target > 0 {
+                        // Never wraps in narrow cards (e.g. a 256pt column).
                         Text("/ \(target.temperatureFormatted)")
                             .font(.callout.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
             }

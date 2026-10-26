@@ -127,9 +127,6 @@ public class GcodeFile : StoredFile
     /// </summary>
     public int? ExtruderCount { get; set; }
 
-    // Navigation property to harvest file mappings
-    public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
-
     // --- Promotion lineage: written once when a slicer artifact is promoted into the library ---
 
     /// <summary>Slicer artifact whose bytes were streamed into this file (soft ref — no FK constraint).</summary>

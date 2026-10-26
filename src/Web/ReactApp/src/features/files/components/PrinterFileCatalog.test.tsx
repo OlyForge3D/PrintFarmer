@@ -3,13 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileOperation } from '@/types/api';
+import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileDeleteOperation, PrinterFileOperation } from '@/types/api';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
   confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), enabled: vi.fn(),
-  preview: vi.fn(), thumbnail: vi.fn(), download: vi.fn(),
+  preview: vi.fn(), thumbnail: vi.fn(), download: vi.fn(), prepareDelete: vi.fn(), confirmDelete: vi.fn(),
   hasPermission: vi.fn(), toastError: vi.fn(),
 }));
 const media = vi.hoisted(() => ({ lg: false }));
@@ -22,6 +22,7 @@ vi.mock('@/services/api', () => ({
     refreshPrinterFileIndex: mocks.refresh, setPrinterFileIndexEnabled: mocks.enabled,
     getPrinterFilePreview: mocks.preview, getPrinterFileLocationThumbnail: mocks.thumbnail,
     downloadPrinterFile: mocks.download,
+    prepareIndexedPrinterFileDelete: mocks.prepareDelete, confirmPrinterFileDelete: mocks.confirmDelete,
   },
 }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -66,6 +67,20 @@ const captured: PrinterFileOperation = {
   sizeBytes: 100, verification: 'UnverifiedSnapshot', reasonCode: 'unverified_source_snapshot',
   cancellationRequested: false, destinationPrinterId: 'source', payloadSha256: 'enqueue-payload',
   jobIds: [],
+};
+const secondEntry: PrinterFileCatalogEntry = {
+  ...entry, id: 'location2', relativePath: 'Parts/other.gcode', displayName: 'other.gcode', observationRevision: 9,
+};
+const bulkCatalog: PrinterFileCatalogPage = {
+  ...catalog, items: [entry, secondEntry], total: 2,
+  printers: [{ ...catalog.printers[0], canDelete: true }],
+};
+const preparedDelete: PrinterFileDeleteOperation = {
+  id: 'delete-location', revision: 1, state: 'AwaitingDeleteConfirmation', locationId: entry.id,
+  sourcePrinterId: entry.printerId, storageRoot: entry.storageRoot, relativePath: entry.relativePath,
+  observationRevision: entry.observationRevision, configurationGeneration: entry.configurationGeneration,
+  guarantee: 'CurrentExactPath', confirmationBinding: 'binding-location', currentPathRaceAccepted: false,
+  deleteSentAtUtc: null, outcome: 'AwaitingConfirmation', reasonCode: null,
 };
 
 function LocationProbe() {
@@ -165,7 +180,8 @@ describe('Printer file catalog', () => {
     const table = row.closest('table');
     expect(table).toHaveClass('text-xs');
     expect(within(table!).getAllByRole('columnheader').map(cell => cell.textContent))
-      .toEqual(['Preview', 'Name', 'Printer', 'Status', 'Size', 'Modified', 'Actions']);
+      .toEqual(['', 'Preview', 'Name', 'Printer', 'Status', 'Size', 'Modified', 'Actions']);
+    expect(within(table!).getByRole('checkbox', { name: 'Select all files on this page' })).toBeInTheDocument();
     expect(within(row).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
     expect(cellUnder('Size', row)).toHaveTextContent(/^Unknown$/);
     expect(cellUnder('Modified', row)).toHaveTextContent(/^Unknown$/);
@@ -183,6 +199,211 @@ describe('Printer file catalog', () => {
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.queue).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it.each(['table', 'grid'])('selects eligible files in the %s without opening details and exposes mixed select-all state', async viewMode => {
+    const missing: PrinterFileCatalogEntry = {
+      ...entry, id: 'missing', displayName: 'missing.gcode', availability: 'Missing',
+    };
+    mocks.catalog.mockResolvedValue({ ...bulkCatalog, items: [entry, secondEntry, missing], total: 3 });
+    const user = userEvent.setup();
+    renderCatalog();
+    await findRow('part.gcode');
+    if (viewMode === 'grid') await user.click(screen.getByRole('button', { name: 'Grid view' }));
+    const selectAll = screen.getByRole('checkbox', { name: 'Select all files on this page' });
+    const selectFirst = screen.getByRole('checkbox', { name: 'Select part.gcode' });
+    const selectSecond = screen.getByRole('checkbox', { name: 'Select other.gcode' });
+    const selectMissing = screen.getByRole('checkbox', { name: 'Select missing.gcode' });
+    expect(selectMissing).toBeDisabled();
+    expect(selectMissing).toHaveAttribute('title', 'No bulk action is available for this file');
+    await user.click(selectFirst);
+    expect(selectFirst).toBeChecked();
+    expect(selectAll).toBePartiallyChecked();
+    expect(selectSecond).not.toBeChecked();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await user.click(selectAll);
+    expect(selectAll).toBeChecked();
+    expect(selectSecond).toBeChecked();
+    expect(selectMissing).not.toBeChecked();
+    expect(screen.getByRole('group', { name: 'Selected files' })).toHaveTextContent('2 selected');
+    await user.click(selectAll);
+    expect(selectFirst).not.toBeChecked();
+    expect(selectSecond).not.toBeChecked();
+    expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
+  });
+
+  it.each(['filter', 'page'])('clears selection on a %s change and does not resurrect it on return', async change => {
+    mocks.catalog.mockResolvedValue({ ...bulkCatalog, total: 30 });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    if (change === 'filter') await user.selectOptions(screen.getByRole('combobox', { name: 'Freshness' }), 'fresh');
+    else await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
+    expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
+    if (change === 'filter') await user.selectOptions(screen.getByRole('combobox', { name: 'Freshness' }), '');
+    else await user.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
+  });
+
+  it('drops selections that become unavailable on refresh, even if the file later returns', async () => {
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    const user = userEvent.setup();
+    const { queryClient } = renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select part.gcode' }));
+    mocks.catalog.mockResolvedValue({ ...bulkCatalog, items: [{ ...entry, availability: 'Missing' }, secondEntry] });
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select part.gcode' })).toBeDisabled());
+    expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select part.gcode' })).toBeEnabled());
+    expect(screen.getByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
+  });
+
+  it('limits each bulk action to its permitted sources and never selects files with no action', async () => {
+    mocks.hasPermission.mockImplementation((resource: string, action: string) => resource !== 'printer_files' || action !== 'delete');
+    mocks.catalog.mockResolvedValue({
+      ...bulkCatalog,
+      items: [entry, { ...secondEntry, printerId: 'other' }, { ...entry, id: 'denied', displayName: 'denied.gcode', printerId: 'denied' }],
+      total: 3,
+      printers: [
+        { ...bulkCatalog.printers[0], canDownload: false },
+        { ...bulkCatalog.printers[0], id: 'other', canCopy: false, supportsDownload: true, canDownload: true },
+        { ...bulkCatalog.printers[0], id: 'denied', canCopy: false, canDownload: false },
+      ],
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    expect(screen.getByRole('checkbox', { name: 'Select denied.gcode' })).toBeDisabled();
+    const toolbar = screen.getByRole('group', { name: 'Selected files' });
+    expect(within(toolbar).getByRole('button', { name: 'Copy 1 of 2 selected to local library' })).toBeEnabled();
+    expect(within(toolbar).getByRole('button', { name: 'Download 1 of 2 selected' })).toBeEnabled();
+    expect(within(toolbar).getByRole('button', { name: 'Delete 0 of 2 selected from printer' })).toBeDisabled();
+    await user.click(within(toolbar).getByRole('button', { name: 'Copy 1 of 2 selected to local library' }));
+    const dialog = screen.getByRole('dialog', { name: 'Copy 1 file into local library' });
+    expect(within(dialog).getByText('part.gcode')).toBeInTheDocument();
+    expect(within(dialog).queryByText('other.gcode')).not.toBeInTheDocument();
+  });
+
+  it('bulk Copy uses each observation and a distinct intent, retrying only the failed file with its original key', async () => {
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    mocks.copy.mockRejectedValueOnce(new Error('Response lost'));
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    await user.click(screen.getByRole('button', { name: 'Copy 2 selected to local library' }));
+    const dialog = screen.getByRole('dialog', { name: 'Copy 2 files into local library' });
+    expect(mocks.copy).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: 'Copy 2 files locally' }));
+    await within(dialog).findByText('1 requested, 1 failed, 0 stale');
+    expect(mocks.copy.mock.calls).toEqual([
+      ['location', 7, expect.any(String)],
+      ['location2', 9, expect.any(String)],
+    ]);
+    const firstKey = mocks.copy.mock.calls[0][2];
+    const secondKey = mocks.copy.mock.calls[1][2];
+    expect(firstKey).toBeTruthy();
+    expect(secondKey).toBeTruthy();
+    expect(firstKey).not.toBe(secondKey);
+    await user.click(within(dialog).getByRole('button', { name: 'Retry 1 failed file with the same intents' }));
+    await within(dialog).findByText('2 requested, 0 failed, 0 stale');
+    expect(mocks.copy).toHaveBeenCalledTimes(3);
+    expect(mocks.copy.mock.calls[2]).toEqual(['location', 7, firstKey]);
+    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
+    expect(mocks.prepareDelete).not.toHaveBeenCalled();
+  });
+
+  it('does not retry stale bulk Copy observations and refreshes the catalog', async () => {
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    mocks.copy.mockRejectedValueOnce({ statusCode: 409, data: { reasonCode: 'stale_observation' } });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    await user.click(screen.getByRole('button', { name: 'Copy 2 selected to local library' }));
+    const dialog = screen.getByRole('dialog', { name: 'Copy 2 files into local library' });
+    await user.click(within(dialog).getByRole('button', { name: 'Copy 2 files locally' }));
+    await within(dialog).findByText('1 requested, 0 failed, 1 stale');
+    expect(within(dialog).queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    expect(mocks.copy).toHaveBeenCalledTimes(2);
+  });
+
+  it('downloads selected files sequentially without copying and reports a stale failure by filename', async () => {
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    let finishFirst: (() => void) | undefined;
+    mocks.download
+      .mockImplementationOnce(() => new Promise<void>(resolve => { finishFirst = resolve; }))
+      .mockRejectedValueOnce({ statusCode: 409, message: 'Conflict' });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    await user.click(screen.getByRole('button', { name: 'Download 2 selected' }));
+    expect(mocks.download.mock.calls).toEqual([['location', 7, 'part.gcode']]);
+    expect(screen.getByRole('button', { name: 'Download 2 selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy 2 selected to local library' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete 2 selected from printer' })).toBeDisabled();
+    await act(async () => { finishFirst?.(); });
+    await waitFor(() => expect(mocks.download.mock.calls).toEqual([
+      ['location', 7, 'part.gcode'], ['location2', 9, 'other.gcode'],
+    ]));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      'Downloaded 1 of 2 files.', { description: expect.stringMatching(/other\.gcode: The file changed on the printer/) },
+    ));
+    expect(mocks.catalog).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Download 2 selected' })).toBeEnabled();
+    expect(mocks.copy).not.toHaveBeenCalled();
+    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.prepareDelete).not.toHaveBeenCalled();
+  });
+
+  it('bulk Delete needs both batch consents, binds each source separately and never resends an uncertain confirmation', async () => {
+    mocks.catalog.mockResolvedValue(bulkCatalog);
+    const conditionalDelete: PrinterFileDeleteOperation = {
+      ...preparedDelete, id: 'delete-location2', locationId: secondEntry.id,
+      relativePath: secondEntry.relativePath, observationRevision: secondEntry.observationRevision,
+      guarantee: 'NativeConditional', confirmationBinding: 'binding-location2',
+    };
+    mocks.prepareDelete.mockResolvedValueOnce(preparedDelete).mockResolvedValueOnce(conditionalDelete);
+    mocks.confirmDelete
+      .mockResolvedValueOnce({ ...preparedDelete, state: 'Deleted', outcome: 'Acknowledged' })
+      .mockRejectedValueOnce(new Error('Response lost'));
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
+    await user.click(screen.getByRole('button', { name: 'Delete 2 selected from printer' }));
+    const dialog = screen.getByRole('dialog', { name: 'Delete 2 files from printers' });
+    const confirm = within(dialog).getByRole('button', { name: 'Delete 2 files' });
+    expect(confirm).toBeDisabled();
+    expect(within(dialog).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
+    expect(within(dialog).getByText('gcodes/Parts/other.gcode')).toBeInTheDocument();
+    expect(mocks.prepareDelete).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('checkbox', { name: /I accept irreversible deletion/ }));
+    expect(confirm).toBeDisabled();
+    expect(mocks.confirmDelete).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('checkbox', { name: /I accept the current-path replacement race/ }));
+    await user.click(confirm);
+    await within(dialog).findByText('1 deleted, 0 failed, 0 stale, 1 outcome unknown');
+    expect(mocks.prepareDelete.mock.calls).toEqual([
+      ['location', 7, expect.any(String)], ['location2', 9, expect.any(String)],
+    ]);
+    expect(mocks.prepareDelete.mock.calls[0][2]).toBeTruthy();
+    expect(mocks.prepareDelete.mock.calls[1][2]).toBeTruthy();
+    expect(mocks.prepareDelete.mock.calls[0][2]).not.toBe(mocks.prepareDelete.mock.calls[1][2]);
+    expect(mocks.confirmDelete.mock.calls).toEqual([
+      ['delete-location', { confirmationBinding: 'binding-location', acceptIrreversibleDelete: true, acceptCurrentPathRace: true }],
+      ['delete-location2', { confirmationBinding: 'binding-location2', acceptIrreversibleDelete: true, acceptCurrentPathRace: false }],
+    ]);
+    expect(within(dialog).getByText('Outcome unknown')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Show delete status for other.gcode' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /Retry|Delete 2 files/ })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(mocks.confirmDelete).toHaveBeenCalledTimes(2);
+    expect(mocks.copy).not.toHaveBeenCalled();
+    expect(mocks.queue).not.toHaveBeenCalled();
   });
 
   it('renders wire-shaped observations whose null metadata was omitted by the API', async () => {
@@ -294,7 +515,7 @@ describe('Printer file catalog', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  it('opens details from the filename, labels every action and restores focus on Escape', async () => {
+  it('opens details from the filename, names every icon action and restores focus on Escape', async () => {
     const user = userEvent.setup();
     renderCatalog();
     const name = within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' });
@@ -307,8 +528,14 @@ describe('Printer file catalog', () => {
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unavailable$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unavailable$/);
     expect(within(panel).getByText('Preview unavailable')).toBeInTheDocument();
-    expect(within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button').map(button => button.textContent))
+    const panelActions = within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button');
+    expect(panelActions.map(button => button.getAttribute('aria-label')))
       .toEqual(['Copy to local library', 'Download', 'Queue']);
+    // Icon-only, matching cards and rows: no visible text, tooltip carries the name.
+    for (const button of panelActions) {
+      expect(button.textContent).toBe('');
+      expect(button).toHaveAttribute('title', button.getAttribute('aria-label'));
+    }
     expect(mocks.preview).not.toHaveBeenCalled();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'part.gcode' })).not.toBeInTheDocument());

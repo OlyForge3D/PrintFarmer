@@ -89,7 +89,7 @@ public partial class GcodeFilesService(
 
     /// <summary>
     /// New efficient query method that pushes all filtering, sorting, and pagination to the database.
-    /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
+    /// Supports comprehensive filtering including path, search, tags, printer model, and printer.
     /// This method is designed to replace ListAsync once frontend migration is complete.
     /// </summary>
     /// <param name="path">Optional virtual path to filter files by directory.</param>
@@ -1012,7 +1012,7 @@ public partial class GcodeFilesService(
             try
             {
                 // IMPORTANT: Use UnitOfWork repo to ensure the same DbContext is used
-                // for queue/harvest updates and the actual delete.
+                // for queue updates and the actual delete.
                 GcodeFile? file = await _unitOfWork.GcodeFiles.GetByIdWithIncludesAsync(fileId, ct);
                 if (file != null)
                 {
@@ -1068,8 +1068,8 @@ public partial class GcodeFilesService(
 
         // F4 — Wrap Step 3 compensating deletes + Step 4 parent GcodeFile removal in a
         // single transaction so a failure late in the sequence rolls back the earlier
-        // ExecuteDeleteAsync writes (queue references cleared, harvest import mappings
-        // deleted, direct PartOutputMappings deleted). Cooperate with any outer
+        // ExecuteDeleteAsync writes (queue references cleared, direct PartOutputMappings
+        // deleted). Cooperate with any outer
         // transaction opened by a caller. Physical file deletion (Step 5) is intentionally
         // OUTSIDE the transaction — filesystem operations cannot participate in an EF
         // transaction, and the code already tolerates the "DB removed / physical file
@@ -1079,7 +1079,6 @@ public partial class GcodeFilesService(
         {
             // Step 3: Clear FK references that would otherwise block deletion.
             // - PrintJobs keep history; we null out the FK.
-            // - Harvest import mappings are safe to remove when deleting the library file.
             // - Direct PartOutputMappings (GcodeFileId path) must be explicitly deleted
             //   because their FK to GcodeFiles is Restrict, not Cascade, after the Dallas
             //   cascade adjudication for #953 (broke the SQL Server 1785 multi-cascading-path
@@ -1089,7 +1088,6 @@ public partial class GcodeFilesService(
             foreach (GcodeFile file in filesToDelete)
             {
                 await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
-                await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
                 await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFileAsync(file.Id, ct);
             }
 
@@ -1586,7 +1584,7 @@ public partial class GcodeFilesService(
 
     /// <summary>
     /// Build a GcodeFile entity from extracted metadata and file info.
-    /// This is the unified method used by all code paths (upload, single harvest, bulk harvest).
+    /// This is the unified method used by all code paths (upload, slice import, local copy).
     /// Storage directory is obtained from IStoragePathService internally.
     /// </summary>
     /// <param name="fileId">Unique identifier for the file.</param>
@@ -1597,10 +1595,8 @@ public partial class GcodeFilesService(
     /// <param name="virtualDirectory">Canonical virtual directory containing the physical file.</param>
     /// <param name="metadata">Extracted metadata from the G-code file, or null if extraction failed.</param>
     /// <param name="thumbnailPath">Path to the extracted thumbnail, or null if none available.</param>
-    /// <param name="source">Source of the G-code file (Upload, Harvested, etc.).</param>
+    /// <param name="source">Source of the G-code file (Upload, Generated, etc.).</param>
     /// <param name="fileExtension">File extension including the dot (default: '.gcode').</param>
-    /// <param name="sourcePrinterId">Optional ID of the printer the file was harvested from.</param>
-    /// <param name="originalPrinterPath">Optional original path on the printer if harvested.</param>
     /// <param name="resolvedPrinterModelId">Optional resolved printer model ID from metadata.</param>
     internal GcodeFile BuildGcodeFileEntityFromMetadata(
         Guid fileId,
@@ -1613,8 +1609,6 @@ public partial class GcodeFilesService(
         string? thumbnailPath,
         GcodeSource source,
         string fileExtension = ".gcode",
-        Guid? sourcePrinterId = null,
-        string? originalPrinterPath = null,
         Guid? resolvedPrinterModelId = null)
     {
         return new GcodeFile
@@ -1630,8 +1624,6 @@ public partial class GcodeFilesService(
             FileHash = fileHash,
             UploadedAt = DateTime.UtcNow,
             Source = source,
-            SourcePrinterId = sourcePrinterId,
-            OriginalPrinterPath = originalPrinterPath,
             ExtractedPrinterModelName = metadata?.PrinterModel,  // Store raw extracted name for debugging/fallback
             PrinterModelId = resolvedPrinterModelId, // Source printer model from gcode metadata
             RequiredNozzleDiameter = metadata?.NozzleDiameter,
@@ -2113,7 +2105,7 @@ public partial class GcodeFilesService(
 
     /// <summary>
     /// Unified method for processing and storing G-code files from any source
-    /// (upload, single harvest, bulk harvest, or future sources).
+    /// (upload, slice import, or future sources).
     ///
     /// Handles all file processing: storage, hash calculation, duplicate detection,
     /// metadata extraction, thumbnail processing, entity creation, and database persistence.
@@ -2122,9 +2114,6 @@ public partial class GcodeFilesService(
     /// <param name="originalFileName">Original filename as provided by source</param>
     /// <param name="folderId">Virtual folder ID where file should be organized</param>
     /// <param name="virtualDirectory">Virtual directory path (e.g., '/', '/subfolder'). Defaults to '/'.</param>
-    /// <param name="sourcePrinterId">Optional printer ID if harvested from a specific printer</param>
-    /// <param name="originalPrinterPath">Optional original path on printer if harvested</param>
-    /// <param name="thumbnailUrl">Optional thumbnail URL from printer API (harvest only)</param>
     /// <param name="fileId">Optional specific ID for the file. If null, a new GUID is generated.</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>The saved GcodeFile entity with all metadata populated</returns>
@@ -2146,9 +2135,6 @@ public partial class GcodeFilesService(
         string originalFileName,
         Guid folderId,
         string? virtualDirectory = null,
-        Guid? sourcePrinterId = null,
-        string? originalPrinterPath = null,
-        string? thumbnailUrl = null,
         Guid? fileId = null,
         CancellationToken ct = default)
     {
@@ -2196,7 +2182,7 @@ public partial class GcodeFilesService(
 
         _logger.LogInformation("Calculated file hash: {FileHashSubstring}...", fileHash.Substring(0, 8));
 
-        // Check for duplicates (allow if from same source/printer path, but otherwise reject)
+        // Check for duplicates (reject unless the existing file is the one being re-processed)
         GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
         if (existingFile != null && existingFile.Id != fileId)
         {
@@ -2224,24 +2210,12 @@ public partial class GcodeFilesService(
             // Continue without metadata - it's not fatal
         }
 
-        // Step 4: Process thumbnail (from URL first, then extraction)
+        // Step 4: Extract thumbnail from the G-code
         string? thumbnailPath = null;
         try
         {
-            if (!string.IsNullOrWhiteSpace(thumbnailUrl))
-            {
-                _logger.LogDebug("[GcodeProcessing] Attempting thumbnail download from URL: {ThumbnailUrl}", thumbnailUrl);
-
-                // Try to download from printer API URL
-                thumbnailPath = await ProcessThumbnailFromUrlAsync(thumbnailUrl, fileId.Value, storageDir, ct);
-            }
-
-            // If no URL or URL download failed, try extracting from G-code
-            if (string.IsNullOrEmpty(thumbnailPath))
-            {
-                _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail extraction from G-code file");
-                thumbnailPath = await ExtractThumbnailAsync(finalFilePath, ct);
-            }
+            _logger.LogDebug($"[GcodeProcessing] Attempting thumbnail extraction from G-code file");
+            thumbnailPath = await ExtractThumbnailAsync(finalFilePath, ct);
 
             if (!string.IsNullOrEmpty(thumbnailPath))
             {
@@ -2272,10 +2246,8 @@ public partial class GcodeFilesService(
             "/",
             metadata,
             thumbnailPath,
-            sourcePrinterId.HasValue ? GcodeSource.Harvested : GcodeSource.Upload,
+            GcodeSource.Upload,
             ".gcode",
-            sourcePrinterId,
-            originalPrinterPath,
             resolvedPrinterModelId: printerModelId);
 
         // Step 6: Save to database
@@ -2297,49 +2269,5 @@ public partial class GcodeFilesService(
         }
 
         return gcodeFile;
-    }
-
-    /// <summary>
-    /// Helper method to process thumbnail from printer API URL.
-    /// </summary>
-    /// <param name="thumbnailUrl">URL to download the thumbnail from.</param>
-    /// <param name="fileId">File ID to use for naming the thumbnail.</param>
-    /// <param name="storageDir">Directory to save the thumbnail to.</param>
-    /// <param name="ct">Cancellation token for async operation.</param>
-    private async Task<string?> ProcessThumbnailFromUrlAsync(
-        string thumbnailUrl,
-        Guid fileId,
-        string storageDir,
-        CancellationToken ct)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(thumbnailUrl))
-            {
-                return null;
-            }
-
-            // Download thumbnail from URL
-            using var httpClient = new System.Net.Http.HttpClient();
-            HttpResponseMessage response = await httpClient.GetAsync(thumbnailUrl, ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Failed to download thumbnail from URL: {StatusCode}", response.StatusCode);
-                return null;
-            }
-
-            // Save thumbnail
-            byte[] thumbnailData = await response.Content.ReadAsByteArrayAsync(ct);
-            string thumbnailPath = Path.Join(storageDir, $"{fileId}_thumb.png");
-            await System.IO.File.WriteAllBytesAsync(thumbnailPath, thumbnailData, ct);
-
-            return thumbnailPath;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error downloading thumbnail from URL");
-            return null;
-        }
     }
 }

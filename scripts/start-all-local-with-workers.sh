@@ -713,7 +713,6 @@ cat > "$REACT_DIR/.env" <<EOF
 
 # SignalR URLs for development - connect directly to API server
 VITE_SIGNALR_PRINTERS_URL=$API_URL/hubs/printers
-VITE_SIGNALR_HARVEST_URL=$API_URL/hubs/harvest
 
 # API Base URL (optional, defaults to relative URLs which work via proxy)
 VITE_API_BASE_URL=$API_URL

@@ -1,10 +1,8 @@
-﻿using System.Net.Http.Headers;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
-using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Testing.Shared;
 using Microsoft.AspNetCore.Http.Connections;
@@ -16,205 +14,19 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Farm.Web.Api.Tests.Contracts;
 
 /// <summary>
-/// Wire-contract corpus for the <c>HarvestHub</c> and <c>MaintenanceHub</c> SignalR event
-/// families (issue #2257 — a follow-up finding from #2260/#2238). Every payload captured here
-/// is the exact bytes a real production code path pushed over a real connected
-/// <see cref="HubConnection"/> against the in-process <c>TestServer</c> — never a hand-built DTO
-/// serialized locally, matching the pattern established by <see cref="PrinterStatusContractTests"/>
-/// and <see cref="SignalREventContractTests"/>.
+/// Wire-contract corpus for the <c>MaintenanceHub</c> SignalR event family (issue #2257 — a
+/// follow-up finding from #2260/#2238). Every payload captured here is the exact bytes a real
+/// production code path pushed over a real connected <see cref="HubConnection"/> against the
+/// in-process <c>TestServer</c> — never a hand-built DTO serialized locally, matching the pattern
+/// established by <see cref="PrinterStatusContractTests"/> and <see cref="SignalREventContractTests"/>.
 /// </summary>
-/// <remarks>
-/// Two events <c>harvest-signalr.ts</c> subscribes to — <c>"harvestupdate"</c> and
-/// <c>"harvestoperationcompleted"</c> — have no production broadcaster anywhere in this
-/// codebase (confirmed by repo-wide search for a matching <c>SendAsync</c> call). They are
-/// dead/unreachable client-side listeners and are intentionally NOT given fixtures here: doing
-/// so would require hand-authoring a payload, which is exactly what issue #2238's real-production
-/// -serialization requirement forbids. This is a documented, accepted gap, not an oversight.
-/// </remarks>
-public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifetime
+public sealed class MaintenanceSignalREventContractTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
-
-    /// <summary>
-    /// <c>HarvestHub</c> <c>"harvestfileprogress"</c>, broadcast by the real
-    /// <c>BroadcastFileProgressAsync</c> hub method (called by the backend during a real file
-    /// download) to every client that joined the operation's <c>harvest-{operationId}</c> group.
-    /// This hub method takes no DB state, so no seeding is required beyond a fresh operation id.
-    /// </summary>
-    [Fact]
-    public async Task BroadcastFileProgress_RealHubMethod_SendsHarvestFileProgressEventMatchingCorpus()
-    {
-        Guid operationId = Guid.NewGuid();
-        string token = await CreateFarmAdminTokenAsync();
-
-        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using HubConnection connection = BuildHubConnection("/hubs/harvest", token);
-        _ = connection.On<JsonElement>("harvestfileprogress", payload => receivedTcs.TrySetResult(payload));
-
-        await connection.StartAsync();
-        await connection.InvokeAsync("JoinHarvestGroupAsync", operationId);
-        await connection.InvokeAsync(
-            "BroadcastFileProgressAsync",
-            operationId,
-            "wire-contract-fixture.gcode",
-            2_500_000L,
-            10_000_000L);
-
-        JsonElement received = await WaitForEventAsync(receivedTcs);
-
-        _ = JsonContractAssertions.AssertProperty(received, "operationId", JsonValueKind.String);
-        _ = JsonContractAssertions.AssertProperty(received, "fileName", JsonValueKind.String);
-        _ = JsonContractAssertions.AssertProperty(received, "bytesCopied", JsonValueKind.Number);
-        _ = JsonContractAssertions.AssertProperty(received, "totalBytes", JsonValueKind.Number);
-        _ = JsonContractAssertions.AssertProperty(received, "percent", JsonValueKind.Number);
-
-        string json = received.GetRawText();
-        var volatilePaths = new HashSet<string> { "$.operationId" };
-        await WireContractFixtureWriter.CaptureOrVerifyAsync(
-            WireContractCorpusPaths.ApiRoot,
-            "signalr-events/harvestfileprogress.populated.json",
-            endpoint: "SignalR HarvestHub \"harvestfileprogress\" (BroadcastFileProgressAsync)",
-            producingTest: $"{nameof(HarvestAndMaintenanceSignalREventContractTests)}.{nameof(BroadcastFileProgress_RealHubMethod_SendsHarvestFileProgressEventMatchingCorpus)}",
-            schemaVersion: "1.0",
-            actualJson: json,
-            volatilePaths: volatilePaths);
-    }
-
-    /// <summary>
-    /// <c>HarvestHub</c> <c>"harvestfileupdated"</c>, broadcast by the real
-    /// <see cref="IGcodeHarvestService.SkipDiscoveredFileAsync"/> production call after it marks a
-    /// seeded <see cref="HarvestDiscoveredFile"/> as <see cref="HarvestFileStatus.Skipped"/> — the
-    /// real <c>MapToEventDto</c> mapping, not a hand-built <c>DiscoveredGcodeFileDto</c>.
-    /// </summary>
-    [Fact]
-    public async Task SkipDiscoveredFile_RealServiceCall_SendsHarvestFileUpdatedEventMatchingCorpus()
-    {
-        Guid printerId = Guid.NewGuid();
-        Guid operationId = Guid.NewGuid();
-        Guid fileId = Guid.NewGuid();
-
-        using (IServiceScope scope = _factory.Services.CreateScope())
-        {
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await SeedPrinterAsync(db, printerId);
-
-            db.GcodeHarvestOperations.Add(new GcodeHarvestOperation
-            {
-                Id = operationId,
-                PrinterId = printerId,
-                StartedAt = DateTime.UtcNow.AddMinutes(-5),
-                Status = GcodeHarvestStatus.Running,
-            });
-            db.HarvestDiscoveredFiles.Add(new HarvestDiscoveredFile
-            {
-                Id = fileId,
-                HarvestOperationId = operationId,
-                FilePath = "/gcodes/wire-contract-fixture.gcode",
-                FileName = "wire-contract-fixture.gcode",
-                Size = 1_048_576,
-                Status = HarvestFileStatus.Pending,
-                DiscoveredAt = DateTime.UtcNow.AddMinutes(-4),
-            });
-            _ = await db.SaveChangesAsync();
-        }
-
-        string token = await CreateFarmAdminTokenAsync();
-        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using HubConnection connection = BuildHubConnection("/hubs/harvest", token);
-        _ = connection.On<JsonElement>("harvestfileupdated", payload => receivedTcs.TrySetResult(payload));
-
-        await connection.StartAsync();
-        await connection.InvokeAsync("JoinHarvestGroupAsync", operationId);
-
-        using (IServiceScope scope = _factory.Services.CreateScope())
-        {
-            IGcodeHarvestService harvestService = scope.ServiceProvider.GetRequiredService<IGcodeHarvestService>();
-            bool skipped = await harvestService.SkipDiscoveredFileAsync(operationId, fileId);
-            Assert.True(skipped, "SkipDiscoveredFileAsync should find the seeded discovered file and succeed.");
-        }
-
-        JsonElement received = await WaitForEventAsync(receivedTcs);
-
-        JsonContractAssertions.AssertEnumToken(received, "status", "Skipped");
-        _ = JsonContractAssertions.AssertProperty(received, "errorMessage", JsonValueKind.String);
-        _ = JsonContractAssertions.AssertProperty(received, "printerPath", JsonValueKind.String);
-        _ = JsonContractAssertions.AssertProperty(received, "fileName", JsonValueKind.String);
-        JsonContractAssertions.AssertMissingKey(received, "extractedSlicerName");
-
-        string json = received.GetRawText();
-        var volatilePaths = new HashSet<string> { "$.id", "$.harvestOperationId" };
-        await WireContractFixtureWriter.CaptureOrVerifyAsync(
-            WireContractCorpusPaths.ApiRoot,
-            "signalr-events/harvestfileupdated.skipped.json",
-            endpoint: "SignalR HarvestHub \"harvestfileupdated\" (GcodeHarvestService.SkipDiscoveredFileAsync)",
-            producingTest: $"{nameof(HarvestAndMaintenanceSignalREventContractTests)}.{nameof(SkipDiscoveredFile_RealServiceCall_SendsHarvestFileUpdatedEventMatchingCorpus)}",
-            schemaVersion: "1.0",
-            actualJson: json,
-            volatilePaths: volatilePaths);
-    }
-
-    /// <summary>
-    /// Coverage gap fix for issue #2300: every other fixture in this file connects only with a
-    /// farm_admin token, so the wire-contract corpus never exercised the non-admin path
-    /// <c>HarvestHub.OnConnectedAsync</c>/<c>JoinHarvestGroupAsync</c> must reject. This connects
-    /// with a token that holds no <c>gcode_harvest:admin</c> permission and no <c>farm_admin</c>
-    /// role, and asserts both invariants the fix introduces: (a) <c>JoinHarvestGroupAsync</c>
-    /// rejects the per-operation join outright, and (b) the farm-wide auto-join in
-    /// <c>OnConnectedAsync</c> never happened either, so a real farm-wide
-    /// <c>"singlefileharvestcomplete"</c> broadcast (produced by the real
-    /// <see cref="IHarvestEventBroadcaster"/> production path, not a hand-built payload) never
-    /// reaches this connection — while a farm_admin connection still receives it.
-    /// </summary>
-    [Fact]
-    public async Task SingleFileHarvestComplete_NonAdminToken_JoinRejectedAndNeverReceivesFarmWideEvent()
-    {
-        string adminToken = await CreateFarmAdminTokenAsync();
-        string nonAdminToken = await CreateNonAdminTokenAsync();
-
-        var adminReceivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var nonAdminReceivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using HubConnection adminConnection = BuildHubConnection("/hubs/harvest", adminToken);
-        await using HubConnection nonAdminConnection = BuildHubConnection("/hubs/harvest", nonAdminToken);
-        _ = adminConnection.On<JsonElement>("singlefileharvestcomplete", payload => adminReceivedTcs.TrySetResult(payload));
-        _ = nonAdminConnection.On<JsonElement>("singlefileharvestcomplete", payload => nonAdminReceivedTcs.TrySetResult(payload));
-
-        await adminConnection.StartAsync();
-        await nonAdminConnection.StartAsync();
-
-        // The non-admin caller holds no gcode_harvest:admin permission, so JoinHarvestGroupAsync
-        // must reject the per-operation join exactly like OnConnectedAsync rejects the farm-wide
-        // auto-join for the same caller.
-        Microsoft.AspNetCore.SignalR.HubException exception = await Assert.ThrowsAsync<Microsoft.AspNetCore.SignalR.HubException>(
-            () => nonAdminConnection.InvokeAsync("JoinHarvestGroupAsync", Guid.NewGuid()));
-        Assert.Contains("resource_forbidden", exception.Message, StringComparison.Ordinal);
-
-        // Act: broadcast a real "singlefileharvestcomplete" event via the real production
-        // broadcaster, which targets the farm-wide group the admin connection auto-joined in
-        // OnConnectedAsync and the non-admin connection never joined.
-        using (IServiceScope scope = _factory.Services.CreateScope())
-        {
-            IHarvestEventBroadcaster broadcaster = scope.ServiceProvider.GetRequiredService<IHarvestEventBroadcaster>();
-            await broadcaster.BroadcastSingleFileHarvestCompleteAsync(
-                "wire-contract-nonadmin-fixture.gcode",
-                success: true,
-                message: "Harvest complete.");
-        }
-
-        JsonElement received = await WaitForEventAsync(adminReceivedTcs);
-        _ = JsonContractAssertions.AssertProperty(received, "fileName", JsonValueKind.String);
-
-        // Give the non-admin connection a bounded window to (wrongly) receive the event; it must
-        // not, since it could join neither the farm-wide group (OnConnectedAsync) nor the
-        // per-operation group (JoinHarvestGroupAsync, rejected above).
-        await Task.WhenAny(nonAdminReceivedTcs.Task, Task.Delay(TimeSpan.FromSeconds(2)));
-        Assert.False(
-            nonAdminReceivedTcs.Task.IsCompleted,
-            "a caller with no gcode_harvest:admin permission must never receive farm-wide harvest events.");
-    }
 
     /// <summary>
     /// <c>MaintenanceHub</c> <c>"alertcreated"</c>, broadcast by the real
@@ -315,7 +127,7 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
             WireContractCorpusPaths.ApiRoot,
             "signalr-events/alertcreated.populated.json",
             endpoint: "SignalR MaintenanceHub \"alertcreated\" (MaintenanceAlertEngine.EvaluatePrinterMaintenanceAsync)",
-            producingTest: $"{nameof(HarvestAndMaintenanceSignalREventContractTests)}.{nameof(EvaluatePrinterMaintenance_OverdueDeployment_SendsAlertCreatedEventMatchingCorpus)}",
+            producingTest: $"{nameof(MaintenanceSignalREventContractTests)}.{nameof(EvaluatePrinterMaintenance_OverdueDeployment_SendsAlertCreatedEventMatchingCorpus)}",
             schemaVersion: "1.0",
             actualJson: json,
             volatilePaths: volatilePaths);
@@ -393,7 +205,7 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
             WireContractCorpusPaths.ApiRoot,
             "signalr-events/alertstatuschanged.resolved.json",
             endpoint: "SignalR MaintenanceHub \"alertstatuschanged\" (MaintenanceAlertResolutionService.ResolveAlertWithCompletionLogAsync)",
-            producingTest: $"{nameof(HarvestAndMaintenanceSignalREventContractTests)}.{nameof(ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus)}",
+            producingTest: $"{nameof(MaintenanceSignalREventContractTests)}.{nameof(ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus)}",
             schemaVersion: "1.0",
             actualJson: alertStatusChanged.GetRawText(),
             volatilePaths: alertStatusChangedVolatilePaths);
@@ -403,7 +215,7 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
             WireContractCorpusPaths.ApiRoot,
             "signalr-events/maintenancecompleted.populated.json",
             endpoint: "SignalR MaintenanceHub \"maintenancecompleted\" (MaintenanceAlertResolutionService.ResolveAlertWithCompletionLogAsync)",
-            producingTest: $"{nameof(HarvestAndMaintenanceSignalREventContractTests)}.{nameof(ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus)}",
+            producingTest: $"{nameof(MaintenanceSignalREventContractTests)}.{nameof(ResolveAlertWithCompletionLog_RealServiceCall_SendsAlertStatusChangedAndMaintenanceCompletedEventsMatchingCorpus)}",
             schemaVersion: "1.0",
             actualJson: maintenanceCompleted.GetRawText(),
             volatilePaths: maintenanceCompletedVolatilePaths);
@@ -470,15 +282,13 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
     }
 
     /// <summary>
-    /// Creates a fresh farm_admin bearer token. <c>HarvestHub.BroadcastFileProgressAsync</c>
-    /// requires <c>gcode_harvest:admin</c> (farm_admin implies it), and <c>MaintenanceHub
-    /// .OnConnectedAsync</c> only auto-joins the farm-wide group for callers with
-    /// <c>maintenance:admin</c> (farm_admin implies it too) — mirroring
-    /// <see cref="SignalREventContractTests"/>'s equivalent helper.
+    /// Creates a fresh farm_admin bearer token. <c>MaintenanceHub.OnConnectedAsync</c> only
+    /// auto-joins the farm-wide group for callers with <c>maintenance:admin</c> (farm_admin
+    /// implies it) — mirroring <see cref="SignalREventContractTests"/>'s equivalent helper.
     /// </summary>
     private async Task<string> CreateFarmAdminTokenAsync()
     {
-        string username = $"wire-contract-harvest-maint-admin-{Guid.NewGuid():N}";
+        string username = $"wire-contract-maint-admin-{Guid.NewGuid():N}";
         string email = $"{username}@example.test";
         const string password = "WireContractPassword123!";
         Guid userId = Guid.NewGuid();
@@ -535,53 +345,6 @@ public sealed class HarvestAndMaintenanceSignalREventContractTests : IAsyncLifet
             if (!result.Success || string.IsNullOrWhiteSpace(result.Token))
             {
                 throw new InvalidOperationException("Failed to authenticate the wire-contract farm_admin test user.");
-            }
-
-            return result.Token;
-        }
-    }
-
-    /// <summary>
-    /// Creates a fresh bearer token for a real, DB-seeded user with no roles and no
-    /// <c>gcode_harvest:admin</c> (or any other) permission claim — the coverage gap this file
-    /// previously had for issue #2300: every fixture above authenticates as farm_admin, so the
-    /// non-admin path <c>HarvestHub</c> is supposed to reject was never exercised end-to-end.
-    /// </summary>
-    private async Task<string> CreateNonAdminTokenAsync()
-    {
-        string username = $"wire-contract-harvest-nonadmin-{Guid.NewGuid():N}";
-        string email = $"{username}@example.test";
-        const string password = "WireContractPassword123!";
-        Guid userId = Guid.NewGuid();
-
-        using (IServiceScope scope = _factory.Services.CreateScope())
-        {
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
-
-            db.Users.Add(new User
-            {
-                Id = userId,
-                Username = username,
-                Email = email,
-                PasswordHash = passwordHasher.HashPassword(password),
-                FirstName = "Wire",
-                LastName = "Contract",
-                IsActive = true,
-                EmailConfirmed = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            });
-            _ = await db.SaveChangesAsync();
-        }
-
-        using (IServiceScope scope = _factory.Services.CreateScope())
-        {
-            IAuthenticationService auth = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
-            AuthenticationResult result = await auth.AuthenticateAsync(username, password);
-            if (!result.Success || string.IsNullOrWhiteSpace(result.Token))
-            {
-                throw new InvalidOperationException("Failed to authenticate the wire-contract non-admin test user.");
             }
 
             return result.Token;

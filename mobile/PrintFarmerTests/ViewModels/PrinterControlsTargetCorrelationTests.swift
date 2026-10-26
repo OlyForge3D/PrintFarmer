@@ -15,72 +15,67 @@ import XCTest
 @MainActor
 final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
-    func test_combinedTargets_oneRequestNeedsBothExactTargetsNeverMeasurements() async throws {
+    func test_heaterTarget_oneRequestNeedsExactTargetNeverMeasurements() async throws {
         let service = MockPrinterService()
         var printer = try idlePrinter()
         let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
         await model.loadCapabilities()
-        await model.setHeaterTargets(hotend: 205, bed: 55)
+        await model.setHeaterTarget(.hotend, target: 205)
         XCTAssertEqual(service.setTemperaturesCallCount, 1)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
-        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 55)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed, "Each heater applies on its own (#3547)")
         let command = try XCTUnwrap(model.pendingCommand)
-        XCTAssertEqual(command.kind, .heaterTargets(hotend: 205, bed: 55))
+        XCTAssertEqual(command.kind, .heater(.hotend, target: 205))
         printer.hotendTemp = 205
-        printer.bedTemp = 55
         model.handlePrinterUpdate(printer)
         XCTAssertEqual(model.pendingCommand, command)
         printer.hotendTarget = 205
-        model.handlePrinterUpdate(printer)
-        XCTAssertEqual(model.pendingCommand, command)
-        printer.bedTarget = 55
         model.handlePrinterUpdate(printer)
         XCTAssertNil(model.pendingCommand)
         XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
     }
 
-    func test_combinedTargets_rejectsInvalidPairAtomically() async throws {
-        for (hotend, bed): (Double?, Double?) in [
-            (nil, nil), (205, 99999), (99999, 55), (.nan, 55),
-            (205, -.infinity), (205.5, 55), (205, -1)
+    func test_heaterTarget_rejectsInvalidTargets() async throws {
+        for (heater, target): (Heater, Double) in [
+            (.bed, 99999), (.hotend, 99999), (.hotend, .nan),
+            (.bed, -.infinity), (.hotend, 205.5), (.bed, -1)
         ] {
             let service = MockPrinterService()
             let model = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps, service: service)
             await model.loadCapabilities()
-            await model.setHeaterTargets(hotend: hotend, bed: bed)
-            XCTAssertEqual(service.setTemperaturesCallCount, 0)
+            await model.setHeaterTarget(heater, target: target)
+            XCTAssertEqual(service.setTemperaturesCallCount, 0, "\(heater) \(target)")
             XCTAssertNotNil(model.lastError)
             XCTAssertNil(model.pendingCommand)
         }
     }
 
-    func test_combinedTargets_rejectUnsupportedPreserveOmissionsAndDispatchWithoutMaximum() async throws {
+    func test_heaterTarget_rejectUnsupportedAndDispatchWithoutMaximum() async throws {
         let service = MockPrinterService()
         let printer = try idlePrinter()
         let model = makeViewModel(printer: printer, capabilities: Self.noBedCaps, service: service)
         await model.loadCapabilities()
-        await model.setHeaterTargets(hotend: 205, bed: 0)
+        await model.setHeaterTarget(.bed, target: 0)
         XCTAssertEqual(service.setTemperaturesCallCount, 0, "Even zero cannot speculate about unsupported heaters")
-        await model.setHeaterTargets(hotend: 205, bed: nil)
+        await model.setHeaterTarget(.hotend, target: 205)
         XCTAssertEqual(service.setTemperaturesCallCount, 1)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         model.cancelPendingCommand()
         service.detailsToReturn = nil
         await model.loadHardware()
         XCTAssertEqual(service.setTemperaturesCallCount, 1, "A limits read never replays a target")
-        await model.setHeaterTargets(hotend: 200, bed: nil)
+        await model.setHeaterTarget(.hotend, target: 200)
         XCTAssertEqual(service.setTemperaturesCallCount, 2)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
-        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         model.cancelPendingCommand()
-        await model.setHeaterTargets(hotend: 0, bed: nil)
+        await model.setHeaterTarget(.hotend, target: 0)
         XCTAssertEqual(service.setTemperaturesCallCount, 3)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         model.cancelPendingCommand()
     }
 
-    func test_combinedTargets_duplicateAndLateServerResponseDoNotReleaseNewOwner() async throws {
+    func test_heaterTarget_duplicateAndLateServerResponseDoNotReleaseNewOwner() async throws {
         let service = MockPrinterService()
         let printer = try idlePrinter()
         let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
@@ -88,15 +83,15 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         service.beforeSetTemperatures = { await barrier.arriveAndWait() }
-        let request = Task { await model.setHeaterTargets(hotend: 205, bed: 55) }
+        let request = Task { await model.setHeaterTarget(.hotend, target: 205) }
         await barrier.waitUntilArrived()
-        await model.setHeaterTargets(hotend: 220, bed: 60)
+        await model.setHeaterTarget(.bed, target: 60)
         XCTAssertEqual(service.setTemperaturesCallCount, 1)
         model.deactivate()
         let newService = MockPrinterService()
         let newModel = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: newService)
         await newModel.loadCapabilities()
-        await newModel.setHeaterTargets(hotend: 210, bed: 50)
+        await newModel.setHeaterTarget(.hotend, target: 210)
         let pending = try XCTUnwrap(newModel.pendingCommand)
         barrier.release()
         await request.value
@@ -106,15 +101,15 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         newModel.cancelPendingCommand()
     }
 
-    func test_combinedTargets_cachedMatchAndFailureNeverClaimHeatOrRetry() async throws {
+    func test_heaterTarget_cachedMatchAndFailureNeverClaimHeatOrRetry() async throws {
         let service = MockPrinterService()
         let printer = try idlePrinter()
         let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
         await model.loadCapabilities()
-        await model.setHeaterTargets(hotend: printer.hotendTarget, bed: printer.bedTarget)
+        await model.setHeaterTarget(.hotend, target: try XCTUnwrap(printer.hotendTarget))
         assertAcceptanceOnly(model)
         service.errorToThrow = NetworkError.timeout
-        await model.setHeaterTargets(hotend: 205, bed: 55)
+        await model.setHeaterTarget(.hotend, target: 205)
         XCTAssertNil(model.pendingCommand)
         XCTAssertTrue(model.lastError?.message.contains("unknown") == true)
         XCTAssertEqual(service.setTemperaturesCallCount, 2)

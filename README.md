@@ -395,7 +395,7 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 - ✅ Full printer fleet management (add, remove, monitor, control)
 - ✅ G-code file upload and print job queuing
 - ✅ Metadata-only printer-file discovery in Files, with explicit local Copy and
-  stage-before-Queue actions ([catalog API and safety policy](docs/GCODE_HARVESTING_API.md#durable-printer-file-catalog))
+  stage-before-Queue actions ([catalog API and safety policy](docs/PRINTER_FILE_CATALOG_API.md#durable-printer-file-catalog))
 - ✅ Real-time printer status via SignalR
 - ✅ Auto-dispatch and bed-clear confirmation
 - ✅ Network discovery and Spoolman integration

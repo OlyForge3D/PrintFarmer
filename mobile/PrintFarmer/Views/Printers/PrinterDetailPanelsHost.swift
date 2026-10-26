@@ -746,6 +746,9 @@ struct PrinterDetailTemperatureStrip: View {
                         .font(.footnote).foregroundColor(.pfTextSecondary)
                 )
                 .monospacedDigit()
+                // Current and target stay on one line in narrow columns (256pt).
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

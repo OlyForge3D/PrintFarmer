@@ -76,7 +76,8 @@ public sealed class DatabaseMigrationTests
             "20261012013745_AddPrinterShowExternalSpool",
             "20261013004523_CameraPrinterJoinAndLocation",
             "20261013023326_AddDismissedPrinterCameras",
-            "20261025192142_AddPrinterFileCatalog");
+            "20261025192142_AddPrinterFileCatalog",
+            "20261026153717_RetireGcodeHarvest");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -801,7 +802,8 @@ public sealed class DatabaseMigrationTests
             "20261012013745_AddPrinterShowExternalSpool",
             "20261013004523_CameraPrinterJoinAndLocation",
             "20261013023326_AddDismissedPrinterCameras",
-            "20261025192142_AddPrinterFileCatalog");
+            "20261025192142_AddPrinterFileCatalog",
+            "20261026153717_RetireGcodeHarvest");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1359,6 +1361,7 @@ public sealed class DatabaseMigrationTests
                 "20261013004517_CameraPrinterJoinAndLocation",
                 "20261013023320_AddDismissedPrinterCameras",
                 "20261025192207_AddPrinterFileCatalog",
+                "20261026153721_RetireGcodeHarvest",
             ]
             :
             [
@@ -1400,6 +1403,7 @@ public sealed class DatabaseMigrationTests
                 "20261013004520_CameraPrinterJoinAndLocation",
                 "20261013023323_AddDismissedPrinterCameras",
                 "20261025192231_AddPrinterFileCatalog",
+                "20261026153726_RetireGcodeHarvest",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

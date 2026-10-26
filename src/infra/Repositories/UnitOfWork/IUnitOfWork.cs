@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Repositories.Cameras;
 using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
-using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
 using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Printers;
@@ -55,13 +54,8 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     ICameraRepository Cameras { get; }
 
     /// <summary>
-    /// Repository for harvest operation and discovered file persistence and retrieval.
-    /// </summary>
-    IHarvestRepository HarvestOperations { get; }
-
-    /// <summary>
     /// Repository for printer configuration and persistence.
-    /// Coordinated with harvest operations via shared DbContext.
+    /// Coordinated with the other repositories via shared DbContext.
     /// </summary>
     IPrintersRepository Printers { get; }
 
@@ -107,7 +101,7 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     /// (and dispose) ONLY when the returned handle is non-null.
     ///
     /// This is the coordination primitive the Dallas cascade fix for #953 uses to make
-    /// compensating deletes (schedules, PartOutputMappings, harvest-import mappings, etc.)
+    /// compensating deletes (schedules, PartOutputMappings, etc.)
     /// atomic with the parent SaveChanges — a later failure rolls back the earlier
     /// <c>ExecuteDeleteAsync</c> writes. It cooperates safely with outer transactions
     /// opened by callers such as <c>DataImportService.ImportFullBackupAsync</c> Replace mode.

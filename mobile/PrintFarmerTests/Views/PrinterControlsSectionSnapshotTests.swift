@@ -96,7 +96,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
         printer.isOnline = true
         let bed = PrinterCardPresentation(printer: printer, isPendingReady: true,
                                          attentionCount: 1, failureReason: nil, printTimeLeftSeconds: nil)
-        XCTAssertEqual(bed.stateLabel, "Bed clear")
+        XCTAssertEqual(bed.stateLabel, "Bed clear?")
         XCTAssertEqual(bed.jobLabel, "Ready to harvest")
     }
 
@@ -165,7 +165,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
             printTimeLeftSeconds: 1_320
         )
 
-        XCTAssertEqual(presentation.stateLabel, "Bed clear")
+        XCTAssertEqual(presentation.stateLabel, "Bed clear?")
         XCTAssertFalse(presentation.canShowJobETA)
         XCTAssertFalse(presentation.showsJobProgress)
         XCTAssertFalse(presentation.accessibilityLabel.contains("% complete"))
@@ -478,7 +478,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
         let editor = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
-        XCTAssertFalse(editor.isEnabled)
+        // #3555 B02: heat rows stay editable; a queued target waits in the view model for the lease.
+        XCTAssertTrue(editor.isEnabled)
         XCTAssertTrue(model.blockedReason?.contains("Another controls view") == true)
         XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                        "A replacement must not offer a no-op Stop waiting for someone else's request")
@@ -698,7 +699,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 let value = try control(id)
                 return value.convert(value.bounds, to: controller.view)
             }
-            let heat = try frame("printer.controls.heat.set-targets")
+            let heat = try frame("printer.controls.hotend.increase")
             let motion = try frame("printer.controls.home.all")
             let material = try frame("printer.controls.filament-load")
             if width < 760 {
@@ -711,10 +712,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             }
             let hotend = try frame("printer.controls.hotend.target")
             let bed = try frame("printer.controls.bed.target")
-            XCTAssertEqual(hotend.maxY, bed.maxY, accuracy: 1)
-            XCTAssertLessThan(hotend.maxX, bed.minX)
-            XCTAssertEqual(bed.maxY, heat.maxY, accuracy: 1)
-            XCTAssertLessThan(bed.maxX, heat.minX)
+            // #3547: every heater has its own identical row, stacked Nozzle above Bed.
+            XCTAssertLessThanOrEqual(hotend.maxY, bed.minY)
+            XCTAssertEqual(hotend.midX, bed.midX, accuracy: 1)
+            XCTAssertEqual(hotend.width, bed.width, accuracy: 1)
+            XCTAssertEqual(heat.midY, hotend.midY, accuracy: 1)
             XCTAssertFalse(nativeControls(in: controller.view).contains {
                 ["printer.controls.hotend.set", "printer.controls.bed.set",
                  "printer.controls.hotend.off", "printer.controls.bed.off"].contains($0.accessibilityIdentifier ?? "")
@@ -793,18 +795,19 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 return item.convert(item.bounds, to: controller.view)
             }
             let hotend = try frame("printer.controls.hotend.target")
-            let set = try frame("printer.controls.heat.set-targets")
-            XCTAssertEqual(hotend.minX, tablet ? 42 : 34, accuracy: 1)
-            XCTAssertEqual(set.minX, tablet ? 475.703125 : 300, accuracy: 1)
-            // Both revised prototype and native inputs have 45-point heights.
-            XCTAssertEqual(hotend.minY, 254.0, accuracy: 2)
-            XCTAssertEqual(set.minY, hotend.minY, accuracy: 1)
-            XCTAssertEqual(set.height, hotend.height, accuracy: 1)
-            XCTAssertEqual(set.width, 52, accuracy: 0.5)
+            // #3547: the shared heat row is − target +, with no Go button.
+            let decrease = try frame("printer.controls.hotend.decrease")
+            let increase = try frame("printer.controls.hotend.increase")
+            XCTAssertFalse(native.contains { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
+            XCTAssertLessThanOrEqual(decrease.maxX, hotend.minX)
+            XCTAssertLessThanOrEqual(hotend.maxX, increase.minX)
+            XCTAssertEqual(increase.midY, hotend.midY, accuracy: 1)
+            XCTAssertEqual(decrease.midY, hotend.midY, accuracy: 1)
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
-            XCTAssertEqual(up.minY, tablet ? 166.09375 : 579.6666666666666, accuracy: 4)
+            // #3555 N3555-10: the shared 48pt preset tile replaces the 54pt phone tile.
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 597, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")
@@ -1034,7 +1037,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         // this test compares only controls that disable in place.
         unsupported.supportsHeaterShutdown = Self.essentialLayoutCaps.supportsHeaterShutdown
         let identifiers = [
-            "hotend.target", "bed.target", "heat.set-targets", "jog.step.10",
+            "hotend.target", "bed.target", "hotend.increase", "bed.decrease", "jog.step.10",
             "jog.x.positive", "jog.x.negative", "jog.y.positive", "jog.y.negative",
             "jog.z.positive", "jog.z.negative", "home.all", "home.xy", "home.z",
             "disable-motors", "calibration-start",
@@ -1067,7 +1070,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     let hotend = try XCTUnwrap(controls.first {
                         $0.accessibilityIdentifier == "printer.controls.hotend.target"
                     })
-                    for suffix in ["bed.target", "heat.set-targets", "extrusion-distance", "extrusion-speed"] {
+                    for suffix in ["bed.target", "extrusion-distance", "extrusion-speed"] {
                         let control = try XCTUnwrap(controls.first {
                             $0.accessibilityIdentifier == "printer.controls.\(suffix)"
                         })
@@ -1192,7 +1195,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 } as? UIButton)
             }
             func assertMotionLocal(_ feedback: UIView) throws {
-                let heat = try button("heat.set-targets").convert(try button("heat.set-targets").bounds, to: controller.view)
+                let heat = try button("hotend.increase").convert(try button("hotend.increase").bounds, to: controller.view)
                 let home = try button("home.all").convert(try button("home.all").bounds, to: controller.view)
                 let material = try button("filament-load").convert(try button("filament-load").bounds, to: controller.view)
                 let frame = feedback.convert(feedback.bounds, to: controller.view)
@@ -1309,9 +1312,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let controls = nativeControls(in: controller.view)
             XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                            "Pending is silent: no Stop waiting button (#3496)")
-            let originID = section == .heat ? "heat.set-targets" : "filament-load"
+            let originID = section == .heat ? "hotend.increase" : "filament-load"
             let origin = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.\(originID)" })
-            XCTAssertFalse(origin.isEnabled, "The originating control stays disabled while in flight")
+            if section == .heat {
+                XCTAssertTrue(origin.isEnabled, "Heat ± stays live while in flight; taps queue in the view model (#3555)")
+            } else {
+                XCTAssertFalse(origin.isEnabled, "The originating control stays disabled while in flight")
+            }
             if section == .material {
                 barrier.release()
                 await request?.value
@@ -1386,7 +1393,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let heatingDispatched = expectation(description: "Unknown limits do not block the explicit native target")
         service.afterSetTemperatures = { heatingDispatched.fulfill() }
         defer { service.afterSetTemperatures = nil }
-        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
+        try pressSet(heater)
         await fulfillment(of: [heatingDispatched], timeout: 5)
         service.afterSetTemperatures = nil
         try await settle(controller)
@@ -1416,7 +1423,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let coolDownDispatched = expectation(description: "The UI's asynchronous zero-target command reaches the service")
         service.afterSetTemperatures = { coolDownDispatched.fulfill() }
-        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
+        try pressSet(heater)
         await fulfillment(of: [coolDownDispatched], timeout: 5)
         service.afterSetTemperatures = nil
         XCTAssertEqual(service.setTemperaturesCallCount, 2)
@@ -1437,7 +1444,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "261"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
-        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
+        try pressSet(heater)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith)
         XCTAssertEqual(service.setTemperaturesCallCount, 2, "A known maximum still validates explicit input")
@@ -1483,20 +1490,19 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await expandAbsolute(controller)
         let controls = nativeControls(in: controller.view)
         let heater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" } as? UITextField)
-        let setHeater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
-        let coordinate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.x" } as? UITextField)
+                let coordinate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.x" } as? UITextField)
         let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
         XCTAssertEqual(
             heater.accessibilityHint,
-            "Maximum \(try XCTUnwrap(model.maximum(for: .hotend))) degrees. " + ControlNumberInput.heaterPrecisionMessage
-                + " Blank leaves this heater unchanged; zero switches it off."
+            "Double tap to enter a target, then choose Set. Maximum \(try XCTUnwrap(model.maximum(for: .hotend))) degrees. "
+                + ControlNumberInput.heaterPrecisionMessage + " Zero switches it off."
         )
         XCTAssertEqual(coordinate.accessibilityHint, ControlNumberInput.coordinatePrecisionMessage)
 
         heater.text = "200.5"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
-        setHeater.sendActions(for: .touchUpInside)
+        try pressSet(heater)
         try await settle(controller)
         coordinate.text = "1.2345"
         coordinate.sendActions(for: .editingChanged)
@@ -1526,7 +1532,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let heaterDispatched = expectation(description: "Valid whole-degree target dispatched")
         service.afterSetTemperatures = { heaterDispatched.fulfill() }
-        setHeater.sendActions(for: .touchUpInside)
+        try pressSet(heater)
         await fulfillment(of: [heaterDispatched], timeout: 1)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
@@ -1623,7 +1629,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
     }
 
-    func test_pendingCommand_disablesNativeActionsSilently() async throws {
+    func test_pendingCommand_isSilentAndKeepsHeatRowsLive() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
@@ -1636,12 +1642,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         controller.view.frame = window.bounds
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
-        let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
+        let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.increase" })
         let input = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
         XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
                        "Pending is silent: no Stop waiting button (#3496)")
-        XCTAssertFalse(apply.isEnabled)
-        XCTAssertFalse(input.isEnabled)
+        // #3555 B02: heat rows never lock while a request is in flight; the row speaks Applying.
+        XCTAssertTrue(apply.isEnabled)
+        XCTAssertTrue(input.isEnabled)
+        XCTAssertEqual(input.accessibilityValue, "Applying")
         model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         XCTAssertTrue(model.commandNotice?.contains("may still execute") == true)
@@ -1747,7 +1755,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
             "X destination in millimeters", "Y destination in millimeters",
             "Z destination in millimeters",
-            "Go, set heater targets", "Move to position", "Disable motors"
+            "Increase Hotend target by 5 degrees", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
             XCTAssertGreaterThanOrEqual(target.bounds.height, 44, label)
@@ -2065,12 +2073,17 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCallCount, 0, "Capability resolution cannot replay a command")
     }
 
-    func test_instrumentPanel_activeJobsGateTuneAndHeatersByCapability() async throws {
+    /// #3540/#3545: active jobs gate Tune, and Tune is Speed, Flow and babystep
+    /// only. Heater targets never render during a job, even when the backend
+    /// advertises temperature control during a print.
+    func test_instrumentPanel_activeJobsGateTuneAndOmitHeatersRegardlessOfCapability() async throws {
         for (state, canTune) in [("starting", false), ("printing", true), ("paused", true)] {
             for supportsHeat in [false, true] {
                 let printer = try makePrinter(backend: .moonraker, state: state)
                 var caps = Self.layoutCaps
                 caps.supportsTemperatureControlDuringPrint = supportsHeat
+                caps.supportsSpeedFactorControl = true
+                caps.supportsFlowFactorControl = true
                 let service = makeService(caps: caps)
                 let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
                 await model.loadCapabilities()
@@ -2083,20 +2096,24 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 let tune = try XCTUnwrap(try panelControl("printer.controls.segment.tune", in: controller) as? UIButton)
                 XCTAssertEqual(tune.isEnabled, canTune, state)
                 XCTAssertEqual(tune.isSelected, canTune, state)
-                for heater in ["hotend", "bed"] {
-                    for action in ["target", "decrease", "increase"] {
-                        let identifier = "printer.controls.\(heater).\(action)"
-                        let control = nativeControls(in: controller.view).first {
-                            $0.accessibilityIdentifier == identifier
-                        }
-                        if canTune && supportsHeat {
-                            let control = try XCTUnwrap(control, "\(state) \(identifier)")
-                            XCTAssertTrue(control.isEnabled, "\(state) \(identifier)")
-                            XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, identifier)
-                        } else {
-                            XCTAssertNil(control, "\(state) must not expose unsupported Tune heater actions")
-                        }
+                if canTune {
+                    for identifier in [
+                        "printer.controls.runtime.speed-factor.increase", "printer.controls.runtime.speed-factor.decrease",
+                        "printer.controls.runtime.flow-factor.increase", "printer.controls.runtime.flow-factor.decrease",
+                        "printer.controls.runtime.z-offset.increase", "printer.controls.runtime.z-offset.decrease"
+                    ] {
+                        let control = try panelControl(identifier, in: controller)
+                        XCTAssertFalse(control.accessibilityLabel?.isEmpty ?? true, "\(state) \(identifier)")
                     }
+                }
+                let heaterControls = ["hotend", "bed"].flatMap { heater in
+                    ["target", "decrease", "increase"].map { "printer.controls.\(heater).\($0)" }
+                } + ["printer.controls.heat.set-targets"]
+                for identifier in heaterControls {
+                    XCTAssertNil(
+                        nativeControls(in: controller.view).first { $0.accessibilityIdentifier == identifier },
+                        "\(state) heat=\(supportsHeat): \(identifier) must not render during an active job"
+                    )
                 }
                 XCTAssertEqual(service.setTemperaturesCallCount, 0)
                 XCTAssertNil(service.moveCalledWith)
@@ -2189,5 +2206,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let hostingController = host(rootView)
         hostingController.overrideUserInterfaceStyle = .dark
         assertSnapshot(of: hostingController, as: .image(on: .iPhone13), named: snapshotName)
+    }
+
+    /// Invokes the keypad toolbar's Set item, as a tap would (#3547).
+    private func pressSet(_ field: UITextField) throws {
+        let identifier = "\(field.accessibilityIdentifier ?? "").set"
+        let item = try XCTUnwrap(
+            (field.inputAccessoryView as? UIToolbar)?.items?.first { $0.accessibilityIdentifier == identifier }, identifier
+        )
+        _ = (item.target as? NSObject)?.perform(item.action)
     }
 }

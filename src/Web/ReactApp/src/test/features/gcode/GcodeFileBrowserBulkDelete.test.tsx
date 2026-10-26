@@ -3,9 +3,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GcodeFileBrowser } from '@/features/gcode/components/GcodeFileBrowser';
 
+const auth = vi.hoisted(() => ({ grants: new Set<string>() }));
+
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    hasPermission: (_resource: string, action: string) => action === 'delete',
+    hasPermission: (resource: string, action: string) => auth.grants.has(`${resource}:${action}`),
   }),
 }));
 
@@ -19,6 +21,7 @@ describe('GcodeFileBrowser bulk delete', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    auth.grants = new Set(['gcode_library:admin']);
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -54,5 +57,12 @@ describe('GcodeFileBrowser bulk delete', () => {
         'Are you sure you want to delete 2 selected files? This action cannot be undone.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('hides bulk delete without the library admin grant the delete API requires', () => {
+    auth.grants = new Set(['gcode_library:read', 'gcode_library:create']);
+    renderBrowser();
+
+    expect(screen.queryByRole('button', { name: 'Delete (2)' })).not.toBeInTheDocument();
   });
 });

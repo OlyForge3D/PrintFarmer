@@ -1,14 +1,9 @@
 ﻿using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
-using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Gcode;
-using Farm.Infrastructure.Services.Printers;
-using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Infrastructure.Telemetry;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -343,22 +338,6 @@ public class BinaryGcodeReaderTests
         {
             Directory.Delete(directory, recursive: true);
         }
-    }
-
-    [Fact]
-    public async Task HarvestMetadata_BinaryGcode_UsesMetadataComments()
-    {
-        var harvest = new GcodeHarvestService(
-            Mock.Of<IUnitOfWork>(), NullLogger<GcodeHarvestService>.Instance,
-            Mock.Of<IServiceScopeFactory>(), Mock.Of<IStoragePathService>(), Mock.Of<IBackendCapabilityFactory>(),
-            Mock.Of<IHarvestEventBroadcaster>(), Mock.Of<IGcodeFileProcessingService>(), Mock.Of<IPrintFarmerTelemetryService>());
-        using var stream = new MemoryStream(CreateFile([MetadataBlock(0, "Producer = PrusaSlicer 2.9.4\n")]));
-
-        GcodeMetadataDto result = await harvest.ExtractMetadataAsync(stream);
-
-        Assert.Equal("PrusaSlicer", result.SlicerName);
-        Assert.Equal("2.9.4", result.SlicerVersion);
-        Assert.True(stream.CanRead);
     }
 
     private static GcodeMetadataExtractorService Extractor() => new(NullLogger<GcodeMetadataExtractorService>.Instance);

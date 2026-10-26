@@ -19,7 +19,7 @@ public sealed class RoleToPermissionMigrationCompletenessTests
     private static readonly Assembly[] ScannedAssemblies =
     [
         typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
-        typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
+        typeof(Farm.Infrastructure.Services.SignalR.PrinterHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue controllers moved out of Farm.Web.Api and must be
         // scanned here explicitly, or a reintroduced farm_admin role-name gate on one of them

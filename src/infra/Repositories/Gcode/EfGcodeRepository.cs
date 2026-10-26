@@ -296,39 +296,6 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
                 .ToListAsync(ct);
     }
 
-    public async Task<Guid?> GetLatestHarvestOperationIdForPrinterAsync(Guid printerId, CancellationToken ct)
-    {
-        GcodeHarvestOperation? op = await _db.GcodeHarvestOperations
-            .Where(o => o.PrinterId == printerId)
-            .OrderByDescending(o => o.StartedAt)
-            .FirstOrDefaultAsync(ct);
-        return op?.Id;
-    }
-
-    public async Task<Dictionary<Guid, Guid?>> GetLatestHarvestOperationIdsByPrintersAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
-    {
-        var printerIdList = printerIds.ToList();
-        if (printerIdList.Count == 0)
-        {
-            return new Dictionary<Guid, Guid?>();
-        }
-
-        var latestOps = await _db.GcodeHarvestOperations
-            .Where(o => printerIdList.Contains(o.PrinterId))
-            .GroupBy(o => o.PrinterId)
-            .Select(g => new { PrinterId = g.Key, LatestOpId = g.OrderByDescending(o => o.StartedAt).First().Id })
-            .ToListAsync(ct);
-
-        var result = new Dictionary<Guid, Guid?>();
-        foreach (Guid printerId in printerIdList)
-        {
-            var op = latestOps.FirstOrDefault(o => o.PrinterId == printerId);
-            result[printerId] = op?.LatestOpId;
-        }
-
-        return result;
-    }
-
     public Task AddAsync(GcodeFile file, CancellationToken ct)
     {
         _ = _db.GcodeFiles.Add(file);

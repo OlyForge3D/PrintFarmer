@@ -180,8 +180,13 @@ describe('FilesPage local library', () => {
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
     expect(detailValue(panel, 'Material')).toHaveTextContent(/^PLA$/);
     expect(detailValue(panel, 'Uploaded').querySelector('time')).toHaveTextContent(new Date(gcodeUploadedAt).toLocaleDateString());
-    expect(within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button').map((button) => button.textContent))
+    const panelActions = within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button');
+    expect(panelActions.map((button) => button.getAttribute('aria-label')))
       .toEqual(['Queue for printing', 'Tag file', 'Download file', 'Add to project', 'Delete file']);
+    for (const button of panelActions) {
+      expect(button.textContent).toBe('');
+      expect(button).toHaveAttribute('title', button.getAttribute('aria-label'));
+    }
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'z-last.gcode' })).not.toBeInTheDocument());
     await waitFor(() => expect(name).toHaveFocus());

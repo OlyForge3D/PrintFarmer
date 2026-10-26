@@ -5463,7 +5463,6 @@ VITE_API_BASE_URL=/api
 
 # SignalR hub URL - relative path routes through Nginx
 VITE_SIGNALR_PRINTERS_URL=/hubs/printers
-VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 EOF
     print_success "React production environment configured: $react_dir/.env.production"
 }
