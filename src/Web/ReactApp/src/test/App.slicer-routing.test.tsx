@@ -57,12 +57,6 @@ vi.mock('@/services/printer-signalr', () => ({
   },
 }));
 
-vi.mock('@/services/harvest-signalr', () => ({
-  signalRService: {
-    connect: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
 vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getApiBaseUrl: () => 'http://localhost:5245',
   getAuthHeaders: () => ({}),

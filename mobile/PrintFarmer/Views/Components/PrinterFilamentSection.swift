@@ -68,27 +68,11 @@ struct PrinterFilamentSection: View {
                     .accessibilityIdentifier("printer.filament.attention")
             }
             if !embedded {
-                if showsAllActions {
-                    Text("Assignment does not verify physical loading.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("printer.filament.assignment-disclaimer")
-                }
                 if let action = primaryAction {
                     if !showsAllActions { actionButton(action) }
                 }
                 if showsAllActions {
                     filamentDetailActions
-                    if presentation.rows.contains(where: { $0.coverage != nil }) {
-                        DisclosureGroup(isExpanded: $detailsExpanded) {
-                            details
-                        } label: {
-                            Text("Coverage details")
-                                .font(.caption.weight(.medium))
-                                .frame(minHeight: 44, alignment: .leading)
-                                .accessibilityIdentifier("printer.filament.disclosure")
-                        }
-                    }
                 }
                 if !showsAllActions {
                     DisclosureGroup(isExpanded: $detailsExpanded) {
@@ -165,9 +149,15 @@ struct PrinterFilamentSection: View {
                         .font(embedded ? .callout.weight(.semibold) : .subheadline)
                 }
                 if showsAllActions && row.hasAssignment {
-                    coverageSummary(row, useConciseRunoutCopy: true)
-                    if let spoolID = row.spoolID, let spoolDetails = spoolDetailsByID[spoolID] {
-                        spoolWeightMeter(spoolDetails)
+                    let spoolDetails = row.spoolID.flatMap { spoolDetailsByID[$0] }
+                    // The meter already states the remaining weight, so the
+                    // quantity line only stands in when there is no meter (#3496 D4).
+                    if spoolDetails == nil || conciseCoverageSummaryText(for: row) != nil {
+                        coverageSummary(row, useConciseRunoutCopy: true)
+                    }
+                    if let spoolDetails {
+                        // The runout warning already states the remaining grams (#3496 N13).
+                        spoolWeightMeter(spoolDetails, showsLabel: conciseCoverageSummaryText(for: row) == nil)
                     } else if let spoolLookupMessage, row.spoolID != nil {
                         Text(spoolLookupMessage)
                             .font(.caption)
@@ -200,10 +190,12 @@ struct PrinterFilamentSection: View {
         useConciseRunoutCopy: Bool = false
     ) -> some View {
         if useConciseRunoutCopy, let text = conciseCoverageSummaryText(for: row) {
-            Text(text)
-                .font(.footnote.monospacedDigit())
-                .foregroundStyle(Color.pfWarning)
-                .accessibilityIdentifier("printer.filament.attention")
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill").accessibilityHidden(true)
+                Text(text).accessibilityIdentifier("printer.filament.attention")
+            }
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(Color.pfWarning)
         } else {
             coverageQuantities(row)
         }
@@ -231,7 +223,7 @@ struct PrinterFilamentSection: View {
               let demand = quantityValue(row.coverage?.currentJobRequiredGrams) else {
             return nil
         }
-        return "About \(remaining) g left. This job needs about \(demand) g."
+        return "\(remaining) g / needs \(demand) g"
     }
 
     private func quantityText(_ grams: Double?) -> String {
@@ -245,7 +237,7 @@ struct PrinterFilamentSection: View {
         }
     }
 
-    private func spoolWeightMeter(_ spool: SpoolmanSpool) -> some View {
+    private func spoolWeightMeter(_ spool: SpoolmanSpool, showsLabel: Bool = true) -> some View {
         let meter = SpoolWeightMeter(
             remainingGrams: spool.remainingWeightG,
             initialGrams: spool.initialWeightG
@@ -254,7 +246,7 @@ struct PrinterFilamentSection: View {
             if let fraction = meter.fraction {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.pfBackgroundTertiary)
+                        Capsule().fill(Color.pfBorder)
                         Capsule()
                             .fill(fraction <= 0.12 ? Color.pfError : fraction <= 0.25 ? Color.pfWarning : Color.pfSuccess)
                             .frame(width: geometry.size.width * fraction)
@@ -264,11 +256,15 @@ struct PrinterFilamentSection: View {
                 .accessibilityLabel("Spool remaining")
                 .accessibilityValue(meter.label)
             }
-            Text(meter.label)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.pfTextSecondary)
-                .accessibilityIdentifier("printer.filament.remainingMeter.label")
+            if showsLabel {
+                Text(meter.label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("printer.filament.remainingMeter.label")
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.filament.remainingMeter")
     }
@@ -318,12 +314,13 @@ struct PrinterFilamentSection: View {
         }
     }
 
-    private func actionButton(_ action: PrinterFilamentAction) -> some View {
+    private func actionButton(_ action: PrinterFilamentAction, fillsHeight: Bool = false) -> some View {
         Button { select(action) } label: {
             Group {
                 if showsAllActions {
                     Text(actionTitle(action))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 44, maxHeight: fillsHeight ? .infinity : nil)
                         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
                 } else {
@@ -346,9 +343,14 @@ struct PrinterFilamentSection: View {
         let primaryActions = actions.filter { [.set, .change, .scanNFC].contains($0.kind) }
         VStack(spacing: 8) {
             if !primaryActions.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(primaryActions) { action in actionButton(action) }
+                // Stacked at accessibility sizes; siblings share one height (#3496 R04).
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 8))
+                layout {
+                    ForEach(primaryActions) { action in actionButton(action, fillsHeight: true) }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

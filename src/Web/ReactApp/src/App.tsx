@@ -44,7 +44,6 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, Routes, Navigate, useLocation, Outlet } from 'react-router';
 import { AppRouterProvider } from '@/common/router/AppRouterProvider';
 import { Toaster, toast } from 'sonner';
-import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
 
 const LazyPrinterDashboard = lazy(() =>
@@ -205,21 +204,11 @@ function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
-  const { logger } = useUnifiedLogging({
-    component: 'AuthenticatedAppRoutes',
-    logLifecycle: false,
-  });
 
   useEffect(() => {
     if (!isAuthenticated) {
       return;
     }
-
-    harvestSignalRService.connect().catch(err => {
-      logger.warn('Failed to establish authenticated SignalR connection', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
 
     const unsubscribe = printerSignalRService.onFailureDetected((event) => {
       const confidencePercent = Math.round(event.confidence * 100);
@@ -245,7 +234,7 @@ function AuthenticatedAppRoutes() {
     });
 
     return unsubscribe;
-  }, [isAuthenticated, logger, user?.id]);
+  }, [isAuthenticated, user?.id]);
 
   if (isLoading) {
     return (

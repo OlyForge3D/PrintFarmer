@@ -5,7 +5,7 @@
 
 import type { Model } from './models';
 import type { HistoryJob, HistoryStats, JobAction, JobStatus, JobDetails } from './queue';
-import type { FileEntry, HarvestDiscoveredFile, HarvestOptions, FileImportStatus } from './gcode';
+import type { FileEntry } from './gcode';
 import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
 
 // ====================================
@@ -118,64 +118,6 @@ export interface PrinterCardProps {
   selected?: boolean;
 }
 
-export interface IndexedFilesListProps {
-  files: FileEntry[];
-  onFileSelect?: (file: FileEntry) => void;
-  selectedFiles?: string[];
-}
-
-export interface HarvestWizardStep2OptionsProps {
-  options: HarvestOptions;
-  onOptionsChange: (options: HarvestOptions) => void;
-}
-
-export interface HarvestWizardStep2OptionsRef {
-  validate: () => boolean;
-}
-
-export interface HarvestWizardStep4ProgressProps {
-  files: HarvestDiscoveredFile[];
-  importStatus: FileImportStatus[];
-  onComplete?: () => void;
-}
-
-export interface HarvestWizardStep3FileSelectionProps {
-  files: HarvestDiscoveredFile[];
-  onFilesChange: (files: HarvestDiscoveredFile[]) => void;
-}
-
-export interface HarvestWizardStep1SelectionProps {
-  selectedPrinters: string[];
-  onPrintersChange: (printers: string[]) => void;
-}
-
-export interface ErrorIconProps {
-  message?: string;
-  size?: 'sm' | 'md' | 'lg';
-}
-
-export interface HarvestOperationDetailsProps {
-  operationId: string;
-  onClose?: () => void;
-}
-
-export interface VirtualizedPrinterGridProps {
-  printers: Printer[];
-  onPrinterSelect?: (printer: Printer) => void;
-  selectedPrinters?: string[];
-}
-
-export interface HarvestOperationCardProps {
-  operation: Record<string, unknown>;
-  onViewDetails?: (operationId: string) => void;
-}
-
-export interface HarvestWizardProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onComplete?: () => void;
-}
-
 export interface QueueGcodeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -205,7 +147,6 @@ export interface ExplorerFileBrowserProps {
 }
 
 export interface FileBrowserProps {
-  harvestId?: string;
   printerId?: string;
 }
 

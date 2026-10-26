@@ -467,7 +467,7 @@ public sealed class PrinterAggregate
     ///   <item><c>FIRMWARE_RESTART</c> / <c>RESTART</c> — recovery: Klippy state -&gt; "ready", print job cleared back to "standby", homed axes cleared (a real MCU reboot loses homing). Also bypasses the ready gate — this is the recovery path itself.</item>
     ///   <item><c>EXCLUDE_OBJECT NAME=...</c> — adds to <see cref="ExcludedObjects"/> (existing behavior).</item>
     ///   <item><c>G28</c>, <c>G28 X Y</c>, <c>G28 Z</c> — homes the specified axes (all three when bare) into <see cref="HomedAxes"/> and updates <see cref="Position"/>; still refused with <see cref="PrinterBusyException"/> while printing.</item>
-    ///   <item><c>M104 S...</c> / <c>M140 S...</c> — set <see cref="ExtruderTarget"/> / <see cref="BedTarget"/>.</item>
+    ///   <item><c>M104 S...</c> / <c>M140 S...</c> — set the active extruder target / <see cref="BedTarget"/>.</item>
     ///   <item><c>G91 G0 X.. Y.. Z.. F..</c> followed by a bare <c>G90</c> (relative move, <c>MoveAsync</c>'s shape), plus separate <c>G90</c> and <c>G0 X.. Y.. Z.. F..</c> lines (absolute move, <c>MoveToAsync</c>'s shape) — both update <see cref="Position"/> and <see cref="AbsoluteCoordinates"/>.</item>
     /// </list>
     /// <b>Documented fidelity boundary:</b> <c>M84</c> (disable motors), <c>LOAD_FILAMENT</c>,
@@ -571,7 +571,21 @@ public sealed class PrinterAggregate
 
                 if (TryParseSValue(trimmed, "M104", out double hotendTarget))
                 {
-                    ExtruderTarget = hotendTarget;
+                    if (Mmu.Mode == MmuMode.SnapmakerU1 && Mmu.SnapmakerU1ActiveToolheadIndex > 0)
+                    {
+                        string command = string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"SET_HEATER_TEMPERATURE HEATER=extruder{Mmu.SnapmakerU1ActiveToolheadIndex} TARGET={hotendTarget:R}");
+                        if (!_sensors.TrySendGcode(command))
+                        {
+                            throw new GcodeParameterException("The active extruder does not support a temperature target.");
+                        }
+                    }
+                    else
+                    {
+                        ExtruderTarget = hotendTarget;
+                    }
+
                     continue;
                 }
 

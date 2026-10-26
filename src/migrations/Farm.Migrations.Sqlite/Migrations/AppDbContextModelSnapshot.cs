@@ -15,7 +15,7 @@ namespace Farm.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
             modelBuilder.Entity("Farm.Infrastructure.Data.AppSettingsEntity", b =>
                 {
@@ -6467,6 +6467,474 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("PrinterDispatchStates");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileIoSlot", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LeaseFence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LeaseOwner")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<Guid?>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterFileIoSlots");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Availability")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("FirstSeenAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IdentityKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCompleteScanAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModifiedValue")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("MutationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ObservationRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProviderDigest")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderVersion")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RegisteredPrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StorageRoot")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegisteredPrinterId", "Availability");
+
+                    b.HasIndex("SourcePrinterId", "IdentityKey")
+                        .IsUnique();
+
+                    b.ToTable("PrinterFileLocations");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("CancellationRequested")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CommandJson")
+                        .IsRequired()
+                        .HasMaxLength(16384)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CommandKeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("CurrentPathRaceAccepted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeleteConfirmationSha256")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeleteConfirmedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeleteSentAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DestinationPrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("GcodeFileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("MutationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ObservationRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ReservedBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SnapshotConfirmationSha256")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SnapshotConfirmedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Verification")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("WorkerFence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("WorkerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("WorkerLeaseExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GcodeFileId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("ActorId", "CommandKeyHash")
+                        .IsUnique();
+
+                    b.HasIndex("State", "CreatedAtUtc");
+
+                    b.ToTable("PrinterFileOperations");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOperationJob", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OperationId", "Ordinal");
+
+                    b.HasIndex("JobId")
+                        .IsUnique();
+
+                    b.ToTable("PrinterFileOperationJobs");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOrigin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CapturedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("GcodeFileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ObservationRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderDigest")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderVersion")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StorageRoot")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Verification")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GcodeFileId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("SourcePrinterId");
+
+                    b.ToTable("PrinterFileOrigins");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileRootScan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("IdentityKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCompleteScanAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("MutationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<Guid>("ScanStateId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StorageRoot")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subtree")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScanStateId", "IdentityKey")
+                        .IsUnique();
+
+                    b.ToTable("PrinterFileRootScans");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileScanState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigurationFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("InteractiveRequestedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCompleteScanAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LeaseFence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LeaseOwner")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("MutationGeneration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("NextScanAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RegisteredPrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<Guid>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RegisteredPrinterId");
+
+                    b.HasIndex("SourcePrinterId")
+                        .IsUnique();
+
+                    b.HasIndex("Enabled", "NextScanAtUtc");
+
+                    b.ToTable("PrinterFileScanStates");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9574,6 +10042,83 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Navigation("Printer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileLocation", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "RegisteredPrinter")
+                        .WithMany()
+                        .HasForeignKey("RegisteredPrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("RegisteredPrinter");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOperation", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
+                        .WithMany()
+                        .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileLocation", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("GcodeFile");
+
+                    b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOperationJob", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileOperation", "Operation")
+                        .WithMany("Jobs")
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Operation");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOrigin", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
+                        .WithMany()
+                        .HasForeignKey("GcodeFileId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileLocation", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("GcodeFile");
+
+                    b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileRootScan", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileScanState", "ScanState")
+                        .WithMany()
+                        .HasForeignKey("ScanStateId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("ScanState");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileScanState", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", "RegisteredPrinter")
+                        .WithMany()
+                        .HasForeignKey("RegisteredPrinterId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("RegisteredPrinter");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
@@ -10146,6 +10691,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Navigation("Statistics");
 
                     b.Navigation("Toolheads");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileOperation", b =>
+                {
+                    b.Navigation("Jobs");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>

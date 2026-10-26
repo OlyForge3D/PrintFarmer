@@ -1689,7 +1689,7 @@ public class PrintJobManagementService(
                 {
                     // Step 1: Upload the file to the printer
                     await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
-                    if (job.JobKind == JobKind.FilamentCalibration)
+                    if (job.JobKind == JobKind.FilamentCalibration || job.PinnedGcodeFileSizeBytes.HasValue)
                     {
                         StoredGcodeIntegrityResult uploadIntegrity =
                             await StoredGcodeIntegrityVerifier.VerifyOpenedStreamAsync(
@@ -2255,7 +2255,7 @@ public class PrintJobManagementService(
             }
 
             await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
-            if (job.JobKind == JobKind.FilamentCalibration)
+            if (job.JobKind == JobKind.FilamentCalibration || job.PinnedGcodeFileSizeBytes.HasValue)
             {
                 StoredGcodeIntegrityResult uploadIntegrity =
                     await StoredGcodeIntegrityVerifier.VerifyOpenedStreamAsync(

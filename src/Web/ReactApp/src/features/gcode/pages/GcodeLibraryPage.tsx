@@ -23,7 +23,6 @@ export const GcodeLibraryPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-gcode-viewmode');
   const { startTour } = usePageTour({ tourId: 'gcode-library', steps: gcodeLibraryTour });
-  const harvestId = searchParams.get('harvest') || undefined;
   const printerId = searchParams.get('printer') || undefined;
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterModels, setSelectedPrinterModels] = useState<string[]>([]);
@@ -158,7 +157,6 @@ export const GcodeLibraryPage: React.FC = () => {
         {/* Content */}
         <div className="flex-1 min-h-0">
           <GcodeFileBrowser
-            harvestId={harvestId}
             printerId={printerId}
             viewMode={viewMode as 'grid' | 'explorer'}
             onViewModeChange={setViewMode}

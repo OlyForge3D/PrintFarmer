@@ -24,7 +24,6 @@ import {
   FilamentTypeDto,
   GcodeFile,
   GcodeLibraryFile,
-  GcodeHarvestOperation,
   GetGcodeFilesResponse,
   HealthStatus,
   HistoryJob,
@@ -94,10 +93,8 @@ import {
   UpdatePrinterDto,
   UpdatePrinterGroupRequest,
   UpdateToolheadModelDefDto,
-  DiscoveredGcodeFileDto,
   SetModelDispatchDefaultsRequest,
   ApplyModelDefaultsResult,
-  GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
   SpoolFilterOptions,
@@ -588,56 +585,121 @@ export class ApiClient {
     return this.client.delete<T>(url, config);
   }
 
-  // ===== Harvest/discovered file API methods =====
-  // Get discovered G-code files for a harvest operation
-  async getDiscoveredGcodeFiles(
-    harvestOperationId: string
-  ): Promise<DiscoveredGcodeFileDto[]> {
-    const resp = await this.client.get<DiscoveredGcodeFileDto[]>(
-      `/gcode-harvest/operations/${harvestOperationId}/files`
+  // ===== Printer-file catalog API methods =====
+  async getPrinterFileCatalog(
+    query: {
+      printerId?: string; search?: string; page?: number; pageSize?: number;
+      availability?: import("@/types/api").PrinterFileAvailability; stale?: boolean;
+    },
+    signal?: AbortSignal,
+  ): Promise<import("@/types/api").PrinterFileCatalogPage> {
+    const response = await this.client.get<import("@/types/api").PrinterFileCatalogPage>(
+      "/printer-files", { params: query, signal },
     );
-    return resp.data;
+    return response.data;
   }
 
-  // Import selected discovered G-code files
-  async importSelectedGcodeFiles(
-    dto: { harvestOperationId: string; fileIds: string[] },
-    options?: { timeout?: number }
-  ): Promise<GcodeHarvestResultDto> {
-    // Backend exposes this endpoint under /api/gcode-harvest/import
-    const config: AxiosRequestConfig = options?.timeout
-      ? { timeout: options.timeout }
-      : {};
-    const resp = await this.client.post<GcodeHarvestResultDto>(
-      `/gcode-harvest/import`,
-      dto,
-      config
-    );
-    return resp.data;
+  async refreshPrinterFileIndex(printerId: string): Promise<void> {
+    await this.client.post(`/printer-files/printers/${encodeURIComponent(printerId)}/refresh`);
   }
 
-  // Skip a discovered G-code file in a harvest operation
-  async skipDiscoveredGcodeFile(
-    operationId: string,
-    fileId: string
-  ): Promise<DiscoveredGcodeFileDto> {
-    const resp = await this.client.post<DiscoveredGcodeFileDto>(
-      `/gcode-harvest/operations/${operationId}/files/${fileId}/skip`,
-      {}
-    );
-    return resp.data;
+  async setPrinterFileIndexEnabled(printerId: string, enabled: boolean): Promise<void> {
+    await this.client.put(`/printer-files/printers/${encodeURIComponent(printerId)}/index`, { enabled });
   }
 
-  // Retry a discovered G-code file in a harvest operation
-  async retryDiscoveredGcodeFile(
-    operationId: string,
-    fileId: string
-  ): Promise<DiscoveredGcodeFileDto> {
-    const resp = await this.client.post<DiscoveredGcodeFileDto>(
-      `/gcode-harvest/operations/${operationId}/files/${fileId}/retry`,
-      {}
+  async copyIndexedPrinterFile(
+    locationId: string, observationRevision: number, key: string,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/copy`, { observationRevision },
+      { headers: { "Idempotency-Key": key } },
     );
-    return resp.data;
+    return response.data;
+  }
+
+  async queueIndexedPrinterFile(
+    locationId: string, observationRevision: number, destinationPrinterId: string,
+    options: import("@/types/api").PrinterFileQueueOptions, key: string,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/queue`,
+      { observationRevision, destinationPrinterId, options }, { headers: { "Idempotency-Key": key } },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileOperation(id: string, signal?: AbortSignal): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.get<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}`, { signal },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileOperations(signal?: AbortSignal): Promise<import("@/types/api").PrinterFileOperation[]> {
+    const response = await this.client.get<import("@/types/api").PrinterFileOperation[]>(
+      "/printer-file-index/operations", { signal },
+    );
+    return response.data;
+  }
+
+  async confirmPrinterFileSnapshot(
+    id: string, confirmation: import("@/types/api").PrinterFileSnapshotConfirmation,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/confirm-snapshot`, confirmation,
+    );
+    return response.data;
+  }
+
+  async retryPrinterFileOperation(
+    id: string, admissionOnly: boolean,
+  ): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/${admissionOnly ? "enqueue" : "retry"}`,
+    );
+    return response.data;
+  }
+
+  async cancelPrinterFileOperation(id: string): Promise<import("@/types/api").PrinterFileOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileOperation>(
+      `/printer-file-index/operations/${encodeURIComponent(id)}/cancel`,
+    );
+    return response.data;
+  }
+
+  async prepareIndexedPrinterFileDelete(
+    locationId: string, observationRevision: number, key: string,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/${encodeURIComponent(locationId)}/delete`, { observationRevision },
+      { headers: { "Idempotency-Key": key } },
+    );
+    return response.data;
+  }
+
+  async getPrinterFileDeleteOperation(
+    id: string, signal?: AbortSignal,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.get<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}`, { signal },
+    );
+    return response.data;
+  }
+
+  async confirmPrinterFileDelete(
+    id: string, confirmation: import("@/types/api").PrinterFileDeleteConfirmation,
+  ): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}/confirm`, confirmation,
+    );
+    return response.data;
+  }
+
+  async reconcilePrinterFileDelete(id: string): Promise<import("@/types/api").PrinterFileDeleteOperation> {
+    const response = await this.client.post<import("@/types/api").PrinterFileDeleteOperation>(
+      `/printer-file-index/delete-operations/${encodeURIComponent(id)}/reconcile`,
+    );
+    return response.data;
   }
 
   // Get hash for a G-code file (returns string)
@@ -2223,194 +2285,6 @@ export class ApiClient {
     return response.data;
   }
 
-  // ============ G-code harvest operations ============
-
-  async startHarvestOperation(
-    printerId: string,
-    opts?: {
-      includeSubdirectories?: boolean;
-      maxFileSizeBytes?: number;
-      modifiedAfter?: Date | string;
-      fileExtensions?: string[];
-      minFileSizeBytes?: number;
-      duplicateHandling?: string;
-    }
-  ): Promise<{ queueItemId: string }> {
-    const payload = {
-      printerId,
-      includeSubdirectories: opts?.includeSubdirectories ?? true,
-      maxFileSizeBytes: opts?.maxFileSizeBytes ?? 100 * 1024 * 1024,
-      modifiedAfter: opts?.modifiedAfter
-        ? typeof opts.modifiedAfter === "string"
-          ? opts.modifiedAfter
-          : opts.modifiedAfter.toISOString()
-        : undefined,
-      fileExtensions: opts?.fileExtensions,
-      minFileSizeBytes: opts?.minFileSizeBytes,
-      duplicateHandling: opts?.duplicateHandling,
-    };
-    const response = await this.client.post("/gcode-harvest/start", payload);
-    return response.data as { queueItemId: string };
-  }
-
-  async harvestSingleFile(
-    printerId: string,
-    filename: string
-  ): Promise<{ queueItemId: string }> {
-    const response = await this.client.post(
-      `/gcode-harvest/printers/${printerId}/files/harvest`,
-      null,
-      {
-        params: {
-          filename,
-        },
-      }
-    );
-    return response.data as { queueItemId: string };
-  }
-
-  async startBulkHarvest(
-    printerIds: string[],
-    options: {
-      includeSubfolders?: boolean;
-      maxFileAge?: number;
-      fileTypes?: string[];
-      minFileSize?: number;
-      duplicateHandling?: string;
-    } = {}
-  ): Promise<{ operationIds: string[] }> {
-    const modifiedAfter = options.maxFileAge
-      ? new Date(Date.now() - options.maxFileAge)
-      : undefined;
-    const results = await Promise.all(
-      printerIds.map((pid) =>
-        this.startHarvestOperation(pid, {
-          includeSubdirectories: options?.includeSubfolders ?? true,
-          modifiedAfter,
-          fileExtensions: options.fileTypes,
-          minFileSizeBytes: options.minFileSize,
-          duplicateHandling: options.duplicateHandling,
-        }).catch((err) => {
-          console.error("Failed to start harvest for printer", pid, err);
-          return null;
-        })
-      )
-    );
-    return {
-      operationIds: results
-        .filter((r) => r !== null)
-        .map((r) => (r as { queueItemId: string }).queueItemId),
-    };
-  }
-
-  async getHarvestOperations(
-    printerId?: string,
-    status?: string,
-    limit?: number,
-    offset?: number
-  ): Promise<GcodeHarvestOperation[]> {
-    const params: Record<string, string | number> = {};
-    if (printerId) params.printerId = printerId;
-    if (status) params.status = status;
-    if (limit) params.limit = limit;
-    if (offset) params.offset = offset;
-
-    const response = await this.client.get<GcodeHarvestOperation[]>(
-      "/gcode-harvest/operations",
-      { params }
-    );
-    return response.data;
-  }
-
-  async getHarvestOperation(id: string): Promise<GcodeHarvestOperation> {
-    const response = await this.client.get<GcodeHarvestOperation>(
-      `/gcode-harvest/operations/${id}`
-    );
-    return response.data;
-  }
-
-  async waitForHarvestOperationCreated(
-    printerId: string,
-    timeoutMs: number = 10000
-  ): Promise<string | null> {
-    const startTime = Date.now();
-    const pollInterval = 200; // Poll every 200ms
-
-    while (Date.now() - startTime < timeoutMs) {
-      try {
-        const operations = await this.getHarvestOperations(printerId, "Processing");
-        if (operations.length > 0) {
-          return operations[0].id;
-        }
-      } catch {
-        // Continue polling even if endpoint errors
-        console.debug("Polling for harvest operation creation...");
-      }
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-    }
-
-    return null;
-  }
-
-  async getActiveHarvestForPrinter(
-    printerId: string
-  ): Promise<GcodeHarvestOperation | null> {
-    const response = await this.client.get<GcodeHarvestOperation | null>(
-      `/gcode-harvest/printers/${printerId}/active`
-    );
-    return response.data;
-  }
-
-  async getAllActiveHarvests(): Promise<GcodeHarvestOperation[]> {
-    const response = await this.client.get<GcodeHarvestOperation[]>(
-      "/gcode-harvest/active"
-    );
-    return response.data;
-  }
-
-  async restartHarvestDiscovery(operationId: string): Promise<boolean> {
-    const response = await this.client.post<boolean>(
-      `/gcode-harvest/operations/${operationId}/restart-discovery`
-    );
-    return response.data === true;
-  }
-
-  async cancelHarvestOperation(operationId: string): Promise<boolean> {
-    const response = await this.client.post<boolean>(
-      `/gcode-harvest/operations/${operationId}/cancel`
-    );
-    return response.data;
-  }
-
-  /**
-   * Skip a file in a harvest operation (mark as skipped and emit update)
-   * @param operationId The harvest operation ID
-   * @param fileId The file ID to skip
-   * @returns Promise<boolean> indicating success
-   */
-  async skipHarvestFile(operationId: string, fileId: string): Promise<boolean> {
-    const response = await this.client.post<boolean>(
-      `/gcode-harvest/operations/${operationId}/files/${fileId}/skip`
-    );
-    return response.data === true;
-  }
-
-  /**
-   * Retry a file in a harvest operation (reset error and reprocess)
-   * @param operationId The harvest operation ID
-   * @param fileId The file ID to retry
-   * @returns Promise<boolean> indicating success
-   */
-  async retryHarvestFile(
-    operationId: string,
-    fileId: string
-  ): Promise<boolean> {
-    const response = await this.client.post<boolean>(
-      `/gcode-harvest/operations/${operationId}/files/${fileId}/retry`
-    );
-    return response.data === true;
-  }
-
   async getGcodeFilesWithFilter(
     request: Record<string, unknown>
   ): Promise<GetGcodeFilesResponse> {
@@ -3160,20 +3034,6 @@ export class ApiClient {
     );
     if (!response.data.success) {
       throw new Error(response.data.message || response.data.error || 'Failed to start print');
-    }
-    return true;
-  }
-
-  async deletePrinterFile(
-    printerId: string,
-    fileName: string
-  ): Promise<boolean> {
-    const response = await this.client.delete<CommandResult>(
-      `/printers/${printerId}/files`,
-      { data: { fileName } }
-    );
-    if (!response.data.success) {
-      throw new Error(response.data.message || response.data.error || 'Failed to delete file');
     }
     return true;
   }

@@ -15,8 +15,6 @@ import {
   FilamentPresets,
   FilamentTypeDto,
   GcodeFile,
-  GcodeHarvestOperation,
-  GcodeHarvestStatus,
   HistoryJob,
   HistoryListResponse,
   HistoryTotals,
@@ -1250,65 +1248,6 @@ export function useDeleteGcodeFile() {
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ['gcode-files'] });
       queryClient.removeQueries({ queryKey: queryKeys.gcodeFile(id) });
-    },
-  });
-}
-
-// ============ Harvest Operations Hooks ============
-
-export function useHarvestOperations(printerId?: string, options?: QueryOptions<GcodeHarvestOperation[]>) {
-  return useQuery({
-    queryKey: queryKeys.harvestOperations(printerId),
-    queryFn: () => apiClient.getHarvestOperations(printerId),
-    staleTime: 30000, // 30 seconds
-    ...options,
-  });
-}
-
-export function useHarvestOperation(id: string, options?: QueryOptions<GcodeHarvestOperation>) {
-  return useQuery({
-    queryKey: queryKeys.harvestOperation(id),
-    queryFn: () => apiClient.getHarvestOperation(id),
-    enabled: !!id,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return data?.status === GcodeHarvestStatus.Running ? 5000 : false; // Poll while running
-    },
-    staleTime: 0, // Always fresh for running operations
-    ...options,
-  });
-}
-
-export function useStartHarvestOperation() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: (printerId: string) => apiClient.startHarvestOperation(printerId),
-    onSuccess: (_, printerId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations(printerId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
-    },
-  });
-}
-
-export function useCancelHarvestOperation() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: (operationId: string) => apiClient.cancelHarvestOperation(operationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
-    },
-  });
-}
-
-export function useRestartHarvestDiscovery() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: (operationId: string) => apiClient.restartHarvestDiscovery(operationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.harvestOperations() });
     },
   });
 }

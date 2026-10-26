@@ -3,14 +3,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const moduleLoads = vi.hoisted(() => ({
   printablesBrowser: vi.fn(),
   printablesImport: vi.fn(),
-  harvest: vi.fn(),
   queue: vi.fn(),
   quickSlice: vi.fn(),
+  remoteCatalog: vi.fn(),
+  remoteOperations: vi.fn(),
 }));
 const quickSliceModule = vi.hoisted(() => {
   let resolve: () => void = () => undefined;
@@ -42,13 +43,6 @@ vi.mock('@/features/models3d/components/PrintablesImportModal', async () => {
         <button type="button" onClick={onClose}>Close import</button>
       </Modal>
     ),
-  };
-});
-
-vi.mock('@/features/gcode/components/harvest/HarvestWizardModal', () => {
-  moduleLoads.harvest();
-  return {
-    HarvestWizardModal: () => <div role="dialog" aria-label="Harvest wizard mock" />,
   };
 });
 
@@ -85,6 +79,7 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
       void ref;
       return (
         <div>
+          <span>Owned local browser</span>
           {renderItemActions({
             id: 'gcode-1',
             fileName: 'part.gcode',
@@ -122,7 +117,11 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 
 vi.mock('@/services/api', () => ({
   apiClient: {
-    getAllActiveHarvests: vi.fn().mockResolvedValue([]),
+    getPrinterFileCatalog: moduleLoads.remoteCatalog.mockResolvedValue({
+      items: [], total: 0, page: 1, pageSize: 25, printers: [], scans: [],
+      automaticDiscoveryEnabled: false,
+    }),
+    getPrinterFileOperations: moduleLoads.remoteOperations.mockResolvedValue([]),
     getUnifiedFiles: vi.fn().mockResolvedValue({
       items: [],
       totalItems: 0,
@@ -137,6 +136,55 @@ vi.mock('@/services/api', () => ({
 import { FilesPage } from '../FilesPage';
 
 describe('FilesPage lazy interactions', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each(['/files/harvest?harvest=retired', '/files?tab=harvest'])(
+    'does not expose the retired harvest workflow at %s',
+    (url) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[url]}>
+            <FilesPage />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByText('Owned local browser')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Local library' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'On printers' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /harvest/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    },
+  );
+
+  it('mounts one URL-selected source and stops remote polling on return to the local library', async () => {
+    moduleLoads.remoteCatalog.mockClear();
+    moduleLoads.remoteOperations.mockClear();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/files']}>
+          <FilesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('Owned local browser')).toBeInTheDocument();
+    expect(moduleLoads.remoteCatalog).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'On printers' }));
+    expect(await screen.findByRole('heading', { name: 'On printers' })).toBeInTheDocument();
+    expect(screen.queryByText('Owned local browser')).not.toBeInTheDocument();
+    await waitFor(() => expect(moduleLoads.remoteOperations).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Local library' }));
+    expect(screen.getByText('Owned local browser')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'On printers' })).not.toBeInTheDocument();
+    expect(queryClient.getQueryCache().find({ queryKey: ['printer-file-catalog'], exact: false })?.getObserversCount()).toBe(0);
+    vi.useFakeTimers();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(moduleLoads.remoteCatalog).toHaveBeenCalledTimes(1);
+    expect(moduleLoads.remoteOperations).toHaveBeenCalledTimes(1);
+  });
+
   it('loads each large modal only after direct user intent', async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({
@@ -153,7 +201,6 @@ describe('FilesPage lazy interactions', () => {
 
     expect(moduleLoads.printablesBrowser).not.toHaveBeenCalled();
     expect(moduleLoads.printablesImport).not.toHaveBeenCalled();
-    expect(moduleLoads.harvest).not.toHaveBeenCalled();
     expect(moduleLoads.queue).not.toHaveBeenCalled();
     expect(moduleLoads.quickSlice).not.toHaveBeenCalled();
 
@@ -174,13 +221,8 @@ describe('FilesPage lazy interactions', () => {
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     expect(screen.getByRole('button', { name: 'Printables' })).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
-    expect(await screen.findByRole('dialog', { name: 'Harvest wizard mock' })).toBeInTheDocument();
-    expect(moduleLoads.harvest).toHaveBeenCalledTimes(1);
-
     await user.click(screen.getByTitle('Queue for printing'));
     expect(await screen.findByRole('dialog', { name: 'Queue G-code mock' })).toBeInTheDocument();
     expect(moduleLoads.queue).toHaveBeenCalledTimes(1);
-
   });
 });

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Printer detail Control tab: a position readout over Move / Heat / Tune
-/// segments. Presentation only; the detail host owns the command model, access
-/// gating and the pinned Emergency Stop.
+/// Printer detail Control tab: Move / Heat / Tune segments, with a position
+/// readout on Move. Presentation only; the detail host owns the command model,
+/// access gating and the pinned Emergency Stop.
 struct PrinterInstrumentPanelControls: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
@@ -28,19 +28,27 @@ struct PrinterInstrumentPanelControls: View {
     static let babystepOptions: [Double] = MaterialControlInput.babystepIncrements
     static let cornerRadius: CGFloat = 8
 
+    /// Tune eligibility: printing or paused only. Transitional states such as
+    /// `starting` cannot select Tune (#3496).
     static func isPrinting(state: String?) -> Bool {
+        PrinterControlsViewModel.isRunningPrint(state: state)
+    }
+
+    /// Move and Heat stay locked for any active-print state, including `starting`.
+    static func isLocked(state: String?) -> Bool {
         PrinterControlsViewModel.isPrintingOrPaused(state: state)
     }
 
-    /// Short Tune explanation shown only when the backend cannot apply heater
-    /// targets right now; `nil` keeps the temperatures editable.
-    static func tuneTemperatureBlockedReason(
-        isPrinting: Bool, heatDuringPrint: Bool, canControlHeat: Bool, heatBlockedReason: String?
-    ) -> String? {
-        if isPrinting, !heatDuringPrint { return "This printer can't change temperatures during a print." }
-        guard !canControlHeat else { return nil }
-        return heatBlockedReason
+    /// Tune shows heater targets only when the backend can apply them during a
+    /// print; otherwise the block is omitted entirely (#3496).
+    static func showsTuneTemperatures(isPrinting: Bool, heatDuringPrint: Bool) -> Bool {
+        isPrinting && heatDuringPrint
     }
+
+    /// iPad keeps the jog pad at a thumb-sized width, centred in the panel.
+    static let maximumJogPadWidth: CGFloat = 480
+    /// Shared Tune stepper value column so every row's − / + buttons line up.
+    static let tuneValueColumnWidth: CGFloat = 64
 
     /// VoiceOver reads position values with their unit, e.g. "X 120.0 millimeters".
     static func readoutAccessibilityLabel(axis: String, value: Double?, homedAxes: String?) -> String {
@@ -54,21 +62,35 @@ struct PrinterInstrumentPanelControls: View {
 
     /// Move and Heat lock during a job (mockup B): presets would change
     /// temperatures mid-print, and Tune already carries the hotend/bed targets.
-    static func isAvailable(_ segment: Segment, isPrinting: Bool) -> Bool {
+    /// Tune (speed, flow, babystep) only applies to a running or paused print
+    /// (#3496), so it is disabled while idle.
+    /// `isLocked` defaults to `isPrinting`; pass it separately for transitional
+    /// states (`starting`) that lock Move/Heat without enabling Tune.
+    static func isAvailable(_ segment: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Bool {
         switch segment {
-        case .tune: true
-        case .heat, .move: !isPrinting
+        case .tune: isPrinting
+        case .heat, .move: !(isLocked ?? isPrinting)
         }
     }
 
-    static func resolvedSegment(_ selected: Segment, isPrinting: Bool) -> Segment {
-        isAvailable(selected, isPrinting: isPrinting) ? selected : .tune
+    static func resolvedSegment(_ selected: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Segment {
+        isAvailable(selected, isPrinting: isPrinting, isLocked: isLocked) ? selected : (isPrinting ? .tune : .move)
     }
 
     /// Entering Control mid-print, or a print starting while it is open,
-    /// selects Tune; when the print ends the selection stays put.
-    static func selection(afterPrintingChange selected: Segment, isPrinting: Bool) -> Segment {
-        isPrinting ? resolvedSegment(selected, isPrinting: true) : selected
+    /// selects Tune; when the print ends a Tune selection falls back to Move.
+    static func selection(afterPrintingChange selected: Segment, isPrinting: Bool, isLocked: Bool? = nil) -> Segment {
+        resolvedSegment(selected, isPrinting: isPrinting, isLocked: isLocked)
+    }
+
+    /// A transitional state (e.g. `starting`) disables every segment; a short
+    /// label names the state without explanatory text (#3496 B10).
+    static func transitionalStateLabel(isPrinting: Bool, isLocked: Bool) -> String? {
+        isLocked && !isPrinting ? "Starting…" : nil
+    }
+
+    static func unavailableHint(_ segment: Segment) -> String {
+        segment == .tune ? "Available while printing" : "Unavailable while printing"
     }
 
     static func babystepText(_ offset: Double?) -> String {
@@ -97,18 +119,22 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private var isPrinting: Bool {
-        Self.isPrinting(state: printer.state) || viewModel.isPrintingOrPaused
+        Self.isPrinting(state: printer.state) || viewModel.isRunningPrint
+    }
+
+    private var isLocked: Bool {
+        Self.isLocked(state: printer.state) || viewModel.isPrintingOrPaused
     }
 
     private var segment: Segment {
-        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting)
+        Self.resolvedSegment(selectedSegment, isPrinting: isPrinting, isLocked: isLocked)
     }
 
     var body: some View {
         if !PrinterControlsSection.isHidden(for: printer) {
             VStack(alignment: .leading, spacing: 12) {
                 loadIssues
-                if !isPrinting, let reason = viewModel.blockedReason {
+                if !isLocked, let reason = viewModel.blockedReason {
                     Label(reason, systemImage: "lock.fill")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextPrimary)
@@ -116,7 +142,12 @@ struct PrinterInstrumentPanelControls: View {
                         .accessibilityLabel(reason)
                         .accessibilityIdentifier("printer.controls.blocked-reason")
                 }
-                positionReadout
+                if let label = Self.transitionalStateLabel(isPrinting: isPrinting, isLocked: isLocked) {
+                    Text(label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityIdentifier("printer.controls.state-label")
+                }
                 segmentPicker
                 Group {
                     switch segment {
@@ -137,7 +168,9 @@ struct PrinterInstrumentPanelControls: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.instrument-panel")
             .onChange(of: isPrinting, initial: true) { _, printing in
-                selectedSegment = Self.selection(afterPrintingChange: selectedSegment, isPrinting: printing)
+                selectedSegment = Self.selection(
+                    afterPrintingChange: selectedSegment, isPrinting: printing, isLocked: isLocked
+                )
             }
         }
     }
@@ -174,35 +207,47 @@ struct PrinterInstrumentPanelControls: View {
 
     // MARK: - Position readout
 
+    /// The Move readout is hidden only when the printer reports no position at
+    /// all; unhomed or unreported axes show `readoutPlaceholder` (#3496).
+    static func showsPositionReadout(x: Double?, y: Double?, z: Double?, homedAxes: String?) -> Bool {
+        [x, y, z].contains { $0?.isFinite == true }
+    }
+
+    static let readoutPlaceholder = "\u{2014}"
+
+    static func readoutText(axis: String, value: Double?, homedAxes: String?) -> String {
+        let text = JogSubgroup.positionDisplay(
+            axis: axis, value: value, homedAxes: homedAxes, fractionDigits: readoutFractionDigits(axis: axis)
+        ).text
+        return text == PrinterDetailViewModel.missingValuePlaceholder ? readoutPlaceholder : text
+    }
+
+    /// One compact row at every text size, capped like the jog pad so it
+    /// never pushes the pad below the fold (#3496 N02/N03).
     private var positionReadout: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-        let accessible = dynamicTypeSize.isAccessibilitySize
-        return layout {
+        HStack(alignment: .center, spacing: 8) {
             readoutColumn("X", value: viewModel.printer.x)
-            readoutDivider(vertical: !accessible)
+            readoutDivider()
             readoutColumn("Y", value: viewModel.printer.y)
-            readoutDivider(vertical: !accessible)
+            readoutDivider()
             readoutColumn("Z", value: viewModel.printer.z)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .padding(.vertical, 6)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .overlay { RoundedRectangle(cornerRadius: Self.cornerRadius).strokeBorder(Color.pfBorder) }
+        .frame(maxWidth: Self.maximumJogPadWidth)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.position")
     }
 
     private func readoutColumn(_ axis: String, value: Double?) -> some View {
-        let display = JogSubgroup.positionDisplay(
-            axis: axis, value: value, homedAxes: viewModel.printer.homedAxes,
-            fractionDigits: Self.readoutFractionDigits(axis: axis)
-        )
-        return VStack(alignment: .center, spacing: 2) {
+        VStack(alignment: .center, spacing: 2) {
             Text(axis)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
-            Text(display.text)
+            Text(Self.readoutText(axis: axis, value: value, homedAxes: viewModel.printer.homedAxes))
                 .font(.title3.monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -215,19 +260,24 @@ struct PrinterInstrumentPanelControls: View {
         .accessibilityIdentifier("printer.controls.position.\(axis.lowercased())")
     }
 
-    private func readoutDivider(vertical: Bool) -> some View {
+    private func readoutDivider() -> some View {
         Rectangle()
             .fill(Color.pfBorder)
-            .frame(width: vertical ? 1 / displayScale : nil, height: vertical ? 32 : 1 / displayScale)
+            .frame(width: 1 / displayScale, height: 32)
             .accessibilityHidden(true)
     }
 
     // MARK: - Segments
 
+    /// Accessibility sizes stack the segments as full-width choices so
+    /// "Move" never wraps mid-word (#3496 N01).
     private var segmentPicker: some View {
-        HStack(spacing: 2) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
             ForEach(Segment.allCases) { option in
-                let available = Self.isAvailable(option, isPrinting: isPrinting)
+                let available = Self.isAvailable(option, isPrinting: isPrinting, isLocked: isLocked)
                 ControlActionButton(
                     title: option.title,
                     identifier: "printer.controls.segment.\(option.rawValue)",
@@ -236,7 +286,9 @@ struct PrinterInstrumentPanelControls: View {
                     segmented: true,
                     minimumHeight: 44
                 ) { selectedSegment = option }
+                .frame(maxWidth: .infinity)
                 .disabled(!available)
+                .accessibilityHint(available ? "" : Self.unavailableHint(option))
                 .accessibilityAddTraits(segment == option ? .isSelected : [])
             }
         }
@@ -253,6 +305,12 @@ struct PrinterInstrumentPanelControls: View {
 
     private var movePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if Self.showsPositionReadout(
+                x: viewModel.printer.x, y: viewModel.printer.y, z: viewModel.printer.z,
+                homedAxes: viewModel.printer.homedAxes
+            ) {
+                positionReadout
+            }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             if JogSubgroup.isHidden(for: viewModel.capabilities) {
                 HStack(spacing: 8) {
@@ -272,6 +330,8 @@ struct PrinterInstrumentPanelControls: View {
                     xyPad
                     zColumn.frame(width: 72)
                 }
+                .frame(maxWidth: Self.maximumJogPadWidth)
+                .frame(maxWidth: .infinity)
                 .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 stepSelector(
                     title: "Jog distance (mm)",
@@ -356,9 +416,15 @@ struct PrinterInstrumentPanelControls: View {
     // MARK: - Heat
 
     private var heatPanel: some View {
-        PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("printer.controls.heat-group")
+        VStack(alignment: .leading, spacing: 12) {
+            PreheatSubgroup(viewModel: viewModel, usesSteppers: true, compactForDetail: true)
+            // Writable sensors stay reachable while idle; Tune carries them mid-print.
+            PrinterSensorControlRows(
+                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
+                )
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.heat-group")
     }
 
     // MARK: - Tune
@@ -410,7 +476,8 @@ struct PrinterInstrumentPanelControls: View {
                 selection: $babystep,
                 identifier: { "printer.controls.runtime.z-offset.step.\($0.formatted())" },
                 label: { Self.babystepOptionLabel($0) },
-                accessibilityLabel: { "Babystep \($0.formatted()) millimeters" }
+                accessibilityLabel: { "Babystep \($0.formatted()) millimeters" },
+                capsWidth: false
             )
             let buttons = dynamicTypeSize.isAccessibilitySize
                 ? AnyLayout(VStackLayout(spacing: 8))
@@ -419,39 +486,26 @@ struct PrinterInstrumentPanelControls: View {
                 babystepButton(raise: true, reason: reason).disabled(!canAdjust)
                 babystepButton(raise: false, reason: reason).disabled(!canAdjust)
             }
-            if isPrinting {
+            if Self.showsTuneTemperatures(isPrinting: isPrinting, heatDuringPrint: viewModel.supportsHeatDuringPrint) {
                 Divider()
                 tuneTemperatures
             }
-            PrinterSensorControlRows(viewModel: viewModel, compact: true)
+            PrinterSensorControlRows(
+                    viewModel: viewModel, compact: true, valueColumnWidth: Self.tuneValueColumnWidth
+                )
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime")
     }
 
-    /// Hotend and bed targets stay editable in Tune during a print when the
-    /// backend can apply them; otherwise a short reason explains why not.
+    /// Hotend and bed target steppers, shown only when the backend can apply
+    /// them during a print. No caption: disabled rows speak for themselves.
     private var tuneTemperatures: some View {
-        let reason = Self.tuneTemperatureBlockedReason(
-            isPrinting: isPrinting,
-            heatDuringPrint: viewModel.supportsHeatDuringPrint,
-            canControlHeat: viewModel.canControlHeat,
-            heatBlockedReason: viewModel.heatBlockedReason
-        )
-        return VStack(alignment: .leading, spacing: 8) {
-            EssentialControlHeading(title: "Temperatures")
+        VStack(alignment: .leading, spacing: 8) {
             PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
             PreheatSubgroup.IndividualHeaterControls(
                 viewModel: viewModel, usesSteppers: true, compactForDetail: true, allowsActivePrint: true
             )
-            .disabled(reason != nil)
-            if let reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("printer.controls.runtime.temperatures.reason")
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.controls.runtime.temperatures")
@@ -481,7 +535,7 @@ struct PrinterInstrumentPanelControls: View {
             Text(renderedValue)
                 .font(.body.monospacedDigit().weight(.medium))
                 .foregroundStyle(Color.pfTextPrimary)
-                .frame(minWidth: 64)
+                .frame(minWidth: Self.tuneValueColumnWidth)
                 .accessibilityLabel(Self.runtimeFactorAccessibilityLabel(factor, value))
                 .uiTestRenderedValue(renderedValue)
                 .accessibilityIdentifier("\(identifier).value")
@@ -500,13 +554,6 @@ struct PrinterInstrumentPanelControls: View {
                 stepper
             }
             .frame(minHeight: 48)
-            if let reason {
-                Text(reason)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("\(identifier).reason")
-            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
@@ -515,6 +562,10 @@ struct PrinterInstrumentPanelControls: View {
     private func runtimeFactorButton(_ factor: RuntimeFactor, delta: Double, reason: String?) -> some View {
         let increase = delta > 0
         let step = RuntimeFactor.stepPercent.formatted()
+        let pending = Self.isRuntimeFactorPending(
+            viewModel.pendingCommand?.kind, factor: factor, increase: increase,
+            current: viewModel.runtimeFactorPercent(factor)
+        )
         return ControlActionButton(
             title: "",
             identifier: "printer.controls.runtime.\(factor.rawValue)-factor.\(increase ? "increase" : "decrease")",
@@ -522,10 +573,28 @@ struct PrinterInstrumentPanelControls: View {
             hint: reason ?? "Sends a new \(factor.title.lowercased()) percentage to the printer.",
             compact: true,
             systemImage: increase ? "plus" : "minus",
-            minimumHeight: 44
+            value: pending ? "Pending" : nil,
+            minimumHeight: 44,
+            isPending: pending
         ) { Task { await viewModel.stepRuntimeFactor(factor, by: delta) } }
-        .frame(width: 44, height: 44)
+        .frame(minWidth: 44, minHeight: 44)
+        .fixedSize()
         .disabled(!viewModel.canStepRuntimeFactor(factor, by: delta))
+    }
+
+    /// The in-flight runtime-factor request is shown on the stepper button that
+    /// sent it: a target above the current readback came from "+".
+    static func isRuntimeFactorPending(
+        _ kind: ControlCommand.Kind?, factor: RuntimeFactor, increase: Bool, current: Double?
+    ) -> Bool {
+        guard case let .runtimeFactor(pendingFactor, percent) = kind, pendingFactor == factor else { return false }
+        guard let current, current.isFinite else { return increase }
+        return (percent > current) == increase
+    }
+
+    static func isBabystepPending(_ kind: ControlCommand.Kind?, raise: Bool) -> Bool {
+        guard case let .transientZOffset(_, deltaMm) = kind else { return false }
+        return (deltaMm > 0) == raise
     }
 
     static func runtimeFactorText(_ percent: Double?) -> String {
@@ -539,14 +608,17 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     private func babystepButton(raise: Bool, reason: String?) -> some View {
-        ControlActionButton(
+        let pending = Self.isBabystepPending(viewModel.pendingCommand?.kind, raise: raise)
+        return ControlActionButton(
             title: raise ? "Raise nozzle" : "Lower nozzle",
             identifier: "printer.controls.runtime.z-offset.\(raise ? "increase" : "decrease")",
             accessibilityTitle: raise ? "Raise nozzle" : "Lower nozzle",
             hint: reason ?? "Moves the live Z offset \(babystep.formatted()) millimeters.",
             compact: true,
             systemImage: raise ? "arrow.up" : "arrow.down",
-            minimumHeight: 44
+            value: pending ? "Pending" : nil,
+            minimumHeight: 44,
+            isPending: pending
         ) { Task { await viewModel.adjustLiveZOffset(by: raise ? babystep : -babystep) } }
         .frame(maxWidth: .infinity, minHeight: 44)
     }
@@ -559,11 +631,12 @@ struct PrinterInstrumentPanelControls: View {
         selection: Binding<Double>,
         identifier: @escaping (Double) -> String,
         label: @escaping (Double) -> String,
-        accessibilityLabel: @escaping (Double) -> String
+        accessibilityLabel: @escaping (Double) -> String,
+        capsWidth: Bool = true
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(Color.pfTextSecondary)
                 .accessibilityAddTraits(.isHeader)
             HStack(spacing: 2) {
@@ -581,6 +654,10 @@ struct PrinterInstrumentPanelControls: View {
             .padding(2)
             .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
         }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        // Move caps to the jog pad; Tune rows span the full panel width.
+        .frame(maxWidth: capsWidth ? Self.maximumJogPadWidth : .infinity)
+        .frame(maxWidth: .infinity)
     }
 }
 

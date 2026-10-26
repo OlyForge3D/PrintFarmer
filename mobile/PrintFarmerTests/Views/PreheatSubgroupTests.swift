@@ -109,15 +109,12 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
         XCTAssertTrue(model.isExecuting)
-        let pendingControls = nativeControls(controller.view)
-        let stop = try XCTUnwrap(pendingControls.first {
-            $0.accessibilityIdentifier == "printer.controls.stop-waiting"
-        })
-        XCTAssertTrue(stop.isEnabled, "Card-local observation cancellation remains available")
-        let commandControls = pendingControls.filter { $0 !== stop }
+        let commandControls = nativeControls(controller.view)
+        XCTAssertFalse(commandControls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                       "Pending is silent: no Stop waiting button (#3496)")
         XCTAssertEqual(commandControls.count, 3, "Both target fields and the setter remain mounted")
         XCTAssertTrue(commandControls.allSatisfy { !$0.isEnabled })
-        stop.sendActions(for: .touchUpInside)
+        model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         try await settle(controller)
         field.text = ""
@@ -237,6 +234,89 @@ final class PreheatSubgroupTests: XCTestCase {
         .fixedSize(horizontal: false, vertical: true)
         .background(Color.pfCard)
         .ignoresSafeArea()
+    }
+
+    /// #3496 N09 / R3514-H07: a pending → settled round-trip must keep the same
+    /// UIButton (VoiceOver focus stays on the tapped control) and centred content.
+    func test_controlActionButton_pendingRoundTripKeepsInstanceAndCentredContent() async throws {
+        final class Holder: ObservableObject {
+            @Published var pending = false
+            @Published var enabled = true
+            @Published var width: CGFloat = 354
+        }
+        struct Host: View {
+            @ObservedObject var holder: Holder
+            var body: some View {
+                // Mirrors the Tune babystep pair: flexible buttons in an AnyLayout HStack.
+                AnyLayout(HStackLayout(spacing: 8)) {
+                    ControlActionButton(
+                        title: "Raise nozzle", identifier: "n09.button", compact: true,
+                        systemImage: "arrow.up", value: holder.pending ? "Pending" : nil,
+                        minimumHeight: 44, isPending: holder.pending
+                    ) {}
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .disabled(!holder.enabled)
+                    ControlActionButton(
+                        title: "Lower nozzle", identifier: "n09.other", compact: true,
+                        systemImage: "arrow.down", minimumHeight: 44
+                    ) {}
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .disabled(!holder.enabled)
+                }
+                .frame(width: holder.width)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        let holder = Holder()
+        let controller = UIHostingController(rootView: Host(holder: holder))
+        let window = UIWindow()
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(x: 0, y: 0, width: 354, height: 120)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await settle(controller)
+
+        func button() throws -> UIButton {
+            try XCTUnwrap(nativeControls(controller.view).first { $0.accessibilityIdentifier == "n09.button" } as? UIButton)
+        }
+        func contentMidXOffset(_ button: UIButton) throws -> CGFloat {
+            // SwiftUI re-measures the representable without resizing it; that measurement
+            // must not leave the live button with its size-to-fit content layout.
+            _ = controller.sizeThatFits(in: CGSize(width: 354, height: 10000))
+            _ = button.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
+            button.setNeedsLayout()
+            button.layoutIfNeeded()
+            let title = try XCTUnwrap(button.titleLabel)
+            var content = title.convert(title.bounds, to: button)
+            if let image = button.imageView, !image.isHidden, image.bounds.width > 0 {
+                content = content.union(image.convert(image.bounds, to: button))
+            }
+            return abs(content.midX - button.bounds.midX)
+        }
+        holder.width = 60
+        try await settle(controller)
+        holder.width = 354
+        try await settle(controller)
+        let original = try button()
+        let centredOffset = try contentMidXOffset(original)
+        XCTAssertLessThan(centredOffset, 2, "Content starts centred")
+
+        holder.pending = true
+        holder.enabled = false
+        try await settle(controller)
+        let pendingButton = try button()
+        XCTAssertTrue(pendingButton === original, "Pending must not rebuild the UIButton")
+        XCTAssertEqual(pendingButton.accessibilityValue, "Pending")
+        XCTAssertTrue(pendingButton.subviews.contains { ($0 as? UIActivityIndicatorView)?.isAnimating == true })
+
+        holder.pending = false
+        holder.enabled = true
+        try await settle(controller)
+        let settled = try button()
+        XCTAssertTrue(settled === original, "Settling must not rebuild the UIButton")
+        XCTAssertFalse(settled.subviews.contains { ($0 as? UIActivityIndicatorView)?.isAnimating == true })
+        XCTAssertLessThan(try contentMidXOffset(settled), 2, "Content stays centred after a pending round-trip")
     }
 
     private func installThermal(

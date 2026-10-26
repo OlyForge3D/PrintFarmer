@@ -72,6 +72,27 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         }
     }
 
+    /// <summary>Detects the actual optional native inventory client, independent of legacy capability flags.</summary>
+    public bool TryGetFileInventoryClientTyped(PrinterBackend backend, out ISupportsFileInventory? client)
+    {
+        client = null;
+        if (backend == PrinterBackend.Unknown)
+        {
+            return false;
+        }
+
+        try
+        {
+            client = _clientFactory.GetClient(backend) as ISupportsFileInventory;
+            return client is not null;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Native file inventory unavailable for backend {Backend}", backend);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Discovers backend capabilities by checking the plugin registry and/or
     /// using reflection to detect capability marker interfaces on client implementations.

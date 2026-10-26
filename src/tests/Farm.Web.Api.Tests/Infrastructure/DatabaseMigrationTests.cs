@@ -75,10 +75,82 @@ public sealed class DatabaseMigrationTests
             "20260925012135_AddDispatchOperatorRecovery",
             "20261012013745_AddPrinterShowExternalSpool",
             "20261013004523_CameraPrinterJoinAndLocation",
-            "20261013023326_AddDismissedPrinterCameras");
+            "20261013023326_AddDismissedPrinterCameras",
+            "20261025192142_AddPrinterFileCatalog");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_PrinterCatalogUpgradesPopulatedSchemaWithOrdinalIdentityAndPreservesLocalAssets()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261013023326_AddDismissedPrinterCameras");
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Existing catalog maker" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), Name = "Existing catalog model", Manufacturer = manufacturer };
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing printer",
+            Manufacturer = manufacturer,
+            Model = model,
+            ServerUrl = "http://migration.invalid",
+        };
+        var local = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing owned content",
+            FileName = "owned.gcode",
+            FileHash = "existing-owned-hash",
+            Folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" },
+        };
+        context.AddRange(printer, local);
+        await context.SaveChangesAsync();
+        await ProviderAwareMigrationRunner.MigrateAsync(context, DatabaseMigrationTarget.Core, NullLogger.Instance);
+        Assert.Equal(local.FileHash, (await context.GcodeFiles.SingleAsync(x => x.Id == local.Id)).FileHash);
+        Assert.Equal(printer.Name, (await context.Printers.SingleAsync(x => x.Id == printer.Id)).Name);
+        foreach (string path in new[] { "Parts/Café.gcode", "parts/Café.gcode" })
+        {
+            context.PrinterFileLocations.Add(new()
+            {
+                Id = Guid.NewGuid(),
+                SourcePrinterId = printer.Id,
+                RegisteredPrinterId = printer.Id,
+                StorageRoot = "gcodes",
+                RelativePath = path,
+                IdentityKey = Farm.Infrastructure.Services.Printers.PrinterInventoryPath.ComputeIdentity("gcodes", path),
+            });
+        }
+
+        await context.SaveChangesAsync();
+        Assert.Equal(2, await context.PrinterFileLocations.CountAsync());
+        PrinterFileLocation source = await context.PrinterFileLocations.FirstAsync();
+        context.PrinterFileOrigins.Add(new()
+        {
+            Id = Guid.NewGuid(),
+            OperationId = Guid.NewGuid(),
+            SourcePrinterId = printer.Id,
+            LocationId = source.Id,
+            GcodeFileId = local.Id,
+            StorageRoot = source.StorageRoot,
+            RelativePath = source.RelativePath,
+            ContentSha256 = local.FileHash,
+        });
+        await context.SaveChangesAsync();
+        context.Printers.Remove(printer);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        Assert.All(await context.PrinterFileLocations.ToArrayAsync(), location =>
+        {
+            Assert.Null(location.RegisteredPrinterId);
+            Assert.Equal(printer.Id, location.SourcePrinterId);
+        });
+        Assert.Equal(local.Id, (await context.PrinterFileOrigins.SingleAsync()).GcodeFileId);
+        Assert.Single(await context.GcodeFiles.ToArrayAsync());
+        Assert.False(context.Database.HasPendingModelChanges());
     }
 
     [Fact]
@@ -728,7 +800,8 @@ public sealed class DatabaseMigrationTests
             "20260925012135_AddDispatchOperatorRecovery",
             "20261012013745_AddPrinterShowExternalSpool",
             "20261013004523_CameraPrinterJoinAndLocation",
-            "20261013023326_AddDismissedPrinterCameras");
+            "20261013023326_AddDismissedPrinterCameras",
+            "20261025192142_AddPrinterFileCatalog");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1285,6 +1358,7 @@ public sealed class DatabaseMigrationTests
                 "20261012013614_AddPrinterShowExternalSpool",
                 "20261013004517_CameraPrinterJoinAndLocation",
                 "20261013023320_AddDismissedPrinterCameras",
+                "20261025192207_AddPrinterFileCatalog",
             ]
             :
             [
@@ -1325,6 +1399,7 @@ public sealed class DatabaseMigrationTests
                 "20261012013617_AddPrinterShowExternalSpool",
                 "20261013004520_CameraPrinterJoinAndLocation",
                 "20261013023323_AddDismissedPrinterCameras",
+                "20261025192231_AddPrinterFileCatalog",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

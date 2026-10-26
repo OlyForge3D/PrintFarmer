@@ -270,7 +270,8 @@ public sealed class OctoPrintWebSocketAdapter(
             }
 
             // Update cache before broadcasting to clients
-            _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+            _statusCacheWriter.UpdateStatus(
+                cacheUpdate with { RawActivityState = status.State }, originWatermark);
 
             // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
             var signalRUpdate = new PrinterStatusUpdate(

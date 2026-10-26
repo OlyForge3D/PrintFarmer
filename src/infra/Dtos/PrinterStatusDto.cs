@@ -45,6 +45,10 @@ public record PrinterStatusDto(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null)
 {
+    /// <summary>Unnormalized backend activity evidence for metadata-scan gating.</summary>
+    [JsonIgnore]
+    public string? RawActivityState { get; init; }
+
     /// <summary>
     /// Backend-neutral sensors and fans (issue #3406), bounded and deduplicated by
     /// <see cref="PrinterSensorNormalizer"/> on assignment. Empty for backends without sensor telemetry.

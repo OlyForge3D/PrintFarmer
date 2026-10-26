@@ -21,6 +21,18 @@ npm test
 npm run lint
 ```
 
+## Printer files
+
+Use **Files > On printers** (`/files?source=printers`) to browse printer-file
+metadata and explicitly copy a file to the local library. Add
+`&printer=<printerId>` to scope the catalog; the printer-file dialog provides
+this link. Copy is one file at a time, not bulk import.
+
+The React G-code harvest wizard, management page, progress UI, and
+harvest-filtered library view are retired. Local G-code uploads work over HTTP
+without a harvest SignalR connection. Backend harvest endpoints/history,
+printed-parts inventory harvesting, and mobile workflows remain unchanged.
+
 ## Filament coverage
 
 Filament coverage badges, demand summaries, and runout indicators appear only
@@ -167,7 +179,7 @@ segment or document the runtime bridge in the scanner allowlist.
 ### Random IDs and HTTP LAN deployments
 
 All application-generated random IDs share `generateUUID` from `@/utils/uuid`,
-including upload queue entries, temporary aliases, harvest rows, slicer text
+including upload queue entries, temporary aliases, printed-parts harvest rows, slicer text
 models, correlation IDs, and idempotency/operation keys. See the [shared UUID policy](./eslint-rules/README.md#shared-uuid-generation)
 for the HTTP LAN compatibility convention and lint guard.
 
@@ -177,7 +189,7 @@ never silently substitute a timestamp/`Math.random()` ID.
 
 Generate at the existing logical-operation boundary, not on each retry. Preserve
 saved keys verbatim, including older non-UUID keys; do not migrate or regenerate
-them. Harvest retries reuse the dialog's key, unchanged stock-adjustment retries
+them. Printed-parts harvest retries reuse the dialog's key, unchanged stock-adjustment retries
 reuse the cached payload key, and bed-clear retries reuse the key stored for the
 reviewed job/ETags. Correlation IDs remain fresh per HTTP request (including
 streaming export requests), independently of operation idempotency keys. UI row

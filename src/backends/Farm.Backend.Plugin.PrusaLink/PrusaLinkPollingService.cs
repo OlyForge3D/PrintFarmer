@@ -437,7 +437,8 @@ public sealed class PrusaLinkPollingService(
                         cacheUpdate = cacheUpdate with { Sensors = status.Sensors };
                     }
 
-                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+                    _statusCacheWriter.UpdateStatus(
+                        cacheUpdate with { RawActivityState = status.State }, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,

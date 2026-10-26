@@ -167,29 +167,15 @@ struct PrinterControlCommandFeedback: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let error = viewModel.lastError {
                     errorBanner(error)
-                } else {
-                    if viewModel.pendingCommand != nil {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text("Command pending").font(.footnote.weight(.semibold))
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let notice = viewModel.commandNotice {
-                        Label(notice, systemImage: "info.circle")
-                            .font(.footnote)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                if viewModel.pendingCommand != nil {
-                    ControlActionButton(
-                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
-                        hint: "Does not stop the printer. Physical execution may continue."
-                    ) { viewModel.cancelPendingCommand() }
+                } else if let notice = viewModel.commandNotice {
+                    // Success is silent (#3496); the tapped control carries the spinner.
+                    Label(notice, systemImage: "info.circle")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .foregroundStyle(Color.pfTextPrimary)
-            .padding(.bottom, viewModel.pendingCommand != nil || viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
+            .padding(.bottom, viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("printer.controls.\(section.rawValue).feedback")
         }
@@ -330,6 +316,8 @@ struct PrinterMaterialControls: View {
 struct PrinterSensorControlRows: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var compact: Bool
+    /// Tune passes its shared value column so sensor and Speed/Flow steppers align.
+    var valueColumnWidth: CGFloat?
 
     var body: some View {
         let activeExtruderId = viewModel.printer.activeExtruderId
@@ -357,17 +345,20 @@ struct PrinterSensorControlRows: View {
             HStack(spacing: 8) {
                 Text(title).font(.subheadline.weight(.medium))
                 Spacer(minLength: 0)
-                if let current, reason == nil {
-                    stepButton("minus", "Decrease \(title)", id + ".decrease",
-                               increasing: false, current: current, descriptor: descriptor, sensor: sensor)
-                }
-                Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
-                    .font(.subheadline.monospacedDigit())
-                    .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
-                    .accessibilityIdentifier(id + ".value")
-                if let current, reason == nil {
-                    stepButton("plus", "Increase \(title)", id + ".increase",
-                               increasing: true, current: current, descriptor: descriptor, sensor: sensor)
+                HStack(spacing: valueColumnWidth == nil ? 8 : 4) {
+                    if let current, reason == nil {
+                        stepButton("minus", "Decrease \(title)", id + ".decrease",
+                                   increasing: false, current: current, descriptor: descriptor, sensor: sensor)
+                    }
+                    Text(reading.map(PrinterSensorFormatting.valueText) ?? PrinterDetailViewModel.missingValuePlaceholder)
+                        .font(.subheadline.monospacedDigit())
+                        .frame(minWidth: valueColumnWidth)
+                        .accessibilityLabel(reading.map { "\(title), \(PrinterSensorFormatting.spokenValue($0))" } ?? "\(title), not reported")
+                        .accessibilityIdentifier(id + ".value")
+                    if let current, reason == nil {
+                        stepButton("plus", "Increase \(title)", id + ".increase",
+                                   increasing: true, current: current, descriptor: descriptor, sensor: sensor)
+                    }
                 }
             }
             if let reason {
@@ -393,7 +384,8 @@ struct PrinterSensorControlRows: View {
         ) {
             Task { await viewModel.setSensorValue(sensorId: sensor.id, quantity: descriptor.quantity, value: clamped) }
         }
-        .frame(width: 44, height: 44)
+        .frame(minWidth: 44, minHeight: 44)
+        .fixedSize()
         .disabled(viewModel.pendingCommand != nil)
     }
 }

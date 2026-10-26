@@ -1147,7 +1147,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(command)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: command)
+                commandNotice = nil
             }
         }
     }
@@ -1177,7 +1177,7 @@ final class PrinterControlsViewModel: ObservableObject {
         telemetryConfirmed = true
         if commandTask == nil {
             pendingCommand = nil
-            commandNotice = "Matching readback received. This reports the backend value, not a physical inspection."
+            commandNotice = nil
         }
     }
 
@@ -1298,6 +1298,9 @@ final class PrinterControlsViewModel: ObservableObject {
             return "\(factor.title) control is not supported on this printer."
         }
         if let reason = runtimeControlAccessReason { return reason }
+        guard isRunningPrint, runtimePrinterStateIsSupported else {
+            return "\(factor.title) can be tuned only while printing or paused."
+        }
         guard runtimeFactorPercent(factor) != nil else {
             return "\(factor.title) readback is unknown; controls are disabled."
         }
@@ -1599,7 +1602,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(pending)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: pending)
+                commandNotice = nil
             }
         }
     }
@@ -1763,7 +1766,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
         if case .runtimeFactor = command.kind {
-            return runtimePrinterStateIsSupported
+            return isRunningPrint && runtimePrinterStateIsSupported
         }
         if permitsActivePrint {
             return runtimePrinterStateIsSupported
@@ -1788,11 +1791,33 @@ final class PrinterControlsViewModel: ObservableObject {
         Self.isPrintingOrPaused(state: printer.state)
     }
 
+    /// Motion commands have no correlated telemetry, so HTTP success settles them.
+    private static func settlesOnResponse(_ command: ControlCommand) -> Bool {
+        switch command.kind {
+        case .home, .jog, .moveTo: return true
+        default: return false
+        }
+    }
+
     nonisolated static func isPrintingOrPaused(state: String?) -> Bool {
         switch state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false
         }
+    }
+
+    /// A print that is actually running or paused. Unlike `isPrintingOrPaused`
+    /// (which also locks idle controls during `starting`), this excludes
+    /// transitional states and gates Tune and the current-job block (#3496).
+    nonisolated static func isRunningPrint(state: String?) -> Bool {
+        switch state?.lowercased() {
+        case "printing", "paused": return true
+        default: return false
+        }
+    }
+
+    var isRunningPrint: Bool {
+        Self.isRunningPrint(state: printer.state)
     }
 
     // MARK: - Private
@@ -1900,13 +1925,8 @@ final class PrinterControlsViewModel: ObservableObject {
                 commandNotice = "Request accepted, but waiting was interrupted or controls became unavailable. Physical outcome is unknown; check the machine before another action."
                 return
             }
-            switch command.kind {
-            case .home, .jog, .moveTo:
-                pendingCommand = nil
-                commandNotice = "Command accepted. Physical completion is not confirmed; check the printer before another action."
-            default:
-                commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
-            }
+            commandNotice = nil
+            if Self.settlesOnResponse(command) { pendingCommand = nil }
         case .failure(let error):
             if error is CancellationError {
                 pendingCommand = nil
@@ -1936,9 +1956,8 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     confirmation domain — e.g. a same-preset preheat on a printer already
     ///     at the requested targets, an already-zero cool-down, or a confirming
     ///     snapshot that landed before the HTTP response — where waiting for a
-    ///     further delta would hang forever, so we clear now. Only a fresh
-    ///     post-dispatch snapshot permits telemetry wording; cached matches
-    ///     report request acceptance without physical confirmation.
+    ///     further delta would hang forever, so we clear now. Success is silent
+    ///     (#3496); only actionable failures or unknown outcomes post a notice.
     /// HTTP settlement alone cannot unlock another owner while this command
     /// still awaits telemetry. Pending-state cleanup releases the matching token.
     private func endCommand(_ command: ControlCommand) {
@@ -1959,10 +1978,10 @@ final class PrinterControlsViewModel: ObservableObject {
         if telemetryConfirmed {
             confirmCalibration(command)
             pendingCommand = nil
-            commandNotice = Self.confirmationNotice(for: command)
+            commandNotice = nil
         } else if Self.transition(from: printer, to: printer, resolves: command) {
             pendingCommand = nil
-            commandNotice = "Request accepted. Previously reported values already match; fresh physical completion is not confirmed. Check the machine before further setup."
+            commandNotice = nil
         }
     }
 
@@ -1970,17 +1989,6 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity else { return }
         commandLeases.release(identity, token: command.id)
         if commandLease?.id == command.id { commandLease = nil }
-    }
-
-    private static func confirmationNotice(for command: ControlCommand) -> String {
-        switch command.kind {
-        case .preheat, .heater, .heaterTargets:
-            return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .transientZOffset, .sensorControl, .runtimeFactor:
-            return "Matching readback received. This reports the backend value, not a physical inspection."
-        default:
-            return "Matching telemetry received. Check the machine before further setup."
-        }
     }
 
     private func setError(command: ControlCommand, error: Error) {

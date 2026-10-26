@@ -86,7 +86,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
         services.AddScoped<IMoonrakerClient>(provider =>
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            HttpClient httpClient = httpClientFactory.CreateClient();
+            HttpClient httpClient = httpClientFactory.CreateClient("VettedEgress");
 
             // IMPORTANT: do not rely on HttpClient.Timeout for Moonraker.
             // MoonrakerClient applies per-request cancellation timeouts via linked CTS

@@ -154,6 +154,7 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         {
             case "G28":
                 state.Homed = true;
+                state.MotorsOff = false;
                 state.X = 0m;
                 state.Y = 0m;
                 state.Z = 0m;
@@ -199,15 +200,22 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
                 ApplyPressureAdvance(state, line, lineNumber, problems);
                 break;
             case "TURN_OFF_HEATERS":
-                state.HeatersOff = true;
+                state.NozzleReset = true;
+                state.BedReset = true;
                 state.NozzleTemperature = 0;
                 state.BedTemperature = 0;
+                state.ChamberTemperature = 0;
                 break;
+            case "M18":
             case "M84":
                 state.MotorsOff = true;
                 break;
+            case "M17":
+                state.MotorsOff = false;
+                break;
             case "G0":
             case "G1":
+                state.MotorsOff = false;
                 ApplyMove(state, line, lineNumber, problems);
                 break;
             default:
@@ -227,6 +235,7 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         }
 
         state.NozzleTemperature = value;
+        state.NozzleReset = value == 0;
         if (state.Limits.Toolhead.NozzleMaxTemperatureCelsius is null &&
             state.Limits.Toolhead.HotendMaxTemperatureCelsius is null)
         {
@@ -258,6 +267,7 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         }
 
         state.BedTemperature = value;
+        state.BedReset = value == 0;
         if (state.Limits.Machine.MaxBedTemperatureCelsius is not { } ceiling)
         {
             return;
@@ -284,8 +294,9 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             return;
         }
 
-        if (state.Limits.Machine.HasHeatedChamber != true ||
-            value > (state.Limits.Machine.MaxChamberTemperatureCelsius ?? 0))
+        state.ChamberTemperature = value;
+        if (value != 0 && (state.Limits.Machine.HasHeatedChamber != true ||
+            value > (state.Limits.Machine.MaxChamberTemperatureCelsius ?? 0)))
         {
             Add(
                 problems,
@@ -810,7 +821,13 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 
         public bool Homed { get; set; }
 
-        public bool HeatersOff { get; set; }
+        public bool NozzleReset { get; set; }
+
+        public bool BedReset { get; set; }
+
+        public decimal ChamberTemperature { get; set; }
+
+        public bool HeatersOff => NozzleReset && BedReset && ChamberTemperature == 0;
 
         public bool MotorsOff { get; set; }
 

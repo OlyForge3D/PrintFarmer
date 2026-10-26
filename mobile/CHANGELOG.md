@@ -6,6 +6,53 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Removed
 
+- **Printer detail clutter (#3496)** — Removed the visible "Speed/Flow can be
+  tuned only while printing or paused." lines under the disabled Tune
+  steppers (VoiceOver hints keep the reason), the Filament tab's
+  "Assignment does not verify physical loading." and unsupported
+  filament-command captions, the Filament tab's **Coverage details**
+  disclosure, and the four page-indicator dots under the
+  Status/Control/Filament/Queue picker. The X/Y/Z position readout now
+  appears only on the Move panel, and is hidden when the printer does not
+  report any position (unhomed or unknown axes read "—"). Control commands on
+  Move, Heat and Tune are now silent on success: the "Command pending" label and the
+  "Matching telemetry received…" / "Command accepted…" / "Request
+  accepted…" notices are gone, and only actionable failures or unknown
+  outcomes are shown; the tapped control shows a spinner and a VoiceOver
+  "Pending" value instead, and the "Stop waiting for command" button is
+  gone. The Control › Tune segment is disabled (VoiceOver hint
+  "Available while printing") unless the printer is printing or paused (not
+  starting), and falls back to Move when a print ends; writable sensor
+  controls moved to Heat so they stay reachable while idle. Tune shows nozzle
+  and bed steppers only when the printer accepts temperature changes during a
+  print, and Heat/Move no longer show "Unavailable while printing" text. The
+  iPad jog pad is capped at 480 pt and centred. The camera card now puts the
+  "Camera" title and rotate/refresh buttons in a header row above
+  full-width, aspect-preserving media whose height is capped relative to the
+  screen (including quarter-turn rotation and the MJPEG livestream). The card
+  is titled "Print preview" when it shows the sliced-model preview, and
+  collapses to a one-line "No camera available" header when there is no
+  media. The Layer cell is omitted when the printer reports no layers, the
+  state chip reads "Idle" for ready printers, and the Filament tab states the
+  remaining weight once with a full-width meter. Idle printers that still report the
+  last file name (Moonraker) now show "No active print" instead of a stale
+  job heading with "Layer --". Follow-up polish: the Move/Heat/Tune picker,
+  steppers and Filament Load/Unload stack vertically at accessibility text
+  sizes; the X/Y/Z readout and jog-distance selector share the jog pad's width;
+  Control content clears the emergency-stop bar; the "Not homed" sentence and
+  SNAPSHOT/LIVE badges are gone; every camera mode keeps "Camera" with
+  Rotate and Refresh in the header (the live/snapshot toggle sits on the
+  media), MJPEG streams size to the stream's own aspect with a loading
+  placeholder; Status uses the same page background as Control with "No active
+  print" in a card; a disconnected Control tab shows "Reconnect to control"
+  with a Reconnect button; filament shortfall reads "84 g / needs 140 g"; and
+  the Queue tab drops "Reorder in the Queue tab." Leaving the detail screen
+  clears a stuck pending command, and a starting printer shows a "Starting…"
+  label. Final alignment pass: Raise/Lower nozzle labels stay centred after a
+  command, the Queue tab uses the navy page background, "No active print"
+  aligns with the Camera card, every Tune stepper shares one value-column width
+  and spans the full row, and the Filament shortfall warning replaces the
+  remaining-weight line while Swap/Scan spool stack at equal height.
 - **Advanced Printer Controls opt-in and legacy screen** — Removed the
   unreachable Advanced printer controls screen and its navigation destination,
   the per-server **Settings → Printer Safety → Advanced printer controls**
@@ -27,6 +74,28 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   require checking the printer and are never automatically replayed (#2713).
 
 ### Fixed
+
+- **Printer detail no longer blocks on offline printers** — Opening a printer
+  from the farm list renders its last-known details immediately instead of a
+  multi-second "Loading printer…" spinner. The canonical printer, status and
+  job details then fill in progressively in the background, and a failed
+  background refresh keeps the shown content. Camera metadata and snapshot
+  fetches are skipped while the printer is offline and resume once it reports
+  online. The full-screen spinner appears only when no cached printer is
+  available. While only cached details are shown, printer controls, filament
+  actions and Start Next Job stay disabled until the server confirms the
+  printer, except Emergency Stop. NFC "ready" and guided spool-swap deep links
+  opened during that window wait and run once the printer is confirmed,
+  including after a failed first load succeeds on Retry. A
+  connectivity-only live update during a refresh no longer lets the cached
+  printer state override the server's current state.
+  A failed refresh shows a compact "Showing last known status" note with
+  Retry. Switching servers never leaves the previous server's printer on
+  screen, and a printer that comes online during a refresh keeps its live
+  status and loads its camera. NFC "ready" deep links now show the Mark
+  Printer Ready confirmation from the printer page; previously the request
+  was dropped. A refresh that restarts mid-load no longer lets an older live
+  state override the newer server state (#3507).
 
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm
