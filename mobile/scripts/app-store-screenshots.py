@@ -48,6 +48,13 @@ def resolve(family):
     if device is None or device["deviceTypeIdentifier"] != f"com.apple.CoreSimulator.SimDeviceType.{device_type}":
         raise RuntimeError(f"No approved {family} of the required display class; install/create {name}.")
     # A dedicated simulator must be used exactly; never fall back to a shared one.
+    if override:
+        named = [d["udid"] for runtime_devices in devices["devices"].values()
+                 for d in runtime_devices if d["name"] == override]
+        if len(named) != 1:
+            raise RuntimeError(
+                f"APP_STORE_{family.upper()}_SIMULATOR='{override}' matches {len(named)} available "
+                "simulators; it must name exactly one.")
     if override and device["name"] != override:
         raise RuntimeError(
             f"APP_STORE_{family.upper()}_SIMULATOR='{override}' resolved to '{device['name']}'; "

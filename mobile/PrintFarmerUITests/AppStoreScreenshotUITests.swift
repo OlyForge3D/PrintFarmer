@@ -48,7 +48,9 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         )).firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(facts.matching(NSPredicate(format: "label BEGINSWITH %@", "Done at")).firstMatch.exists)
         XCTAssertFalse(facts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists)
-        XCTAssertFalse(facts.matching(NSPredicate(format: "label == %@", "--")).firstMatch.exists)
+        XCTAssertFalse(facts.matching(NSPredicate(
+            format: "label == %@ OR label ENDSWITH %@", "--", ", --"
+        )).firstMatch.exists)
         XCTAssertFalse(facts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Unavailable")).firstMatch.exists)
         capture("02-printer-status")
 
@@ -127,7 +129,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             guard identicalFrames >= 3 else { continue }
             // Store images must never show an unresolved status (whole word, any case).
             let unknown = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "label MATCHES[c] %@", ".*\\bunknown\\b.*"))
+                .matching(NSPredicate(format: "label MATCHES[c] %@", "(?s).*\\bunknown\\b.*"))
             XCTAssertEqual(
                 unknown.count, 0,
                 "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
