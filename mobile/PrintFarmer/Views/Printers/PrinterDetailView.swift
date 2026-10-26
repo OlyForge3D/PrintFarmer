@@ -1433,10 +1433,11 @@ struct PrinterDetailView: View {
         if viewModel.snapshotData != nil { return true }
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
-            return viewModel.showLivestream
-                ? resolvedCameraURL(printer.cameraStreamUrl) != nil
-                    || CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
-                : CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
+            // A stream-only camera stays mounted in snapshot mode so the
+            // live/snapshot toggle on the media remains reachable.
+            let streamReachable = (viewModel.showLivestream || viewModel.canShowLivestream)
+                && resolvedCameraURL(printer.cameraStreamUrl) != nil
+            return streamReachable || CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
         case .snapshotPolling, .directSnapshot:
             return viewModel.cameraPreviewMode == .snapshotPolling
                 ? printer.isOnline

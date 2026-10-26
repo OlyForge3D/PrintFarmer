@@ -1624,6 +1624,17 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         )
         XCTAssertLessThanOrEqual(media.frame.height, 160, "The placeholder stays compact")
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
+
+        // R3514-B12: a stream-only camera must stay switchable after choosing snapshot.
+        toggle.tap()
+        XCTAssertTrue(app.buttons["Switch to livestream"].waitForExistence(timeout: 5), "Toggle stays reachable in snapshot mode")
+        XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Camera")
+        app.buttons["Switch to livestream"].tap()
+        XCTAssertTrue(app.buttons["Switch to snapshot"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
+            "Livestream returns after switching back"
+        )
     }
 }
 
