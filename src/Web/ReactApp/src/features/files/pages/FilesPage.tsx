@@ -1,5 +1,4 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import clsx from 'clsx';
 import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -21,6 +20,20 @@ import { AddToProjectModal } from '@/features/projects/components/AddToProjectMo
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Modal } from '@/common/components/modals/Modal';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
+import { CompactFileCard } from '@/features/files/components/CompactFileCard';
+import { FileActionIconButtons, type FileAction } from '@/features/files/components/FileActions';
+import { FileDate } from '@/features/files/components/FileDate';
+import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
+import { FileNameButton } from '@/features/files/components/FileNameButton';
+import { FileThumbnail } from '@/features/files/components/FileThumbnail';
+import { LocalFileDetails } from '@/features/files/components/LocalFileDetails';
+import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
+import {
+  fileExtension,
+  fileKindFromName,
+  formatSizeLabel,
+  type FileKind,
+} from '@/features/files/utils/fileDisplay';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
@@ -40,7 +53,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Badge, Button, Checkbox, TagChip } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -287,160 +300,18 @@ function toFileItem(file: UnifiedFileRecord): FileItem {
 
 function getFileExtension(file: FileItem): string {
   const model = file.meta?.model3d as Model | undefined;
-  return getNormalizedExtension(file.fileName, model?.fileType).toUpperCase();
+  const gcode = file.meta?.gcode as GcodeFile | undefined;
+  // Display names may omit the extension; fall back to the stored file type.
+  const extension = fileExtension(file.fileName)
+    || getNormalizedExtension(undefined, model?.fileType ?? gcode?.fileType);
+  return extension.toUpperCase();
 }
 
-function getSourceLabel(file: FileItem): string {
-  return file.meta?.gcode ? 'G-Code' : '3D Model';
+function getFileKind(file: FileItem): FileKind {
+  if (file.meta?.gcode) return 'gcode';
+  if (file.meta?.model3d) return 'model';
+  return fileKindFromName(file.fileName);
 }
-
-function formatBytes(bytes?: number) {
-  if (!bytes) {
-    return '—';
-  }
-
-  const kilo = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const sizeIndex = Math.floor(Math.log(bytes) / Math.log(kilo));
-  return `${(bytes / Math.pow(kilo, sizeIndex)).toFixed(1)} ${sizes[sizeIndex]}`;
-}
-
-function buildModelCard(
-  file: FileItem,
-  isSelected: boolean,
-  onToggle: () => void,
-  onOpenModel: (model: Model) => void,
-  onSliceModel: (model: Model) => void,
-  onDeleteModel: (file: FileItem) => void,
-  onTagItem: (target: TaggingTarget) => void,
-  onDownloadModel: (file: FileItem) => void
-) {
-  const model = file.meta?.model3d as Model | undefined;
-  if (!model) {
-    return null;
-  }
-
-  const filterCategory = classifyModel(model);
-  const categoryLabel = filterCategory === 'other' ? 'Other' : '3D Model';
-
-  return (
-    <div
-      className={clsx(
-        'group overflow-hidden rounded-lg border bg-pf-bg-0 transition-all focus-within:ring-2 focus-within:ring-pf-accent',
-        isSelected ? 'border-pf-accent shadow-md' : 'border-pf-border hover:border-pf-accent/50 hover:shadow-md'
-      )}
-    >
-      <div className="relative aspect-square overflow-hidden bg-pf-bg-1">
-        {model.thumbnailUrl ? (
-          <img
-            src={model.thumbnailUrl}
-            alt={model.name}
-            className="h-full w-full object-contain p-2"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-pf-text-secondary">
-            <CubeIcon className="h-12 w-12 opacity-50" />
-          </div>
-        )}
-        <div className="absolute left-2 top-2">
-          <Checkbox
-            aria-label={`Select ${file.fileName}`}
-            checked={isSelected}
-            onChange={onToggle}
-          />
-        </div>
-        <div className="absolute right-2 top-2 flex gap-1">
-          <Badge variant="primary">{categoryLabel}</Badge>
-          <Badge variant="default">{getFileExtension(file)}</Badge>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 p-3">
-        <div className="min-w-0">
-          <h3 className="line-clamp-2 text-sm font-semibold text-pf-text-primary">{model.name}</h3>
-          <p className="mt-1 text-xs text-pf-text-secondary">{getSourceLabel(file)}</p>
-        </div>
-
-        <div className="space-y-1.5 border-t border-pf-border pt-2 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-pf-text-secondary">Size</span>
-            <span className="font-medium text-pf-text-primary">{formatBytes(file.fileSize)}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-pf-text-secondary">Uploaded</span>
-            <span className="font-medium text-pf-text-primary">
-              {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '—'}
-            </span>
-          </div>
-          {model.tags && model.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {model.tags.slice(0, 3).map((tag) => (
-                <TagChip
-                  key={tag.id}
-                  label={tag.name}
-                  color={tag.color}
-                  truncate
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-t border-pf-border pt-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onDownloadModel(file)}
-            title="Download file"
-          >
-            <DownloadIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onTagItem({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] })}
-            title="Tag file"
-          >
-            <TagIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onOpenModel(model)}
-            title="Preview file"
-          >
-            <EyeIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            onClick={() => onSliceModel(model)}
-            onFocus={() => void QuickSliceModal.preload()}
-            onPointerEnter={() => void QuickSliceModal.preload()}
-            title="Open quick slice"
-          >
-            <LayersTripleOutlineIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-            onClick={() => onDeleteModel(file)}
-            title="Delete file"
-          >
-            <DeleteIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function FilesPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -599,14 +470,118 @@ export function FilesPage() {
     onViewModeChange: (mode) => setViewMode(mode),
   }), [fetcher, selectedFilter, selectedIds, setViewMode, viewMode]);
 
+  const details = useFileDetailSelection<FileItem>();
+  const openDetails = details.open;
+  const closeDetails = details.close;
+  const activeDetailId = details.selected?.id;
+
+  // One action list per file feeds the card/row icon buttons and the labelled panel buttons.
+  const localActions = useCallback((file: FileItem): FileAction[] => {
+    const gcode = file.meta?.gcode as GcodeFile | undefined;
+    const model = file.meta?.model3d as Model | undefined;
+    const deleteAction: FileAction = {
+      id: 'delete',
+      label: 'Delete file',
+      icon: <DeleteIcon className="h-4 w-4" />,
+      tone: 'danger',
+      onClick: () => {
+        setDeleteTarget(file);
+        setDeleteMode('single');
+      },
+    };
+
+    if (gcode) {
+      return [
+        {
+          id: 'queue',
+          label: 'Queue for printing',
+          icon: <PlayIcon className="h-4 w-4" />,
+          onClick: () => setQueueFile(gcode),
+          onPreload: () => void QueueGcodeModal.preload(),
+        },
+        {
+          id: 'tag',
+          label: 'Tag file',
+          icon: <TagIcon className="h-4 w-4" />,
+          onClick: () => setTaggingTarget({ actualId: gcode.id, objectType: 'GcodeFile', name: gcode.name, tags: gcode.tags ?? [] }),
+        },
+        {
+          id: 'download',
+          label: 'Download file',
+          icon: <DownloadIcon className="h-4 w-4" />,
+          onClick: () => void handleDownloadGcode(file),
+        },
+        {
+          id: 'project',
+          label: 'Add to project',
+          icon: <ClipboardListIcon className="h-4 w-4" />,
+          onClick: () => {
+            setSelectedIds([file.id]);
+            setShowAddToProjectModal(true);
+          },
+        },
+        deleteAction,
+      ];
+    }
+
+    if (!model) {
+      return [];
+    }
+
+    return [
+      {
+        id: 'download',
+        label: 'Download file',
+        icon: <DownloadIcon className="h-4 w-4" />,
+        onClick: () => void handleDownloadModel(file),
+      },
+      {
+        id: 'tag',
+        label: 'Tag file',
+        icon: <TagIcon className="h-4 w-4" />,
+        onClick: () => setTaggingTarget({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] }),
+      },
+      {
+        id: 'preview',
+        label: 'Preview file',
+        icon: <EyeIcon className="h-4 w-4" />,
+        onClick: () => setViewerModel(model),
+      },
+      {
+        id: 'quick-slice',
+        label: 'Quick slice',
+        icon: <LayersTripleOutlineIcon className="h-4 w-4" />,
+        tone: 'primary',
+        onClick: () => setQuickSliceModel(model),
+        onPreload: () => void QuickSliceModal.preload(),
+      },
+      deleteAction,
+    ];
+  }, [handleDownloadGcode, handleDownloadModel]);
+
+  // Same columns and glyphs as the On printers table; the thumbnail sits between the
+  // selection checkbox and the name. Extended metadata lives in the detail panel.
   const modelColumns = useMemo<ColumnDef[]>(() => [
-    { key: 'fileName', label: 'Name', sortable: true },
+    {
+      key: 'thumbnail',
+      label: 'Preview',
+      render: (file) => <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />,
+    },
+    {
+      key: 'fileName',
+      label: 'Name',
+      sortable: true,
+      render: (file) => (
+        <FileNameButton name={file.fileName} className="max-w-xs" onOpen={(invoker) => openDetails(file, invoker)} />
+      ),
+    },
     {
       key: 'category',
       label: 'Type',
       render: (file) => (
-        <span className="text-xs font-medium uppercase text-pf-text-secondary">
-          {getFileExtension(file)}
+        <span className="inline-flex items-center gap-1.5 font-medium uppercase text-pf-text-secondary">
+          <FileTypeGlyph kind={getFileKind(file)} decorative />
+          {getFileExtension(file) || '—'}
         </span>
       ),
     },
@@ -615,239 +590,36 @@ export function FilesPage() {
       label: 'Size',
       sortable: true,
       align: 'right',
-      render: (file) => formatBytes(file.fileSize),
+      render: (file) => formatSizeLabel(file.fileSize),
     },
     {
       key: 'uploadedAt',
       label: 'Uploaded',
       sortable: true,
-      render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),
+      render: (file) => <FileDate value={file.uploadedAt} fallback="—" />,
     },
-    {
-      key: 'details',
-      label: 'Details',
-      render: (file) => {
-        const gcode = file.meta?.gcode as GcodeFile | undefined;
-        const model = file.meta?.model3d as Model | undefined;
+  ], [openDetails]);
 
-        if (gcode) {
-          return gcode.extractedPrinterModelName || gcode.requiredMaterial || gcode.extractedMaterial || '—';
-        }
-
-        if (model?.tags?.length) {
-          return `${model.tags.length} tag${model.tags.length === 1 ? '' : 's'}`;
-        }
-
-        return model?.fileType?.toUpperCase() ?? '—';
-      },
-    },
-  ], []);
-
-  const renderItemActions = useCallback((file: FileItem) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    const model = file.meta?.model3d as Model | undefined;
-
-    if (gcode) {
-      return (
-        <>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => setQueueFile(gcode)}
-            onFocus={() => void QueueGcodeModal.preload()}
-            onPointerEnter={() => void QueueGcodeModal.preload()}
-            title="Queue for printing"
-          >
-            <PlayIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => setTaggingTarget({ actualId: gcode.id, objectType: 'GcodeFile', name: gcode.name, tags: gcode.tags ?? [] })}
-            title="Tag file"
-          >
-            <TagIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => handleDownloadGcode(file)}
-            title="Download file"
-          >
-            <DownloadIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              setSelectedIds([file.id]);
-              setShowAddToProjectModal(true);
-            }}
-            title="Add to project"
-          >
-            <ClipboardListIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-            onClick={() => {
-              setDeleteTarget(file);
-              setDeleteMode('single');
-            }}
-            title="Delete file"
-          >
-            <DeleteIcon className="h-4 w-4" />
-          </Button>
-        </>
-      );
-    }
-
-    if (!model) {
-      return null;
-    }
-
-    return (
-      <>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => handleDownloadModel(file)}
-          title="Download file"
-        >
-          <DownloadIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => setTaggingTarget({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] })}
-          title="Tag file"
-        >
-          <TagIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => setViewerModel(model)}
-          title="Preview file"
-        >
-          <EyeIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="primary"
-          onClick={() => setQuickSliceModel(model)}
-          onFocus={() => void QuickSliceModal.preload()}
-          onPointerEnter={() => void QuickSliceModal.preload()}
-          title="Quick slice"
-        >
-          <LayersTripleOutlineIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-          onClick={() => {
-            setDeleteTarget(file);
-            setDeleteMode('single');
-          }}
-          title="Delete file"
-        >
-          <DeleteIcon className="h-4 w-4" />
-        </Button>
-      </>
-    );
-  }, [handleDownloadGcode, handleDownloadModel]);
-
-  const renderMetadata = useCallback((file: FileItem) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    const model = file.meta?.model3d as Model | undefined;
-
-    if (gcode) {
-      return (
-        <>
-          {(gcode.requiredMaterial || gcode.extractedMaterial) && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-pf-text-secondary">Material:</span>
-              <span className="font-medium text-pf-text-primary line-clamp-1">{gcode.requiredMaterial || gcode.extractedMaterial}</span>
-            </div>
-          )}
-          {gcode.extractedPrinterModelName && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-pf-text-secondary">Printer:</span>
-              <span className="font-medium text-pf-text-primary line-clamp-1">{gcode.extractedPrinterModelName}</span>
-            </div>
-          )}
-        </>
-      );
-    }
-
-    if (model?.tags?.length) {
-      return (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-pf-text-secondary">Tags:</span>
-          <span className="font-medium text-pf-text-primary">{model.tags.length}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-pf-text-secondary">Source:</span>
-        <span className="font-medium text-pf-text-primary">{getSourceLabel(file)}</span>
-      </div>
-    );
-  }, []);
+  const renderItemActions = useCallback(
+    (file: FileItem) => <FileActionIconButtons actions={localActions(file)} dense />,
+    [localActions],
+  );
 
   const renderCard = useCallback((file: FileItem, isSelected: boolean, onToggle: () => void) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    if (gcode) {
-      return (
-        <div className={clsx('relative h-full rounded-lg transition-all', isSelected && 'ring-2 ring-pf-accent')}>
-          <div className="absolute left-2 top-2 z-10">
-            <Checkbox
-              aria-label={`Select ${file.fileName}`}
-              checked={isSelected}
-              onChange={onToggle}
-            />
-          </div>
-          <GcodeFileCard
-            file={gcode}
-            onDownload={() => handleDownloadGcode(file)}
-            onDelete={() => {
-              setDeleteTarget(file);
-              setDeleteMode('single');
-            }}
-          />
-        </div>
-      );
-    }
-
-    return buildModelCard(
-      file,
-      isSelected,
-      onToggle,
-      setViewerModel,
-      setQuickSliceModel,
-      (selectedFile) => {
-        setDeleteTarget(selectedFile);
-        setDeleteMode('single');
-      },
-      setTaggingTarget,
-      handleDownloadModel
+    const kind = getFileKind(file);
+    return (
+      <CompactFileCard
+        name={file.fileName}
+        thumbnail={<FileThumbnail kind={kind} size="card" src={file.thumbnailUrl} />}
+        meta={formatSizeLabel(file.fileSize)}
+        status={<FileTypeGlyph kind={kind} className="h-3.5 w-3.5" />}
+        actions={localActions(file)}
+        selection={{ checked: isSelected, onToggle }}
+        isActive={activeDetailId === file.id}
+        onOpen={(invoker) => openDetails(file, invoker)}
+      />
     );
-  }, [handleDownloadGcode, handleDownloadModel]);
-
+  }, [activeDetailId, localActions, openDetails]);
   const handleDeleteFiles = useCallback(async (idsToDelete: string[]) => {
     if (!idsToDelete.length) {
       return;
@@ -880,6 +652,9 @@ export function FilesPage() {
     setDeleteTarget(null);
     setShowBulkDeleteConfirm(false);
     setSelectedIds([]);
+    if (activeDetailId && idsToDelete.includes(activeDetailId)) {
+      closeDetails();
+    }
     await handleRefresh();
 
     if (successCount > 0 && failedCount === 0) {
@@ -893,7 +668,7 @@ export function FilesPage() {
     }
 
     toast.error('Failed to delete selected files');
-  }, [handleRefresh]);
+  }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (
     <div className="flex flex-wrap items-center gap-2">
@@ -1023,25 +798,43 @@ export function FilesPage() {
                 next.delete('file');
                 navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
                 setSelectedIds([]);
+                closeDetails();
               }}>
               {source === 'local' ? 'Local library' : 'On printers'}
             </Button>
           ))}
         </div>
-        <div className="min-h-[65vh] min-w-0 overflow-hidden">
-          {onPrinters ? <PrinterFileCatalog /> : <FileBrowser
-            ref={fileBrowserRef}
-            config={config}
-            sortOptions={FILE_BROWSER_SORT_OPTIONS}
-            columns={modelColumns}
-            renderItemActions={renderItemActions}
-            renderMetadata={renderMetadata}
-            renderCard={renderCard}
-            filterActions={filterButtons}
-            extraToolbarActions={toolbarActions}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />}
+        {/* overflow-clip (not hidden) keeps the docked detail panel sticky while clipping overflow. */}
+        <div className="min-h-[65vh] min-w-0 overflow-clip">
+          {onPrinters ? <PrinterFileCatalog /> : (
+            <div className="flex items-start gap-4">
+              <div className="min-w-0 flex-1">
+                <FileBrowser
+                  ref={fileBrowserRef}
+                  config={config}
+                  sortOptions={FILE_BROWSER_SORT_OPTIONS}
+                  columns={modelColumns}
+                  renderItemActions={renderItemActions}
+                  renderCard={renderCard}
+                  filterActions={filterButtons}
+                  extraToolbarActions={toolbarActions}
+                  viewMode={viewMode}
+                  onViewModeChange={setViewMode}
+                  compact
+                />
+              </div>
+              {details.selected && (
+                <LocalFileDetails
+                  key={details.selected.id}
+                  file={details.selected}
+                  kind={getFileKind(details.selected)}
+                  extension={getFileExtension(details.selected)}
+                  actions={localActions(details.selected)}
+                  onClose={closeDetails}
+                />
+              )}
+            </div>
+          )}
         </div>
       </PageTemplate>
 

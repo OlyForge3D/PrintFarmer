@@ -170,6 +170,14 @@ public sealed class PrinterFileCatalogControllerTests
                 ("e-read-only", false, true, false, false),
             ],
             flags);
+        foreach (JsonElement printer in document.RootElement.GetProperty("printers").EnumerateArray())
+        {
+            bool supported = printer.GetProperty("name").GetString() != "b-prusalink";
+            Assert.Equal(supported, printer.GetProperty("supportsPreview").GetBoolean());
+            Assert.Equal(supported, printer.GetProperty("canPreview").GetBoolean());
+            Assert.Equal(supported, printer.GetProperty("supportsDownload").GetBoolean());
+            Assert.Equal(printer.GetProperty("canCopy").GetBoolean(), printer.GetProperty("canDownload").GetBoolean());
+        }
         fixture.Access.Verify(x => x.GetCatalogAuthorityAsync(fixture.Actor, It.IsAny<IReadOnlyCollection<Guid>>(),
             It.IsAny<CancellationToken>()), Times.Once);
         fixture.Access.Verify(x => x.CanReadAsync(It.IsAny<Guid>(), It.IsAny<Guid>(),
@@ -405,8 +413,17 @@ public sealed class PrinterFileCatalogControllerTests
 
     private sealed record CatalogMeasurement(int Catalog, int Authority, int Legacy);
 
-    private sealed class CopyCapableClient : IBackendClient, ISupportsPrinterFileCopy
+    private sealed class CopyCapableClient : IBackendClient, ISupportsPrinterFileCopy,
+        ISupportsPrinterFilePreview, ISupportsFileInventory
     {
+        public Task<PrinterFilePreviewContent> GetFilePreviewAsync(
+            string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<PrinterFileInventoryResult> GetFileInventoryAsync(
+            string baseUrl, PrinterCredential? credential = null, PrinterFileInventoryOptions? options = null,
+            CancellationToken ct = default) => throw new NotSupportedException();
+
         public Task<PrinterFileCopyBytes> CopyFileToAsync(
             string baseUrl, string storageRoot, string relativePath, PrinterCredential? credential,
             Stream destination, long maximumBytes, CancellationToken ct) =>

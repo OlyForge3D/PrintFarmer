@@ -100,10 +100,28 @@ export interface PrinterFileScanStatus {
   reasonCode?: string | null;
   lastAttemptAtUtc?: string | null;
   lastCompleteScanAtUtc?: string | null;
-  nextScanAtUtc: string;
+  nextScanAtUtc: string | null;
   configurationGeneration: number;
   isStale: boolean;
   isScanning: boolean;
+}
+
+/** One authorized printer source listed alongside a catalog page. */
+export interface PrinterFileCatalogSource {
+  id: string;
+  name: string;
+  canManage: boolean;
+  canCopy: boolean;
+  canDelete: boolean;
+  supportsCopy: boolean;
+  /** Backend can capture a preview (thumbnail / print metadata) for this source. */
+  supportsPreview?: boolean;
+  /** The caller may read captured previews for this source. */
+  canPreview?: boolean;
+  /** Backend can stream the source bytes as a browser-only download. */
+  supportsDownload?: boolean;
+  /** The caller may download source bytes (server: supportsDownload && copy authority). */
+  canDownload?: boolean;
 }
 
 export interface PrinterFileCatalogPage {
@@ -111,12 +129,25 @@ export interface PrinterFileCatalogPage {
   total: number;
   page: number;
   pageSize: number;
-  printers: Array<{
-    id: string; name: string; canManage: boolean; canCopy: boolean; canDelete: boolean;
-    supportsCopy: boolean;
-  }>;
+  printers: PrinterFileCatalogSource[];
   scans: PrinterFileScanStatus[];
   automaticDiscoveryEnabled: boolean;
+}
+
+export type PrinterFilePreviewState = 'Available' | 'Unavailable' | 'Unsupported' | 'Deferred';
+
+/** GET /printer-files/locations/{id}/preview?observationRevision=n */
+export interface PrinterFilePreview {
+  locationId: string;
+  observationRevision: number;
+  state: PrinterFilePreviewState;
+  reasonCode?: string | null;
+  capturedAtUtc?: string | null;
+  hasImage: boolean;
+  /** Server-relative hint only; the client fetches thumbnails through apiClient. */
+  thumbnailUrl?: string | null;
+  printTimeSeconds?: number | null;
+  layerHeightMm?: number | null;
 }
 
 // PrintJobStatusDto for Moonraker print job status

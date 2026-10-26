@@ -8,8 +8,9 @@ The legacy G-code harvest feature (the `/api/gcode-harvest/*` endpoints, the
 `/hubs/harvest` SignalR hub, its operation, queue, and discovered-file tables,
 and the `gcode_harvest` permission resource) was retired permanently in #3531.
 Use **Files > On printers** (`/files?source=printers`, optionally
-`&printer=<printerId>`) instead. Its explicit Copy action handles one file at a
-time; it does not provide bulk import. Library files imported by earlier harvests
+`&printer=<printerId>`) instead. Each Copy request imports exactly one file;
+there is no server-side batch endpoint. The UI can copy several selected files
+by sending one revision-bound request per file. Library files imported by earlier harvests
 remain in the G-code library with their `Harvested` source, source printer, and
 original printer path. Printed-parts inventory harvesting and mobile workflows
 are unchanged.
@@ -130,10 +131,113 @@ restricted local asset ID or authorizes reuse of its bytes.
 
 The canonical `/files` page separates **Local library** from **On printers**.
 The latter offers metadata search, availability/freshness filters, scan controls,
-and single-location actions. It never downloads remote previews or thumbnails.
+and single-location actions. Catalog browsing and automatic indexing remain
+metadata-only. Preview capture is a distinct, opt-in request for visible items;
+it is never part of a scan or catalog list request.
 Captured local versions are links, not a claim that current remote bytes match.
-Copy handles one file at a time; bulk import is unavailable. Part/stock harvesting
+Each Copy request imports one file and there is no batch endpoint. Selecting
+several files makes the UI send one request per file, each bound to its own
+observation revision and intent key; only failed files are retried with their
+original key, and stale files must be refreshed first. Part/stock harvesting
 and immediate printer Print controls are unchanged.
+
+### On-demand preview and browser Download
+
+**Copy Local** retains the durable import flow described below. **Download**
+streams a file to the browser without importing it, creating an asset, or
+creating a queue job. Neither preview nor Download weakens existing Copy,
+Queue, Delete, revision, or snapshot-confirmation checks.
+
+All three content endpoints require an interactive authenticated session and
+the `ModelRead` policy. The `observationRevision` query parameter is required
+and must equal the selected catalog location's current positive revision.
+No endpoint accepts a printer URL or arbitrary remote path.
+
+| Method and endpoint | Behavior |
+| --- | --- |
+| `GET /api/printer-files/locations/{id}/preview?observationRevision={n}` | Version-keyed cached preview, or one on-demand lightweight metadata/image capture |
+| `GET /api/printer-files/locations/{id}/thumbnail?observationRevision={n}` | Authorized cache-only raster image; `404` if absent; never contacts the printer |
+| `GET /api/printer-files/locations/{id}/download?observationRevision={n}` | Explicit bounded browser attachment stream, not a local import |
+
+Preview JSON uses this camelCase contract:
+
+```json
+{
+  "locationId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "observationRevision": 7,
+  "state": "Available",
+  "reasonCode": null,
+  "capturedAtUtc": "2026-10-26T18:00:00Z",
+  "hasImage": true,
+  "thumbnailUrl": "/api/printer-files/locations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/thumbnail?observationRevision=7",
+  "printTimeSeconds": 3600,
+  "layerHeightMm": 0.2
+}
+```
+
+- `Available`: at least one image or native measurement is present.
+- `Unavailable`: native metadata was fetched but contains no supported detail.
+- `Unsupported`: no certified lightweight preview adapter; no capture date.
+- `Deferred`: no fresh, explicit idle status or no available file-I/O lease.
+  Returns HTTP `200`, `reasonCode: "printer_busy"`, no image or capture date.
+- A null print time, layer height, or image means explicitly unavailable, not
+  zero or an inferred value. `capturedAtUtc` is the real metadata/image fetch
+  time, retained on cache hits. It is not a source-version guarantee.
+
+Catalog `printers[]` includes `supportsPreview`, `canPreview`,
+`supportsDownload`, and `canDownload`. These are capability/authority flags,
+not a promise that the printer is currently idle. Existing
+`supportsCopy && canCopy` also identifies eligible browser downloads for the
+currently certified adapters.
+
+| Backend | Preview | Browser Download |
+| --- | --- | --- |
+| Moonraker | Native per-file metadata, estimated time, layer height, and optional native PNG/JPEG/WebP | Certified authenticated `gcodes` stream |
+| OctoPrint | Native per-file analysis estimated time; image and layer height explicitly unavailable | Certified authenticated `local` stream |
+| PrusaLink, FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
+
+Preview never fetches G-code to parse metadata or render an image. Moonraker
+uses at most two metadata requests and one image request per capture, with a
+15-second total deadline, 256 KiB metadata limit, and 2 MiB image limit.
+Images require a supported raster signature; SVG, redirects, ambiguous paths,
+encoded traversal, compressed responses, and oversized/truncated bodies fail
+closed. OctoPrint uses one bounded metadata request and no image request.
+
+The server cache is private filesystem data under
+`<ContentRoot>/App_Data/printer-file-previews`, outside the web root, and is
+never exposed by static-file middleware or the library. It is limited to
+256 entries and 64 MiB, with a 24-hour lifetime; oldest entries are evicted
+before writes exceed either bound. Cache identity includes printer, root,
+case-sensitive path, size, raw modification value, provider identity,
+observation/configuration/mutation revisions, and configuration fingerprint.
+Every read checks current database permissions, printer View ACL, registration,
+availability, revision, and configuration. Cached bytes may be served while
+busy because that causes no printer I/O. HTTP responses use
+`Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`;
+clients must authenticate even when loading a previously returned image URL.
+
+Download additionally requires `ModelWrite` and the exact live Copy authority:
+`printer_files:read`, `printer_files:copy`, printer View access, and library
+read/create permissions. It requires fresh, explicit idle evidence and the
+existing exclusive file-I/O lease. Pre/post native inventory checks must match
+the selected observation. The lease remains held throughout streaming;
+activity is checked on each output chunk and live authority at least once per
+second while writing. Lease loss and request cancellation propagate upstream.
+No persistent download copy is written. Limits are the observed size (when
+known), an absolute 200,000,000 bytes, and the configured file-download timeout.
+The attachment uses a sanitized, length-bounded leaf filename, never a path.
+Post-start failures abort the response rather than reporting a successful file.
+
+Missing/invalid revisions return `400`; stale observations/configuration and
+busy downloads return `409`; inaccessible locations return `404`; size-limit
+violations return `413`. Error bodies are ProblemDetails with non-sensitive
+`code` and `reasonCode` extensions. Unsupported preview is a normal `200`
+`Unsupported` response. Upstream transport/invalid-content failures return
+safe `409`/`503` errors, never printer URLs, credentials, or response bodies.
+The frontend should request previews only for visible items, not fan out
+across the catalog, and avoid polling deferred items aggressively.
+
+### Durable Copy Local and staged Queue endpoints
 
 | Endpoint | Behavior |
 | --- | --- |

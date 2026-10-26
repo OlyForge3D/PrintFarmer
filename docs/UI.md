@@ -44,16 +44,59 @@ Main overview page showing all printers with real-time status.
   tag, preview, slice models, and queue local G-code. Use `?type=models` or
   `?type=gcode` to filter by file type.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
-  availability and freshness, inspect scan status, and explicitly copy a
-  selected location to the local library. Add `&printer=<printerId>` to scope
-  the catalog to one printer. Browsing does not download remote previews or
-  file contents.
+  availability and freshness, and act on one or several selected files. Add
+  `&printer=<printerId>` to scope the catalog to one printer.
 
-The printer-file dialog links to the printer-scoped catalog. Copy operates
-**one file at a time**; bulk import is not available. The React G-code harvest
+Both sources share the same compact card grid and 12px table, with the same
+file, status, and action glyphs. Selecting a card or file name opens a details
+panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
+it and returns focus). The panel shows a larger preview, type, size, path,
+source, print time, and layer height. Values the source cannot provide are shown
+as **Unavailable**. File dates display as dates only; hover for the full
+timestamp. Details-panel actions are icon-only buttons; hover or focus them to
+see their names.
+
+On-printer files offer two distinct actions:
+
+- **Copy to local library** (folder-arrow glyph) creates or reuses an owned
+  local asset. It never queues a print.
+- **Download** (tray-arrow glyph) saves the bytes to your browser only. It does
+  not create a library asset or a queue entry.
+
+#### Selecting multiple printer files
+
+Cards and table rows have checkboxes, and the table header selects every
+eligible file on the current page. Selection is limited to the current page and
+filters; changing either clears it. Files with no permitted action cannot be
+selected. The selection toolbar shows how many selected files each action
+applies to (for example, `Copy 2 of 3 selected`).
+
+- **Copy to local library** sends one request per file, each bound to the
+  observed revision with its own intent key. Retrying reuses the original key
+  for failed files only; stale files must be refreshed instead.
+- **Download** saves files one after another. Your browser may ask permission
+  to download multiple files.
+- **Delete from printer** shows every exact path in one confirmation, with the
+  irreversible-deletion and path-race acknowledgements asked once for the
+  batch. The server still checks each file. Results are reported per file; a
+  delete whose outcome is unknown is never resent automatically.
+
+Remote previews load lazily, only for visible items on printers whose backend
+supports them. They are fetched only when the printer is idle, cached per file
+version, and labelled with their capture date. Indexing itself remains
+metadata-only.
+
+Per-printer automatic discovery, scan status, and **Refresh now** live in the
+**Files** section of the printer's Edit dialog. Those changes apply immediately
+and are not part of the form save. Global discovery cadence and budgets remain
+under Admin Settings > Files.
+
+The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are
-retired. Printed-parts inventory harvesting is a separate workflow and is
-unchanged, as are backend harvest history and the mobile app.
+retired, and the legacy harvest backend, its history tables, and the
+`gcode_harvest` permission were permanently removed (#3531). Library files
+imported by earlier harvests remain. Printed-parts inventory harvesting is a
+separate workflow and is unchanged, as is the mobile app.
 
 ### Slice Page
 Standalone browser-based 3D slicer application for converting models to G-code.

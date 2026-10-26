@@ -607,6 +607,48 @@ export class ApiClient {
     await this.client.put(`/printer-files/printers/${encodeURIComponent(printerId)}/index`, { enabled });
   }
 
+  /** Captured preview metadata for one exact observation. Busy printers answer 200 `Deferred`. */
+  async getPrinterFilePreview(
+    locationId: string, observationRevision: number, signal?: AbortSignal,
+  ): Promise<import("@/types/api").PrinterFilePreview> {
+    const response = await this.client.get<import("@/types/api").PrinterFilePreview>(
+      `/printer-files/locations/${encodeURIComponent(locationId)}/preview`,
+      { params: { observationRevision }, signal },
+    );
+    return response.data;
+  }
+
+  /** Captured thumbnail bytes for one exact observation, or `null` when no image exists (404). */
+  async getPrinterFileLocationThumbnail(
+    locationId: string, observationRevision: number, signal?: AbortSignal,
+  ): Promise<Blob | null> {
+    try {
+      const response = await this.client.get<Blob>(
+        `/printer-files/locations/${encodeURIComponent(locationId)}/thumbnail`,
+        { params: { observationRevision }, responseType: "blob", signal },
+      );
+      return response.data;
+    } catch (error) {
+      if (typeof error === "object" && error !== null
+        && (error as { statusCode?: unknown }).statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Streams the printer-resident bytes straight to a browser download. Creates no local
+   * library asset and no queue job (contrast copyIndexedPrinterFile / queueIndexedPrinterFile).
+   */
+  async downloadPrinterFile(locationId: string, observationRevision: number, fileName: string): Promise<void> {
+    const response = await this.client.get<Blob>(
+      `/printer-files/locations/${encodeURIComponent(locationId)}/download`,
+      { params: { observationRevision }, responseType: "blob" },
+    );
+    this.triggerBrowserDownload(response.data, fileName || "file.gcode");
+  }
+
   async copyIndexedPrinterFile(
     locationId: string, observationRevision: number, key: string,
   ): Promise<import("@/types/api").PrinterFileOperation> {
