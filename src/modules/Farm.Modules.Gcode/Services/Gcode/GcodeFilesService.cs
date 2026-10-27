@@ -1459,8 +1459,7 @@ public partial class GcodeFilesService(
                 return null;
             }
 
-            using StreamReader reader = new(filePath, Encoding.UTF8);
-            string gcodeContent = await reader.ReadToEndAsync(ct);
+            string gcodeContent = await BinaryGcodeReader.ReadFileAsTextAsync(filePath, ct);
 
             return string.IsNullOrWhiteSpace(gcodeContent) ? null : await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
         }
@@ -2199,7 +2198,7 @@ public partial class GcodeFilesService(
         GcodeMetadataExtracted? metadata = null;
         try
         {
-            string gcodeText = Encoding.UTF8.GetString(fileContent);
+            string gcodeText = await BinaryGcodeReader.ReadBytesAsTextAsync(fileContent, ct);
             _logger.LogDebug("[GcodeProcessing] Extracting metadata from {OriginalFileName} ({GcodeTextLength} chars)", LogSanitizer.Sanitize(originalFileName), gcodeText.Length);
             metadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
             _logger.LogInformation("[GcodeProcessing] Metadata extracted: printer={MetadataPrinterModel}, material={MetadataMaterial}, time={MetadataEstimatedPrintTimeMinutes}m", metadata?.PrinterModel, metadata?.Material, metadata?.EstimatedPrintTimeMinutes);

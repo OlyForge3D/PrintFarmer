@@ -28,10 +28,9 @@ public class GcodeThumbnailExtractorService(
 
         try
         {
-            // Read the stream content as text
+            // Binary G-code (.bgcode) is converted to equivalent comment text; plain G-code is read as UTF-8.
             gcodeStream.Position = 0;
-            using StreamReader reader = new(gcodeStream, System.Text.Encoding.UTF8, leaveOpen: true);
-            string gcodeText = await reader.ReadToEndAsync(ct);
+            string gcodeText = await BinaryGcodeReader.ReadAsTextAsync(gcodeStream, ct);
 
             return await ExtractAndSaveThumbnailFromTextAsync(gcodeText, ct);
         }

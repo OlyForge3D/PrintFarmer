@@ -255,12 +255,22 @@ public sealed class PrinterFileContentService(
     {
         string? url = capture?.Content.Image is null ? null :
             $"/api/printer-files/locations/{location.Id}/thumbnail?observationRevision={location.ObservationRevision}";
+        bool hasCatalogDetails = location.DetailsFetchedAtUtc.HasValue;
+        PrinterPrintMetadata? metadata = hasCatalogDetails
+            ? location.Metadata : capture?.Content.Metadata;
+        bool hasMetadata = metadata?.HasValues is true;
+        double? printTime = metadata?.EstimatedPrintTimeSeconds ?? metadata?.PrintTimeSeconds ??
+            (hasCatalogDetails ? null : capture?.Content.PrintTimeSeconds);
+        double? layerHeight = metadata?.LayerHeightMm ?? (hasCatalogDetails ? null : capture?.Content.LayerHeightMm);
+        long? size = location.SizeBytes ?? (hasCatalogDetails ? null : capture?.Content.SizeBytes);
         PrinterFilePreviewState resolvedState = state ?? (reason == "preview_unsupported" ? PrinterFilePreviewState.Unsupported :
-            capture?.Content is { Image: not null } or { PrintTimeSeconds: not null } or { LayerHeightMm: not null }
+            hasMetadata || capture?.Content.Image is not null || printTime.HasValue || layerHeight.HasValue ||
+                size.HasValue
                 ? PrinterFilePreviewState.Available : PrinterFilePreviewState.Unavailable);
         return new(location.Id, location.ObservationRevision, capture?.CapturedAtUtc, capture?.Content.Image is not null, url,
-            capture?.Content.PrintTimeSeconds, capture?.Content.LayerHeightMm,
-            reason ?? (capture?.Content.Image is null ? "image_unavailable" : null), resolvedState);
+            printTime, layerHeight,
+            reason ?? (capture?.Content.Image is null ? "image_unavailable" : null), resolvedState,
+            size, metadata);
     }
 
     private sealed record Source(PrinterFileLocation Location, Printer Printer, string Key);
@@ -305,7 +315,9 @@ public sealed record PrinterFilePreviewDto(
     bool HasImage, string? ThumbnailUrl,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? PrintTimeSeconds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? LayerHeightMm,
-    string? ReasonCode, PrinterFilePreviewState State);
+    string? ReasonCode, PrinterFilePreviewState State,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] long? SizeBytes = null,
+    PrinterPrintMetadata? Metadata = null);
 
 /// <summary>Preview availability serialized as the established case-sensitive string values.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<PrinterFilePreviewState>))]

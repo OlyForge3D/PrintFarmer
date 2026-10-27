@@ -16,6 +16,7 @@ public sealed class PrinterFilePreviewCache(
     public static string Key(PrinterFileLocation location, string configurationFingerprint) =>
         Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
         {
+            schemaVersion = 2,
             location.SourcePrinterId,
             location.StorageRoot,
             location.RelativePath,
@@ -108,7 +109,8 @@ public sealed class PrinterFilePreviewCache(
             PrinterFilePreviewTransport.IsValidImage(content.Image, content.ContentType)) &&
         (content.PrintTimeSeconds is null || (double.IsFinite(content.PrintTimeSeconds.Value) &&
             content.PrintTimeSeconds > 0)) &&
-        (content.LayerHeightMm is null || (double.IsFinite(content.LayerHeightMm.Value) && content.LayerHeightMm > 0));
+        (content.LayerHeightMm is null || (double.IsFinite(content.LayerHeightMm.Value) && content.LayerHeightMm > 0)) &&
+        content.SizeBytes is not < 0 && (content.Metadata is null || content.Metadata.IsValid());
 
     private string EntryPath(string key)
     {

@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
-import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
+import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
@@ -57,6 +57,14 @@ interface Selection {
 
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
+const REFRESH_ALL_LABEL = 'Force refresh all online printers';
+const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers and free I/O slots; may take up to two minutes per printer.';
+const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
+
+interface RefreshTarget {
+  id: string;
+  name: string;
+}
 
 function byteCount(value?: number | null) {
   return value == null ? 'Unknown size' : `${value.toLocaleString()} bytes`;
@@ -190,6 +198,33 @@ export function PrinterFileCatalog() {
       }
     },
   });
+  // Sequential requests avoid consuming all deployment I/O slots with this batch.
+  const refreshAll = useMutation({
+    mutationFn: async (targets: RefreshTarget[]) => {
+      const failures: string[] = [];
+      for (const target of targets) {
+        try {
+          await apiClient.refreshPrinterFileIndex(target.id, true);
+        } catch (error) {
+          failures.push(`${target.name}: ${describePrinterFileFailure(error).message}`);
+        }
+      }
+      return failures;
+    },
+    onSuccess: async (failures, targets) => {
+      const completed = targets.length - failures.length;
+      if (completed > 0) {
+        toast.success(`Force refresh completed for ${completed} printer${completed === 1 ? '' : 's'}. Previews reload on demand.`);
+      }
+      if (failures.length > 0) toast.error(`Failed to force refresh: ${failures.join('; ')}`);
+      // Refresh revisions before invalidating old preview keys.
+      await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['printer-file-preview'] }),
+        queryClient.invalidateQueries({ queryKey: ['printer-file-thumbnail'] }),
+      ]);
+    },
+  });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
     setIntent({ entry, action, key: generateUUID() });
     setDestination(entry.printerId);
@@ -201,6 +236,11 @@ export function PrinterFileCatalog() {
 
   const sourceFor = (entry: PrinterFileCatalogEntry) =>
     catalog.data?.printers.find(printer => printer.id === entry.printerId);
+  const onlinePrinterIds = new Set(destinations.filter(printer => printer.isOnline).map(printer => printer.id));
+  const manageableSources = catalog.data?.printers.filter(printer => printer.canManage) ?? [];
+  const refreshTargets: RefreshTarget[] = manageableSources
+    .filter(printer => onlinePrinterIds.has(printer.id))
+    .map(({ id, name }) => ({ id, name }));
   const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
     const source = sourceFor(entry);
     if (!source) return [];
@@ -283,7 +323,7 @@ export function PrinterFileCatalog() {
         {hasPermission('settings', 'read') && <Link to="/admin/settings?q=printer%20file" className="text-sm text-pf-accent underline">Discovery settings</Link>}
       </div>
       {catalog.data?.automaticDiscoveryEnabled === false && (
-        <Alert variant="info">Automatic discovery is globally disabled. Explicit Copy and Queue remain separate actions.</Alert>
+        <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <FormField label="Printer" htmlFor="catalog-printer">
@@ -322,7 +362,25 @@ export function PrinterFileCatalog() {
               {viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
               <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
             </div>
-            <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+            <div className="flex items-center gap-1">
+              <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+              {manageableSources.length > 0 && (
+                <Button
+                  type="button"
+                  size="md"
+                  variant="secondary"
+                  aria-label={REFRESH_ALL_LABEL}
+                  title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+                  explainedDisabled
+                  disabled={refreshTargets.length === 0}
+                  loading={refreshAll.isPending}
+                  iconLeft={<RefreshIcon className={ACTION_ICON_CLASS} />}
+                  onClick={() => refreshAll.mutate(refreshTargets)}
+                >
+                  Force refresh
+                </Button>
+              )}
+            </div>
           </div>
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">

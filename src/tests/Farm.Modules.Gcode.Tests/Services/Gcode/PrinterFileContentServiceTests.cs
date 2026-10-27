@@ -152,6 +152,103 @@ public sealed class PrinterFileContentServiceTests
     }
 
     [Fact]
+    public async Task PreviewAsync_DeferredPreviewStillServesDurableCatalogDetails()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterPrintMetadata metadata = new()
+        {
+            EstimatedPrintTimeSeconds = 0,
+            LayerHeightMm = 0.15,
+            BrimWidthMm = 0,
+            QuietLeftPresent = false,
+        };
+        fixture.Location.Metadata = metadata;
+        fixture.Location.DetailsFetchedAtUtc = DateTime.UtcNow.AddDays(-30);
+        fixture.Location.SizeBytes = 629505;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Activity = "printing";
+
+        PrinterFilePreviewDto result = await fixture.PreviewAsync();
+
+        Assert.Equal(PrinterFilePreviewState.Deferred, result.State);
+        Assert.False(result.HasImage);
+        Assert.Null(result.CapturedAtUtc);
+        Assert.Equal(629505, result.SizeBytes);
+        Assert.Equal(metadata, result.Metadata);
+        Assert.Equal(0, result.PrintTimeSeconds);
+        Assert.Equal(0.15, result.LayerHeightMm);
+        Assert.Equal(0, fixture.Fetches);
+    }
+
+    [Theory]
+    [InlineData(456.0, 0.3)]
+    [InlineData(0.0, 0.0)]
+    public async Task PreviewAsync_FetchedCatalogDetailsTakePrecedenceOverCachedPreviewMeasurements(
+        double printTime, double layerHeight)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterFilePreviewDto cached = await fixture.PreviewAsync();
+        Assert.Equal(123, cached.PrintTimeSeconds);
+        Assert.Null(cached.Metadata);
+        PrinterPrintMetadata metadata = new() { PrintTimeSeconds = printTime, LayerHeightMm = layerHeight };
+        fixture.Location.Metadata = metadata;
+        fixture.Location.DetailsFetchedAtUtc = DateTime.UtcNow;
+        await fixture.Db.SaveChangesAsync();
+
+        PrinterFilePreviewDto result = await fixture.PreviewAsync();
+
+        Assert.True(result.HasImage);
+        Assert.Equal(printTime, result.PrintTimeSeconds);
+        Assert.Equal(layerHeight, result.LayerHeightMm);
+        Assert.Equal(metadata, result.Metadata);
+        Assert.Equal(4, result.SizeBytes);
+        Assert.Equal(1, fixture.Fetches);
+    }
+
+    [Theory]
+    [InlineData("missing", false)]
+    [InlineData("empty", false)]
+    [InlineData("unrelated", false)]
+    [InlineData("missing", true)]
+    [InlineData("empty", true)]
+    [InlineData("unrelated", true)]
+    public async Task PreviewAsync_FetchedCatalogHasUnknownMeasurements_DoesNotResurrectCachedValues(
+        string metadataKind, bool hasImage)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        fixture.Location.SizeBytes = null;
+        await fixture.Db.SaveChangesAsync();
+        fixture.PreviewContent = new(123, 0.2, hasImage ? Fixture.Png : null, hasImage ? "image/png" : null,
+            SizeBytes: 629505, Metadata: new() { PrintTimeSeconds = 123, LayerHeightMm = 0.2 });
+        PrinterFilePreviewDto cached = await fixture.PreviewAsync();
+        Assert.Equal(123, cached.PrintTimeSeconds);
+        Assert.Equal(0.2, cached.LayerHeightMm);
+        Assert.Equal(629505, cached.SizeBytes);
+        Assert.NotNull(cached.Metadata);
+
+        fixture.Location.Metadata = metadataKind switch
+        {
+            "empty" => new(),
+            "unrelated" => new() { FilamentType = "PLA" },
+            _ => null,
+        };
+        fixture.Location.DetailsFetchedAtUtc = DateTime.UtcNow;
+        await fixture.Db.SaveChangesAsync();
+        fixture.Activity = "printing";
+
+        PrinterFilePreviewDto result = await fixture.PreviewAsync();
+
+        Assert.Equal(fixture.Location.Metadata, result.Metadata);
+        Assert.Null(result.PrintTimeSeconds);
+        Assert.Null(result.LayerHeightMm);
+        Assert.Null(result.SizeBytes);
+        Assert.Equal(hasImage, result.HasImage);
+        Assert.Equal(hasImage || metadataKind == "unrelated"
+            ? PrinterFilePreviewState.Available : PrinterFilePreviewState.Unavailable, result.State);
+        Assert.Equal(1, fixture.Fetches);
+    }
+
+    [Fact]
     public async Task PreviewAsync_UnsupportedBackendDoesNotInventCapture()
     {
         await using Fixture fixture = await Fixture.CreateAsync();
@@ -309,6 +406,7 @@ public sealed class PrinterFileContentServiceTests
         public bool Online { get; set; } = true;
         public int StatusAgeMinutes { get; set; }
         public string RemoteModified { get; set; } = "1";
+        public PrinterFilePreviewContent PreviewContent { get; set; } = new(123, 0.2, Png, "image/png");
         public Action? BeforeCopy { get; set; }
         public int Fetches { get; private set; }
         public int Copies { get; private set; }
@@ -357,7 +455,7 @@ public sealed class PrinterFileContentServiceTests
                     It.IsAny<string>(), It.IsAny<PrinterFileInventoryEntry>(), It.IsAny<PrinterCredential?>(),
                     It.IsAny<CancellationToken>()))
                 .Callback(() => fixture.Fetches++)
-                .ReturnsAsync(new PrinterFilePreviewContent(123, 0.2, Png, "image/png"));
+                .ReturnsAsync(() => fixture.PreviewContent);
             backend.As<ISupportsFileInventory>().Setup(x => x.GetFileInventoryAsync(
                     It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<PrinterFileInventoryOptions?>(),
                     It.IsAny<CancellationToken>()))

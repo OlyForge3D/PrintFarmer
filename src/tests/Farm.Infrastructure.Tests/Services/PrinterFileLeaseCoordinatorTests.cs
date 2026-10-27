@@ -72,6 +72,69 @@ public sealed class PrinterFileLeaseCoordinatorTests
     }
 
     [Fact]
+    public async Task ForceRefreshAsync_BypassesDisabledDiscoveryAndBackoffButSharesExclusiveSlots()
+    {
+        await using var fixture = await Fixture.CreateAsync(1, enabled: false);
+        fixture.SetIdle(fixture.First);
+        fixture.SetIdle(fixture.Second);
+        await using (IPrinterFileLease? enrollment = await fixture.Coordinator.TryAcquireAsync(fixture.First, true))
+        {
+            Assert.NotNull(enrollment);
+        }
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            await db.PrinterFileScanStates.ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Enabled, false)
+                .SetProperty(x => x.NextScanAtUtc, DateTime.UtcNow.AddYears(1))
+                .SetProperty(x => x.InteractiveRequestedAtUtc, DateTime.UtcNow)
+                .SetProperty(x => x.ConsecutiveFailures, 5));
+        }
+
+        await using IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.First);
+        Assert.NotNull(lease);
+        Assert.True(await lease.IsCurrentAsync());
+        Assert.Null(await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.First));
+        Assert.Null(await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.Second));
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.Second, true));
+        await lease.DisposeAsync();
+        await using IPrinterFileLease? next = await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.Second);
+        Assert.NotNull(next);
+    }
+
+    [Theory]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    [InlineData("mystery")]
+    public async Task ForceRefreshAsync_RejectsNonIdleAcquisitionAndPublication(string activity)
+    {
+        await using var fixture = await Fixture.CreateAsync(1, enabled: false);
+        fixture.SetActivity(fixture.First, activity);
+        Assert.Null(await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.First));
+        fixture.SetIdle(fixture.First);
+        await using IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.First);
+        Assert.NotNull(lease);
+        fixture.SetActivity(fixture.First, activity);
+        Assert.False(await lease.IsCurrentAsync());
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        Assert.False(await lease.FencePublicationAsync(db));
+    }
+
+    [Fact]
+    public async Task ForceRefreshAsync_IdleLossCancelsRenewableOwnership()
+    {
+        await using var fixture = await Fixture.CreateAsync(1);
+        fixture.SetIdle(fixture.First);
+        await using IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireForRefreshAsync(fixture.First);
+        Assert.NotNull(lease);
+        TaskCompletionSource lost = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = lease.Token.Register(() => lost.TrySetResult());
+        fixture.SetActivity(fixture.First, "printing");
+        await lost.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(lease.Token.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task AcquireAsync_ExpiredOwnerCannotPublishOrReleaseReplacement()
     {
         await using var fixture = await Fixture.CreateAsync(1);
@@ -202,6 +265,12 @@ public sealed class PrinterFileLeaseCoordinatorTests
         public Mock<IPrinterStatusCacheReader> Status { get; } = new();
 
         public PrinterFileLeaseCoordinator Coordinator { get; }
+
+        public void SetIdle(Guid printerId) => SetActivity(printerId, "ready");
+
+        public void SetActivity(Guid printerId, string activity) =>
+            Status.Setup(x => x.GetSnapshot(printerId)).Returns(new PrinterStatusCacheSnapshot(
+                new PrinterStatusDto(printerId, true, activity) { RawActivityState = activity }, DateTime.UtcNow));
 
         public static async Task<Fixture> CreateAsync(int slots, bool enabled = true)
         {

@@ -6,6 +6,7 @@ import { RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { FileDate } from '@/features/files/components/FileDate';
 import { describeReasonCode } from '@/features/files/utils/fileDisplay';
+import { describePrinterFileFailure } from '@/features/files/utils/printerFileBulk';
 import { apiClient } from '@/services/api';
 import type { PrinterFileScanOutcome } from '@/types/api';
 
@@ -44,15 +45,25 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
   });
   const change = useMutation({
     mutationFn: (request: DiscoveryChange) => request.kind === 'refresh'
-      ? apiClient.refreshPrinterFileIndex(printerId)
+      ? apiClient.refreshPrinterFileIndex(printerId, true)
       : apiClient.setPrinterFileIndexEnabled(printerId, request.enabled),
     onSuccess: async (_result, request) => {
       toast.success(request.kind === 'refresh'
-        ? 'Refresh requested. It runs when the printer is idle.'
+        ? 'Force refresh completed. Previews reload on demand.'
         : `Automatic file discovery ${request.enabled ? 'enabled' : 'disabled'}.`);
       await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+      if (request.kind === 'refresh') {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['printer-file-preview'] }),
+          queryClient.invalidateQueries({ queryKey: ['printer-file-thumbnail'] }),
+        ]);
+      }
     },
-    onError: (error: Error) => toast.error(`Failed to update file discovery: ${error.message}`),
+    onError: async (error: unknown, request) => {
+      const action = request.kind === 'refresh' ? 'Force refresh failed' : 'Failed to update file discovery';
+      toast.error(`${action}: ${describePrinterFileFailure(error).message}`);
+      await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+    },
   });
 
   if (!canRead) return null;
@@ -122,13 +133,15 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
                   iconLeft={<RefreshIcon className="h-4 w-4" />}
                   loading={refreshing}
                   disabled={change.isPending}
+                  title="Bypass schedule and cached previews. Requires an idle printer and a free I/O slot; may take up to two minutes."
                   onClick={() => change.mutate({ kind: 'refresh' })}
                 >
-                  Refresh now
+                  Force refresh
                 </Button>
               </div>
               <p className="text-xs text-pf-text-secondary">
                 Changes apply immediately and are not saved with this form. Scans run only while the printer is idle.
+                Force refresh bypasses automatic-discovery settings and backoff; busy printers must be retried.
                 Global scan cadence and budgets are in Admin Settings &gt; Files.
               </p>
             </>

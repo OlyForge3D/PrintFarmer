@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -12,7 +13,8 @@ public sealed class PrinterFileInventorySession : IDisposable
     private readonly List<PrinterFileInventoryEntry> _entries = [];
     private readonly List<PrinterFileInventoryCoverage> _coverage = [];
     private readonly HashSet<string> _identities = new(StringComparer.Ordinal);
-    private int _requests;
+    private readonly System.Diagnostics.Stopwatch _elapsed = System.Diagnostics.Stopwatch.StartNew();
+    private CancellationToken? _requestToken;
     private int _visitedEntries;
 
     public PrinterFileInventorySession(PrinterFileInventoryOptions? options, CancellationToken callerToken)
@@ -61,17 +63,80 @@ public sealed class PrinterFileInventorySession : IDisposable
     public void Cover(string root, bool complete, PrinterFileInventoryEvidence evidence) =>
         _coverage.Add(new(root, string.Empty, complete, evidence));
 
-    /// <summary>Reads one bounded JSON listing; the sender must use the supplied cancellation token.</summary>
-    public async Task<JsonDocument> ReadAsync(Func<CancellationToken, Task<HttpResponseMessage>> send, int requestCost = 1)
+    /// <summary>
+    /// Best-effort detail enrichment. A failed detail read leaves only that entry without details; reads stop once the
+    /// detail budget (three quarters of the scan deadline) is spent so the completed listing can still be published.
+    /// </summary>
+    public async Task EnrichAsync(
+        Func<PrinterFileInventoryEntry, Task<PrinterFileInventoryEntry>> enrich, ILogger logger)
     {
-        Token.ThrowIfCancellationRequested();
-        if (requestCost < 1 || requestCost > Options.MaxRequests - _requests)
+        TimeSpan remaining = (Options.Deadline * 0.75) - _elapsed.Elapsed;
+        if (remaining <= TimeSpan.Zero)
         {
-            throw new PrinterFileInventoryException(PrinterFileInventoryReason.RequestLimit);
+            logger.LogWarning("Printer file detail enrichment skipped because its time budget was exhausted");
+            return;
         }
 
-        _requests += requestCost;
-        using HttpResponseMessage response = await send(Token).ConfigureAwait(false);
+        using CancellationTokenSource detail = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        detail.CancelAfter(remaining);
+        _requestToken = detail.Token;
+        try
+        {
+            for (int index = 0; index < _entries.Count && !detail.IsCancellationRequested; index++)
+            {
+                PrinterFileInventoryEntry entry = _entries[index];
+                PrinterFileInventoryEntry enriched;
+                try
+                {
+                    enriched = await enrich(entry).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!Token.IsCancellationRequested)
+                {
+                    logger.LogWarning("Printer file detail enrichment stopped after a detail request timed out");
+                    break;
+                }
+                catch (PrinterFileInventoryException failure)
+                    when (failure.Reason != PrinterFileInventoryReason.InvalidPath)
+                {
+                    logger.LogWarning("Printer file detail enrichment failed for an entry: {Reason}", failure.Reason);
+                    if (failure.Reason == PrinterFileInventoryReason.AuthenticationRequired)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+                catch (Exception exception) when (exception is HttpRequestException or IOException or
+                    JsonException or InvalidOperationException or FormatException or KeyNotFoundException)
+                {
+                    logger.LogWarning(
+                        "Printer file detail enrichment failed for an entry: {FailureType}",
+                        exception.GetType().Name);
+                    continue;
+                }
+
+                if (enriched.StorageRoot != entry.StorageRoot || enriched.RelativePath != entry.RelativePath)
+                {
+                    throw new PrinterFileInventoryException(PrinterFileInventoryReason.InvalidPath);
+                }
+
+                _entries[index] = enriched;
+            }
+        }
+        finally
+        {
+            _requestToken = null;
+        }
+
+        Token.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>Reads one bounded JSON listing; the sender must use the supplied cancellation token.</summary>
+    public async Task<JsonDocument> ReadAsync(Func<CancellationToken, Task<HttpResponseMessage>> send)
+    {
+        CancellationToken token = _requestToken ?? Token;
+        token.ThrowIfCancellationRequested();
+        using HttpResponseMessage response = await send(token).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             throw new PrinterFileInventoryException(PrinterFileInventoryReason.AuthenticationRequired);
@@ -92,18 +157,18 @@ public sealed class PrinterFileInventorySession : IDisposable
             throw new PrinterFileInventoryException(PrinterFileInventoryReason.ResponseLimit);
         }
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(Token).ConfigureAwait(false);
+        await using Stream stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
         using MemoryStream buffer = new();
         byte[] chunk = new byte[8192];
         int count;
-        while ((count = await stream.ReadAsync(chunk, Token).ConfigureAwait(false)) != 0)
+        while ((count = await stream.ReadAsync(chunk, token).ConfigureAwait(false)) != 0)
         {
             if (buffer.Length + count > MaxResponseBytes)
             {
                 throw new PrinterFileInventoryException(PrinterFileInventoryReason.ResponseLimit);
             }
 
-            await buffer.WriteAsync(chunk.AsMemory(0, count), Token).ConfigureAwait(false);
+            await buffer.WriteAsync(chunk.AsMemory(0, count), token).ConfigureAwait(false);
         }
 
         if (response.Content.Headers.ContentLength is long expectedLength && expectedLength != buffer.Length)
@@ -111,7 +176,7 @@ public sealed class PrinterFileInventorySession : IDisposable
             throw new PrinterFileInventoryException(PrinterFileInventoryReason.IncompleteResponse);
         }
 
-        Token.ThrowIfCancellationRequested();
+        token.ThrowIfCancellationRequested();
         return JsonDocument.Parse(buffer.ToArray(), new JsonDocumentOptions { MaxDepth = 128 });
     }
 
@@ -142,7 +207,7 @@ public sealed class PrinterFileInventorySession : IDisposable
                 PrinterFileInventoryOutcome.Unsupported,
             _ when _entries.Count > 0 || _coverage.Count > 0 ||
                 reason is PrinterFileInventoryReason.EntryLimit or PrinterFileInventoryReason.DepthLimit or
-                    PrinterFileInventoryReason.RequestLimit or PrinterFileInventoryReason.IncompleteResponse =>
+                    PrinterFileInventoryReason.IncompleteResponse =>
                 PrinterFileInventoryOutcome.Partial,
             _ => PrinterFileInventoryOutcome.Unavailable
         };

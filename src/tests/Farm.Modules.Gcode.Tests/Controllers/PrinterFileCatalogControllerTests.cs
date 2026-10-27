@@ -2,19 +2,23 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Modules.Gcode.Controllers;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace Farm.Modules.Gcode.Tests.Controllers;
@@ -33,7 +37,7 @@ public sealed class PrinterFileCatalogControllerTests
         interceptor.Fail = true;
         IActionResult result = toggle
             ? await fixture.Controller.SetEnabledAsync(fixture.Visible, new(false), CancellationToken.None)
-            : await fixture.Controller.RefreshAsync(fixture.Visible, CancellationToken.None);
+            : await fixture.Controller.RefreshAsync(fixture.Visible, ct: CancellationToken.None);
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
         Assert.Equal(409, conflict.StatusCode);
         Assert.Contains("scan_state_changed", JsonSerializer.Serialize(conflict.Value));
@@ -54,6 +58,34 @@ public sealed class PrinterFileCatalogControllerTests
         Assert.DoesNotContain(fixture.Hidden.ToString(), json, StringComparison.OrdinalIgnoreCase);
         Assert.Single(document.RootElement.GetProperty("printers").EnumerateArray());
         Assert.Single(document.RootElement.GetProperty("scans").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ListAsync_PersistedDetails_ReturnsMetadataWithoutReadingPrinter()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        PrinterFileLocation location = await fixture.Db.PrinterFileLocations.SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible);
+        DateTime fetched = new(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
+        location.DisplayName = "Long printable part.bgcode";
+        location.SizeBytes = 123;
+        location.DetailsFetchedAtUtc = fetched;
+        location.Metadata = new() { BrimWidthMm = 0, QuietLeftPresent = false, FilamentUsedPerToolG = [0, 2.5] };
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null));
+        JsonElement entry = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal("Long printable part.bgcode", entry.GetProperty("displayName").GetString());
+        Assert.Equal("public.gcode", entry.GetProperty("relativePath").GetString());
+        Assert.Equal(123, entry.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(fetched, entry.GetProperty("detailsFetchedAtUtc").GetDateTime());
+        JsonElement metadata = entry.GetProperty("metadata");
+        Assert.Equal(0, metadata.GetProperty("brimWidthMm").GetDouble());
+        Assert.False(metadata.GetProperty("quietLeftPresent").GetBoolean());
+        Assert.Equal(new double[] { 0, 2.5 },
+            metadata.GetProperty("filamentUsedPerToolG").EnumerateArray().Select(value => value.GetDouble()));
+        Assert.False(metadata.TryGetProperty("hasValues", out _));
     }
 
     [Fact]
@@ -109,11 +141,42 @@ public sealed class PrinterFileCatalogControllerTests
         Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
     }
 
-    [Fact]
-    public async Task RefreshAsync_ViewDoesNotImplyManage()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshAsync_ViewDoesNotImplyManage(bool force)
     {
         await using var fixture = await Fixture.CreateAsync();
-        Assert.IsType<NotFoundResult>(await fixture.Controller.RefreshAsync(fixture.Visible, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await fixture.Controller.RefreshAsync(fixture.Visible, force, CancellationToken.None));
+        Assert.Equal(DateTime.MaxValue, (await fixture.Db.PrinterFileScanStates.SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible)).NextScanAtUtc);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ForceDoesNotScanWhenPrinterIsNotConfirmedIdle()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Resources.Setup(x => x.CanActorAccessPrinterAsync(fixture.Actor.ToString(), fixture.Visible,
+            PrinterGroupAccessLevel.Manage, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var leases = new Mock<IPrinterFileLeaseCoordinator>();
+        var status = new Mock<IPrinterStatusCacheReader>();
+        status.Setup(x => x.GetSnapshot(fixture.Visible)).Returns(new PrinterStatusCacheSnapshot(
+            new PrinterStatusDto(fixture.Visible, true, "Printing") { RawActivityState = "printing" }, DateTime.UtcNow));
+        var catalog = new PrinterFileCatalogService(
+            Mock.Of<IDbContextFactory<AppDbContext>>(), Mock.Of<IPrintersRepository>(),
+            Mock.Of<IBackendCapabilityFactory>(), leases.Object, status.Object,
+            NullLogger<PrinterFileCatalogService>.Instance);
+        PrinterFileCatalogController controller = fixture.CreateController(
+            fixture.Access.Object, fixture.Resources.Object, catalog: catalog);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(
+            await controller.RefreshAsync(fixture.Visible, true, CancellationToken.None));
+
+        Assert.Contains("waiting_for_confirmed_idle", JsonSerializer.Serialize(conflict.Value));
+        leases.Verify(x => x.TryAcquireForRefreshAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        leases.Verify(x => x.TryAcquireAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
         Assert.Equal(DateTime.MaxValue, (await fixture.Db.PrinterFileScanStates.SingleAsync(
             x => x.SourcePrinterId == fixture.Visible)).NextScanAtUtc);
     }
@@ -520,8 +583,9 @@ public sealed class PrinterFileCatalogControllerTests
         public PrinterFileCatalogController CreateController(
             IPrinterFileAccessService access,
             IQueueResourceAuthorizationService resources,
-            IBackendClientFactory? backendClients = null) =>
-            new(Db, access, resources, backendClients)
+            IBackendClientFactory? backendClients = null,
+            PrinterFileCatalogService? catalog = null) =>
+            new(Db, access, resources, backendClients, catalog)
             {
                 ControllerContext = new ControllerContext
                 {

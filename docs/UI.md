@@ -42,7 +42,11 @@ Main overview page showing all printers with real-time status.
 
 - **Local library** (`/files`): upload and organize models and G-code, search,
   tag, preview, slice models, and queue local G-code. Use `?type=models` or
-  `?type=gcode` to filter by file type.
+  `?type=gcode` to filter by file type. Prusa binary G-code (`.bgcode`) uploads
+  show slicer metadata and an embedded PNG or JPEG thumbnail. QOI-only
+  thumbnails and unsupported block compression are omitted; malformed or
+  oversized files (over 1 MiB per metadata block, 2 MiB per thumbnail block,
+  64 header blocks, or 16 MiB of header data) show no metadata.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one or several selected files. Add
   `&printer=<printerId>` to scope the catalog to one printer.
@@ -55,6 +59,16 @@ source, print time, and layer height. Values the source cannot provide are shown
 as **Unavailable**. File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
+
+For PrusaLink files, the panel also shows every supplied **Native print
+metadata** field, including filament use, temperatures, tool-specific values,
+and printer/profile information. Names, sizes, and these details are saved in
+the database during discovery, not held only in the expiring preview cache.
+They remain visible when thumbnail loading fails or the source is unavailable.
+The saved date identifies the observation; absent native values are **Unknown**,
+while explicit zero and false remain visible. Tool numbers follow provider
+order. Full display names do not replace the short filename used by file actions.
+Scheduled scans reuse unchanged details; **Force Refresh** refetches them.
 
 On-printer files offer two distinct actions:
 
@@ -86,10 +100,22 @@ supports them. They are fetched only when the printer is idle, cached per file
 version, and labelled with their capture date. Indexing itself remains
 metadata-only.
 
-Per-printer automatic discovery, scan status, and **Refresh now** live in the
+Per-printer automatic discovery, scan status, and **Force refresh** live in the
 **Files** section of the printer's Edit dialog. Those changes apply immediately
 and are not part of the form save. Global discovery cadence and budgets remain
 under Admin Settings > Files.
+
+**Force refresh**, to the right of the table/card view toggle on **On printers**,
+scans every online printer you can manage, one at a time. Both refresh controls
+bypass the automatic-discovery switches, schedule, backoff, and cached previews.
+They still require a confirmed-idle printer and a free I/O slot; idle status is
+checked again during the scan and before publication. A scan can take up to two
+minutes per printer. Success means a complete listing was published, not merely
+scheduled; failures name the printer and reason so busy printers can be retried.
+
+Previews reload on demand after a successful force refresh, not eagerly as part
+of indexing. Files pinned by unfinished file operations retain their preview
+revision to preserve those operations; force refresh again after they finish.
 
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are

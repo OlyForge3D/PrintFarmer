@@ -5,6 +5,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +21,8 @@ public sealed class PrinterFileCatalogController(
     AppDbContext db,
     IPrinterFileAccessService access,
     IQueueResourceAuthorizationService resources,
-    IBackendClientFactory? backendClients = null) : ControllerBase
+    IBackendClientFactory? backendClients = null,
+    PrinterFileCatalogService? catalog = null) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> ListAsync(
@@ -91,6 +93,8 @@ public sealed class PrinterFileCatalogController(
                 x.RelativePath,
                 x.DisplayName,
                 x.SizeBytes,
+                x.Metadata,
+                x.DetailsFetchedAtUtc,
                 x.ModifiedValue,
                 x.ObservationRevision,
                 x.ConfigurationGeneration,
@@ -152,13 +156,40 @@ public sealed class PrinterFileCatalogController(
         return Ok(new { items, total, page, pageSize, printers, scans, automaticDiscoveryEnabled = policy.Enabled });
     }
 
+    /// <summary>
+    /// Without <paramref name="force"/>, only moves the next background scan forward. With it, scans now and
+    /// returns 200 only after a complete listing is published; deferrals and incomplete scans return 409.
+    /// </summary>
     [HttpPost("printers/{printerId:guid}/refresh")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
-    public async Task<IActionResult> RefreshAsync(Guid printerId, CancellationToken ct)
+    public async Task<IActionResult> RefreshAsync(
+        Guid printerId, [FromQuery] bool force = false, CancellationToken ct = default)
     {
         if (!await CanManageAsync(printerId, ct))
         {
             return NotFound();
+        }
+
+        if (force)
+        {
+            PrinterFileCatalogService scanner = catalog ??
+                throw new InvalidOperationException("Printer file catalog service is not registered.");
+            PrinterFileForceRefreshResult outcome;
+            try
+            {
+                outcome = await scanner.ForceRefreshAsync(printerId, ct);
+            }
+            catch (DbUpdateException)
+            {
+                return Conflict(new { code = "scan_state_changed" });
+            }
+
+            return outcome.Status switch
+            {
+                PrinterFileForceRefreshStatus.Completed => Ok(new { code = "refresh_completed", files = outcome.FileCount }),
+                PrinterFileForceRefreshStatus.Incomplete => Conflict(new { code = "refresh_incomplete", reasonCode = outcome.ReasonCode }),
+                _ => Conflict(new { code = outcome.ReasonCode, reasonCode = outcome.ReasonCode }),
+            };
         }
 
         PrinterFileScanState? state = await db.PrinterFileScanStates.SingleOrDefaultAsync(

@@ -29,10 +29,6 @@ public sealed class PrinterFileIndexSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(Name = "Total scan budget", Unit = "seconds", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 120)]
     public int ScanTimeoutSeconds { get; set; } = 120;
 
-    [JsonPropertyName("maxRequests")]
-    [SettingDisplay(Name = "Listing request budget", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 100)]
-    public int MaxRequests { get; set; } = 100;
-
     [JsonPropertyName("maxEntries")]
     [SettingDisplay(Name = "Entry budget", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 10000)]
     public int MaxEntries { get; set; } = 10_000;
@@ -46,7 +42,6 @@ public sealed class PrinterFileIndexSettings : IAppSetting, IValidatableSetting
         if (ScanIntervalMinutes is < 1 or > 1440 ||
             MaxConcurrentIo is < 1 or > 16 ||
             ScanTimeoutSeconds is < 1 or > 120 ||
-            MaxRequests is < 1 or > 100 ||
             MaxEntries is < 1 or > 10_000 ||
             MaxDepth is < 0 or > 16)
         {

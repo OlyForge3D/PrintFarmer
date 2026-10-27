@@ -746,6 +746,12 @@ public class GcodeFilesController(
                 _ => "image/png"
             };
 
+            // .bgcode files may only embed JPG thumbnails; they share the _thumb.png naming, so sniff JPEG bytes.
+            if (contentType == "image/png" && IsJpegFile(absolutePath))
+            {
+                contentType = "image/jpeg";
+            }
+
             logger.LogInformation("[Thumbnail] Returning thumbnail for GCode file {Id} with content type {ContentType}", id, contentType);
             return PhysicalFile(absolutePath, contentType);
         }
@@ -932,6 +938,25 @@ public class GcodeFilesController(
         return string.IsNullOrWhiteSpace(status.FinalFilePath)
             ? throw new InvalidOperationException("Upload has not completed - no final file path available")
             : status.FinalFilePath;
+    }
+
+    private static bool IsJpegFile(string path)
+    {
+        try
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> header = stackalloc byte[3];
+            return stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
+                && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // ---------------- Settings & Move endpoints ----------------

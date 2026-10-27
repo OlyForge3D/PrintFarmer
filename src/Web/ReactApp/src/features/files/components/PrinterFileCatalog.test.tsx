@@ -3,16 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileDeleteOperation, PrinterFileOperation } from '@/types/api';
+import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileDeleteOperation, PrinterFileOperation, PrinterPrintMetadata } from '@/types/api';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
   confirm: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), enabled: vi.fn(),
   preview: vi.fn(), thumbnail: vi.fn(), download: vi.fn(), prepareDelete: vi.fn(), confirmDelete: vi.fn(),
-  hasPermission: vi.fn(), toastError: vi.fn(),
+  hasPermission: vi.fn(), toastError: vi.fn(), toastSuccess: vi.fn(),
 }));
 const media = vi.hoisted(() => ({ lg: false }));
+const printerList = vi.hoisted(() => ({ value: [] as Array<{ id: string; name: string; isEnabled: boolean; isOnline: boolean }> }));
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinterFileCatalog: mocks.catalog, getPrinterFileOperations: mocks.operations,
@@ -29,17 +30,14 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: mocks.hasPermission }),
 }));
 vi.mock('@/common/hooks/useApi', () => ({
-  usePrinters: () => ({ data: [
-    { id: 'source', name: 'Source printer', isEnabled: true },
-    { id: 'other', name: 'Other printer', isEnabled: true },
-  ] }),
+  usePrinters: () => ({ data: printerList.value }),
 }));
 vi.mock('@/common/hooks/useMediaQuery', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/common/hooks/useMediaQuery')>(),
   useIsLgBreakpoint: () => media.lg,
 }));
 vi.mock('sonner', () => ({
-  toast: { error: mocks.toastError, success: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  toast: { error: mocks.toastError, success: mocks.toastSuccess, warning: vi.fn(), info: vi.fn() },
 }));
 
 const entry: PrinterFileCatalogEntry = {
@@ -54,7 +52,7 @@ const catalog: PrinterFileCatalogPage = {
   total: 1, page: 1, pageSize: 25,
   printers: [{ id: 'source', name: 'Source printer', canManage: true, canCopy: true, canDelete: false, supportsCopy: true }],
   scans: [{
-    printerId: 'source', enabled: false, outcome: 'Partial', reasonCode: 'request_limit',
+    printerId: 'source', enabled: false, outcome: 'Partial', reasonCode: 'time_limit',
     lastAttemptAtUtc: null, lastCompleteScanAtUtc: null, nextScanAtUtc: '2026-10-26T12:00:00Z',
     configurationGeneration: 1, isStale: true, isScanning: false,
   }],
@@ -158,6 +156,10 @@ describe('Printer file catalog', () => {
     window.localStorage.clear();
     media.lg = false;
     observers.length = 0;
+    printerList.value = [
+      { id: 'source', name: 'Source printer', isEnabled: true, isOnline: true },
+      { id: 'other', name: 'Other printer', isEnabled: true, isOnline: true },
+    ];
     mocks.hasPermission.mockReturnValue(true);
     mocks.catalog.mockResolvedValue(catalog);
     mocks.operations.mockResolvedValue([]);
@@ -189,8 +191,8 @@ describe('Printer file catalog', () => {
       .toEqual(['Available', 'Stale']);
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute('href', '/admin/settings?q=printer%20file');
-    // Discovery toggles/refresh now live in Edit printer > Files.
-    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+    // Per-printer discovery toggles live in Edit printer > Files; only the all-printers Refresh is here.
+    expect(screen.getByRole('button', { name: 'Force refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
     expect(mocks.catalog).toHaveBeenCalledWith({ printerId: undefined, search: undefined,
       availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
@@ -199,6 +201,81 @@ describe('Printer file catalog', () => {
     expect(mocks.copy).not.toHaveBeenCalled();
     expect(mocks.queue).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  describe('Force refresh all online printers', () => {
+    const managed = (id: string, name: string, canManage = true) => ({ ...catalog.printers[0], id, name, canManage });
+
+    it('sits right of the view toggle and force-scans only online printers the user manages', async () => {
+      printerList.value = [
+        { id: 'source', name: 'Source printer', isEnabled: true, isOnline: true },
+        { id: 'other', name: 'Other printer', isEnabled: true, isOnline: false },
+        { id: 'viewer', name: 'Viewer printer', isEnabled: true, isOnline: true },
+      ];
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [
+        managed('source', 'Source printer'), managed('other', 'Other printer'), managed('viewer', 'Viewer printer', false),
+      ] });
+      mocks.refresh.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      const { queryClient } = renderCatalog();
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
+      expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
+      expect(mocks.refresh).not.toHaveBeenCalled();
+
+      await user.click(refresh);
+
+      await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        'Force refresh completed for 1 printer. Previews reload on demand.'));
+      expect(mocks.refresh.mock.calls).toEqual([['source', true]]);
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-thumbnail'] }));
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
+      await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    });
+
+    it('scans one printer at a time, continues past a failure, and names the printer and reason', async () => {
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer'), managed('other', 'Other printer')] });
+      let rejectFirst!: (error: unknown) => void;
+      mocks.refresh
+        .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }))
+        .mockResolvedValueOnce(undefined);
+      const user = userEvent.setup();
+      renderCatalog();
+      await user.click(await screen.findByRole('button', { name: 'Force refresh all online printers' }));
+
+      await waitFor(() => expect(mocks.refresh.mock.calls).toEqual([['source', true]]));
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+      rejectFirst({ statusCode: 409, message: 'Request failed with status code 409',
+        data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' } });
+
+      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+        'Failed to force refresh: Source printer: waiting for confirmed idle'));
+      expect(mocks.refresh.mock.calls).toEqual([['source', true], ['other', true]]);
+      expect(mocks.toastSuccess).toHaveBeenCalledWith('Force refresh completed for 1 printer. Previews reload on demand.');
+    });
+
+    it('explains why it is unavailable when no printer the user manages is online', async () => {
+      printerList.value = printerList.value.map(printer => ({ ...printer, isOnline: false }));
+      const user = userEvent.setup();
+      renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('title', 'No online printers you can manage');
+
+      await user.click(refresh);
+
+      expect(mocks.refresh).not.toHaveBeenCalled();
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    });
+
+    it('is hidden when the user manages none of the listed printers', async () => {
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer', false)] });
+      renderCatalog();
+      await findRow('part.gcode');
+      expect(screen.queryByRole('button', { name: 'Force refresh all online printers' })).not.toBeInTheDocument();
+    });
   });
 
   it.each(['table', 'grid'])('selects eligible files in the %s without opening details and exposes mixed select-all state', async viewMode => {
@@ -611,6 +688,180 @@ describe('Printer file catalog', () => {
     expect(within(panel).getByText('Preview unavailable')).toBeInTheDocument();
     expect(mocks.preview).toHaveBeenCalledTimes(1);
     expect(mocks.thumbnail).not.toHaveBeenCalled();
+  });
+
+  it('shows all 41 saved native fields with units and tool order, preserving the long name and short path', async () => {
+    const metadata = {
+      printerModel: 'COREONE', profile: '0.20mm QUALITY', printTimeSeconds: 5400,
+      estimatedPrintTimeSeconds: 5460, estimatedPrintTimeNormalMode: '1h 31m',
+      layerHeightMm: 0.2, maxLayerZMm: 80, fillDensity: '15%', brimWidthMm: 5,
+      supportMaterial: '1', ironing: 0, bedTemperatureC: 60, bedTemperaturePerToolC: [60, 65],
+      nozzleTemperatureC: 215, nozzleTemperaturePerToolC: [215, 220],
+      nozzleDiameterMm: 0.4, nozzleDiameterPerToolMm: [0.4, 0.6],
+      filamentType: 'PLA', filamentTypePerTool: ['PLA', 'PETG'],
+      filamentUsedMm: 1200, filamentUsedPerToolMm: [800, 400],
+      filamentUsedG: 4, filamentUsedPerToolG: [3, 1],
+      filamentUsedCm3: 3, filamentUsedPerToolCm3: [2, 1],
+      filamentCost: 0.12, filamentCostPerTool: [0.09, 0.03],
+      materialName: 'Tough resin', requiredResinMl: 20, fadedLayers: 10,
+      exposureTimeSeconds: 2, initialExposureTimeSeconds: 30,
+      minExposureTimeSeconds: 1, maxExposureTimeSeconds: 5,
+      minInitialExposureTimeSeconds: 20, maxInitialExposureTimeSeconds: 40,
+      normalPercentPresent: true, normalLeftPresent: false,
+      quietPercentPresent: false, quietLeftPresent: true, layerInfoPresent: true,
+    } satisfies Required<PrinterPrintMetadata>;
+    const nativeEntry: PrinterFileCatalogEntry = {
+      ...entry, storageRoot: 'usb', relativePath: 'PART~1.BGC',
+      displayName: 'Long descriptive part with full settings.bgcode', sizeBytes: 4096,
+      detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata,
+    };
+    mocks.catalog.mockResolvedValue({
+      ...catalog, items: [nativeEntry],
+      printers: [{ ...catalog.printers[0], supportsCopy: false, canCopy: false }],
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    const row = await findRow(nativeEntry.displayName);
+    expect(cellUnder('Size', row)).toHaveTextContent(/^4 KB$/);
+    await user.click(within(row).getByRole('button', { name: `${nativeEntry.displayName}, show details` }));
+    const panel = screen.getByRole('dialog', { name: nativeEntry.displayName });
+    expect(detailValue(panel, 'Path')).toHaveTextContent(/^usb\/PART~1.BGC$/);
+    expect(detailValue(panel, 'Size')).toHaveTextContent(/^4 KB$/);
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
+    expect(within(panel).getByText(/Saved in catalog/)).toHaveTextContent(
+      `Saved in catalog ${new Date(nativeEntry.detailsFetchedAtUtc!).toLocaleDateString()}`);
+    const section = within(panel).getByRole('region', { name: 'Native print metadata' });
+    const expected = [
+      ['Printer model', 'COREONE'], ['Profile', '0.20mm QUALITY'],
+      ['Reported print time', '5400 s'], ['Estimated print time', '5460 s'],
+      ['Normal-mode estimate', '1h 31m'], ['Native layer height', '0.2 mm'],
+      ['Maximum layer Z', '80 mm'], ['Infill density', '15%'], ['Brim width', '5 mm'],
+      ['Support material', '1'], ['Ironing', '0'],
+      ['Bed temperature', '60 \u00b0C'], ['Bed temperature per tool', 'Tool 1: 60 \u00b0C; Tool 2: 65 \u00b0C'],
+      ['Nozzle temperature', '215 \u00b0C'], ['Nozzle temperature per tool', 'Tool 1: 215 \u00b0C; Tool 2: 220 \u00b0C'],
+      ['Nozzle diameter', '0.4 mm'], ['Nozzle diameter per tool', 'Tool 1: 0.4 mm; Tool 2: 0.6 mm'],
+      ['Filament type', 'PLA'], ['Filament type per tool', 'Tool 1: PLA; Tool 2: PETG'],
+      ['Filament length', '1200 mm'], ['Filament length per tool', 'Tool 1: 800 mm; Tool 2: 400 mm'],
+      ['Filament mass', '4 g'], ['Filament mass per tool', 'Tool 1: 3 g; Tool 2: 1 g'],
+      ['Filament volume', '3 cm\u00b3'], ['Filament volume per tool', 'Tool 1: 2 cm\u00b3; Tool 2: 1 cm\u00b3'],
+      ['Filament cost', '0.12 (currency unspecified)'],
+      ['Filament cost per tool', 'Tool 1: 0.09 (currency unspecified); Tool 2: 0.03 (currency unspecified)'],
+      ['Material name', 'Tough resin'], ['Required resin', '20 mL'], ['Faded layers', '10'],
+      ['Exposure time', '2 s'], ['Initial exposure time', '30 s'],
+      ['Minimum exposure time', '1 s'], ['Maximum exposure time', '5 s'],
+      ['Minimum initial exposure time', '20 s'], ['Maximum initial exposure time', '40 s'],
+      ['Normal-mode progress reporting', 'Yes'], ['Normal-mode remaining-time reporting', 'No'],
+      ['Quiet-mode progress reporting', 'No'], ['Quiet-mode remaining-time reporting', 'Yes'],
+      ['Layer information present', 'Yes'],
+    ];
+    expect(Object.keys(metadata)).toHaveLength(41);
+    expect(expected).toHaveLength(41);
+    expect(within(section).getAllByRole('term')).toHaveLength(41);
+    for (const [label, value] of expected) {
+      expect(detailValue(section, label).textContent).toBe(value);
+    }
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.thumbnail).not.toHaveBeenCalled();
+    expect(within(panel).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Copy to local library' })).not.toBeInTheDocument();
+  });
+
+  it.each(['pending preview', 'failed thumbnail', 'missing file'])(
+    'keeps saved metadata visible with a %s', async state => {
+      vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+      mocks.catalog.mockResolvedValue({
+        ...catalog, printers: [previewSource], items: [{
+          ...entry, availability: state === 'missing file' ? 'Missing' : 'Available',
+          detailsFetchedAtUtc: '2026-10-27T12:00:00Z',
+          metadata: { printTimeSeconds: 5400, layerHeightMm: 0.2, filamentType: 'PLA' },
+        }],
+      });
+      mocks.preview.mockReturnValue(state === 'pending preview' ? new Promise(() => {}) : Promise.resolve({
+        locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: true,
+        metadata: { printTimeSeconds: 1, layerHeightMm: 1, filamentType: 'stale preview value' },
+      }));
+      mocks.thumbnail.mockRejectedValue(new Error('Thumbnail unavailable'));
+      const user = userEvent.setup();
+      const rendered = renderCatalog();
+      await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+      const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+      expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
+      expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
+      expect(detailValue(panel, 'Filament type')).toHaveTextContent(/^PLA$/);
+      if (state === 'pending preview') {
+        expect(within(panel).getByText('Loading preview…')).toBeInTheDocument();
+      } else if (state === 'failed thumbnail') {
+        await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalled());
+        await waitFor(() => expect(within(panel).queryByText('Loading preview…')).not.toBeInTheDocument());
+        expect(detailValue(panel, 'Filament type')).toHaveTextContent(/^PLA$/);
+      } else {
+        expect(mocks.preview).not.toHaveBeenCalled();
+      }
+      rendered.unmount();
+      rendered.queryClient.clear();
+    });
+
+  it.each([undefined, null, {}])('treats a saved empty result (%j) as unknown, not stale preview metadata', async metadata => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({
+      ...catalog, printers: [previewSource], items: [{
+        ...entry, detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata,
+      }],
+    });
+    mocks.preview.mockResolvedValue({
+      locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: false,
+      sizeBytes: 999, printTimeSeconds: 600, layerHeightMm: 0.2,
+      metadata: { printerModel: 'stale preview value', printTimeSeconds: 600, layerHeightMm: 0.2 },
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    await waitFor(() => expect(mocks.preview).toHaveBeenCalled());
+    await waitFor(() => expect(within(panel).queryByText('Loading preview…')).not.toBeInTheDocument());
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unknown$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unknown$/);
+    expect(detailValue(panel, 'Size')).toHaveTextContent(/^Unknown$/);
+    expect(within(panel).getByText('Unknown — no native metadata supplied.')).toBeInTheDocument();
+    expect(within(panel).queryByText('stale preview value')).not.toBeInTheDocument();
+  });
+
+  it('preserves explicit zero and false rather than treating them as absent', async () => {
+    mocks.catalog.mockResolvedValue({
+      ...catalog, items: [{
+        ...entry, sizeBytes: 0, detailsFetchedAtUtc: '2026-10-27T12:00:00Z',
+        metadata: { printTimeSeconds: 0, layerHeightMm: 0, normalPercentPresent: false, filamentUsedPerToolG: [0, 3] },
+      }],
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    expect(detailValue(panel, 'Size')).toHaveTextContent(/^0 Bytes$/);
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^0 s$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0 mm$/);
+    expect(detailValue(panel, 'Normal-mode progress reporting')).toHaveTextContent(/^No$/);
+    expect(detailValue(panel, 'Filament mass per tool')).toHaveTextContent(/^Tool 1: 0 g; Tool 2: 3 g$/);
+    expect(within(panel).queryByText('Printer model', { selector: 'dt' })).not.toBeInTheDocument();
+  });
+
+  it('uses native preview details before the first durable scan', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [previewSource] });
+    mocks.preview.mockResolvedValue({
+      locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: false,
+      sizeBytes: 4096, metadata: { estimatedPrintTimeSeconds: 5400, layerHeightMm: 0.2, printerModel: 'COREONE' },
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    await waitFor(() => expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/));
+    expect(detailValue(panel, 'Size')).toHaveTextContent(/^4 KB$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
+    expect(detailValue(panel, 'Printer model')).toHaveTextContent(/^COREONE$/);
+    expect(within(panel).queryByText(/Saved in catalog/)).not.toBeInTheDocument();
   });
 
   it.each([

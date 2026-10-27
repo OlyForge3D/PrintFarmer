@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Services.Printers;
+
+namespace Farm.Infrastructure.Domain;
 
 /// <summary>Availability of one observed remote path, independent of local copies.</summary>
 public enum PrinterFileAvailability
@@ -81,6 +83,11 @@ public sealed class PrinterFileLocation : IRevisionedEntity
     public string DisplayName { get; set; } = string.Empty;
 
     public long? SizeBytes { get; set; }
+
+    public PrinterPrintMetadata? Metadata { get; set; }
+
+    /// <summary>Successful native detail read, including a valid response with no optional metadata.</summary>
+    public DateTime? DetailsFetchedAtUtc { get; set; }
 
     public string? ModifiedValue { get; set; }
 

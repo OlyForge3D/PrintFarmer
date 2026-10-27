@@ -2,6 +2,14 @@
 
 ### Features
 
+- Persist PrusaLink native file details in the database, including full display
+  names, sizes, and all 41 supported print-metadata fields. Show saved details
+  independently of thumbnail availability; reuse unchanged observations during
+  scheduled scans and refetch on Force Refresh. Remove the inventory HTTP
+  request-count cap while retaining time, entry, depth, and response bounds.
+  Slow or failed optional detail reads no longer discard completed listings;
+  saved details remain available when source evidence is unchanged.
+
 - Add independent Moonraker runtime speed/flow API controls with bounded
   percentages, semantic capabilities and nullable authoritative status/SignalR
   readback. Other backends explicitly reject unsupported writes (#3474).

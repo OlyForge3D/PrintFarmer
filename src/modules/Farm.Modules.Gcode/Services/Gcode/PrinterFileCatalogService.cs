@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -20,18 +21,40 @@ public sealed class PrinterFileCatalogService(
     IPrinterStatusCacheReader statusCache,
     ILogger<PrinterFileCatalogService> logger)
 {
-    public async Task ScanAsync(Guid printerId, CancellationToken ct = default)
+    private static readonly TimeSpan AdapterDeadlineGrace = TimeSpan.FromSeconds(15);
+
+    public async Task ScanAsync(Guid printerId, CancellationToken ct = default) =>
+        _ = await ScanCoreAsync(printerId, false, ct);
+
+    /// <summary>
+    /// Operator-requested scan that ignores the schedule, failure backoff, and automatic-discovery switches,
+    /// and advances every observed file's revision so cached previews are rebuilt. The confirmed-idle check,
+    /// exclusive per-printer lease, and deployment I/O slots still apply.
+    /// </summary>
+    public async Task<PrinterFileForceRefreshResult> ForceRefreshAsync(Guid printerId, CancellationToken ct = default)
     {
-        await using IPrinterFileLease? lease = await leases.TryAcquireAsync(printerId, false, ct);
+        if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
+        {
+            return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
+        }
+
+        return await ScanCoreAsync(printerId, true, ct);
+    }
+
+    private async Task<PrinterFileForceRefreshResult> ScanCoreAsync(Guid printerId, bool force, CancellationToken ct)
+    {
+        await using IPrinterFileLease? lease = force
+            ? await leases.TryAcquireForRefreshAsync(printerId, ct)
+            : await leases.TryAcquireAsync(printerId, false, ct);
         if (lease is null)
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Busy, "source_busy");
         }
 
         Printer? printer = await printers.FindByIdWithIncludesAsync(printerId, lease.Token);
         if (printer is null || !await lease.IsCurrentAsync(ct))
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
         }
 
         PrinterFileInventoryResult result;
@@ -45,21 +68,40 @@ public sealed class PrinterFileCatalogService(
             await using AppDbContext policyDb = await dbFactory.CreateDbContextAsync(ct);
             var settings = await PrinterFileIndexPolicy.ReadAsync(policyDb, ct);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lease.Token);
-            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds));
+
+            // Grace lets the adapter's own deadline fire first and return the listing it already completed.
+            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds) + AdapterDeadlineGrace);
             if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
             {
-                return;
+                return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
             }
 
             try
             {
+                Dictionary<string, PrinterFileInventoryEntry> cachedEntries = [];
+                if (!force)
+                {
+                    var previous = await policyDb.PrinterFileLocations.AsNoTracking()
+                        .Where(x => x.SourcePrinterId == printerId &&
+                            x.Availability == PrinterFileAvailability.Available &&
+                            x.ConfigurationGeneration == lease.ConfigurationGeneration &&
+                            x.MutationGeneration == lease.MutationGeneration &&
+                            x.DetailsFetchedAtUtc != null)
+                        .ToArrayAsync(deadline.Token);
+                    cachedEntries = previous.ToDictionary(x => x.IdentityKey, x => new PrinterFileInventoryEntry(
+                        x.StorageRoot, x.RelativePath, x.SizeBytes, ProviderVersion: x.ProviderVersion,
+                        ProviderHash: x.ProviderDigest, ModifiedValue: x.ModifiedValue, DisplayName: x.DisplayName,
+                        Metadata: x.Metadata, DetailsFetchedAtUtc: x.DetailsFetchedAtUtc));
+                }
+
                 result = await client.GetFileInventoryAsync(
                     printer.BackendUrl,
                     printer.Credential,
                     new PrinterFileInventoryOptions
                     {
                         Deadline = TimeSpan.FromSeconds(settings.ScanTimeoutSeconds),
-                        MaxRequests = settings.MaxRequests,
+                        IncludeFileDetails = true,
+                        CachedEntries = cachedEntries,
                         MaxEntries = settings.MaxEntries,
                         MaxDepth = settings.MaxDepth,
                     },
@@ -69,6 +111,10 @@ public sealed class PrinterFileCatalogService(
             {
                 result = new PrinterFileInventoryResult(
                     PrinterFileInventoryOutcome.Unavailable, PrinterFileInventoryReason.Timeout, [], []);
+            }
+            catch (OperationCanceledException) when (lease.Token.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
             }
 
             if (result.Outcome == PrinterFileInventoryOutcome.Cancelled &&
@@ -81,14 +127,29 @@ public sealed class PrinterFileCatalogService(
 
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || lease.Token.IsCancellationRequested)
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
         }
 
-        await PublishAsync(lease, result, ct);
+        if (!await PublishAsync(lease, result, force, ct))
+        {
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
+        }
+
+        return result.Outcome == PrinterFileInventoryOutcome.Complete
+            ? new(PrinterFileForceRefreshStatus.Completed, result.Reason.ToString(), result.Entries.Length)
+            : new(PrinterFileForceRefreshStatus.Incomplete, result.Reason.ToString());
     }
 
+    public Task<bool> PublishAsync(
+        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default) =>
+        PublishAsync(lease, result, false, ct);
+
+    /// <summary>
+    /// Forced publication advances the revision of every observed file so revision-keyed preview caches miss, except files with an
+    /// in-flight operation that is pinned to the current revision.
+    /// </summary>
     public async Task<bool> PublishAsync(
-        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default)
+        IPrinterFileLease lease, PrinterFileInventoryResult result, bool force, CancellationToken ct = default)
     {
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || ct.IsCancellationRequested)
         {
@@ -107,6 +168,15 @@ public sealed class PrinterFileCatalogService(
         PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync(
             x => x.SourcePrinterId == lease.PrinterId, ct);
         var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
+        HashSet<Guid> pinned = force
+            ? (await db.PrinterFileOperations
+                .Where(x => x.SourcePrinterId == lease.PrinterId &&
+                    x.State != PrinterFileOperationState.Queued &&
+                    x.State != PrinterFileOperationState.Deleted &&
+                    x.State != PrinterFileOperationState.Failed &&
+                    x.State != PrinterFileOperationState.Cancelled)
+                .Select(x => x.LocationId).ToListAsync(ct)).ToHashSet()
+            : [];
         Dictionary<string, PrinterFileLocation> locations = await db.PrinterFileLocations
             .Where(x => x.SourcePrinterId == lease.PrinterId).ToDictionaryAsync(x => x.IdentityKey, ct);
         HashSet<string> observed = new(StringComparer.Ordinal);
@@ -114,7 +184,8 @@ public sealed class PrinterFileCatalogService(
         {
             if (!PrinterInventoryPath.TryCanonicalizeRoot(entry.StorageRoot, out string root) ||
                 !PrinterInventoryPath.TryCanonicalizeRelativePath(entry.RelativePath, out string path) ||
-                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0)
+                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0 ||
+                (entry.Metadata is { } metadata && (!metadata.IsValid() || !entry.DetailsFetchedAtUtc.HasValue)))
             {
                 throw new InvalidOperationException("Inventory adapter returned a noncanonical observation.");
             }
@@ -142,18 +213,47 @@ public sealed class PrinterFileCatalogService(
                 locations.Add(key, location);
             }
 
-            bool changed = location.SizeBytes != entry.SizeBytes ||
+            // A missed detail read keeps saved details while the listing evidence still matches them.
+            bool keepDetails = !isNew && !entry.DetailsFetchedAtUtc.HasValue && location.DetailsFetchedAtUtc.HasValue &&
+                entry.ModifiedValue is not null && location.ModifiedValue == entry.ModifiedValue &&
+                (entry.SizeBytes is null || location.SizeBytes == entry.SizeBytes) &&
+                location.ProviderVersion == entry.ProviderVersion && location.ProviderDigest == entry.ProviderHash &&
+                location.Availability == PrinterFileAvailability.Available &&
+                location.ConfigurationGeneration == lease.ConfigurationGeneration &&
+                location.MutationGeneration == lease.MutationGeneration;
+            long? sizeBytes = keepDetails ? entry.SizeBytes ?? location.SizeBytes : entry.SizeBytes;
+            string? observedDisplayName = entry.DisplayName ?? (keepDetails ? location.DisplayName : null);
+            PrinterPrintMetadata? storedMetadata = keepDetails ? location.Metadata : entry.Metadata;
+            DateTime? detailsFetchedAtUtc = keepDetails ? location.DetailsFetchedAtUtc : entry.DetailsFetchedAtUtc;
+            if (storedMetadata is not null && !storedMetadata.FitsStorage())
+            {
+                logger.LogWarning(
+                    "Skipping print metadata for catalog location {LocationId}: stored JSON exceeds {MaxLength} characters",
+                    location.Id,
+                    PrinterPrintMetadata.MaximumStoredJsonLength);
+                storedMetadata = null;
+            }
+
+            bool changed = location.SizeBytes != sizeBytes ||
                 location.ModifiedValue != entry.ModifiedValue ||
                 location.ProviderVersion != entry.ProviderVersion ||
                 location.ProviderDigest != entry.ProviderHash ||
+                JsonSerializer.Serialize(location.Metadata, PrinterPrintMetadata.StorageJsonOptions) !=
+                    JsonSerializer.Serialize(storedMetadata, PrinterPrintMetadata.StorageJsonOptions) ||
                 location.ConfigurationGeneration != lease.ConfigurationGeneration;
-            if (!isNew && (changed || location.Availability == PrinterFileAvailability.Deleted))
+            if (!isNew && ((force && !pinned.Contains(location.Id)) || changed ||
+                    location.Availability == PrinterFileAvailability.Deleted))
             {
                 location.ObservationRevision++;
             }
 
-            location.DisplayName = path[(path.LastIndexOf('/') + 1)..];
-            location.SizeBytes = entry.SizeBytes;
+            location.DisplayName = observedDisplayName is { Length: > 0 and <= 512 } displayName &&
+                !string.IsNullOrWhiteSpace(displayName) &&
+                !displayName.Any(c => char.IsControl(c) || c is '/' or '\\')
+                ? displayName : path[(path.LastIndexOf('/') + 1)..];
+            location.SizeBytes = sizeBytes;
+            location.Metadata = storedMetadata;
+            location.DetailsFetchedAtUtc = detailsFetchedAtUtc;
             location.ModifiedValue = entry.ModifiedValue;
             location.ProviderVersion = entry.ProviderVersion;
             location.ProviderDigest = entry.ProviderHash;

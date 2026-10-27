@@ -62,6 +62,11 @@ public interface IPrusaLinkApiClient
         PrinterFileInventoryOptions? options = null, CancellationToken ct = default) =>
         Task.FromResult(PrinterFileInventoryResult.Unsupported());
 
+    /// <summary>Bounded native file preview; custom clients without this capability fail closed.</summary>
+    Task<PrinterFilePreviewContent> GetFilePreviewAsync(
+        string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct) =>
+        Task.FromException<PrinterFilePreviewContent>(new PrinterFileCopyException("preview_unsupported"));
+
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
     /// <summary>Gets API version information.</summary>
