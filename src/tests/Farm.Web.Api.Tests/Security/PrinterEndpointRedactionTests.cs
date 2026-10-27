@@ -77,6 +77,10 @@ public sealed class PrinterEndpointRedactionTests
             await client.GetAsync("/api/printers/camera-urls");
         HttpResponseMessage printerListResponse =
             await client.GetAsync("/api/printers");
+        HttpResponseMessage printerResponse =
+            await client.GetAsync($"/api/printers/{printerId:D}");
+        HttpResponseMessage viewOnlyPrinterResponse =
+            await viewOnlyClient.GetAsync($"/api/printers/{printerId:D}");
         HttpResponseMessage viewOnlyDetailsResponse =
             await viewOnlyClient.GetAsync($"/api/printers/{printerId:D}/details");
 
@@ -85,6 +89,8 @@ public sealed class PrinterEndpointRedactionTests
         _ = cameraResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = cameraListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = printerListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = printerResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = viewOnlyPrinterResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = viewOnlyDetailsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string redactedRoutesJson = string.Join(
@@ -109,6 +115,13 @@ public sealed class PrinterEndpointRedactionTests
         _ = detailsJson.Should().Contain("\"passwordConfigured\":true");
         _ = detailsResponse.Headers.CacheControl?.NoStore.Should().BeTrue();
         _ = printerListJson.Should().Contain("\"frontendUrl\":\"http://printer.internal:7125\"");
+        foreach (HttpResponseMessage response in new[] { printerResponse, viewOnlyPrinterResponse })
+        {
+            string printerJson = await response.Content.ReadAsStringAsync();
+            AssertSecretsAreAbsent(printerJson, includePrinterHost: false);
+            _ = printerJson.Should().Contain("\"frontendUrl\":\"http://printer.internal:7125\"");
+            _ = printerJson.Should().NotContain("\"backendUrl\"").And.NotContain("\"originalServerUrl\"");
+        }
         _ = viewOnlyDetailsJson.Should().NotContain("\"serverUrl\"");
         _ = viewOnlyDetailsJson.Should().NotContain("printer.internal");
     }

@@ -36,7 +36,7 @@ namespace Farm.Infrastructure;
 /// <param name="FrontendPort">Frontend port number.</param>
 /// <param name="SpoolInfo">Active spool information (Moonraker + Spoolman integration).</param>
 /// <param name="BackendUrl">Calculated backend URL with port (7125 for Moonraker, etc).</param>
-/// <param name="FrontendUrl">Calculated frontend URL (typically port 80 for web UI).</param>
+/// <param name="FrontendUrl">Calculated frontend URL, sanitized for client navigation during serialization.</param>
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
 /// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
@@ -105,4 +105,11 @@ public record PrinterDto(
     bool ShowExternalSpool = false,
     string? ActiveExtruderId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null)
+{
+    /// <summary>
+    /// Credential-free native web URL, with query parameters and fragments removed.
+    /// </summary>
+    [JsonPropertyName("frontendUrl")]
+    public string? ClientFrontendUrl => PrinterClientUrl.Create(FrontendUrl);
+}

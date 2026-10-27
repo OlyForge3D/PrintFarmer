@@ -305,7 +305,7 @@ struct JogSubgroup: View {
         let signedStep = direction * selectedStep
         let stepLabelText = stepLabel(selectedStep)
         let hasError = isErrored(direction: direction)
-        let isInteractive = viewModel.canControl && !viewModel.isExecuting
+        let isInteractive = viewModel.canJog(axis: selectedAxis)
 
         Button {
             handleTap {
@@ -339,7 +339,7 @@ struct JogSubgroup: View {
 
     /// Unavailable controls are disabled without explanatory text (#3548).
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl, !viewModel.isExecuting else { return }
+        guard viewModel.canJog(axis: selectedAxis) else { return }
         action()
     }
 
@@ -357,10 +357,24 @@ struct JogSubgroup: View {
         if !viewModel.canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
+        if let reason = Self.homingBlockedHint(axis: selectedAxis, homedAxes: viewModel.printer.homedAxes) {
+            return reason
+        }
         if direction > 0 {
             return String(localized: "Moves \(selectedAxis) positive \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog per spec §4.1")
         }
         return String(localized: "Moves \(selectedAxis) negative \(stepLabelText) millimeters.", comment: "VoiceOver hint for negative jog per spec §4.1")
+    }
+
+    static func homingBlockedHint(axis: String, homedAxes: String?) -> String? {
+        switch isAxisHomed(axis, homedAxes: homedAxes) {
+        case nil:
+            return "\(axis) homing status is unknown. Jogging requires reported homing from the printer."
+        case false:
+            return "Home \(axis) before jogging."
+        case true:
+            return nil
+        }
     }
 
     func jogAccessibilityValue(isPending: Bool, hasError: Bool) -> String {
@@ -540,12 +554,15 @@ struct PrinterMotionControls: View {
         return ControlActionButton(
             title: title, identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
             accessibilityTitle: "Move \(axis) \(direction)",
-            hint: available ? "Moves \(step.formatted()) millimeters." : "\(axis) movement is unavailable.",
+            hint: available
+                ? JogSubgroup.homingBlockedHint(axis: axis, homedAxes: viewModel.printer.homedAxes)
+                    ?? "Moves \(step.formatted()) millimeters."
+                : "\(axis) movement is unavailable.",
             compact: true, systemImage: symbol, value: pending ? "Pending" : nil,
             minimumHeight: 48,
             isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: sign * step) } }
-        .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
+        .disabled(!viewModel.canJog(axis: axis))
     }
 
     private func homeAll(minimumHeight: CGFloat = 48) -> some View {

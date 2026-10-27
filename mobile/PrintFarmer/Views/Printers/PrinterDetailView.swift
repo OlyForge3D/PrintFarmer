@@ -114,12 +114,6 @@ struct PrinterDetailView: View {
                 emergencyStopFillsAvailableWidth: fillsWidth,
                 onSelect: { kind in handleRunAction(kind) }
             )
-            if !printer.isOnline {
-                Text("Printer offline. Use the physical safety switch if needed.")
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .frame(maxWidth: .infinity, alignment: fillsWidth ? .center : .trailing)
         .padding(.horizontal)
@@ -339,11 +333,8 @@ struct PrinterDetailView: View {
 
             Spacer(minLength: 12)
 
-            if let baseURL = serverRegistry.activeServer?.baseURL {
-                Link(
-                    destination: baseURL.appendingPathComponent("printers")
-                        .appendingPathComponent(printerId.uuidString.lowercased())
-                ) {
+            if let nativeWebURL = viewModel.nativeWebURL {
+                Link(destination: nativeWebURL) {
                     Text("Open in web ↗")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextSecondary)
@@ -352,6 +343,7 @@ struct PrinterDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("printer.detail.web")
+                .accessibilityHint("Opens the printer's native web interface.")
             }
         }
         .padding(.horizontal, 16)
@@ -688,7 +680,10 @@ struct PrinterDetailView: View {
     // MARK: - Main Content
 
     private func controlsAvailable(for printer: Printer) -> Bool {
-        PrinterControlsAccess.isEntryVisible(for: printer)
+        PrinterControlsAccess.isEntryVisible(
+            for: printer,
+            hasControlsOwner: controlsViewModel?.printer.id == printer.id
+        )
     }
 
     /// An offline visit fetches setup capabilities only for Moonraker printers,
@@ -842,7 +837,8 @@ struct PrinterDetailView: View {
             onAction: { handleFilamentAction($0) },
             showsAllActions: true,
             spoolDetailsByID: spoolLookup.spoolsByID,
-            spoolLookupMessage: spoolLookup.statusMessage
+            spoolLookupMessage: spoolLookup.statusMessage,
+            isSpoolLookupPending: spoolLookup.isAwaitingResult
         )
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {

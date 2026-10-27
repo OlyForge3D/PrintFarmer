@@ -376,7 +376,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private var commandStateInvalidated = false
     private var lifecycleGeneration = 0
 
-    private(set) var printer: Printer
+    @Published private(set) var printer: Printer
 
     private let printerService: any PrinterServiceProtocol
     private let clock: @Sendable () -> Date
@@ -692,7 +692,7 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
-        finishAcceptedRequest(command, notice: "Extrusion request accepted. Travel and physical filament state are not reported; verify at the printer.")
+        finishAcceptedRequest(command)
     }
 
     func filamentBlockedReason(_ operation: PhysicalFilamentOperation) -> String? {
@@ -711,35 +711,30 @@ final class PrinterControlsViewModel: ObservableObject {
             setError(command: command, message: reason, isRetryable: false)
             return
         }
-        var responseMessage: String?
         await perform(command) { [self] in
             if let reason = filamentBlockedReason(operation) { throw PrinterControlError.invalidRequest(reason) }
             switch operation {
             case .load:
                 let result = try await printerService.loadFilament(printerId: printer.id)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             case .unload:
                 // Residual weight/spool ID describe inventory, not physical
                 // completion. No binding, clearing or slot targeting occurs.
                 let result = try await printerService.unloadFilament(printerId: printer.id, toolheadIndex: nil)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             case .change:
                 let result = try await printerService.changeFilament(printerId: printer.id)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             }
         }
-        let detail = responseMessage.map { " Server response: \($0)" } ?? ""
-        finishAcceptedRequest(command, notice: "\(operation.title) request accepted. Follow the printer's prompts and verify physical completion. Spool assignment was not changed.\(detail)")
+        finishAcceptedRequest(command)
     }
 
-    private func finishAcceptedRequest(_ command: ControlCommand, notice: String) {
+    private func finishAcceptedRequest(_ command: ControlCommand) {
         guard pendingCommand == command, lastError == nil, !commandStateInvalidated,
               !Task.isCancelled, canExecute(command) else { return }
         pendingCommand = nil
-        commandNotice = notice
+        commandNotice = nil
     }
 
     // MARK: - Interruptible calibration
@@ -1091,7 +1086,7 @@ final class PrinterControlsViewModel: ObservableObject {
             calibrationMessage = "Save was not confirmed. Check the printer, then cancel and refresh/review. No automatic retry was sent."
             return
         }
-        finishAcceptedRequest(command, notice: "Firmware save request accepted. The printer may restart or disconnect. Verify the offset at the machine before printing.")
+        finishAcceptedRequest(command)
         calibrationStep = .done
         calibrationCommandID = nil
         releaseCalibrationLease()
@@ -1301,10 +1296,7 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
-        finishAcceptedRequest(
-            command,
-            notice: "Sensor command accepted. Readback remains observational; physical completion is not confirmed."
-        )
+        finishAcceptedRequest(command)
     }
 
     func runtimeFactorPercent(_ factor: RuntimeFactor) -> Double? {
@@ -1406,7 +1398,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if target != nil {
             await refreshSafetyEvidence(refreshDiscovery: false)
         } else {
-            finishAcceptedRequest(command, notice: "Z-offset adjustment request accepted. Live offset readback is unavailable; physical completion is not confirmed.")
+            finishAcceptedRequest(command)
         }
     }
 
@@ -1616,10 +1608,12 @@ final class PrinterControlsViewModel: ObservableObject {
             guard result.success else {
                 throw PrinterControlError.invalidRequest(result.message ?? "Motor release was rejected.")
             }
+            if self.pendingCommand == command {
+                // Acceptance invalidates cached homing; only subsequent telemetry can restore it.
+                self.printer.homedAxes = nil
+            }
         }
-        guard pendingCommand == command, lastError == nil else { return }
-        commandNotice = "Motor release request accepted. Motor state is not reported; verify the machine and re-home before moving."
-        pendingCommand = nil
+        finishAcceptedRequest(command)
     }
 
     func dismissError() {
@@ -1756,6 +1750,18 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && !isPrintingOrPaused
     }
 
+    func canJog(axis: String) -> Bool {
+        canControl && !isExecuting && isJogAxisReady(axis)
+    }
+
+    private func isJogAxisReady(_ axis: String) -> Bool {
+        let normalized = axis.uppercased()
+        return ["X", "Y", "Z"].contains(normalized)
+            && capabilities?.supportsMovement == true
+            && capabilities?.supportedAxes.contains(normalized) == true
+            && printer.homedAxes?.uppercased().contains(normalized) == true
+    }
+
     /// Heater targets stay available during a print only when the backend
     /// confirms it can apply them under the active-print lease.
     var supportsHeatDuringPrint: Bool {
@@ -1822,6 +1828,10 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
+        if case let .jog(axis, _) = command.kind,
+           ["X", "Y", "Z"].contains(axis.uppercased()) {
+            return !isPrintingOrPaused && isJogAxisReady(axis)
+        }
         if case .runtimeFactor = command.kind {
             return isRunningPrint && runtimePrinterStateIsSupported
         }
@@ -2056,7 +2066,7 @@ final class PrinterControlsViewModel: ObservableObject {
             uncertainResponse = false
         }
         let message = mapped.isRetryable || uncertainResponse
-            ? "\(mapped.message) Outcome may be unknown. Check the printer before sending another request."
+            ? "\(mapped.message) Check the printer before retrying."
             : mapped.message
         setError(command: command, message: message, isRetryable: mapped.isRetryable)
     }
@@ -2074,9 +2084,9 @@ final class PrinterControlsViewModel: ObservableObject {
     static func mapError(_ error: Error) -> (message: String, isRetryable: Bool) {
         if let net = error as? NetworkError {
             switch net {
-            case .noConnection: return ("No internet connection.", true)
+            case .noConnection: return ("Command connection failed.", true)
             case .timeout: return ("Request timed out.", true)
-            case .serverUnreachable: return ("Printer is unreachable.", true)
+            case .serverUnreachable: return ("Couldn't reach the server for this command.", true)
             case .transportError: return ("Network error.", true)
             case .serverError: return ("Printer reported a server error.", true)
             case .conflict(let api): return (api?.displayMessage ?? "Printer is busy.", false)
@@ -2102,9 +2112,9 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         if let url = error as? URLError {
             switch url.code {
-            case .notConnectedToInternet, .networkConnectionLost: return ("No internet connection.", true)
+            case .notConnectedToInternet, .networkConnectionLost: return ("Command connection failed.", true)
             case .timedOut: return ("Request timed out.", true)
-            case .cannotConnectToHost, .cannotFindHost: return ("Printer is unreachable.", true)
+            case .cannotConnectToHost, .cannotFindHost: return ("Couldn't reach the server for this command.", true)
             default: return ("Network error.", true)
             }
         }

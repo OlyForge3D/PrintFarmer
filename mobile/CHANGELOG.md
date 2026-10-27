@@ -4,7 +4,41 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Filament loading flash (#3565)** — Opening the Filament tab no longer
+  briefly reports unknown spool amounts before the inventory lookup finishes.
+  Completed missing-data and lookup-failure states remain visible.
+
+- **Stable control panel (#3565)** — Loaded controls no longer disappear and
+  reappear on printer offline/online updates; offline commands stay disabled.
+  Homing and readiness changes update buttons immediately rather than waiting
+  for another refresh. The global banner now says "Server connected", and the
+  redundant offline safety-switch footer is removed.
+
+- **Native printer web link (#3565)** — "Open in web" opens the printer's
+  configured frontend URL rather than PrintFarmer's printer page. The link is
+  hidden if there is no valid HTTP(S) frontend address. Canonical detail
+  responses preserve the sanitized URL without credentials, queries or fragments.
+
+- **Request-scoped connection errors (#3565)** — A failed control request no
+  longer claims "No internet connection" while the server banner is Connected.
+  Failures retain a short check-before-retry instruction and an accessible
+  close icon instead of the visible "Dismiss" label.
+
+- **Jog homing gate (#3565)** — Jog buttons enable only for supported axes
+  reported homed. Unknown or unhomed axes stay disabled without lockout text;
+  the same rule is checked again before dispatch. OctoPrint and PrusaLink
+  lack homing telemetry, so Home acceptance cannot enable their jog buttons.
+  VoiceOver distinguishes unknown homing from explicitly unhomed axes.
+  Accepted motor release invalidates cached homing until subsequent telemetry.
+
 ### Removed
+
+- **Remaining control acceptance disclaimers (#3565)** — Sensor targets,
+  extrusion, filament operations, motor release, firmware saves and Z-offset
+  adjustments without readback are now silent on success, like other controls.
+  Actual errors and interrupted-request warnings remain visible.
 
 - **Leftover lockout text (#3548, #3542)** — Printer detail, the Control tab
   (Move, Heat, Tune) and the filament section no longer render lockout banners,

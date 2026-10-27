@@ -9,6 +9,45 @@ import Vision
 @MainActor
 final class PreheatSubgroupTests: XCTestCase {
 
+    func test_commandFailureKeepsActionableTextWithIconOnlyDismissal() async throws {
+        let (model, service) = try await thermalModel()
+        defer { model.deactivate() }
+        service.errorToThrow = NetworkError.noConnection
+        await model.setHeaterTarget(.hotend, target: 200)
+
+        let controller = UIHostingController(rootView:
+            PrinterControlCommandFeedback(viewModel: model, section: .heat)
+                .frame(width: 326)
+                .fixedSize(horizontal: false, vertical: true)
+        )
+        let window = UIWindow()
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(x: 0, y: 0, width: 326, height: 200)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await settle(controller)
+
+        let dismiss = try XCTUnwrap(try control("printer.controls.dismiss-error", in: controller) as? UIButton)
+        XCTAssertNil(dismiss.configuration?.title, "Dismissal is an icon, not visible text")
+        XCTAssertNotNil(dismiss.configuration?.image)
+        XCTAssertEqual(dismiss.accessibilityLabel, "Dismiss error")
+        XCTAssertGreaterThanOrEqual(dismiss.bounds.width, 44)
+        XCTAssertGreaterThanOrEqual(dismiss.bounds.height, 44)
+        let text = try recognizedTexts(controller).joined(separator: " ").lowercased()
+        XCTAssertTrue(text.contains("command connection failed"), text)
+        XCTAssertFalse(text.contains("internet"), text)
+        XCTAssertFalse(text.contains("outcome may be unknown"), text)
+        XCTAssertFalse(text.contains("dismiss"), text)
+
+        dismiss.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(model.lastError)
+        XCTAssertFalse(nativeControls(controller.view).contains {
+            $0.accessibilityIdentifier == "printer.controls.dismiss-error"
+        })
+    }
+
     func test_thermalPhoneHeight() async throws {
         let (model, _) = try await thermalModel()
         let controller = UIHostingController(rootView: thermalContent(model, width: 326))
@@ -547,6 +586,14 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(service.setSensorValueCalledWith?.quantity, .targetTemperature)
         XCTAssertEqual(service.setSensorValueCalledWith?.value, 45)
         XCTAssertNil(service.setTemperaturesCalledWith, "No heater changes")
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.commandNotice, "Chamber target acceptance must not render a disclaimer (#3565)")
+        try await settle(controller)
+        XCTAssertFalse(try recognizedTexts(controller).contains {
+            $0.localizedCaseInsensitiveContains("command accepted")
+                || $0.localizedCaseInsensitiveContains("physical completion")
+                || $0.localizedCaseInsensitiveContains("observational")
+        }, "The Heat panel must stay silent after a successful sensor command")
         model.cancelPendingCommand()
     }
 

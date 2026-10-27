@@ -85,6 +85,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var moveToCalledWith: (printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)?
     var extrudeCalledWith: (printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int)?
     var disableMotorsCalledWith: UUID?
+    var beforeDisableMotors: (@Sendable () async -> Void)?
     var turnOffHeatersCallCount = 0
     var turnOffHeatersCalledWith: UUID?
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
@@ -316,6 +317,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func disableMotors(printerId: UUID) async throws -> CommandResult {
         disableMotorsCalledWith = printerId
+        if let beforeDisableMotors { await beforeDisableMotors() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

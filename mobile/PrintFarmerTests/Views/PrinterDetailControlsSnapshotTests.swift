@@ -992,6 +992,37 @@ final class PrinterDetailControlsSnapshotTests: XCTestCase {
         }
     }
 
+    func test_instrumentPanel_offlineUpdateRetainsSupportedMotionButDisablesCommands() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.layoutCaps)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let (window, controller) = install(PrinterInstrumentPanelControls(printer: printer, viewModel: model))
+        defer { window.isHidden = true; model.deactivate() }
+        try await settle(controller)
+        let jog = try panelControl("printer.controls.jog.x.positive", in: controller)
+        let home = try panelControl("printer.controls.home.all", in: controller)
+        XCTAssertTrue(jog.isEnabled)
+        XCTAssertTrue(home.isEnabled)
+
+        var offline = printer
+        offline.isOnline = false
+        model.handlePrinterUpdate(offline)
+        try await settle(controller)
+        XCTAssertTrue(try panelControl("printer.controls.jog.x.positive", in: controller) === jog)
+        XCTAssertTrue(try panelControl("printer.controls.home.all", in: controller) === home)
+        XCTAssertFalse(jog.isEnabled)
+        XCTAssertFalse(home.isEnabled)
+        let text = VisibleText.collect(in: controller.view)
+        XCTAssertTrue(text.contains("Move X positive"), "The retained motion panel must still render")
+        VisibleText.assertNoLockoutText(text, "retained-offline-motion")
+        XCTAssertFalse(text.contains { $0.localizedCaseInsensitiveContains("unavailable") }, "\(text)")
+        await model.jog(axis: "X", distanceMm: 1)
+        await model.homeAll()
+        XCTAssertNil(service.moveCalledWith, "Offline mutation must fail closed even outside the disabled button")
+        XCTAssertNil(service.homeCalledWith)
+    }
+
     /// The production Control-page host shows no offline banner (#3548).
     func test_offlineControlPage_rendersNoLockoutBanner() async throws {
         let (window, controller) = install(PrinterDetailControlsUnavailable())

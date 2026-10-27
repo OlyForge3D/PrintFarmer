@@ -1,9 +1,63 @@
 import XCTest
 import SwiftUI
+import Vision
 @testable import PrintFarmer
 
 @MainActor
 final class PrinterFilamentSectionTests: XCTestCase {
+    func testFilamentTabWaitsForSpoolLookupBeforeShowingUnknownQuantities() async throws {
+        let printer = try TestData.decodePrinter()
+        let spool = try TestData.decodeSpoolmanSpool()
+        let model = PrinterFilamentPresentation(
+            printer: printer, toolheads: [],
+            spool: PrinterSpoolInfo(hasActiveSpool: true, activeSpoolId: spool.id, material: "PLA"),
+            coverage: nil, coverageState: .loading, isStale: false, supportedActions: []
+        )
+        for (pending, details, message, expectsUnknown) in [
+            (true, [Int: SpoolmanSpool](), Optional<String>.none, false),
+            (true, [:], "Loading spool capacity…", false),
+            (false, [spool.id: spool], nil, false),
+            (false, [:], "Some assigned spools were not found in inventory.", true),
+            (false, [:], "Spool capacity unavailable: Request timed out.", true)
+        ] {
+            let section = PrinterFilamentSection(
+                presentation: model, actions: [], onAction: { _ in XCTFail("Rendering must not send commands") },
+                showsAllActions: true, spoolDetailsByID: details,
+                spoolLookupMessage: message, isSpoolLookupPending: pending
+            )
+            let host = UIHostingController(rootView: section.frame(width: 350))
+            let window = UIWindow()
+            window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            try await Task.sleep(for: .milliseconds(100))
+            let accessibilityText = VisibleText.collect(in: host.view).joined(separator: " ")
+            let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
+            }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: try XCTUnwrap(image.cgImage)).perform([request])
+            let visibleText = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: " ")
+            let text = accessibilityText + " " + visibleText
+            XCTAssertTrue(text.contains("PLA"), "The assigned filament must remain visible: \(text)")
+            XCTAssertEqual(accessibilityText.contains("Spool amount Unknown"), expectsUnknown, text)
+            XCTAssertEqual(visibleText.contains("Unknown"), expectsUnknown, visibleText)
+            if let message {
+                XCTAssertTrue(text.contains(message), "Real lookup failures must stay visible: \(text)")
+            }
+            if !details.isEmpty {
+                XCTAssertTrue(text.contains(SpoolWeightMeter(
+                    remainingGrams: spool.remainingWeightG, initialGrams: spool.initialWeightG
+                ).label), text)
+            }
+        }
+    }
+
     private func presentation(
         printer: Printer,
         stale: Bool = false,

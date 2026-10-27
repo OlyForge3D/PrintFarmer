@@ -26,6 +26,78 @@ final class PrinterDetailViewModelTests: XCTestCase {
 
     // MARK: - Load Printer Detail
 
+    func testNativeWebURLSurvivesCanonicalDetailLoadThroughPrinterService() async throws {
+        let api = MockAPIClient()
+        let service = PrinterService(apiClient: api.apiClient)
+        viewModel.configure(printerService: service)
+        let address = "https://printer.local:8443/mainsail"
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(TestJSON.printerMinimal.utf8)) as? [String: Any]
+        )
+        json["frontendUrl"] = address
+        json["isOnline"] = false
+        let payload = try JSONSerialization.data(withJSONObject: json)
+        let detailPath = "/api/printers/\(TestData.testUUID)"
+        api.requestHandler = { request in
+            let canonical = request.url?.path == detailPath
+            return (TestData.httpResponse(url: request.url, statusCode: canonical ? 200 : 404),
+                    canonical ? payload : Data())
+        }
+
+        for cached in [false, true] {
+            if cached { viewModel.seedCachedPrinter(try printerWithFrontendURL(address)) }
+            await viewModel.loadPrinter()
+            XCTAssertNil(viewModel.errorMessage)
+            XCTAssertFalse(viewModel.isShowingCachedPrinter)
+            XCTAssertEqual(viewModel.nativeWebURL?.absoluteString, address,
+                           "Both direct navigation and replacement of a list seed must retain the native URL")
+        }
+        let requests = api.capturedRequests.filter { $0.url?.path == detailPath }
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.httpMethod == "GET" })
+
+        json.removeValue(forKey: "frontendUrl")
+        api.stubResponse(json: String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self))
+        await viewModel.loadPrinter()
+        XCTAssertNil(viewModel.nativeWebURL, "A missing canonical URL must hide the link, not keep a stale list URL")
+    }
+
+    func testNativeWebURLUsesPrinterFrontendWithoutReplacingItsPortOrPath() throws {
+        for address in [
+            "http://192.168.1.100",
+            "https://printer.local:8443/mainsail/?printer=one",
+            "http://[fd00::1234]:8080/fluidd/"
+        ] {
+            viewModel.printer = try printerWithFrontendURL(address)
+            XCTAssertEqual(viewModel.nativeWebURL?.absoluteString, address)
+            XCTAssertNotEqual(viewModel.nativeWebURL?.port, 7125, "Never substitute the Moonraker API endpoint")
+        }
+    }
+
+    func testNativeWebURLHidesMissingInvalidAndCredentialBearingAddresses() throws {
+        XCTAssertNil(viewModel.nativeWebURL, "No link before the printer loads")
+        for address: String? in [
+            nil, "", " ", "/printers/123", "printer.local",
+            "javascript:alert(1)", "file:///etc/hosts", "ftp://printer.local",
+            "https://", "http://user:password@printer.local", "http://user@printer.local"
+        ] {
+            viewModel.printer = try printerWithFrontendURL(address)
+            XCTAssertNil(viewModel.nativeWebURL, String(describing: address))
+        }
+    }
+
+    private func printerWithFrontendURL(_ address: String?) throws -> Printer {
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(TestJSON.printer.utf8)) as? [String: Any]
+        )
+        if let address {
+            json["frontendUrl"] = address
+        } else {
+            json.removeValue(forKey: "frontendUrl")
+        }
+        return try TestData.decoder.decode(Printer.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
     func testEveryDetailPageTransitionStopsAndRestartsStatusCameraPolling() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         printer.isOnline = true

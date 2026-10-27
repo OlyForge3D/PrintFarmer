@@ -9,6 +9,7 @@ struct PrinterFilamentSection: View {
     var showsAllActions = false
     var spoolDetailsByID: [Int: SpoolmanSpool] = [:]
     var spoolLookupMessage: String?
+    var isSpoolLookupPending = false
     @State var detailsExpanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -152,7 +153,8 @@ struct PrinterFilamentSection: View {
                     let spoolDetails = row.spoolID.flatMap { spoolDetailsByID[$0] }
                     // The meter already states the remaining weight, so the
                     // quantity line only stands in when there is no meter (#3496 D4).
-                    if spoolDetails == nil || conciseCoverageSummaryText(for: row) != nil {
+                    let awaitingSpool = row.spoolID != nil && isSpoolLookupPending
+                    if (spoolDetails == nil && !awaitingSpool) || conciseCoverageSummaryText(for: row) != nil {
                         coverageSummary(row, useConciseRunoutCopy: true)
                     }
                     if let spoolDetails {
