@@ -46,6 +46,10 @@
 
 ### Fixes
 
+- Update System.Security.Cryptography.Xml and its transitive Pkcs dependency
+  from 10.0.10 to 10.0.14 across .NET projects, resolving high- and
+  moderate-severity NuGet security advisories (#3568).
+
 - iOS: remove the Heat **Go** button. Nozzle, Bed, Chamber, Heater Box and
   other settable heaters now share one row: name, current reading, a tappable
   target and ±. Steppers apply that heater after a short pause; typed targets
