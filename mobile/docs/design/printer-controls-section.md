@@ -191,7 +191,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Preheat PLA/PETG/ABS (+ ASA/TPU/PC/Nylon via More) | `setTemperatures` | Idle-only (blocked while starting, printing or paused, regardless of `supportsTemperatureControlDuringPrint`). Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
 | Cool Down | `turnOffHeaters` (`POST /heaters/off`), else `setTemperatures` 0/0 | Always shown; idle-only (disabled while starting, printing or paused). Heater shutdown when `supportsHeaterShutdown`, otherwise 0/0 targets; confirms 0 on each supported heater |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
-| Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
+| Jog | `move` | Movement + supported axis explicitly reported homed; unknown/unhomed axes stay disabled. Recheck before dispatch; HTTP response settles the request without claiming physical completion |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
 | Absolute XYZ | `moveTo` | All XYZ required; verified operation, frame, bounds, homing and clearance; every coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
@@ -248,8 +248,14 @@ Load, Unload and Change filament require their own explicit operation flags,
 Supported per-operation discovery, the same measured-temperature guard, and
 a native confirmation. The unload path consumes `FilamentUnloadResult`;
 its residual weight and spool ID are not physical-loaded state. Successful
-results say **request accepted**, preserve server guidance and ask the operator
-to verify completion. False/failed/uncertain responses never become success.
+results are silent, as are sensor targets, extrusion, motor release, firmware
+saves and Z-offset adjustments without readback (#3565). No routine acceptance
+or physical-completion disclaimer is rendered. False/failed/uncertain responses
+remain actionable failures, never success.
+Command transport failures describe the failed request, not the device's global
+internet state; a healthy server connection does not confirm a command's outcome.
+Errors retain a concise check-before-retry instruction and an icon-only,
+VoiceOver-labelled dismissal.
 No physical action binds or clears a spool, and no action supplies a toolhead
 index. Existing Assign/Change spool, Clear assignment, NFC and combined Eject
 remain unchanged under their original owners.
@@ -277,8 +283,9 @@ The guarded downstream semantics use 0.01/0.05/0.1 mm increments (negative is
 closer), -5…5 mm save bounds, a freshly reviewed `PrinterDetails.rowVersion`,
 and `saveToFirmware: true`. A review is consumed on any save attempt, including
 412/428 or an uncertain outcome; refresh/review never automatically retries.
-Done describes firmware-request acceptance, not a measured gap or first-layer
-quality. The full conditional flow is exercised with a synthetic shared-contract
+Done retains only the first-layer check instruction, without an acceptance
+disclaimer or a claim of measured clearance or first-layer quality.
+The full conditional flow is exercised with a synthetic shared-contract
 fixture; it is not a claim that any current production backend proves every fact.
 
 Cancellation/dismissal, loss of access and server-epoch changes invalidate the

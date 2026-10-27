@@ -155,18 +155,33 @@ The app supports multiple registered PrintFarmer backend servers. Server
 registrations are stored locally in UserDefaults on the device, and each server
 keeps its own Keychain-stored credentials.
 
+The printer detail **Open in web** link opens that printer's configured native
+web interface (`frontendUrl`), not the PrintFarmer web app or backend API.
+It is hidden when no valid HTTP(S) frontend URL is available.
+
 ### Direct Motion Controls
 
 Home All/XY/Z, relative jogs and absolute positioning use ordinary direct
 command endpoints. Controls remain gated by authorization, printer readiness,
 backend capabilities and movement safety. Absolute positioning allows blank
 axes to remain unchanged; current telemetry is used only to validate safety.
+Jogging additionally requires the corresponding axis to be reported homed.
+Unknown or unhomed axes stay disabled until a printer update reports homing;
+the same check applies immediately before dispatch.
 
 A successful response means the backend accepted the command, not that physical
 motion completed. The in-flight request disables conflicting actions.
 Canceling observation, closing a screen or disconnecting cannot recall a command.
 After a timeout or uncertain outcome, inspect the printer before another action.
 Commands are never automatically retried or replayed on reconnect.
+Routine accepted commands are silent. Connection errors describe the failed
+command request, rather than claiming the device has no internet; they remain
+visible until dismissed or replaced by the next command.
+
+Once loaded, the Control panel stays in place through printer connectivity
+changes; offline commands remain disabled. The top "Server connected" banner
+describes the app's connection to PrintFarmer, not an individual printer's
+availability.
 
 There are no motion journals, operation IDs, receipt polling, recovery panels
 or admission-resubmission flows. Ordinary printer telemetry and safety refreshes

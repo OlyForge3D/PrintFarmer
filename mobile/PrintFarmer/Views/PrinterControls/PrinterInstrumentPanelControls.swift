@@ -125,39 +125,37 @@ struct PrinterInstrumentPanelControls: View {
     }
 
     var body: some View {
-        if PrinterControlsAccess.isEntryVisible(for: printer) {
-            VStack(alignment: .leading, spacing: 12) {
-                loadIssues
-                if let label = Self.transitionalStateLabel(isPrinting: isPrinting, isLocked: isLocked) {
-                    Text(label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityIdentifier("printer.controls.state-label")
+        VStack(alignment: .leading, spacing: 12) {
+            loadIssues
+            if let label = Self.transitionalStateLabel(isPrinting: isPrinting, isLocked: isLocked) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .accessibilityIdentifier("printer.controls.state-label")
+            }
+            segmentPicker
+            Group {
+                switch segment {
+                case .move: movePanel
+                case .heat: heatPanel
+                case .tune: tunePanel
                 }
-                segmentPicker
-                Group {
-                    switch segment {
-                    case .move: movePanel
-                    case .heat: heatPanel
-                    case .tune: tunePanel
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(Color.pfTextPrimary)
-            .environment(\.controlActionCornerRadius, Self.cornerRadius)
-            .environment(\.controlActionSelectedFill, Color.pfSegmentSelected)
-            .environment(\.preheatPresetsFillRow, true)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("printer.controls.instrument-panel")
-            .onChange(of: isPrinting, initial: true) { _, printing in
-                selectedSegment = Self.selection(
-                    afterPrintingChange: selectedSegment, isPrinting: printing, isLocked: isLocked
-                )
-            }
+            .padding(12)
+            .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(Color.pfTextPrimary)
+        .environment(\.controlActionCornerRadius, Self.cornerRadius)
+        .environment(\.controlActionSelectedFill, Color.pfSegmentSelected)
+        .environment(\.preheatPresetsFillRow, true)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.instrument-panel")
+        .onChange(of: isPrinting, initial: true) { _, printing in
+            selectedSegment = Self.selection(
+                afterPrintingChange: selectedSegment, isPrinting: printing, isLocked: isLocked
+            )
         }
     }
 
@@ -378,7 +376,7 @@ struct PrinterInstrumentPanelControls: View {
             textSize: 13, minimumHeight: 44, isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: distance) } }
         .frame(maxWidth: .infinity, minHeight: 44)
-        .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
+        .disabled(!viewModel.canJog(axis: axis))
     }
 
     private func home(

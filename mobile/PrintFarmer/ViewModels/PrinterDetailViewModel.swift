@@ -9,6 +9,16 @@ final class PrinterDetailViewModel {
     ) -> Void
 
     var printer: Printer?
+    var nativeWebURL: URL? {
+        guard let address = printer?.frontendUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let components = URLComponents(string: address),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false,
+              components.user == nil, components.password == nil else { return nil }
+        return components.url
+    }
+
     private var detailSource: DetailSource = .none
     private var cameraMetadataDeferred = false
     var statusDetail: PrinterStatusDetail?

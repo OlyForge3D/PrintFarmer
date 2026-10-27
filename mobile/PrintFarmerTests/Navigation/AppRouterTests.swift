@@ -887,6 +887,8 @@ final class AppRouterTests: XCTestCase {
 
         printer.isOnline = false
         XCTAssertFalse(PrinterControlsAccess.isEntryVisible(for: printer))
+        XCTAssertTrue(PrinterControlsAccess.isEntryVisible(for: printer, hasControlsOwner: true),
+                      "Offline updates disable commands, not an already-loaded control panel")
     }
 
     // MARK: - Reset to root

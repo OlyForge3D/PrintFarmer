@@ -305,7 +305,7 @@ struct JogSubgroup: View {
         let signedStep = direction * selectedStep
         let stepLabelText = stepLabel(selectedStep)
         let hasError = isErrored(direction: direction)
-        let isInteractive = viewModel.canControl && !viewModel.isExecuting
+        let isInteractive = viewModel.canJog(axis: selectedAxis)
 
         Button {
             handleTap {
@@ -339,7 +339,7 @@ struct JogSubgroup: View {
 
     /// Unavailable controls are disabled without explanatory text (#3548).
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl, !viewModel.isExecuting else { return }
+        guard viewModel.canJog(axis: selectedAxis) else { return }
         action()
     }
 
@@ -356,6 +356,9 @@ struct JogSubgroup: View {
         }
         if !viewModel.canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
+        }
+        if Self.isAxisHomed(selectedAxis, homedAxes: viewModel.printer.homedAxes) != true {
+            return "Home \(selectedAxis) before jogging."
         }
         if direction > 0 {
             return String(localized: "Moves \(selectedAxis) positive \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog per spec §4.1")
@@ -545,7 +548,7 @@ struct PrinterMotionControls: View {
             minimumHeight: 48,
             isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: sign * step) } }
-        .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
+        .disabled(!viewModel.canJog(axis: axis))
     }
 
     private func homeAll(minimumHeight: CGFloat = 48) -> some View {

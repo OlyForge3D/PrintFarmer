@@ -8,6 +8,124 @@ import SwiftUI
 @MainActor
 final class JogSubgroupTests: XCTestCase {
 
+    private struct InstrumentPanelHost: View {
+        @ObservedObject var model: PrinterControlsViewModel
+
+        var body: some View {
+            PrinterInstrumentPanelControls(printer: model.printer, viewModel: model)
+        }
+    }
+
+    func test_loadedInstrumentPanelRetainsButtonsThroughConnectivityChanges() async throws {
+        var printer = try Self.idlePrinter()
+        printer.homedAxes = "xyz"
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        defer { model.deactivate() }
+
+        let controller = UIHostingController(rootView: InstrumentPanelHost(model: model))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 900, height: 2000))
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        func buttons(in view: UIView) -> [UIButton] {
+            (view as? UIButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
+        }
+        var initialButton: UIButton?
+        for online in [true, false, true, false, true] {
+            printer.isOnline = online
+            model.handlePrinterUpdate(printer)
+            XCTAssertTrue(PrinterControlsAccess.isEntryVisible(for: printer, hasControlsOwner: true))
+            let deadline = ContinuousClock.now + .seconds(3)
+            var home: UIButton?
+            repeat {
+                controller.view.setNeedsLayout()
+                controller.view.layoutIfNeeded()
+                home = buttons(in: controller.view).first {
+                    $0.accessibilityIdentifier == "printer.controls.home.all"
+                }
+                if let home, home.isEnabled == online { break }
+                try await Task.sleep(for: .milliseconds(10))
+            } while ContinuousClock.now < deadline
+            let homeButton = try XCTUnwrap(home, "Offline telemetry must not tear down the loaded panel")
+            XCTAssertEqual(homeButton.isEnabled, online)
+            if let initialButton {
+                XCTAssertTrue(homeButton === initialButton, "The existing control must survive every transition")
+            } else {
+                initialButton = homeButton
+            }
+            if !online {
+                await model.homeAll()
+                await model.jog(axis: "X", distanceMm: 1)
+            }
+        }
+        XCTAssertEqual(service.motionCallCount, 0)
+        XCTAssertNil(service.homeCalledWith, "Retaining the panel must never permit offline commands")
+    }
+
+    func test_motionButtonsFollowPerAxisHomingAcrossLayouts() async throws {
+        var printer = try Self.idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        defer { model.deactivate() }
+
+        for instrumentPanel in [false, true] {
+            for type in [DynamicTypeSize.large, .accessibility3] {
+                let content = instrumentPanel
+                    ? AnyView(InstrumentPanelHost(model: model))
+                    : AnyView(PrinterMotionControls(viewModel: model))
+                let controller = UIHostingController(rootView: content.environment(\.dynamicTypeSize, type))
+                let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 900, height: 2000))
+                window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+                window.rootViewController = controller
+                window.makeKeyAndVisible()
+                defer { window.isHidden = true }
+
+                func buttons(in view: UIView) -> [UIButton] {
+                    (view as? UIButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
+                }
+                for homedAxes: String? in [nil, "", "x", "xy", "xZ", "xyz"] {
+                    printer.homedAxes = homedAxes
+                    model.handlePrinterUpdate(printer)
+                    let deadline = ContinuousClock.now + .seconds(3)
+                    var jogButtons: [UIButton] = []
+                    repeat {
+                        controller.view.setNeedsLayout()
+                        controller.view.layoutIfNeeded()
+                        jogButtons = buttons(in: controller.view).filter {
+                            let id = $0.accessibilityIdentifier ?? ""
+                            return id.hasPrefix("printer.controls.jog.")
+                                && (id.hasSuffix(".positive") || id.hasSuffix(".negative"))
+                        }
+                        if jogButtons.count == 6, jogButtons.allSatisfy({ button in
+                            let axis = (button.accessibilityIdentifier ?? "").split(separator: ".")[3].uppercased()
+                            return button.isEnabled == (homedAxes?.uppercased().contains(axis) == true)
+                        }) { break }
+                        try await Task.sleep(for: .milliseconds(10))
+                    } while ContinuousClock.now < deadline
+                    XCTAssertEqual(jogButtons.count, 6, "Both directions of every axis must be rendered")
+                    for button in jogButtons {
+                        let identifier = try XCTUnwrap(button.accessibilityIdentifier)
+                        let axis = identifier.split(separator: ".")[3].uppercased()
+                        XCTAssertEqual(button.isEnabled, homedAxes?.uppercased().contains(axis) == true,
+                                       "\(identifier), homing: \(String(describing: homedAxes)), \(instrumentPanel)/\(type)")
+                    }
+                    let home = try XCTUnwrap(buttons(in: controller.view).first {
+                        $0.accessibilityIdentifier == "printer.controls.home.all"
+                    })
+                    XCTAssertTrue(home.isEnabled, "Homing remains available when jogging is disabled")
+                }
+            }
+        }
+        XCTAssertEqual(service.motionCallCount, 0, "Rendering and homing updates never dispatch motion")
+    }
+
     func test_coordinateInput_limitsPrecisionWithoutBinaryNoiseOrSilentRounding() throws {
         XCTAssertNil(try ControlNumberInput.coordinate(" "))
         for (text, value) in [
