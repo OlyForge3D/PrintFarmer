@@ -258,13 +258,14 @@ public sealed class PrinterFileContentService(
         bool hasCatalogDetails = location.DetailsFetchedAtUtc.HasValue;
         PrinterPrintMetadata? metadata = hasCatalogDetails
             ? location.Metadata : capture?.Content.Metadata;
+        bool hasMetadata = metadata?.HasValues is true;
         double? printTime = metadata?.EstimatedPrintTimeSeconds ?? metadata?.PrintTimeSeconds ??
             (hasCatalogDetails ? null : capture?.Content.PrintTimeSeconds);
         double? layerHeight = metadata?.LayerHeightMm ?? (hasCatalogDetails ? null : capture?.Content.LayerHeightMm);
         long? size = location.SizeBytes ?? (hasCatalogDetails ? null : capture?.Content.SizeBytes);
         PrinterFilePreviewState resolvedState = state ?? (reason == "preview_unsupported" ? PrinterFilePreviewState.Unsupported :
-            capture?.Content.Image is not null || printTime.HasValue || layerHeight.HasValue || size.HasValue ||
-                metadata?.HasValues is true
+            hasMetadata || capture?.Content.Image is not null || printTime.HasValue || layerHeight.HasValue ||
+                size.HasValue
                 ? PrinterFilePreviewState.Available : PrinterFilePreviewState.Unavailable);
         return new(location.Id, location.ObservationRevision, capture?.CapturedAtUtc, capture?.Content.Image is not null, url,
             printTime, layerHeight,

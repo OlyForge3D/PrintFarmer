@@ -328,9 +328,8 @@ public static class BinaryGcodeReader
             throw new BinaryGcodeFormatException("invalid_metadata_encoding");
         }
 
-        foreach (string rawLine in text.Split('\n'))
+        foreach (string line in text.Split('\n').Select(rawLine => rawLine.TrimEnd('\r')))
         {
-            string line = rawLine.TrimEnd('\r');
             int separator = line.IndexOf('=');
             if (separator <= 0)
             {

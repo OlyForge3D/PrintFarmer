@@ -171,9 +171,8 @@ public partial class PrusaLinkApiClient
         }
 
         List<string> segments = [];
-        foreach (string encoded in reference[1..].Split('/'))
+        foreach (string segment in reference[1..].Split('/').Select(Uri.UnescapeDataString))
         {
-            string segment = Uri.UnescapeDataString(encoded);
             if (segment.Length == 0 || segment is "." or ".." ||
                 segment.Any(c => char.IsControl(c) || c is '/' or '\\' or '%' or '?' or '#' or ':'))
             {
