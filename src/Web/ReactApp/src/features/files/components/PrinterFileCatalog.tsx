@@ -57,8 +57,8 @@ interface Selection {
 
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
-const REFRESH_ALL_LABEL = 'Refresh all online printers';
-const REFRESH_ALL_TITLE = 'Request a file scan on every online printer you manage. Scans run when each printer is idle.';
+const REFRESH_ALL_LABEL = 'Force refresh all online printers';
+const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers and free I/O slots; may take up to two minutes per printer.';
 const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
 
 interface RefreshTarget {
@@ -198,19 +198,31 @@ export function PrinterFileCatalog() {
       }
     },
   });
-  // Same request as Edit printer > Files > Refresh now, sent to each target; one failure never hides the rest.
+  // Sequential requests avoid consuming all deployment I/O slots with this batch.
   const refreshAll = useMutation({
     mutationFn: async (targets: RefreshTarget[]) => {
-      const results = await Promise.allSettled(targets.map(target => apiClient.refreshPrinterFileIndex(target.id)));
-      return targets.filter((_, index) => results[index].status === 'rejected').map(target => target.name);
-    },
-    onSuccess: async (failedNames, targets) => {
-      const requested = targets.length - failedNames.length;
-      if (requested > 0) {
-        toast.success(`Refresh requested for ${requested} printer${requested === 1 ? '' : 's'}. Scans run when each printer is idle.`);
+      const failures: string[] = [];
+      for (const target of targets) {
+        try {
+          await apiClient.refreshPrinterFileIndex(target.id, true);
+        } catch (error) {
+          failures.push(`${target.name}: ${describePrinterFileFailure(error).message}`);
+        }
       }
-      if (failedNames.length > 0) toast.error(`Failed to refresh: ${failedNames.join(', ')}`);
+      return failures;
+    },
+    onSuccess: async (failures, targets) => {
+      const completed = targets.length - failures.length;
+      if (completed > 0) {
+        toast.success(`Force refresh completed for ${completed} printer${completed === 1 ? '' : 's'}. Previews reload on demand.`);
+      }
+      if (failures.length > 0) toast.error(`Failed to force refresh: ${failures.join('; ')}`);
+      // Refresh revisions before invalidating old preview keys.
       await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['printer-file-preview'] }),
+        queryClient.invalidateQueries({ queryKey: ['printer-file-thumbnail'] }),
+      ]);
     },
   });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
@@ -311,7 +323,7 @@ export function PrinterFileCatalog() {
         {hasPermission('settings', 'read') && <Link to="/admin/settings?q=printer%20file" className="text-sm text-pf-accent underline">Discovery settings</Link>}
       </div>
       {catalog.data?.automaticDiscoveryEnabled === false && (
-        <Alert variant="info">Automatic discovery is globally disabled. Explicit Copy and Queue remain separate actions.</Alert>
+        <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <FormField label="Printer" htmlFor="catalog-printer">
@@ -365,7 +377,7 @@ export function PrinterFileCatalog() {
                   iconLeft={<RefreshIcon className={ACTION_ICON_CLASS} />}
                   onClick={() => refreshAll.mutate(refreshTargets)}
                 >
-                  Refresh
+                  Force refresh
                 </Button>
               )}
             </div>

@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrinterFileCatalogPage, PrinterFileScanStatus } from '@/types/api';
 import { PrinterFileDiscoverySection } from '@/features/printers/components/PrinterFileDiscoverySection';
@@ -45,7 +46,7 @@ function renderSection(onSubmit = vi.fn((event: SubmitEvent) => event.preventDef
       </form>
     </QueryClientProvider>,
   );
-  return { onSubmit };
+  return { onSubmit, queryClient };
 }
 
 function statusValue(term: string) {
@@ -90,16 +91,45 @@ describe('PrinterFileDiscoverySection', () => {
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
   });
 
-  it('requests a refresh with a non-submitting button', async () => {
+  it('force refreshes with a non-submitting button and claims success only after the scan completes', async () => {
     const user = userEvent.setup();
-    const { onSubmit } = renderSection();
-    const refresh = await screen.findByRole('button', { name: 'Refresh now' });
+    const { onSubmit, queryClient } = renderSection();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    let complete!: () => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    const refresh = await screen.findByRole('button', { name: 'Force refresh' });
     expect(refresh).toHaveAttribute('type', 'button');
+    expect(refresh).toHaveAttribute('title', expect.stringMatching(/Requires an idle printer and a free I\/O slot/));
     await user.click(refresh);
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('printer-1'));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('printer-1', true));
+    expect(screen.getByRole('checkbox', { name: 'Automatic file discovery' })).toBeDisabled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+
+    complete();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.'));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-thumbnail'] }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-catalog'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(mocks.enabled).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('reports why a force refresh did not run instead of claiming success', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderSection();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    mocks.refresh.mockRejectedValue({
+      statusCode: 409,
+      message: 'Request failed with status code 409',
+      data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Force refresh' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Force refresh failed: waiting for confirmed idle'));
+    expect(toast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-catalog'] }));
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
   });
 
   it('defaults discovery on for a never-scanned printer and does not claim a completed scan', async () => {
@@ -130,7 +160,7 @@ describe('PrinterFileDiscoverySection', () => {
     expect(await screen.findByText(/do not have permission to change file discovery/)).toBeInTheDocument();
     expect(statusValue('Status')).toHaveTextContent(/^Complete$/);
     expect(screen.queryByRole('checkbox', { name: 'Automatic file discovery' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Refresh now' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Force refresh' })).not.toBeInTheDocument();
   });
 
   it('renders and fetches nothing without printer-file read permission', () => {

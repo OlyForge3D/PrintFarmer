@@ -70,7 +70,7 @@ alone is insufficient because legacy normalizers also map unknown states to
 idle. Offline, busy, stale, or unknown activity defers discovery without
 refreshing last-seen timestamps. Disabling the global index or one printer's
 index retains observations, origins, and owned local files; it does not disable
-explicit Copy or Queue actions.
+explicit Force refresh, Copy, or Queue actions.
 
 Busy or unknown sources receive a jittered next-attempt time without advancing
 last-seen or complete-scan evidence, so they cannot monopolize the due batch.
@@ -88,8 +88,33 @@ publish positive observations or mark files missing.
 | Endpoint | Behavior |
 | --- | --- |
 | `GET /api/printer-files` | Metadata-only, paginated locations, authorized printer choices, scan status, and local-copy associations |
-| `POST /api/printer-files/printers/{id}/refresh` | Request a coalesced idle scan; does not bypass discovery disables or idle checks |
+| `POST /api/printer-files/printers/{id}/refresh` | Default: request a coalesced background scan (`202`); does not bypass discovery disables or idle checks |
+| `POST /api/printer-files/printers/{id}/refresh?force=true` | Run a bounded scan now, bypassing discovery switches, schedule, backoff, and preview caches while retaining idle and I/O safeguards |
 | `PUT /api/printer-files/printers/{id}/index` | Set that printer's discovery control with `{ "enabled": true/false }` |
+
+The default refresh response is `202` with `code: "refresh_requested"` (or
+`"enrollment_pending"` before scan-state enrollment). It is not completion
+evidence. With `force=true`, the request waits for the scan and returns `200`
+with `{ "code": "refresh_completed", "files": N }` only after a complete listing
+is published. Deferrals, interrupted/superseded scans, and incomplete inventories
+return `409` with `code` and `reasonCode`; examples include
+`waiting_for_confirmed_idle` and `refresh_incomplete`. A database state race
+returns `409` with `code: "scan_state_changed"`. These failures must not be
+presented as successful or scheduled force refreshes.
+
+Forced scans use the same inventory bounds, exclusive per-printer ownership, and
+deployment-wide I/O slots as background scans. They require confirmed-idle
+telemetry at acquisition, lease renewal, and publication; occupied slots or a
+non-idle printer require a later deliberate retry. They do not enable automatic
+discovery or change its configured cadence.
+
+A published force refresh advances `observationRevision` even for unchanged
+files, invalidating version-keyed server previews. The React controls then
+invalidate catalog and preview queries; preview bodies are fetched on demand,
+not during indexing. Unchanged locations pinned by unfinished file operations
+keep their revision so refresh does not invalidate those operations. Refresh
+again after the operation finishes to invalidate that retained preview.
+Background scans continue to retain revisions for unchanged files.
 
 Listing accepts `printerId`, `search` (at most 200 characters), `availability`
 (`Available`, `Missing`, `Deleted`), `stale`, `page`, and `pageSize`

@@ -599,8 +599,16 @@ export class ApiClient {
     return response.data;
   }
 
-  async refreshPrinterFileIndex(printerId: string): Promise<void> {
-    await this.client.post(`/printer-files/printers/${encodeURIComponent(printerId)}/refresh`);
+  async refreshPrinterFileIndex(printerId: string, force = false): Promise<void> {
+    const response = await this.client.post<{ code: string }>(
+      `/printer-files/printers/${encodeURIComponent(printerId)}/refresh`,
+      undefined,
+      // A forced scan can use the full 120-second server budget.
+      force ? { params: { force: true }, timeout: 150_000 } : undefined,
+    );
+    if (force && (response.status !== 200 || response.data?.code !== 'refresh_completed')) {
+      throw new Error('The server did not confirm a completed force refresh. Reload the catalog before retrying.');
+    }
   }
 
   async setPrinterFileIndexEnabled(printerId: string, enabled: boolean): Promise<void> {

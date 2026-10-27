@@ -20,18 +20,38 @@ public sealed class PrinterFileCatalogService(
     IPrinterStatusCacheReader statusCache,
     ILogger<PrinterFileCatalogService> logger)
 {
-    public async Task ScanAsync(Guid printerId, CancellationToken ct = default)
+    public async Task ScanAsync(Guid printerId, CancellationToken ct = default) =>
+        _ = await ScanCoreAsync(printerId, false, ct);
+
+    /// <summary>
+    /// Operator-requested scan that ignores the schedule, failure backoff, and automatic-discovery switches,
+    /// and advances every observed file's revision so cached previews are rebuilt. The confirmed-idle check,
+    /// exclusive per-printer lease, and deployment I/O slots still apply.
+    /// </summary>
+    public async Task<PrinterFileForceRefreshResult> ForceRefreshAsync(Guid printerId, CancellationToken ct = default)
     {
-        await using IPrinterFileLease? lease = await leases.TryAcquireAsync(printerId, false, ct);
+        if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
+        {
+            return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
+        }
+
+        return await ScanCoreAsync(printerId, true, ct);
+    }
+
+    private async Task<PrinterFileForceRefreshResult> ScanCoreAsync(Guid printerId, bool force, CancellationToken ct)
+    {
+        await using IPrinterFileLease? lease = force
+            ? await leases.TryAcquireForRefreshAsync(printerId, ct)
+            : await leases.TryAcquireAsync(printerId, false, ct);
         if (lease is null)
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Busy, "source_busy");
         }
 
         Printer? printer = await printers.FindByIdWithIncludesAsync(printerId, lease.Token);
         if (printer is null || !await lease.IsCurrentAsync(ct))
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
         }
 
         PrinterFileInventoryResult result;
@@ -48,7 +68,7 @@ public sealed class PrinterFileCatalogService(
             deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds));
             if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
             {
-                return;
+                return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
             }
 
             try
@@ -70,6 +90,10 @@ public sealed class PrinterFileCatalogService(
                 result = new PrinterFileInventoryResult(
                     PrinterFileInventoryOutcome.Unavailable, PrinterFileInventoryReason.Timeout, [], []);
             }
+            catch (OperationCanceledException) when (lease.Token.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
+            }
 
             if (result.Outcome == PrinterFileInventoryOutcome.Cancelled &&
                 deadline.IsCancellationRequested && !lease.Token.IsCancellationRequested)
@@ -81,14 +105,29 @@ public sealed class PrinterFileCatalogService(
 
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || lease.Token.IsCancellationRequested)
         {
-            return;
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_interrupted");
         }
 
-        await PublishAsync(lease, result, ct);
+        if (!await PublishAsync(lease, result, force, ct))
+        {
+            return new(PrinterFileForceRefreshStatus.Superseded, "scan_state_changed");
+        }
+
+        return result.Outcome == PrinterFileInventoryOutcome.Complete
+            ? new(PrinterFileForceRefreshStatus.Completed, result.Reason.ToString(), result.Entries.Length)
+            : new(PrinterFileForceRefreshStatus.Incomplete, result.Reason.ToString());
     }
 
+    public Task<bool> PublishAsync(
+        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default) =>
+        PublishAsync(lease, result, false, ct);
+
+    /// <summary>
+    /// Forced publication advances the revision of every observed file so revision-keyed preview caches miss, except files with an
+    /// in-flight operation that is pinned to the current revision.
+    /// </summary>
     public async Task<bool> PublishAsync(
-        IPrinterFileLease lease, PrinterFileInventoryResult result, CancellationToken ct = default)
+        IPrinterFileLease lease, PrinterFileInventoryResult result, bool force, CancellationToken ct = default)
     {
         if (result.Outcome == PrinterFileInventoryOutcome.Cancelled || ct.IsCancellationRequested)
         {
@@ -107,6 +146,15 @@ public sealed class PrinterFileCatalogService(
         PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync(
             x => x.SourcePrinterId == lease.PrinterId, ct);
         var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
+        HashSet<Guid> pinned = force
+            ? (await db.PrinterFileOperations
+                .Where(x => x.SourcePrinterId == lease.PrinterId &&
+                    x.State != PrinterFileOperationState.Queued &&
+                    x.State != PrinterFileOperationState.Deleted &&
+                    x.State != PrinterFileOperationState.Failed &&
+                    x.State != PrinterFileOperationState.Cancelled)
+                .Select(x => x.LocationId).ToListAsync(ct)).ToHashSet()
+            : [];
         Dictionary<string, PrinterFileLocation> locations = await db.PrinterFileLocations
             .Where(x => x.SourcePrinterId == lease.PrinterId).ToDictionaryAsync(x => x.IdentityKey, ct);
         HashSet<string> observed = new(StringComparer.Ordinal);
@@ -147,7 +195,8 @@ public sealed class PrinterFileCatalogService(
                 location.ProviderVersion != entry.ProviderVersion ||
                 location.ProviderDigest != entry.ProviderHash ||
                 location.ConfigurationGeneration != lease.ConfigurationGeneration;
-            if (!isNew && (changed || location.Availability == PrinterFileAvailability.Deleted))
+            if (!isNew && ((force && !pinned.Contains(location.Id)) || changed ||
+                    location.Availability == PrinterFileAvailability.Deleted))
             {
                 location.ObservationRevision++;
             }

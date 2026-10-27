@@ -192,7 +192,7 @@ describe('Printer file catalog', () => {
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute('href', '/admin/settings?q=printer%20file');
     // Per-printer discovery toggles live in Edit printer > Files; only the all-printers Refresh is here.
-    expect(screen.getByRole('button', { name: 'Refresh all online printers' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Force refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
     expect(mocks.catalog).toHaveBeenCalledWith({ printerId: undefined, search: undefined,
       availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
@@ -203,10 +203,10 @@ describe('Printer file catalog', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  describe('Refresh all online printers', () => {
+  describe('Force refresh all online printers', () => {
     const managed = (id: string, name: string, canManage = true) => ({ ...catalog.printers[0], id, name, canManage });
 
-    it('sits right of the view toggle and requests a scan only on online printers the user manages', async () => {
+    it('sits right of the view toggle and force-scans only online printers the user manages', async () => {
       printerList.value = [
         { id: 'source', name: 'Source printer', isEnabled: true, isOnline: true },
         { id: 'other', name: 'Other printer', isEnabled: true, isOnline: false },
@@ -217,39 +217,50 @@ describe('Printer file catalog', () => {
       ] });
       mocks.refresh.mockResolvedValue(undefined);
       const user = userEvent.setup();
-      renderCatalog();
-      const refresh = await screen.findByRole('button', { name: 'Refresh all online printers' });
+      const { queryClient } = renderCatalog();
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
       expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
+      expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
       expect(mocks.refresh).not.toHaveBeenCalled();
 
       await user.click(refresh);
 
       await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith(
-        'Refresh requested for 1 printer. Scans run when each printer is idle.'));
-      expect(mocks.refresh.mock.calls).toEqual([['source']]);
+        'Force refresh completed for 1 printer. Previews reload on demand.'));
+      expect(mocks.refresh.mock.calls).toEqual([['source', true]]);
       expect(mocks.toastError).not.toHaveBeenCalled();
+      await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-thumbnail'] }));
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
       await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
     });
 
-    it('requests every target even when one fails and names the failed printer', async () => {
+    it('scans one printer at a time, continues past a failure, and names the printer and reason', async () => {
       mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer'), managed('other', 'Other printer')] });
-      mocks.refresh.mockImplementation(async (id: string) => {
-        if (id === 'source') throw new Error('Request failed');
-      });
+      let rejectFirst!: (error: unknown) => void;
+      mocks.refresh
+        .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }))
+        .mockResolvedValueOnce(undefined);
       const user = userEvent.setup();
       renderCatalog();
-      await user.click(await screen.findByRole('button', { name: 'Refresh all online printers' }));
+      await user.click(await screen.findByRole('button', { name: 'Force refresh all online printers' }));
 
-      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to refresh: Source printer'));
-      expect(mocks.refresh.mock.calls).toEqual([['source'], ['other']]);
-      expect(mocks.toastSuccess).toHaveBeenCalledWith('Refresh requested for 1 printer. Scans run when each printer is idle.');
+      await waitFor(() => expect(mocks.refresh.mock.calls).toEqual([['source', true]]));
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+      rejectFirst({ statusCode: 409, message: 'Request failed with status code 409',
+        data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' } });
+
+      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+        'Failed to force refresh: Source printer: waiting for confirmed idle'));
+      expect(mocks.refresh.mock.calls).toEqual([['source', true], ['other', true]]);
+      expect(mocks.toastSuccess).toHaveBeenCalledWith('Force refresh completed for 1 printer. Previews reload on demand.');
     });
 
     it('explains why it is unavailable when no printer the user manages is online', async () => {
       printerList.value = printerList.value.map(printer => ({ ...printer, isOnline: false }));
       const user = userEvent.setup();
       renderCatalog();
-      const refresh = await screen.findByRole('button', { name: 'Refresh all online printers' });
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
       expect(refresh).toHaveAttribute('aria-disabled', 'true');
       expect(refresh).toHaveAttribute('title', 'No online printers you can manage');
 
@@ -263,7 +274,7 @@ describe('Printer file catalog', () => {
       mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer', false)] });
       renderCatalog();
       await findRow('part.gcode');
-      expect(screen.queryByRole('button', { name: 'Refresh all online printers' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Force refresh all online printers' })).not.toBeInTheDocument();
     });
   });
 

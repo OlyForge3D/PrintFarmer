@@ -1,4 +1,6 @@
 ﻿using System.Collections.Immutable;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -216,6 +218,151 @@ public sealed class PrinterFileCatalogTests
         Assert.Null((await db.PrinterFileScanStates.SingleAsync()).LastAttemptAtUtc);
     }
 
+    [Fact]
+    public async Task ForceRefreshAsync_CompleteScanAdvancesUnchangedRevisionsAndResetsBackoff()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await fixture.AddAsync("gcodes", "a.gcode");
+        PrinterFileInventoryResult inventory = Result([new("gcodes", "a.gcode", 10)],
+            [new("gcodes", "", true, PrinterFileInventoryEvidence.NativeRecursiveListing)]);
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, inventory));
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            Assert.Equal(1, (await db.PrinterFileLocations.SingleAsync()).ObservationRevision);
+            PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync();
+            state.NextScanAtUtc = DateTime.MaxValue;
+            state.ConsecutiveFailures = 5;
+            state.Enabled = false;
+            await db.SaveChangesAsync();
+        }
+        fixture.ArrangeForceRefresh("ready", inventory);
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.Completed, result.Status);
+        Assert.Equal(1, result.FileCount);
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        Assert.Equal(2, (await current.PrinterFileLocations.SingleAsync()).ObservationRevision);
+        PrinterFileScanState saved = await current.PrinterFileScanStates.SingleAsync();
+        Assert.Equal(PrinterFileScanOutcome.Complete, saved.Outcome);
+        Assert.Equal(0, saved.ConsecutiveFailures);
+        Assert.NotNull(saved.LastCompleteScanAtUtc);
+        Assert.InRange(saved.NextScanAtUtc, DateTime.UtcNow, DateTime.UtcNow.AddDays(1));
+        Assert.False(saved.Enabled);
+        fixture.Leases.Verify(x => x.TryAcquireForRefreshAsync(fixture.PrinterId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(PrinterFileOperationState.Pending, 1)]
+    [InlineData(PrinterFileOperationState.AwaitingSourceConfirmation, 1)]
+    [InlineData(PrinterFileOperationState.AwaitingDeleteConfirmation, 1)]
+    [InlineData(PrinterFileOperationState.Queued, 2)]
+    [InlineData(PrinterFileOperationState.Failed, 2)]
+    public async Task ForceRefreshAsync_UnchangedFilePreservesOnlyInFlightOperationRevisions(
+        PrinterFileOperationState operationState, long expectedRevision)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await fixture.AddAsync("gcodes", "a.gcode");
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            PrinterFileLocation location = await db.PrinterFileLocations.SingleAsync();
+            db.PrinterFileOperations.Add(new PrinterFileOperation
+            {
+                Id = Guid.NewGuid(),
+                ActorId = Guid.NewGuid(),
+                SourcePrinterId = fixture.PrinterId,
+                LocationId = location.Id,
+                ObservationRevision = location.ObservationRevision,
+                ConfigurationGeneration = location.ConfigurationGeneration,
+                State = operationState,
+                CommandKeyHash = new string('a', 64),
+                PayloadSha256 = new string('b', 64),
+                CommandJson = "{}",
+            });
+            await db.SaveChangesAsync();
+        }
+        fixture.ArrangeForceRefresh("ready", Result([new("gcodes", "a.gcode", 10)],
+            [new("gcodes", "", true, PrinterFileInventoryEvidence.NativeRecursiveListing)]));
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.Completed, result.Status);
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        Assert.Equal(expectedRevision, (await current.PrinterFileLocations.SingleAsync()).ObservationRevision);
+        Assert.Equal(1, (await current.PrinterFileOperations.SingleAsync()).ObservationRevision);
+    }
+
+    [Theory]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    [InlineData("unknown")]
+    public async Task ForceRefreshAsync_NotIdleDoesNotAcquireLeaseOrReadPrinter(string activity)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        fixture.ArrangeForceRefresh(activity, Result([], []));
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.NotIdle, result.Status);
+        Assert.Equal("waiting_for_confirmed_idle", result.ReasonCode);
+        fixture.Leases.Verify(x => x.TryAcquireForRefreshAsync(It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Inventory.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ForceRefreshAsync_BusyDoesNotReadPrinter()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        fixture.ArrangeForceRefresh("ready", Result([], []));
+        fixture.Leases.Setup(x => x.TryAcquireForRefreshAsync(fixture.PrinterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IPrinterFileLease?)null);
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.Busy, result.Status);
+        Assert.Equal("source_busy", result.ReasonCode);
+        fixture.Inventory.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(PrinterFileInventoryOutcome.Unavailable, PrinterFileInventoryReason.Timeout)]
+    [InlineData(PrinterFileInventoryOutcome.Partial, PrinterFileInventoryReason.EntryLimit)]
+    [InlineData(PrinterFileInventoryOutcome.Unsupported, PrinterFileInventoryReason.Unsupported)]
+    public async Task ForceRefreshAsync_IncompleteScanDoesNotReportCompletion(
+        PrinterFileInventoryOutcome outcome, PrinterFileInventoryReason reason)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        fixture.ArrangeForceRefresh("ready", new(outcome, reason, [], []));
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.Incomplete, result.Status);
+        Assert.Equal(reason.ToString(), result.ReasonCode);
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileScanState state = await db.PrinterFileScanStates.SingleAsync();
+        Assert.Null(state.LastCompleteScanAtUtc);
+        Assert.NotNull(state.LastAttemptAtUtc);
+    }
+
+    [Fact]
+    public async Task ForceRefreshAsync_LostFenceDoesNotReportCompletionOrInvalidatePreviews()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await fixture.AddAsync("gcodes", "a.gcode");
+        fixture.ArrangeForceRefresh("ready", Result([new("gcodes", "a.gcode", 10)], []));
+        fixture.Lease.Setup(x => x.FencePublicationAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.Equal(PrinterFileForceRefreshStatus.Superseded, result.Status);
+        Assert.Equal("scan_state_changed", result.ReasonCode);
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        Assert.Equal(1, (await db.PrinterFileLocations.SingleAsync()).ObservationRevision);
+        Assert.Null((await db.PrinterFileScanStates.SingleAsync()).LastCompleteScanAtUtc);
+    }
+
     private static PrinterFileInventoryResult Result(
         ImmutableArray<PrinterFileInventoryEntry> entries, ImmutableArray<PrinterFileInventoryCoverage> coverage) =>
         new(PrinterFileInventoryOutcome.Complete, PrinterFileInventoryReason.None, entries, coverage);
@@ -233,8 +380,7 @@ public sealed class PrinterFileCatalogTests
             Lease.Setup(x => x.FencePublicationAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
             Service = new PrinterFileCatalogService(
-                factory, Mock.Of<IPrintersRepository>(), Mock.Of<IBackendCapabilityFactory>(),
-                Mock.Of<IPrinterFileLeaseCoordinator>(), Mock.Of<IPrinterStatusCacheReader>(),
+                factory, Printers.Object, Capabilities.Object, Leases.Object, Status.Object,
                 NullLogger<PrinterFileCatalogService>.Instance);
         }
 
@@ -244,7 +390,35 @@ public sealed class PrinterFileCatalogTests
 
         public Mock<IPrinterFileLease> Lease { get; } = new();
 
+        public Mock<IPrintersRepository> Printers { get; } = new();
+
+        public Mock<IBackendCapabilityFactory> Capabilities { get; } = new();
+
+        public Mock<IPrinterFileLeaseCoordinator> Leases { get; } = new();
+
+        public Mock<IPrinterStatusCacheReader> Status { get; } = new();
+
+        public Mock<ISupportsFileInventory> Inventory { get; } = new();
+
         public PrinterFileCatalogService Service { get; }
+
+        public void ArrangeForceRefresh(string activity, PrinterFileInventoryResult result)
+        {
+            Status.Setup(x => x.GetSnapshot(PrinterId)).Returns(new PrinterStatusCacheSnapshot(
+                new PrinterStatusDto(PrinterId, true, activity) { RawActivityState = activity }, DateTime.UtcNow));
+            Lease.SetupGet(x => x.Token).Returns(CancellationToken.None);
+            Lease.Setup(x => x.IsCurrentAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            Leases.Setup(x => x.TryAcquireForRefreshAsync(PrinterId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Lease.Object);
+            Printers.Setup(x => x.FindByIdWithIncludesAsync(PrinterId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Printer { Id = PrinterId, Name = "Catalog printer", ServerUrl = "http://catalog.invalid" });
+            ISupportsFileInventory? client = Inventory.Object;
+            Capabilities.Setup(x => x.TryGetFileInventoryClientTyped(It.IsAny<PrinterBackend>(), out client))
+                .Returns(true);
+            Inventory.Setup(x => x.GetFileInventoryAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(),
+                    It.IsAny<PrinterFileInventoryOptions>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(result);
+        }
 
         public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
         {

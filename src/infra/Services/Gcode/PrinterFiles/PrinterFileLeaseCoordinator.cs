@@ -18,8 +18,15 @@ public sealed class PrinterFileLeaseCoordinator(
 {
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(45);
 
-    public async Task<IPrinterFileLease?> TryAcquireAsync(
-        Guid printerId, bool interactive, CancellationToken ct = default)
+    public Task<IPrinterFileLease?> TryAcquireAsync(
+        Guid printerId, bool interactive, CancellationToken ct = default) =>
+        TryAcquireCoreAsync(printerId, interactive, requireIdle: !interactive, ct);
+
+    public Task<IPrinterFileLease?> TryAcquireForRefreshAsync(Guid printerId, CancellationToken ct = default) =>
+        TryAcquireCoreAsync(printerId, interactive: true, requireIdle: true, ct);
+
+    private async Task<IPrinterFileLease?> TryAcquireCoreAsync(
+        Guid printerId, bool interactive, bool requireIdle, CancellationToken ct)
     {
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
@@ -74,12 +81,12 @@ public sealed class PrinterFileLeaseCoordinator(
             }
 
             bool occupied = state.LeaseOwner.HasValue && state.LeaseExpiresAtUtc > now;
-            bool confirmedIdle = interactive || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
+            bool confirmedIdle = !requireIdle || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
             bool deferred = !interactive && (!settings.Enabled || !state.Enabled ||
                 state.NextScanAtUtc > now ||
                 state.InteractiveRequestedAtUtc > now.AddMinutes(-2) ||
                 !confirmedIdle);
-            if (occupied || deferred)
+            if (occupied || deferred || !confirmedIdle)
             {
                 if (!occupied && !interactive && settings.Enabled && state.Enabled &&
                     state.NextScanAtUtc <= now && !confirmedIdle)
@@ -131,7 +138,7 @@ public sealed class PrinterFileLeaseCoordinator(
             slot.LeaseFence++;
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            return new Lease(dbFactory, statusCache, logger, state, slot, fingerprint, interactive, ct);
+            return new Lease(dbFactory, statusCache, logger, state, slot, fingerprint, interactive, requireIdle, ct);
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -156,6 +163,7 @@ public sealed class PrinterFileLeaseCoordinator(
         private readonly long _slotFence;
         private readonly string _fingerprint;
         private readonly bool _interactive;
+        private readonly bool _requireIdle;
         private int _disposed;
 
         public Lease(
@@ -166,6 +174,7 @@ public sealed class PrinterFileLeaseCoordinator(
             PrinterFileIoSlot slot,
             string fingerprint,
             bool interactive,
+            bool requireIdle,
             CancellationToken ct)
         {
             _dbFactory = dbFactory;
@@ -175,6 +184,7 @@ public sealed class PrinterFileLeaseCoordinator(
             _slotFence = slot.LeaseFence;
             _fingerprint = fingerprint;
             _interactive = interactive;
+            _requireIdle = requireIdle;
             PrinterId = state.SourcePrinterId;
             OwnerId = state.LeaseOwner!.Value;
             Fence = state.LeaseFence;
@@ -262,8 +272,8 @@ public sealed class PrinterFileLeaseCoordinator(
                 !state.LeaseExpiresAtUtc.HasValue || state.LeaseExpiresAtUtc <= now ||
                 slot is null || slot.LeaseOwner != OwnerId || slot.LeaseFence != _slotFence ||
                 !slot.LeaseExpiresAtUtc.HasValue || slot.LeaseExpiresAtUtc <= now ||
-                (!_interactive && (!settings.Enabled || !state.Enabled ||
-                 !PrinterFileIndexPolicy.IsConfirmedIdle(_statusCache.GetSnapshot(PrinterId), now))))
+                (!_interactive && (!settings.Enabled || !state.Enabled)) ||
+                (_requireIdle && !PrinterFileIndexPolicy.IsConfirmedIdle(_statusCache.GetSnapshot(PrinterId), now)))
             {
                 return null;
             }
