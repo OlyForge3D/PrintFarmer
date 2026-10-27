@@ -19,6 +19,9 @@ jobs:
     # Only trigger on squad:{member} labels (not the base "squad" label)
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.label.name, 'squad:')
     runs-on: ubuntu-latest
+    concurrency:
+      group: squad-issue-assign-${{ github.event.issue.number || inputs.issue_number }}
+      cancel-in-progress: false
     steps:
       - name: Require Copilot assignment token
         if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'squad:copilot'
@@ -175,6 +178,11 @@ jobs:
             const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
             if (!issue.labels.some(existing => existing.name === label)) {
               throw new Error(`Issue #${issue_number} no longer has ${label}; refusing stale Copilot handoff.`);
+            }
+            if (issue.assignees?.some(assignee =>
+              ['copilot-swe-agent[bot]', 'copilot-swe-agent'].includes(assignee.login))) {
+              core.info(`Issue #${issue_number} is already assigned to Copilot; skipping duplicate handoff.`);
+              return;
             }
 
             // Get the default branch name (main, master, etc.)

@@ -135,6 +135,41 @@ test('Copilot handoff acknowledges only verified API acceptance and rejects stal
   }
 });
 
+test('Copilot handoffs serialize label and manual dispatches for the same issue', () => {
+  const job = readWorkflow('squad-issue-assign.yml').jobs['assign-work'];
+  assert.equal(job.concurrency.group, 'squad-issue-assign-${{ github.event.issue.number || inputs.issue_number }}');
+  assert.equal(job.concurrency['cancel-in-progress'], false);
+});
+
+test('Copilot handoff skips already-assigned issues without posting requests or comments', async (t) => {
+  const step = readWorkflow('squad-issue-assign.yml').jobs['assign-work'].steps.find(
+    (candidate) => candidate.name === 'Assign @copilot coding agent',
+  );
+  for (const login of ['copilot-swe-agent[bot]', 'copilot-swe-agent']) {
+    await t.test(login, async () => {
+      const calls = [];
+      await runWorkflowScript(step, {
+        context: {
+          repo: { owner: 'example', repo: 'farm' },
+          payload: { inputs: { issue_number: '42' } },
+        },
+        github: {
+          rest: {
+            issues: {
+              get: async () => ({
+                data: { number: 42, labels: [{ name: 'squad:copilot' }], assignees: [{ login }] },
+              }),
+              createComment: async (comment) => calls.push(comment),
+            },
+          },
+          request: async (_route, request) => calls.push(request),
+        },
+      });
+      assert.deepEqual(calls, []);
+    });
+  }
+});
+
 test('heartbeat routes Copilot through the assignment workflow only when auto-assign is enabled', async () => {
   const workflow = readWorkflow('squad-heartbeat.yml');
   const step = workflow.jobs.heartbeat.steps.find(

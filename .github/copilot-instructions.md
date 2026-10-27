@@ -995,15 +995,17 @@ Use the OrcaSlicer profile skill for profile hierarchy, alias, and empty-profile
 - Read generated deployment credentials from local config only when needed for debugging, and avoid echoing secret values in final responses.
 - Keep printer credentials and tokens out of tracked configuration.
 
-<!-- squad:copilot-instructions:start -->
-# Copilot Coding Agent — Squad Instructions
-
-You are working on a project that uses **Squad**, an AI team framework. When picking up issues autonomously, follow these guidelines.
+## Squad Integration Precedence
 
 PrintFarmer's [Readiness and Merge Review Gate](#readiness-and-merge-review-gate),
 [Post-Rejection Revision Ownership](#post-rejection-revision-ownership), and
 `.squad/ralph-instructions.md` take precedence over generic Squad templates.
 Target `development` and apply the `squad` label to Squad PRs.
+
+<!-- squad:copilot-instructions:start -->
+# Copilot Coding Agent — Squad Instructions
+
+You are working on a project that uses **Squad**, an AI team framework. When picking up issues autonomously, follow these guidelines.
 
 ## Coordinator Canary Check
 
