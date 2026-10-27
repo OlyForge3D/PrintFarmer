@@ -662,7 +662,7 @@ describe('Printer file catalog', () => {
 
     const thumbnail = within(row).getByTestId('printer-file-thumbnail');
     scrollIntoView(thumbnail);
-    await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledWith('location', 7, expect.any(AbortSignal)));
+    await waitFor(() => expect(mocks.thumbnail).toHaveBeenCalledWith('location', 7, null, expect.any(AbortSignal)));
     expect(mocks.preview).toHaveBeenCalledTimes(1);
     expect(mocks.preview).toHaveBeenCalledWith('location', 7, expect.any(AbortSignal));
     // Decorative row image (the filename names it); the blob is shown through an object URL.
@@ -690,7 +690,7 @@ describe('Printer file catalog', () => {
     expect(mocks.thumbnail).not.toHaveBeenCalled();
   });
 
-  it('shows all 41 saved native fields with units and tool order, preserving the long name and short path', async () => {
+  it('shows grouped print settings, the tool table and every other supplied native field, preserving the long name and short path', async () => {
     const metadata = {
       printerModel: 'COREONE', profile: '0.20mm QUALITY', printTimeSeconds: 5400,
       estimatedPrintTimeSeconds: 5460, estimatedPrintTimeNormalMode: '1h 31m',
@@ -709,11 +709,19 @@ describe('Printer file catalog', () => {
       minInitialExposureTimeSeconds: 20, maxInitialExposureTimeSeconds: 40,
       normalPercentPresent: true, normalLeftPresent: false,
       quietPercentPresent: false, quietLeftPresent: true, layerInfoPresent: true,
+      layerCount: 400, infillPercentage: 15, infillPattern: 'gyroid',
+      supportEnabled: true, supportType: 'tree', supportStyle: 'organic',
+      slicerName: 'PrusaSlicer', slicerVersion: '2.9.0', filamentUsedGIsDerived: true,
+      // Deliberately out of list order: rows follow the explicit source index.
+      tools: [
+        { index: 1, sourceId: 'T1', material: 'PETG', color: '#00ff00', filamentUsedG: 1 },
+        { index: 0, sourceId: 'T0', material: 'PLA', color: '#ff0000', filamentUsedG: 3 },
+      ],
     } satisfies Required<PrinterPrintMetadata>;
     const nativeEntry: PrinterFileCatalogEntry = {
       ...entry, storageRoot: 'usb', relativePath: 'PART~1.BGC',
       displayName: 'Long descriptive part with full settings.bgcode', sizeBytes: 4096,
-      detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata,
+      detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata, metadataState: 'Ready',
     };
     mocks.catalog.mockResolvedValue({
       ...catalog, items: [nativeEntry],
@@ -731,19 +739,40 @@ describe('Printer file catalog', () => {
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
     expect(within(panel).getByText(/Saved in catalog/)).toHaveTextContent(
       `Saved in catalog ${new Date(nativeEntry.detailsFetchedAtUtc!).toLocaleDateString()}`);
-    const section = within(panel).getByRole('region', { name: 'Native print metadata' });
+    const section = within(panel).getByRole('region', { name: 'Print settings' });
+    const settings = [
+      ['Slicer', 'PrusaSlicer 2.9.0'], ['Sliced for', 'COREONE'], ['Layer count', '400'],
+      ['Nozzle diameter', '0.4 mm'], ['Nozzle temperature', '215 \u00b0C'], ['Bed temperature', '60 \u00b0C'],
+      ['Infill', '15%'], ['Infill pattern', 'gyroid'], ['Supports', 'Enabled'],
+      ['Support type', 'tree'], ['Support style', 'organic'], ['Filament type', 'PLA'],
+      ['Filament used', '4 g (sum of tools)'], ['Filament length', '1200 mm'],
+    ];
+    for (const [label, value] of settings) {
+      expect(detailValue(section, label).textContent).toBe(value);
+    }
+
+    const table = within(section).getByRole('table', { name: 'Filament by tool' });
+    expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Tool', 'Color', 'Material', 'Used']);
+    const [, first, second] = within(table).getAllByRole('row');
+    expect(within(first).getByRole('rowheader')).toHaveTextContent(/^Tool 1 \(T0\)$/);
+    expect(within(first).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#FF0000', 'PLA', '3 g']);
+    expect(within(first).getByTestId('tool-color-swatch')).toHaveStyle({ backgroundColor: '#FF0000' });
+    expect(within(second).getByRole('rowheader')).toHaveTextContent(/^Tool 2 \(T1\)$/);
+    expect(within(second).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#00FF00', 'PETG', '1 g']);
+
+    const other = within(section).getByRole('region', { name: 'Other reported fields' });
     const expected = [
-      ['Printer model', 'COREONE'], ['Profile', '0.20mm QUALITY'],
+      ['Profile', '0.20mm QUALITY'],
       ['Reported print time', '5400 s'], ['Estimated print time', '5460 s'],
       ['Normal-mode estimate', '1h 31m'], ['Native layer height', '0.2 mm'],
-      ['Maximum layer Z', '80 mm'], ['Infill density', '15%'], ['Brim width', '5 mm'],
+      ['Maximum layer Z', '80 mm'], ['Brim width', '5 mm'],
       ['Support material', '1'], ['Ironing', '0'],
-      ['Bed temperature', '60 \u00b0C'], ['Bed temperature per tool', 'Tool 1: 60 \u00b0C; Tool 2: 65 \u00b0C'],
-      ['Nozzle temperature', '215 \u00b0C'], ['Nozzle temperature per tool', 'Tool 1: 215 \u00b0C; Tool 2: 220 \u00b0C'],
-      ['Nozzle diameter', '0.4 mm'], ['Nozzle diameter per tool', 'Tool 1: 0.4 mm; Tool 2: 0.6 mm'],
-      ['Filament type', 'PLA'], ['Filament type per tool', 'Tool 1: PLA; Tool 2: PETG'],
-      ['Filament length', '1200 mm'], ['Filament length per tool', 'Tool 1: 800 mm; Tool 2: 400 mm'],
-      ['Filament mass', '4 g'], ['Filament mass per tool', 'Tool 1: 3 g; Tool 2: 1 g'],
+      ['Bed temperature per tool', 'Tool 1: 60 \u00b0C; Tool 2: 65 \u00b0C'],
+      ['Nozzle temperature per tool', 'Tool 1: 215 \u00b0C; Tool 2: 220 \u00b0C'],
+      ['Nozzle diameter per tool', 'Tool 1: 0.4 mm; Tool 2: 0.6 mm'],
+      ['Filament type per tool', 'Tool 1: PLA; Tool 2: PETG'],
+      ['Filament length per tool', 'Tool 1: 800 mm; Tool 2: 400 mm'],
+      ['Filament mass per tool', 'Tool 1: 3 g; Tool 2: 1 g'],
       ['Filament volume', '3 cm\u00b3'], ['Filament volume per tool', 'Tool 1: 2 cm\u00b3; Tool 2: 1 cm\u00b3'],
       ['Filament cost', '0.12 (currency unspecified)'],
       ['Filament cost per tool', 'Tool 1: 0.09 (currency unspecified); Tool 2: 0.03 (currency unspecified)'],
@@ -755,12 +784,15 @@ describe('Printer file catalog', () => {
       ['Quiet-mode progress reporting', 'No'], ['Quiet-mode remaining-time reporting', 'Yes'],
       ['Layer information present', 'Yes'],
     ];
-    expect(Object.keys(metadata)).toHaveLength(41);
-    expect(expected).toHaveLength(41);
-    expect(within(section).getAllByRole('term')).toHaveLength(41);
+    // 51 native fields: 14 grouped settings + tools table read 18 of them, the other 33 are listed once.
+    expect(Object.keys(metadata)).toHaveLength(51);
+    expect(expected).toHaveLength(33);
+    expect(within(other).getAllByRole('term')).toHaveLength(33);
+    expect(within(section).getAllByRole('term')).toHaveLength(settings.length + expected.length);
     for (const [label, value] of expected) {
-      expect(detailValue(section, label).textContent).toBe(value);
+      expect(detailValue(other, label).textContent).toBe(value);
     }
+    expect(within(section).queryByText(/Collecting|earlier details|could not be read/)).not.toBeInTheDocument();
     expect(mocks.preview).not.toHaveBeenCalled();
     expect(mocks.thumbnail).not.toHaveBeenCalled();
     expect(within(panel).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
@@ -843,7 +875,9 @@ describe('Printer file catalog', () => {
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0 mm$/);
     expect(detailValue(panel, 'Normal-mode progress reporting')).toHaveTextContent(/^No$/);
     expect(detailValue(panel, 'Filament mass per tool')).toHaveTextContent(/^Tool 1: 0 g; Tool 2: 3 g$/);
-    expect(within(panel).queryByText('Printer model', { selector: 'dt' })).not.toBeInTheDocument();
+    // Grouped settings the source did not report read as a dash ("Unknown" to screen readers), never a default.
+    expect(detailValue(panel, 'Sliced for')).toHaveTextContent(/^—Unknown$/);
+    expect(detailValue(panel, 'Supports')).toHaveTextContent(/^—Unknown$/);
   });
 
   it('uses native preview details before the first durable scan', async () => {
@@ -860,8 +894,139 @@ describe('Printer file catalog', () => {
     await waitFor(() => expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/));
     expect(detailValue(panel, 'Size')).toHaveTextContent(/^4 KB$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
-    expect(detailValue(panel, 'Printer model')).toHaveTextContent(/^COREONE$/);
+    expect(detailValue(panel, 'Sliced for')).toHaveTextContent(/^COREONE$/);
     expect(within(panel).queryByText(/Saved in catalog/)).not.toBeInTheDocument();
+  });
+
+  it('orders tool rows by source index and shows unknown tool values as dashes, never invented defaults', async () => {
+    mocks.catalog.mockResolvedValue({
+      ...catalog, items: [{
+        ...entry, detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadataState: 'Partial',
+        // Wire shape: unknown values are omitted, not sent as zero or "disabled".
+        metadata: {
+          supportEnabled: false,
+          tools: [
+            { index: 2, material: 'TPU', color: 'red' },
+            { index: 0, color: '#ff8800aa', filamentUsedG: 0 },
+          ],
+        },
+      }],
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const section = within(screen.getByRole('dialog', { name: 'part.gcode' })).getByRole('region', { name: 'Print settings' });
+    expect(detailValue(section, 'Supports')).toHaveTextContent(/^Disabled$/);
+    for (const label of ['Slicer', 'Layer count', 'Nozzle temperature', 'Infill', 'Filament used']) {
+      expect(detailValue(section, label)).toHaveTextContent(/^—Unknown$/);
+    }
+    expect(within(section).queryByText('Support type', { selector: 'dt' })).not.toBeInTheDocument();
+    expect(within(section).queryByRole('region', { name: 'Other reported fields' })).not.toBeInTheDocument();
+
+    const table = within(section).getByRole('table', { name: 'Filament by tool' });
+    const [, first, second] = within(table).getAllByRole('row');
+    expect(within(first).getByRole('rowheader')).toHaveTextContent(/^Tool 1$/);
+    expect(within(first).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#FF8800AA', '—Unknown', '0 g']);
+    expect(within(second).getByRole('rowheader')).toHaveTextContent(/^Tool 3$/);
+    // A non-literal color is unknown: no inline style, dashed placeholder swatch only.
+    expect(within(second).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['—Unknown', 'TPU', '—Unknown']);
+    expect(within(second).getByTestId('tool-color-swatch')).not.toHaveAttribute('style');
+    expect(within(second).getByTestId('tool-color-swatch')).toHaveClass('border-dashed');
+  });
+
+  it('shows calm "Collecting" states, not errors, while background capture is pending', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    mocks.catalog.mockResolvedValue({
+      ...catalog, printers: [previewSource],
+      items: [{ ...entry, metadataState: 'Pending', thumbnailState: 'Pending' }],
+    });
+    mocks.preview.mockResolvedValue({
+      locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: false,
+      capturedAtUtc: null, printTimeSeconds: null, layerHeightMm: null,
+      metadataState: 'Pending', thumbnailState: 'Deferred', nextAttemptAtUtc: '2026-10-25T12:05:00Z',
+    });
+    const user = userEvent.setup();
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    scrollIntoView(within(row).getByTestId('printer-file-thumbnail'));
+    expect(await within(row).findByRole('img', { name: 'Collecting preview…' })).toBeInTheDocument();
+    expect(within(row).queryByRole('img', { name: /Preview unavailable/ })).not.toBeInTheDocument();
+
+    await user.click(within(row).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    expect(within(panel).getByText('Collecting preview…')).toBeInTheDocument();
+    expect(within(panel).getByText('Collecting details…')).toHaveAttribute('role', 'status');
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Collecting…$/);
+    expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Collecting…$/);
+    expect(within(panel).queryByText(/Preview unavailable|no native metadata|could not be read/)).not.toBeInTheDocument();
+    // One shared, cached preview read for row + panel; no image is requested until one exists.
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    expect(mocks.thumbnail).not.toHaveBeenCalled();
+  });
+
+  it('labels an older snapshot shown while a refresh is pending', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: vi.fn(() => 'blob:old') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: vi.fn() });
+    mocks.catalog.mockResolvedValue({
+      ...catalog, printers: [previewSource], items: [{
+        ...entry, detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata: { filamentType: 'PLA' },
+        metadataState: 'Ready', thumbnailState: 'Ready', thumbnailVersion: 'v1',
+      }],
+    });
+    mocks.preview.mockResolvedValue({
+      locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: true,
+      capturedAtUtc: '2026-10-25T12:00:00Z', metadataState: 'Ready', thumbnailState: 'Ready',
+      thumbnailVersion: 'v1', isStale: true,
+    });
+    mocks.thumbnail.mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    const user = userEvent.setup();
+    renderCatalog();
+    await user.click(within(await findRow('part.gcode')).getByRole('button', { name: 'part.gcode, show details' }));
+    const panel = screen.getByRole('dialog', { name: 'part.gcode' });
+    expect(await within(panel).findByText('Showing earlier details while a refresh is pending.')).toHaveAttribute('role', 'status');
+    expect(await within(panel).findByText('Showing an earlier preview while a refresh is pending.')).toBeInTheDocument();
+    expect(within(panel).getByRole('img', { name: 'Preview of part.gcode' })).toHaveAttribute('src', 'blob:old');
+    expect(detailValue(panel, 'Filament type')).toHaveTextContent(/^PLA$/);
+    expect(within(panel).queryByText(/Collecting|Preview unavailable/)).not.toBeInTheDocument();
+  });
+
+  it('requests the versioned local thumbnail and re-reads it only when the polled catalog reports a new version', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+    const objectUrls = ['blob:v1', 'blob:v2'];
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: vi.fn(() => objectUrls.shift()) });
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: revoke });
+    const ready: PrinterFileCatalogEntry = { ...entry, metadataState: 'Ready', thumbnailState: 'Ready' };
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [previewSource], items: [{ ...ready, thumbnailVersion: 'v1' }] });
+    const previewFor = (version: string) => ({
+      locationId: entry.id, observationRevision: 7, state: 'Available', hasImage: true,
+      metadataState: 'Ready', thumbnailState: 'Ready', thumbnailVersion: version,
+      thumbnailUrl: `/api/printer-files/locations/${entry.id}/thumbnail?observationRevision=7&version=${version}`,
+    });
+    mocks.preview.mockResolvedValue(previewFor('v1'));
+    mocks.thumbnail.mockImplementation(async () => new Blob(['png'], { type: 'image/png' }));
+    const { queryClient } = renderCatalog();
+    const thumbnail = within(await findRow('part.gcode')).getByTestId('printer-file-thumbnail');
+    scrollIntoView(thumbnail);
+    await waitFor(() => expect(thumbnail.querySelector('img')).toHaveAttribute('src', 'blob:v1'));
+    expect(mocks.thumbnail).toHaveBeenCalledTimes(1);
+    expect(mocks.thumbnail).toHaveBeenCalledWith('location', 7, 'v1', expect.any(AbortSignal));
+
+    // An unchanged catalog poll must not re-read the preview or the image.
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    expect(mocks.thumbnail).toHaveBeenCalledTimes(1);
+
+    // The background capture stored a new image: the next catalog poll carries the new version.
+    mocks.catalog.mockResolvedValue({ ...catalog, printers: [previewSource], items: [{ ...ready, thumbnailVersion: 'v2' }] });
+    mocks.preview.mockResolvedValue(previewFor('v2'));
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+    await waitFor(() => expect(mocks.thumbnail).toHaveBeenLastCalledWith('location', 7, 'v2', expect.any(AbortSignal)));
+    await waitFor(() => expect(thumbnail.querySelector('img')).toHaveAttribute('src', 'blob:v2'));
+    expect(mocks.preview).toHaveBeenCalledTimes(2);
+    expect(mocks.thumbnail).toHaveBeenCalledTimes(2);
+    expect(revoke).toHaveBeenCalledWith('blob:v1');
   });
 
   it.each([

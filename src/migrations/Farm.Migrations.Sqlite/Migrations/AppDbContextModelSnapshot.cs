@@ -6202,6 +6202,71 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("PrinterDispatchStates");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileEnrichment", b =>
+                {
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AcquiredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ArtifactId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ExtractorVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MetadataReason")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MetadataSource")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MetadataState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.Property<string>("SourceIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThumbnailReason")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThumbnailState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("LocationId");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("NextAttemptAtUtc");
+
+                    b.ToTable("PrinterFileEnrichments");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileIoSlot", b =>
                 {
                     b.Property<int>("Id")
@@ -6675,6 +6740,88 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("Enabled", "NextScanAtUtc");
 
                     b.ToTable("PrinterFileScanStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailArtifact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentSha256");
+
+                    b.HasIndex("RetiredAtUtc");
+
+                    b.ToTable("PrinterFileThumbnailArtifacts");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ReservedBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.ToTable("PrinterFileThumbnailReservations");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailStorageLock", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterFileThumbnailStorageLocks");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Revision = 0L
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
@@ -9730,6 +9877,24 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsRequired();
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileEnrichment", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileThumbnailArtifact", "Artifact")
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileLocation", "Location")
+                        .WithOne()
+                        .HasForeignKey("Farm.Infrastructure.Domain.PrinterFileEnrichment", "LocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artifact");
+
+                    b.Navigation("Location");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileLocation", b =>

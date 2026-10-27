@@ -233,6 +233,83 @@ public sealed class PrinterFileLeaseCoordinatorTests
         Assert.False(await lease.FencePublicationAsync(publication));
     }
 
+    [Fact]
+    public async Task AcquireAsync_DueEnrichmentClaimsIdleBackgroundLeaseBeforeNextScan()
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        await fixture.PrepareFutureScanAsync();
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, false));
+
+        PrinterFileLocation location = await fixture.AddLocationAsync(fixture.First);
+        await using (IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireAsync(fixture.First, false))
+        {
+            Assert.NotNull(lease);
+            Assert.True(await lease.IsCurrentAsync());
+        }
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        Assert.True((await db.PrinterFileScanStates.AsNoTracking().SingleAsync()).NextScanAtUtc > DateTime.UtcNow);
+        db.PrinterFileEnrichments.Add(new PrinterFileEnrichment
+        {
+            LocationId = location.Id,
+            SourceIdentity = PrinterFileEnrichmentIdentity.For(location),
+            ExtractorVersion = PrinterFileEnrichmentLimits.ExtractorVersion,
+            MetadataState = PrinterFileEnrichmentState.Ready,
+            ThumbnailState = PrinterFileEnrichmentState.Absent,
+            NextAttemptAtUtc = DateTime.UtcNow.AddHours(24),
+        });
+        await db.SaveChangesAsync();
+        await fixture.PostponeScanAsync();
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, false));
+    }
+
+    [Theory]
+    [InlineData("settings")]
+    [InlineData("printer")]
+    [InlineData("busy")]
+    [InlineData("interactive")]
+    [InlineData("generation")]
+    public async Task AcquireAsync_DueEnrichmentNeverBypassesBackgroundEligibility(string blocker)
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        await fixture.PrepareFutureScanAsync();
+        PrinterFileLocation location = await fixture.AddLocationAsync(fixture.First);
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            switch (blocker)
+            {
+                case "settings":
+                    AppSettingsEntity policy = await db.AppSettingsEntities.SingleAsync();
+                    policy.SettingsJson = JsonSerializer.Serialize(new PrinterFileIndexSettings
+                    {
+                        Enabled = false,
+                        MaxConcurrentIo = 2,
+                    });
+                    await db.SaveChangesAsync();
+                    break;
+                case "printer":
+                    await db.PrinterFileScanStates.ExecuteUpdateAsync(s => s.SetProperty(x => x.Enabled, false));
+                    break;
+                case "busy":
+                    fixture.SetActivity(fixture.First, "printing");
+                    break;
+                case "interactive":
+                    await db.PrinterFileScanStates.ExecuteUpdateAsync(s =>
+                        s.SetProperty(x => x.InteractiveRequestedAtUtc, DateTime.UtcNow));
+                    break;
+                default:
+                    await db.PrinterFileLocations.Where(x => x.Id == location.Id).ExecuteUpdateAsync(s =>
+                        s.SetProperty(x => x.ConfigurationGeneration, x => x.ConfigurationGeneration + 1));
+                    break;
+            }
+        }
+
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, false));
+        await using AppDbContext check = fixture.Factory.CreateDbContext();
+        Assert.Empty(await check.PrinterFileIoSlots.ToArrayAsync());
+        Assert.Null((await check.PrinterFileScanStates.AsNoTracking().SingleAsync()).LeaseOwner);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -271,6 +348,54 @@ public sealed class PrinterFileLeaseCoordinatorTests
         public void SetActivity(Guid printerId, string activity) =>
             Status.Setup(x => x.GetSnapshot(printerId)).Returns(new PrinterStatusCacheSnapshot(
                 new PrinterStatusDto(printerId, true, activity) { RawActivityState = activity }, DateTime.UtcNow));
+
+        /// <summary>Enrolls the first printer as idle with its next inventory scan an hour away.</summary>
+        public async Task PrepareFutureScanAsync()
+        {
+            SetIdle(First);
+            await using AppDbContext db = Factory.CreateDbContext();
+            Printer printer = await db.Printers.AsNoTracking().SingleAsync(x => x.Id == First);
+            db.PrinterFileScanStates.Add(new PrinterFileScanState
+            {
+                Id = First,
+                SourcePrinterId = First,
+                RegisteredPrinterId = First,
+                ConfigurationFingerprint = PrinterFileIndexPolicy.ConfigurationFingerprint(printer),
+                NextScanAtUtc = DateTime.UtcNow.AddHours(1),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task PostponeScanAsync()
+        {
+            await using AppDbContext db = Factory.CreateDbContext();
+            await db.PrinterFileScanStates.ExecuteUpdateAsync(s =>
+                s.SetProperty(x => x.NextScanAtUtc, DateTime.UtcNow.AddHours(1)));
+        }
+
+        public async Task<PrinterFileLocation> AddLocationAsync(Guid printerId)
+        {
+            await using AppDbContext db = Factory.CreateDbContext();
+            PrinterFileScanState state = await db.PrinterFileScanStates.AsNoTracking()
+                .SingleAsync(x => x.SourcePrinterId == printerId);
+            PrinterFileLocation location = new()
+            {
+                Id = Guid.NewGuid(),
+                SourcePrinterId = printerId,
+                RegisteredPrinterId = printerId,
+                StorageRoot = "gcodes",
+                RelativePath = "part.gcode",
+                IdentityKey = PrinterInventoryPath.ComputeIdentity("gcodes", "part.gcode"),
+                DisplayName = "part.gcode",
+                SizeBytes = 42,
+                ConfigurationGeneration = state.ConfigurationGeneration,
+                MutationGeneration = state.MutationGeneration,
+                Availability = PrinterFileAvailability.Available,
+            };
+            db.PrinterFileLocations.Add(location);
+            await db.SaveChangesAsync();
+            return location;
+        }
 
         public static async Task<Fixture> CreateAsync(int slots, bool enabled = true)
         {

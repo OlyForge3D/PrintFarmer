@@ -50,12 +50,29 @@ public sealed class PrinterFileIndexWorker(
         List<Printer> printers = await db.Printers.AsNoTracking().Where(x => x.IsEnabled).ToListAsync(ct);
         Dictionary<Guid, PrinterFileScanState> states = await db.PrinterFileScanStates.AsNoTracking()
             .ToDictionaryAsync(x => x.SourcePrinterId, ct);
+        HashSet<Guid> enrichmentDue = (await PrinterFileEnrichmentSchedule.DuePrinterIdsAsync(db, now, ct)).ToHashSet();
+
+        // Inventory-due printers keep their schedule order; enrichment-only printers rotate by least recent lease.
+        DateTime DueAt(Printer printer)
+        {
+            if (!states.TryGetValue(printer.Id, out PrinterFileScanState? state))
+            {
+                return DateTime.MinValue;
+            }
+
+            return state.NextScanAtUtc <= now ||
+                state.ConfigurationFingerprint != PrinterFileIndexPolicy.ConfigurationFingerprint(printer)
+                ? state.NextScanAtUtc
+                : state.LeaseExpiresAtUtc ?? DateTime.MinValue;
+        }
+
         Guid[] due = printers.Where(printer =>
                 !states.TryGetValue(printer.Id, out PrinterFileScanState? state) ||
                 (state.Enabled && (state.NextScanAtUtc <= now ||
-                 state.ConfigurationFingerprint != PrinterFileIndexPolicy.ConfigurationFingerprint(printer))))
-            .OrderBy(printer => states.TryGetValue(printer.Id, out PrinterFileScanState? state)
-                ? state.NextScanAtUtc : DateTime.MinValue)
+                 state.ConfigurationFingerprint != PrinterFileIndexPolicy.ConfigurationFingerprint(printer) ||
+                 enrichmentDue.Contains(printer.Id))))
+            .OrderBy(DueAt)
+            .ThenBy(printer => printer.Id)
             .Take(32).Select(printer => printer.Id).ToArray();
         await Parallel.ForEachAsync(
             due,
@@ -106,5 +123,18 @@ public sealed class PrinterFileIndexWorker(
                     }
                 }
             });
+
+        try
+        {
+            PrinterFileThumbnailStore? store = batchScope.ServiceProvider.GetService<PrinterFileThumbnailStore>();
+            if (store is not null)
+            {
+                await store.CleanupAsync(ct);
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Printer file thumbnail cleanup failed: {FailureType}", ex.GetType().Name);
+        }
     }
 }

@@ -626,14 +626,19 @@ export class ApiClient {
     return response.data;
   }
 
-  /** Captured thumbnail bytes for one exact observation, or `null` when no image exists (404). */
+  /**
+   * Locally stored thumbnail bytes for one exact observation, or `null` when no image exists
+   * (404). `version` is the preview's opaque `thumbnailVersion`; it makes each stored image a
+   * distinct, cacheable URL. Never contacts the printer.
+   */
   async getPrinterFileLocationThumbnail(
-    locationId: string, observationRevision: number, signal?: AbortSignal,
+    locationId: string, observationRevision: number, version: string | null | undefined, signal?: AbortSignal,
   ): Promise<Blob | null> {
     try {
       const response = await this.client.get<Blob>(
         `/printer-files/locations/${encodeURIComponent(locationId)}/thumbnail`,
-        { params: { observationRevision }, responseType: "blob", signal },
+        // axios drops null/undefined params, so older servers see the unchanged request.
+        { params: { observationRevision, version }, responseType: "blob", signal },
       );
       return response.data;
     } catch (error) {

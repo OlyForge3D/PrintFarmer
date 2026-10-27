@@ -94,6 +94,14 @@ export interface PrinterFileCatalogEntry {
     capturedAtUtc: string;
     verification: PrinterFileVerification;
   }>;
+  /** Background metadata outcome; absent on servers without the enrichment pipeline. */
+  metadataState?: PrinterFileEnrichmentState | null;
+  /** Background thumbnail outcome, independent of the metadata outcome. */
+  thumbnailState?: PrinterFileEnrichmentState | null;
+  /** Opaque stored-image version; changes whenever the local thumbnail bytes change. */
+  thumbnailVersion?: string | null;
+  /** Versioned local-only thumbnail route; present only when a validated image exists. */
+  thumbnailUrl?: string | null;
 }
 
 export interface PrinterFileScanStatus {
@@ -139,6 +147,25 @@ export interface PrinterFileCatalogPage {
 
 export type PrinterFilePreviewState = 'Available' | 'Unavailable' | 'Unsupported' | 'Deferred';
 
+/**
+ * Background enrichment outcome for one on-printer file. `Pending`/`Deferred` mean the capture
+ * has not run yet (not an error); `Absent`/`Unsupported`/`Failed` are settled outcomes.
+ */
+export type PrinterFileEnrichmentState =
+  | 'Pending' | 'Ready' | 'Partial' | 'Absent' | 'Unsupported' | 'Deferred' | 'Failed';
+
+/** One explicitly identified source tool slot. Null measurements mean unknown, never zero. */
+export interface PrinterFilamentTool {
+  /** Zero-based source tool slot; unique within one metadata record. */
+  index: number;
+  /** Native tool identifier, when the source supplied one. */
+  sourceId?: string | null;
+  material?: string | null;
+  /** Literal `#RRGGBB` / `#RRGGBBAA` when known; never a guessed default. */
+  color?: string | null;
+  filamentUsedG?: number | null;
+}
+
 /** Optional native measurements; per-tool arrays retain provider order. Cost has no assumed currency. */
 export interface PrinterPrintMetadata {
   bedTemperatureC?: number | null;
@@ -182,6 +209,21 @@ export interface PrinterPrintMetadata {
   ironing?: number | null;
   requiredResinMl?: number | null;
   profile?: string | null;
+  /** Source-reported total layer count, never estimated from layer height. */
+  layerCount?: number | null;
+  /** Infill density as a percentage from 0 through 100. */
+  infillPercentage?: number | null;
+  infillPattern?: string | null;
+  /** `false` is an explicit "disabled"; null means the source did not say. */
+  supportEnabled?: boolean | null;
+  supportType?: string | null;
+  supportStyle?: string | null;
+  slicerName?: string | null;
+  slicerVersion?: string | null;
+  /** Explicitly identified tools; ordered by `index`, never aligned by list position. */
+  tools?: PrinterFilamentTool[] | null;
+  /** True only when `filamentUsedG` was summed from a complete set of tool weights. */
+  filamentUsedGIsDerived?: boolean | null;
 }
 
 /** GET /printer-files/locations/{id}/preview?observationRevision=n */
@@ -192,12 +234,26 @@ export interface PrinterFilePreview {
   reasonCode?: string | null;
   capturedAtUtc?: string | null;
   hasImage: boolean;
-  /** Server-relative hint only; the client fetches thumbnails through apiClient. */
+  /**
+   * Server-relative, local-only route (`…/thumbnail?observationRevision=n&version=v`); a hint
+   * only, since the client fetches thumbnail bytes through apiClient.
+   */
   thumbnailUrl?: string | null;
   printTimeSeconds?: number | null;
   layerHeightMm?: number | null;
   sizeBytes?: number | null;
   metadata?: PrinterPrintMetadata | null;
+  // Enrichment status fields: absent on servers without the background enrichment pipeline.
+  metadataState?: PrinterFileEnrichmentState | null;
+  thumbnailState?: PrinterFileEnrichmentState | null;
+  metadataReason?: string | null;
+  thumbnailReason?: string | null;
+  extractorVersion?: number | null;
+  nextAttemptAtUtc?: string | null;
+  /** Opaque stored-image version; a change means the previous image no longer applies. */
+  thumbnailVersion?: string | null;
+  /** An older snapshot is being served while a background refresh is pending. */
+  isStale?: boolean | null;
 }
 
 // PrintJobStatusDto for Moonraker print job status

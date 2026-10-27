@@ -1,4 +1,6 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -11,8 +13,8 @@ using Microsoft.Extensions.Options;
 namespace Farm.Modules.Gcode.Services.Gcode;
 
 /// <summary>
-/// Interactive remote reads, distinct from metadata indexing and durable Copy Local.
-/// No method creates a library asset, operation, origin or queue job.
+/// Local preview/thumbnail reads plus the interactive remote download, distinct from background
+/// enrichment and durable Copy Local. No method creates a library asset, operation, origin or queue job.
 /// </summary>
 public sealed class PrinterFileContentService(
     AppDbContext db,
@@ -21,66 +23,66 @@ public sealed class PrinterFileContentService(
     IPrinterStatusCacheReader status,
     IBackendClientFactory backends,
     IPrintersRepository printers,
-    PrinterFilePreviewCache cache,
+    PrinterFileThumbnailStore thumbnails,
     IOptions<BackendTimeoutSettings> timeouts)
 {
-    /// <summary>Returns a cached capture or performs one explicitly requested lightweight fetch.</summary>
+    /// <summary>
+    /// Local-only: persisted metadata and background enrichment status. Never contacts the printer,
+    /// acquires a lease or starts acquisition, so it answers while the printer is busy or unreachable.
+    /// </summary>
     public async Task<PrinterFilePreviewDto> PreviewAsync(
         Guid actor, Guid locationId, long revision, CancellationToken ct)
     {
         Source source = await LoadAsync(actor, locationId, revision, download: false, ct);
-        if (GetBackend(source.Printer) is not ISupportsPrinterFilePreview preview)
-        {
-            return Describe(source.Location, null, "preview_unsupported");
-        }
-
-        PrinterFilePreviewCapture? capture = await cache.GetAsync(source.Key, ct);
-        if (capture is not null)
-        {
-            await ValidateCacheReadAsync(actor, source, ct);
-            return Describe(source.Location, capture);
-        }
-
-        try
-        {
-            return await CaptureAsync(actor, source, preview, ct);
-        }
-        catch (PrinterFileCommandException error) when (
-            error.Reason is "waiting_for_confirmed_idle" or "source_busy")
-        {
-            return Describe(source.Location, null, "printer_busy", PrinterFilePreviewState.Deferred);
-        }
+        PrinterFileEnrichment? row = await CurrentEnrichmentAsync(source.Location, ct);
+        bool supported = GetBackend(source.Printer) is ISupportsPrinterFileEnrichment;
+        await ValidateLocalReadAsync(actor, source, ct);
+        return Describe(source.Location, row, supported, DateTime.UtcNow);
     }
 
-    private async Task<PrinterFilePreviewDto> CaptureAsync(
-        Guid actor, Source source, ISupportsPrinterFilePreview preview, CancellationToken ct)
-    {
-        RequireIdle(source.Printer.Id);
-        await using IPrinterFileLease lease = await AcquireAsync(source, ct);
-        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, lease.Token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(15));
-        CancellationToken token = deadline.Token;
-        await ValidateAsync(actor, source, lease, download: false, token);
-        Printer printer = await printers.FindByIdWithIncludesAsync(source.Printer.Id, token)
-            ?? throw new PrinterFileCommandException("source_missing", 404);
-        PrinterFilePreviewContent content = await preview.GetFilePreviewAsync(
-            printer.BackendUrl, Observation(source.Location), printer.Credential, token);
-        await ValidateAsync(actor, source, lease, download: false, token);
-        PrinterFilePreviewCapture capture = new(DateTime.UtcNow, content);
-        await cache.PutAsync(source.Key, capture, token);
-        await ValidateAsync(actor, source, lease, download: false, token);
-        return Describe(source.Location, capture);
-    }
-
-    /// <summary>Cache-only image lookup; every read rechecks live database authority and identity.</summary>
+    /// <summary>
+    /// Serves only a validated, locally stored image for the current source identity. A missing local
+    /// artifact is reported unavailable and scheduled for background repair; there is no printer fallback.
+    /// </summary>
     public async Task<PrinterFilePreviewContent> ThumbnailAsync(
-        Guid actor, Guid locationId, long revision, CancellationToken ct)
+        Guid actor, Guid locationId, long revision, Guid? version, CancellationToken ct)
     {
         Source source = await LoadAsync(actor, locationId, revision, download: false, ct);
-        PrinterFilePreviewCapture? capture = await cache.GetAsync(source.Key, ct);
-        await ValidateCacheReadAsync(actor, source, ct);
-        return capture?.Content.Image is not null
-            ? capture.Content : throw new PrinterFileCommandException("preview_not_cached", 404);
+        PrinterFileEnrichment? row = await CurrentEnrichmentAsync(source.Location, ct);
+        if (row?.ArtifactId is not Guid artifactId)
+        {
+            throw new PrinterFileCommandException("thumbnail_unavailable", 404);
+        }
+
+        if (version is Guid requested && requested != artifactId)
+        {
+            throw new PrinterFileCommandException("thumbnail_version_changed", 404);
+        }
+
+        PrinterFilePreviewContent? image;
+        try
+        {
+            image = await thumbnails.ReadAsync(artifactId, ct);
+        }
+        catch (InvalidDataException)
+        {
+            image = null;
+        }
+
+        if (image?.Image is null || image.ContentType is null)
+        {
+            await ScheduleRepairAsync(source.Location.Id, artifactId, ct);
+            throw new PrinterFileCommandException("thumbnail_unavailable", 404);
+        }
+
+        await ValidateLocalReadAsync(actor, source, ct);
+        PrinterFileEnrichment? current = await CurrentEnrichmentAsync(source.Location, ct);
+        if (current?.ArtifactId != artifactId)
+        {
+            throw new PrinterFileCommandException("thumbnail_version_changed", 404);
+        }
+
+        return image;
     }
 
     /// <summary>
@@ -146,6 +148,10 @@ public sealed class PrinterFileContentService(
         return string.IsNullOrWhiteSpace(safe) || safe is "." or ".." ? "printer-file.gcode" : safe;
     }
 
+    /// <summary>Versioned local-only thumbnail route; a new stored image always yields a new URL.</summary>
+    public static string ThumbnailUrl(Guid locationId, long observationRevision, Guid version) =>
+        $"/api/printer-files/locations/{locationId}/thumbnail?observationRevision={observationRevision}&version={version}";
+
     private async Task<Source> LoadAsync(Guid actor, Guid id, long revision, bool download, CancellationToken ct)
     {
         if (revision < 1)
@@ -182,13 +188,68 @@ public sealed class PrinterFileContentService(
             throw new PrinterFileCommandException("invalid_source_path", 400);
         }
 
-        return new(location, printer, PrinterFilePreviewCache.Key(location, scan.ConfigurationFingerprint));
+        return new(location, printer, SourceKey(location, scan.ConfigurationFingerprint));
     }
+
+    private static string SourceKey(PrinterFileLocation location, string configurationFingerprint) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 2,
+            location.SourcePrinterId,
+            location.StorageRoot,
+            location.RelativePath,
+            location.SizeBytes,
+            location.ModifiedValue,
+            location.ProviderVersion,
+            location.ProviderDigest,
+            location.ObservationRevision,
+            location.ConfigurationGeneration,
+            location.MutationGeneration,
+            configurationFingerprint,
+        })));
 
     private object? GetBackend(Printer printer) =>
         backends.IsBackendSupported((PrinterBackend)printer.Backend) ? backends.GetClient(printer.Backend) : null;
 
-    private async Task ValidateCacheReadAsync(Guid actor, Source source, CancellationToken ct)
+    /// <summary>Enrichment outcomes, only when recorded for the location's current source identity.</summary>
+    private async Task<PrinterFileEnrichment?> CurrentEnrichmentAsync(
+        PrinterFileLocation location, CancellationToken ct)
+    {
+        PrinterFileEnrichment? row = await db.PrinterFileEnrichments.AsNoTracking()
+            .Include(x => x.Artifact)
+            .SingleOrDefaultAsync(x => x.LocationId == location.Id, ct);
+        return row?.SourceIdentity == PrinterFileEnrichmentIdentity.For(location) ? row : null;
+    }
+
+    /// <summary>Detaches a lost artifact so the next background slice re-acquires it.</summary>
+    private async Task ScheduleRepairAsync(Guid locationId, Guid artifactId, CancellationToken ct)
+    {
+        PrinterFileEnrichment? row = await db.PrinterFileEnrichments
+            .SingleOrDefaultAsync(x => x.LocationId == locationId && x.ArtifactId == artifactId, ct);
+        if (row is null)
+        {
+            return;
+        }
+
+        row.ArtifactId = null;
+        row.ThumbnailState = PrinterFileEnrichmentState.Pending;
+        row.ThumbnailReason = "thumbnail_missing";
+        row.NextAttemptAtUtc = DateTime.UtcNow;
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // A concurrent publication already replaced the pointer; its outcome wins.
+        }
+        finally
+        {
+            db.Entry(row).State = EntityState.Detached;
+        }
+    }
+
+    private async Task ValidateLocalReadAsync(Guid actor, Source source, CancellationToken ct)
     {
         Source current = await LoadAsync(actor, source.Location.Id, source.Location.ObservationRevision, false, ct);
         if (current.Key != source.Key)
@@ -250,27 +311,45 @@ public sealed class PrinterFileContentService(
     }
 
     private static PrinterFilePreviewDto Describe(
-        PrinterFileLocation location, PrinterFilePreviewCapture? capture, string? reason = null,
-        PrinterFilePreviewState? state = null)
+        PrinterFileLocation location, PrinterFileEnrichment? row, bool supported, DateTime now)
     {
-        string? url = capture?.Content.Image is null ? null :
-            $"/api/printer-files/locations/{location.Id}/thumbnail?observationRevision={location.ObservationRevision}";
-        bool hasCatalogDetails = location.DetailsFetchedAtUtc.HasValue;
-        PrinterPrintMetadata? metadata = hasCatalogDetails
-            ? location.Metadata : capture?.Content.Metadata;
-        bool hasMetadata = metadata?.HasValues is true;
-        double? printTime = metadata?.EstimatedPrintTimeSeconds ?? metadata?.PrintTimeSeconds ??
-            (hasCatalogDetails ? null : capture?.Content.PrintTimeSeconds);
-        double? layerHeight = metadata?.LayerHeightMm ?? (hasCatalogDetails ? null : capture?.Content.LayerHeightMm);
-        long? size = location.SizeBytes ?? (hasCatalogDetails ? null : capture?.Content.SizeBytes);
-        PrinterFilePreviewState resolvedState = state ?? (reason == "preview_unsupported" ? PrinterFilePreviewState.Unsupported :
-            hasMetadata || capture?.Content.Image is not null || printTime.HasValue || layerHeight.HasValue ||
-                size.HasValue
-                ? PrinterFilePreviewState.Available : PrinterFilePreviewState.Unavailable);
-        return new(location.Id, location.ObservationRevision, capture?.CapturedAtUtc, capture?.Content.Image is not null, url,
-            printTime, layerHeight,
-            reason ?? (capture?.Content.Image is null ? "image_unavailable" : null), resolvedState,
-            size, metadata);
+        Guid? version = row?.ArtifactId;
+        bool hasImage = version.HasValue;
+        string? url = version is Guid artifactId
+            ? ThumbnailUrl(location.Id, location.ObservationRevision, artifactId)
+            : null;
+        PrinterPrintMetadata? metadata = location.Metadata;
+        double? printTime = metadata?.EstimatedPrintTimeSeconds ?? metadata?.PrintTimeSeconds;
+        double? layerHeight = metadata?.LayerHeightMm;
+        long? size = location.SizeBytes;
+        PrinterFileEnrichmentState fallback = supported
+            ? PrinterFileEnrichmentState.Pending : PrinterFileEnrichmentState.Unsupported;
+        PrinterFileEnrichmentState metadataState = row?.MetadataState ?? fallback;
+        PrinterFileEnrichmentState thumbnailState = row?.ThumbnailState ?? fallback;
+        string? unsupportedReason = supported ? null : "enrichment_unsupported";
+        bool unsupported = !supported || (metadataState == PrinterFileEnrichmentState.Unsupported &&
+            thumbnailState == PrinterFileEnrichmentState.Unsupported);
+        bool waiting = row is null || metadataState is PrinterFileEnrichmentState.Pending or PrinterFileEnrichmentState.Deferred ||
+            thumbnailState is PrinterFileEnrichmentState.Pending or PrinterFileEnrichmentState.Deferred;
+        PrinterFilePreviewState state = unsupported ? PrinterFilePreviewState.Unsupported :
+            metadata?.HasValues is true || hasImage || printTime.HasValue || layerHeight.HasValue || size.HasValue
+                ? PrinterFilePreviewState.Available :
+            waiting ? PrinterFilePreviewState.Deferred : PrinterFilePreviewState.Unavailable;
+        string? reason = hasImage ? null :
+            !supported ? "preview_unsupported" : row?.ThumbnailReason ?? "image_unavailable";
+        return new(location.Id, location.ObservationRevision, row?.AcquiredAtUtc ?? location.DetailsFetchedAtUtc,
+            hasImage, url, printTime, layerHeight, reason, state, size, metadata)
+        {
+            MetadataState = metadataState,
+            ThumbnailState = thumbnailState,
+            MetadataReason = row?.MetadataReason ?? unsupportedReason,
+            ThumbnailReason = row?.ThumbnailReason ?? unsupportedReason,
+            ExtractorVersion = row?.ExtractorVersion,
+            NextAttemptAtUtc = row?.NextAttemptAtUtc,
+            ThumbnailVersion = version,
+            IsStale = hasImage && (PrinterFileEnrichmentSchedule.IsDue(row, now) ||
+                thumbnailState != PrinterFileEnrichmentState.Ready),
+        };
     }
 
     private sealed record Source(PrinterFileLocation Location, Printer Printer, string Key);
@@ -308,7 +387,10 @@ public sealed class PrinterFileContentService(
     }
 }
 
-/// <summary>Safe same-origin preview contract; null measurements explicitly mean unavailable.</summary>
+/// <summary>
+/// Safe same-origin preview contract; null measurements explicitly mean unavailable. Enrichment
+/// status fields are always serialized so clients can distinguish pending, deferred and settled work.
+/// </summary>
 public sealed record PrinterFilePreviewDto(
     Guid LocationId, long ObservationRevision,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTime? CapturedAtUtc,
@@ -317,7 +399,33 @@ public sealed record PrinterFilePreviewDto(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? LayerHeightMm,
     string? ReasonCode, PrinterFilePreviewState State,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] long? SizeBytes = null,
-    PrinterPrintMetadata? Metadata = null);
+    PrinterPrintMetadata? Metadata = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public PrinterFileEnrichmentState? MetadataState { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public PrinterFileEnrichmentState? ThumbnailState { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? MetadataReason { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? ThumbnailReason { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public int? ExtractorVersion { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public DateTime? NextAttemptAtUtc { get; init; }
+
+    /// <summary>Opaque artifact version; changes whenever the served image bytes change.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public Guid? ThumbnailVersion { get; init; }
+
+    /// <summary>True when the served image is a previous artifact awaiting background revalidation.</summary>
+    public bool IsStale { get; init; }
+}
 
 /// <summary>Preview availability serialized as the established case-sensitive string values.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<PrinterFilePreviewState>))]

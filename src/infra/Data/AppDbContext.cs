@@ -49,6 +49,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<PrinterFileLocation> PrinterFileLocations => Set<PrinterFileLocation>();
 
+    public DbSet<PrinterFileEnrichment> PrinterFileEnrichments => Set<PrinterFileEnrichment>();
+
+    public DbSet<PrinterFileThumbnailArtifact> PrinterFileThumbnailArtifacts => Set<PrinterFileThumbnailArtifact>();
+
+    public DbSet<PrinterFileThumbnailReservation> PrinterFileThumbnailReservations => Set<PrinterFileThumbnailReservation>();
+
+    public DbSet<PrinterFileThumbnailStorageLock> PrinterFileThumbnailStorageLocks => Set<PrinterFileThumbnailStorageLock>();
+
     public DbSet<PrinterFileScanState> PrinterFileScanStates => Set<PrinterFileScanState>();
 
     public DbSet<PrinterFileRootScan> PrinterFileRootScans => Set<PrinterFileRootScan>();

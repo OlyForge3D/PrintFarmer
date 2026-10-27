@@ -18,7 +18,7 @@ interface PrinterFileThumbnailProps {
 export function PrinterFileThumbnail({ entry, source, size }: PrinterFileThumbnailProps) {
   const [ref, inView] = useInViewOnce<HTMLDivElement>();
   const enabled = inView && canPreviewSource(source) && entry.availability === 'Available';
-  const { thumbnail, unavailableReason, isLoading } = usePrinterFilePreview(entry, enabled);
+  const { thumbnail, unavailableReason, thumbnailCollecting, isLoading } = usePrinterFilePreview(entry, enabled);
   return (
     <div ref={ref} data-testid="printer-file-thumbnail" className={size === 'card' ? 'w-full' : 'inline-flex'}>
       <FileThumbnail
@@ -26,6 +26,7 @@ export function PrinterFileThumbnail({ entry, source, size }: PrinterFileThumbna
         size={size}
         blob={thumbnail}
         unavailableReason={unavailableReason}
+        collecting={thumbnailCollecting}
         loading={isLoading}
         className={size === 'card' ? 'rounded-none' : undefined}
       />

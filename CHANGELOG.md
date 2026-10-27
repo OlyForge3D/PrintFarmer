@@ -2,6 +2,16 @@
 
 ### Features
 
+- Add rich printer-file settings and durable thumbnails through one bounded,
+  confirmed-idle background pipeline for Moonraker, OctoPrint, and PrusaLink
+  (#3570, #3571). Native metadata takes precedence over bounded G-code/BGCode
+  fallback; tool colors, materials, and weights retain their source slots and
+  unknown values. Browsing and preview/image GETs perform no printer I/O.
+  The shared store defaults to 512 MiB and never evicts healthy previews to
+  admit another file. Upgrade with the `AddPrinterFileEnrichment` migration
+  for SQLite, PostgreSQL, or SQL Server; API replicas must share the database
+  and persistent Gcode volume.
+
 - Persist PrusaLink native file details in the database, including full display
   names, sizes, and all 41 supported print-metadata fields. Show saved details
   independently of thumbnail availability; reuse unchanged observations during

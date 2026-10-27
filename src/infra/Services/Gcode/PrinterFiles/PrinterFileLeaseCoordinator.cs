@@ -82,8 +82,14 @@ public sealed class PrinterFileLeaseCoordinator(
 
             bool occupied = state.LeaseOwner.HasValue && state.LeaseExpiresAtUtc > now;
             bool confirmedIdle = !requireIdle || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
+
+            // Due per-file enrichment may claim an idle background lease before the next inventory scan.
+            bool scheduled = state.NextScanAtUtc <= now ||
+                (!interactive && settings.Enabled && state.Enabled && confirmedIdle && !occupied &&
+                 await PrinterFileEnrichmentSchedule.AnyDueAsync(
+                     db, printerId, state.ConfigurationGeneration, state.MutationGeneration, now, ct));
             bool deferred = !interactive && (!settings.Enabled || !state.Enabled ||
-                state.NextScanAtUtc > now ||
+                !scheduled ||
                 state.InteractiveRequestedAtUtc > now.AddMinutes(-2) ||
                 !confirmedIdle);
             if (occupied || deferred || !confirmedIdle)

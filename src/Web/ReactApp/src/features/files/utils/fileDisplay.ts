@@ -1,5 +1,6 @@
 import { formatPrintTimeMinutes, parseApiDateTime } from '@/common/utils/datetime';
 import { formatFileSize } from '@/common/utils/stlFileUtils';
+import type { PrinterFileEnrichmentState } from '@/types/api';
 
 /** Visual file category shared by the local library and printer-resident listings. */
 export type FileKind = 'gcode' | 'model' | 'other';
@@ -89,4 +90,15 @@ export function formatLayerHeight(millimetres: number | null | undefined): strin
 /** Server reason codes are snake_case identifiers; show them as plain words. */
 export function describeReasonCode(code: string | null | undefined): string | null {
   return code ? code.replaceAll('_', ' ') : null;
+}
+
+/** Calm, non-error copy for background capture that has not run yet. */
+export const COLLECTING_DETAILS = 'Collecting details…';
+export const COLLECTING_PREVIEW = 'Collecting preview…';
+
+const COLLECTING_STATES: ReadonlySet<PrinterFileEnrichmentState> = new Set(['Pending', 'Deferred']);
+
+/** `Pending`/`Deferred` mean the background capture has not run yet - not a failure. */
+export function isCollectingState(state: PrinterFileEnrichmentState | null | undefined): boolean {
+  return state != null && COLLECTING_STATES.has(state);
 }

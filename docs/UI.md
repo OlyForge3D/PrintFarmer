@@ -56,19 +56,21 @@ file, status, and action glyphs. Selecting a card or file name opens a details
 panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
 it and returns focus). The panel shows a larger preview, type, size, path,
 source, print time, and layer height. Values the source cannot provide are shown
-as **Unavailable**. File dates display as dates only; hover for the full
+as **Unknown** (or an accessible dash). File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
 
-For PrusaLink files, the panel also shows every supplied **Native print
-metadata** field, including filament use, temperatures, tool-specific values,
-and printer/profile information. Names, sizes, and these details are saved in
-the database during discovery, not held only in the expiring preview cache.
-They remain visible when thumbnail loading fails or the source is unavailable.
-The saved date identifies the observation; absent native values are **Unknown**,
-while explicit zero and false remain visible. Tool numbers follow provider
-order. Full display names do not replace the short filename used by file actions.
-Scheduled scans reuse unchanged details; **Force Refresh** refetches them.
+The **Print settings** section presents time, layer height/count, nozzle size,
+temperatures, infill, supports, filament weight, and slicer identity. A
+**Filament by tool** table keeps each reported tool's color, material, and weight
+aligned; missing values stay unknown rather than borrowing another tool's data.
+Additional supplied native fields appear under **Other reported fields**.
+Moonraker, OctoPrint, and PrusaLink use one native-first background pipeline with
+bounded G-code/BGCode fallback. No missing settings or material values are guessed.
+Saved database metadata remains visible independently of thumbnail availability.
+The panel distinguishes collecting, retained earlier details, and failed reads.
+Explicit zero and false remain visible where valid. Full display names do not
+replace the short filename used by file actions.
 
 On-printer files offer two distinct actions:
 
@@ -95,10 +97,14 @@ applies to (for example, `Copy 2 of 3 selected`).
   batch. The server still checks each file. Results are reported per file; a
   delete whose outcome is unknown is never resent automatically.
 
-Remote previews load lazily, only for visible items on printers whose backend
-supports them. They are fetched only when the printer is idle, cached per file
-version, and labelled with their capture date. Indexing itself remains
-metadata-only.
+Preview records and images load lazily from PrintFarmer's local database and
+storage for visible items. Browsing or opening details never contacts a
+printer. Metadata and thumbnails are acquired in bounded background slices only
+when the printer is confirmed idle. Saved images survive restarts and remain
+readable while the printer is busy or offline. API replicas must share the
+database and Gcode storage volume; the default thumbnail capacity is 512 MiB.
+At capacity, healthy images are retained and metadata collection continues.
+See [storage setup and limits](PRINTER_FILE_CATALOG_API.md#shared-thumbnail-storage-and-upgrade-requirements).
 
 Per-printer automatic discovery, scan status, and **Force refresh** live in the
 **Files** section of the printer's Edit dialog. Those changes apply immediately
@@ -107,15 +113,19 @@ under Admin Settings > Files.
 
 **Force refresh**, to the right of the table/card view toggle on **On printers**,
 scans every online printer you can manage, one at a time. Both refresh controls
-bypass the automatic-discovery switches, schedule, backoff, and cached previews.
+bypass the automatic-discovery switches, schedule, and backoff for inventory,
+and mark background enrichment due.
 They still require a confirmed-idle printer and a free I/O slot; idle status is
 checked again during the scan and before publication. A scan can take up to two
 minutes per printer. Success means a complete listing was published, not merely
 scheduled; failures name the printer and reason so busy printers can be retried.
 
-Previews reload on demand after a successful force refresh, not eagerly as part
-of indexing. Files pinned by unfinished file operations retain their preview
-revision to preserve those operations; force refresh again after they finish.
+Images are reacquired later by the background pipeline, not by opening the
+panel or waiting for force refresh. A complete listing does not guarantee every
+image is ready. Same-source images remain visible while revalidation is pending.
+Files pinned by unfinished operations retain their action revision; enrichment
+does not change that revision. Automatic discovery must be enabled for the
+background enrichment pass.
 
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are

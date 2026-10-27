@@ -89,6 +89,90 @@ public sealed class PrinterFileCatalogControllerTests
     }
 
     [Fact]
+    public async Task ListAsync_EnrichmentStatusIsShownOnlyForTheCurrentSourceGeneration()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        PrinterFileLocation location = await fixture.Db.PrinterFileLocations.AsNoTracking().SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible);
+        Guid artifactId = await fixture.SettleEnrichmentAsync(location, DateTime.UtcNow.AddHours(24));
+
+        using (JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null)))
+        {
+            JsonElement entry = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+            Assert.Equal("Ready", entry.GetProperty("metadataState").GetString());
+            Assert.Equal("Ready", entry.GetProperty("thumbnailState").GetString());
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("metadataReason").ValueKind);
+            Assert.Equal(JsonValueKind.Null, entry.GetProperty("thumbnailReason").ValueKind);
+            Assert.Equal(artifactId, entry.GetProperty("thumbnailVersion").GetGuid());
+            Assert.Equal(
+                $"/api/printer-files/locations/{location.Id}/thumbnail?observationRevision=1&version={artifactId}",
+                entry.GetProperty("thumbnailUrl").GetString());
+            Assert.False(entry.GetProperty("thumbnailIsStale").GetBoolean());
+        }
+
+        await fixture.Db.PrinterFileLocations.Where(x => x.Id == location.Id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.ConfigurationGeneration, 7));
+
+        using (JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null)))
+        {
+            JsonElement entry = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+            foreach (string name in new[]
+                     {
+                         "metadataState", "thumbnailState", "metadataReason", "thumbnailReason",
+                         "thumbnailVersion", "thumbnailUrl",
+                     })
+            {
+                Assert.Equal(JsonValueKind.Null, entry.GetProperty(name).ValueKind);
+            }
+
+            Assert.False(entry.GetProperty("thumbnailIsStale").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task ListAsync_DueReacquisitionServesPreviousThumbnailAsStale()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        PrinterFileLocation location = await fixture.Db.PrinterFileLocations.AsNoTracking().SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible);
+        Guid artifactId = await fixture.SettleEnrichmentAsync(location, DateTime.UtcNow.AddMinutes(-1));
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null));
+
+        JsonElement entry = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal(artifactId, entry.GetProperty("thumbnailVersion").GetGuid());
+        Assert.True(entry.GetProperty("thumbnailIsStale").GetBoolean());
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WithoutForceMarksOnlyThatPrintersEnrichmentDue()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Resources.Setup(x => x.CanActorAccessPrinterAsync(fixture.Actor.ToString(), fixture.Visible,
+            PrinterGroupAccessLevel.Manage, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        DateTime settled = DateTime.UtcNow.AddHours(24);
+        foreach (PrinterFileLocation location in await fixture.Db.PrinterFileLocations.AsNoTracking().ToListAsync())
+        {
+            await fixture.SettleEnrichmentAsync(location, settled);
+        }
+
+        DateTime before = DateTime.UtcNow;
+        Assert.IsType<AcceptedResult>(
+            await fixture.Controller.RefreshAsync(fixture.Visible, ct: CancellationToken.None));
+
+        fixture.Db.ChangeTracker.Clear();
+        var rows = await fixture.Db.PrinterFileEnrichments.AsNoTracking()
+            .Select(x => new { x.Location.SourcePrinterId, x.NextAttemptAtUtc, x.ArtifactId })
+            .ToListAsync();
+        var visible = Assert.Single(rows, x => x.SourcePrinterId == fixture.Visible);
+        Assert.InRange(visible.NextAttemptAtUtc, before, DateTime.UtcNow);
+        Assert.NotNull(visible.ArtifactId);
+        Assert.Equal(settled, Assert.Single(rows, x => x.SourcePrinterId == fixture.Hidden).NextAttemptAtUtc);
+        Assert.InRange((await fixture.Db.PrinterFileScanStates.SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible)).NextScanAtUtc, before, DateTime.UtcNow);
+    }
+
+    [Fact]
     public async Task ListAsync_OriginIdsRequireIndependentLocalAssetAuthority()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -237,7 +321,9 @@ public sealed class PrinterFileCatalogControllerTests
         {
             bool supported = printer.GetProperty("name").GetString() != "b-prusalink";
             Assert.Equal(supported, printer.GetProperty("supportsPreview").GetBoolean());
-            Assert.Equal(supported, printer.GetProperty("canPreview").GetBoolean());
+
+            // Previews are local reads of persisted enrichment, so every readable printer may open them.
+            Assert.True(printer.GetProperty("canPreview").GetBoolean());
             Assert.Equal(supported, printer.GetProperty("supportsDownload").GetBoolean());
             Assert.Equal(printer.GetProperty("canCopy").GetBoolean(), printer.GetProperty("canDownload").GetBoolean());
         }
@@ -477,10 +563,11 @@ public sealed class PrinterFileCatalogControllerTests
     private sealed record CatalogMeasurement(int Catalog, int Authority, int Legacy);
 
     private sealed class CopyCapableClient : IBackendClient, ISupportsPrinterFileCopy,
-        ISupportsPrinterFilePreview, ISupportsFileInventory
+        ISupportsPrinterFileEnrichment, ISupportsFileInventory
     {
-        public Task<PrinterFilePreviewContent> GetFilePreviewAsync(
-            string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct) =>
+        public Task<PrinterFileEnrichmentContent> EnrichFileAsync(
+            string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential,
+            bool captureThumbnail, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task<PrinterFileInventoryResult> GetFileInventoryAsync(
@@ -619,6 +706,36 @@ public sealed class PrinterFileCatalogControllerTests
             await Db.SaveChangesAsync();
             Db.ChangeTracker.Clear();
             return printer.Id;
+        }
+
+        public async Task<Guid> SettleEnrichmentAsync(PrinterFileLocation location, DateTime nextAttemptAtUtc)
+        {
+            PrinterFileThumbnailArtifact artifact = new()
+            {
+                Id = Guid.NewGuid(),
+                ContentSha256 = new string('A', 64),
+                ContentType = "image/png",
+                Width = 1,
+                Height = 1,
+                SizeBytes = 8,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            Db.PrinterFileThumbnailArtifacts.Add(artifact);
+            Db.PrinterFileEnrichments.Add(new PrinterFileEnrichment
+            {
+                LocationId = location.Id,
+                SourceIdentity = PrinterFileEnrichmentIdentity.For(location),
+                ExtractorVersion = PrinterFileEnrichmentLimits.ExtractorVersion,
+                MetadataState = PrinterFileEnrichmentState.Ready,
+                ThumbnailState = PrinterFileEnrichmentState.Ready,
+                MetadataSource = "native",
+                AcquiredAtUtc = DateTime.UtcNow,
+                NextAttemptAtUtc = nextAttemptAtUtc,
+                ArtifactId = artifact.Id,
+            });
+            await Db.SaveChangesAsync();
+            Db.ChangeTracker.Clear();
+            return artifact.Id;
         }
 
         public async Task<PrinterFileLocation> AddLocationAsync(Guid printerId, string relativePath)
