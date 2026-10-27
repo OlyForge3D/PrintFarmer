@@ -6101,6 +6101,7 @@ public partial class PrintersController(
 
         PrinterDto created = await CreatePrinterAndImportProfilesAsync(dto, ct);
         _discoverySessions.RemovePrinter(sessionId, request.DiscoveryId);
+
         // Opaque discovery registration must not disclose the server-side network target.
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created with { FrontendUrl = null });
     }
