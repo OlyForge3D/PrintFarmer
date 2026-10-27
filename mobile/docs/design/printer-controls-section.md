@@ -171,8 +171,11 @@ deleted (#3542).
 **Essential integration (#2594):** `PrinterDetailView` renders
 `PrinterInstrumentPanelControls` in an always-discoverable Overview/Controls pager.
 `PrinterControlsAccess.isEntryVisible` gates command content and owner
-construction, not destination existence. An offline visit hides the controls
-with no visible banner, only a short VoiceOver hint (#3548), and loads
+construction, not destination existence. An offline visit retains an existing
+owner's supported controls, disabled with no visible lockout banner (#3548).
+Unsupported motion stays hidden; its empty-state explanation is also suppressed
+offline. Printers without a controls owner use the silent unavailable view.
+The host loads
 capabilities only for
 Moonraker printers (the detail view always builds their owner for durable motion, #2678). There is
 no per-server opt-in setting.

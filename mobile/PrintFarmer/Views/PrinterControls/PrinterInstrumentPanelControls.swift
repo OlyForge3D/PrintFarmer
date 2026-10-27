@@ -297,18 +297,20 @@ struct PrinterInstrumentPanelControls: View {
             }
             PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             if JogSubgroup.isHidden(for: viewModel.capabilities) {
-                HStack(spacing: 8) {
-                    Image(systemName: Self.moveEmptyStateSymbol)
-                        .font(.subheadline)
-                        .foregroundStyle(Color.pfTextTertiary)
-                        .accessibilityHidden(true)
-                    Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if viewModel.printer.isOnline {
+                    HStack(spacing: 8) {
+                        Image(systemName: Self.moveEmptyStateSymbol)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pfTextTertiary)
+                            .accessibilityHidden(true)
+                        Text(viewModel.capabilities == nil ? "Checking motion support…" : "Motion controls are unavailable on this printer.")
+                            .font(.footnote)
+                            .foregroundStyle(Color.pfTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("printer.controls.motion-empty")
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("printer.controls.motion-empty")
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     xyPad
