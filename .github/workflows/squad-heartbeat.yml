@@ -1,16 +1,12 @@
 name: Squad Heartbeat (Ralph)
-# ⚠️ SYNC: This workflow is maintained in 4 locations. Changes must be applied to all:
-#   - templates/workflows/squad-heartbeat.yml (source template)
-#   - packages/squad-cli/templates/workflows/squad-heartbeat.yml (CLI package)
-#   - .squad/templates/workflows/squad-heartbeat.yml (installed template)
-#   - .github/workflows/squad-heartbeat.yml (active workflow)
-# Run 'squad upgrade' to sync installed copies from source templates.
+# PrintFarmer keeps per-issue serialization and shared routing during Squad upgrades.
 
 on:
   # React to completed work or new squad work
   issues:
     types: [closed, labeled]
-  pull_request:
+  # Both jobs check out the base ref, never a fork's head.
+  pull_request_target:
     types: [closed]
 
   # Manual trigger
@@ -20,6 +16,7 @@ permissions:
   issues: write
   contents: read
   pull-requests: read
+  actions: write
 
 jobs:
   heartbeat:
@@ -59,12 +56,11 @@ jobs:
             echo "decisions=[]" >> "$GITHUB_OUTPUT"
           fi
 
-      # Copilot auto-assign step (uses PAT if available)
-      - name: Ralph — Assign @copilot issues
+      # Only squad-issue-assign.yml performs PAT-backed Copilot assignment.
+      - name: Ralph — Dispatch @copilot issues
         if: success()
         uses: actions/github-script@v9
         with:
-          github-token: ${{ secrets.COPILOT_ASSIGN_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
 
@@ -97,32 +93,23 @@ jobs:
                 return;
               }
 
-              // Get repo default branch
-              const { data: repoData } = await github.rest.repos.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo
-              });
-
               for (const issue of unassigned) {
                 try {
-                  await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
+                  await github.rest.actions.createWorkflowDispatch({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    issue_number: issue.number,
-                    assignees: ['copilot-swe-agent[bot]'],
-                    agent_assignment: {
-                      target_repo: `${context.repo.owner}/${context.repo.repo}`,
-                      base_branch: repoData.default_branch,
-                      custom_instructions: `Read .squad/team.md for team context and .squad/routing.md for routing rules.`
-                    }
+                    workflow_id: 'squad-issue-assign.yml',
+                    ref: context.payload.repository.default_branch,
+                    inputs: { issue_number: String(issue.number) },
                   });
-                  core.info(`Assigned copilot-swe-agent[bot] to #${issue.number}`);
+                  core.info(`Dispatched verified Copilot assignment for #${issue.number}`);
                 } catch (e) {
-                  core.warning(`Failed to assign @copilot to #${issue.number}: ${e.message}`);
+                  core.setFailed(`Failed to dispatch Copilot assignment for #${issue.number}: ${e.message}`);
                 }
               }
             } catch (e) {
-              core.info(`No squad:copilot label found or error: ${e.message}`);
+              if (e.status !== 404) throw e;
+              core.info('No squad:copilot label found');
             }
 
   apply-triage:

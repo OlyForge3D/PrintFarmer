@@ -187,3 +187,4 @@ fixtures/wire-contracts/manifest.json.lock
 # Squad: local CLI artifacts
 .squad/.first-run
 .github/agents/*.local-backup
+.github/workflows/*.local-backup
