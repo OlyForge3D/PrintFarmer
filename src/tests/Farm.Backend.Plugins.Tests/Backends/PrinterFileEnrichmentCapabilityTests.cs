@@ -1,9 +1,12 @@
 ﻿using Farm.Backend.Plugin.FlashForge;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Backend.Plugin.Sdcp;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -73,9 +76,29 @@ public sealed class PrinterFileEnrichmentCapabilityTests
     }
 
     [Fact]
-    public void EnrichmentCapability_ImplementedByPrusaLinkAndNotByBackendsWithoutIt()
+    public void TryGetFileEnrichmentClientTyped_MoonrakerAndOctoPrint_ReturnTheirOwnClients()
+    {
+        using HttpClient moonrakerHttp = new();
+        using HttpClient octoPrintHttp = new();
+        MoonrakerClient moonraker = new(moonrakerHttp, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        OctoPrintClient octoPrint = new(octoPrintHttp);
+        Mock<IBackendClientFactory> clients = new();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker)).Returns(moonraker);
+        clients.Setup(factory => factory.GetClient(PrinterBackend.OctoPrint)).Returns(octoPrint);
+        BackendCapabilityFactory factory = new(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+
+        Assert.True(factory.TryGetFileEnrichmentClientTyped(PrinterBackend.Moonraker, out ISupportsPrinterFileEnrichment? moonrakerClient));
+        Assert.Same(moonraker, moonrakerClient);
+        Assert.True(factory.TryGetFileEnrichmentClientTyped(PrinterBackend.OctoPrint, out ISupportsPrinterFileEnrichment? octoPrintClient));
+        Assert.Same(octoPrint, octoPrintClient);
+    }
+
+    [Fact]
+    public void EnrichmentCapability_ImplementedByPrusaLinkMoonrakerAndOctoPrintOnly()
     {
         Assert.True(typeof(ISupportsPrinterFileEnrichment).IsAssignableFrom(typeof(PrusaLinkClient)));
+        Assert.True(typeof(ISupportsPrinterFileEnrichment).IsAssignableFrom(typeof(MoonrakerClient)));
+        Assert.True(typeof(ISupportsPrinterFileEnrichment).IsAssignableFrom(typeof(OctoPrintClient)));
         Assert.False(typeof(ISupportsPrinterFileEnrichment).IsAssignableFrom(typeof(SdcpClient)));
         Assert.False(typeof(ISupportsPrinterFileEnrichment).IsAssignableFrom(typeof(FlashForgeClient)));
     }
