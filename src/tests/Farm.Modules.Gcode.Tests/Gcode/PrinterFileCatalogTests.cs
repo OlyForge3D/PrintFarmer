@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -463,6 +464,145 @@ public sealed class PrinterFileCatalogTests
         await using AppDbContext db = fixture.Factory.CreateDbContext();
         Assert.Equal(1, (await db.PrinterFileLocations.SingleAsync()).ObservationRevision);
         Assert.Null((await db.PrinterFileScanStates.SingleAsync()).LastCompleteScanAtUtc);
+    }
+
+    [Theory]
+    [InlineData(PrinterFileInventoryOutcome.Complete, PrinterFileInventoryReason.None, PrinterFileForceRefreshStatus.Completed)]
+    [InlineData(PrinterFileInventoryOutcome.Partial, PrinterFileInventoryReason.Timeout, PrinterFileForceRefreshStatus.Incomplete)]
+    public async Task ForceRefreshAsync_AdapterReturnsAtItsDeadline_ListingIsPublished(
+        PrinterFileInventoryOutcome outcome, PrinterFileInventoryReason reason, PrinterFileForceRefreshStatus expected)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            db.AppSettingsEntities.Add(new AppSettingsEntity
+            {
+                Key = PrinterFileIndexSettings.SectionName,
+                SettingsJson = JsonSerializer.Serialize(new PrinterFileIndexSettings { ScanTimeoutSeconds = 1 }),
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        fixture.ArrangeForceRefresh("ready", Result([], []));
+        bool cancelledAtAdapterDeadline = true;
+        fixture.Inventory.Setup(x => x.GetFileInventoryAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(),
+                It.IsAny<PrinterFileInventoryOptions>(), It.IsAny<CancellationToken>()))
+            .Returns<string, PrinterCredential?, PrinterFileInventoryOptions, CancellationToken>(
+                async (_, _, options, token) =>
+                {
+                    // Models the adapter finishing its listing exactly when its own deadline expires.
+                    await Task.Delay(options.Deadline + TimeSpan.FromMilliseconds(250), token);
+                    cancelledAtAdapterDeadline = token.IsCancellationRequested;
+                    return new(outcome, reason, [new("usb", "PART.BGC", 10, ModifiedValue: "1700000000")],
+                        [new("usb", "", outcome == PrinterFileInventoryOutcome.Complete,
+                            PrinterFileInventoryEvidence.NativeRecursiveListing)]);
+                });
+
+        PrinterFileForceRefreshResult result = await fixture.Service.ForceRefreshAsync(fixture.PrinterId);
+
+        Assert.False(cancelledAtAdapterDeadline);
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(reason.ToString(), result.ReasonCode);
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        Assert.Equal("PART.BGC", (await current.PrinterFileLocations.SingleAsync()).RelativePath);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task PublishAsync_ListingWithoutDetails_KeepsSavedDetailsWhileEvidenceIsUnchanged(
+        bool force, bool listingHasSize)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        DateTime fetchedAt = DateTime.UtcNow.AddDays(-3);
+        PrinterPrintMetadata metadata = new() { LayerHeightMm = 0.2, BrimWidthMm = 0, PrinterModel = "MK4S" };
+        PrinterFileInventoryEntry detailed = new("usb", "PART~1.BGC", 123, ModifiedValue: "1700000000",
+            DisplayName: "Long printable part.bgcode", Metadata: metadata, DetailsFetchedAtUtc: fetchedAt);
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result([detailed], [])));
+
+        PrinterFileInventoryEntry listingOnly = new("usb", "PART~1.BGC", listingHasSize ? 123 : null,
+            ModifiedValue: "1700000000");
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object,
+            new(PrinterFileInventoryOutcome.Partial, PrinterFileInventoryReason.Timeout, [listingOnly], []), force));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileLocation location = await db.PrinterFileLocations.SingleAsync();
+        Assert.Equal(123, location.SizeBytes);
+        Assert.Equal("Long printable part.bgcode", location.DisplayName);
+        Assert.Equal(fetchedAt, location.DetailsFetchedAtUtc);
+        Assert.Equal(JsonSerializer.Serialize(metadata), JsonSerializer.Serialize(location.Metadata));
+        Assert.Equal(force ? 2 : 1, location.ObservationRevision);
+    }
+
+    [Theory]
+    [InlineData("size")]
+    [InlineData("timestamp")]
+    [InlineData("missing-timestamp")]
+    [InlineData("provider-version")]
+    [InlineData("provider-hash")]
+    [InlineData("config")]
+    [InlineData("mutation")]
+    [InlineData("availability")]
+    [InlineData("fresh-empty")]
+    public async Task PublishAsync_ListingWithoutDetails_ClearsSavedDetailsWhenEvidenceChanged(string change)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterFileInventoryEntry detailed = new("usb", "PART.BGC", 123, ModifiedValue: "1700000000",
+            Metadata: new() { LayerHeightMm = 0.2 }, DetailsFetchedAtUtc: DateTime.UtcNow.AddDays(-3));
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result([detailed], [])));
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            PrinterFileLocation saved = await db.PrinterFileLocations.SingleAsync();
+            saved.ConfigurationGeneration = change == "config" ? 0 : saved.ConfigurationGeneration;
+            saved.MutationGeneration = change == "mutation" ? 9 : saved.MutationGeneration;
+            saved.Availability = change == "availability" ? PrinterFileAvailability.Missing : saved.Availability;
+            await db.SaveChangesAsync();
+        }
+
+        DateTime freshFetch = DateTime.UtcNow;
+        PrinterFileInventoryEntry next = change switch
+        {
+            "size" => new("usb", "PART.BGC", 124, ModifiedValue: "1700000000"),
+            "timestamp" => new("usb", "PART.BGC", 123, ModifiedValue: "1700000001"),
+            "missing-timestamp" => new("usb", "PART.BGC", 123),
+            "provider-version" => new("usb", "PART.BGC", 123, ProviderVersion: "v2", ModifiedValue: "1700000000"),
+            "provider-hash" => new("usb", "PART.BGC", 123, ProviderHash: "h2", ModifiedValue: "1700000000"),
+            "fresh-empty" => new("usb", "PART.BGC", 123, ModifiedValue: "1700000000", DetailsFetchedAtUtc: freshFetch),
+            _ => new("usb", "PART.BGC", 123, ModifiedValue: "1700000000"),
+        };
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result([next], [])));
+
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        PrinterFileLocation location = await current.PrinterFileLocations.SingleAsync();
+        Assert.Null(location.Metadata);
+        Assert.Equal(change == "fresh-empty" ? freshFetch : null, location.DetailsFetchedAtUtc);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ValidMetadataExceedingStorageBound_PublishesListingWithoutMetadata()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        string text = "x" + new string('\u2028', PrinterPrintMetadata.MaximumTextLength - 1);
+        PrinterPrintMetadata metadata = new()
+        {
+            Profile = text,
+            FilamentTypePerTool = Enumerable.Repeat(text, PrinterPrintMetadata.MaximumTools).ToArray(),
+        };
+        Assert.True(metadata.IsValid());
+        DateTime fetchedAt = DateTime.UtcNow;
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result(
+            [new("usb", "PART.BGC", 123, ModifiedValue: "1700000000", Metadata: metadata, DetailsFetchedAtUtc: fetchedAt)],
+            [])));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileLocation location = await db.PrinterFileLocations.SingleAsync();
+        Assert.Null(location.Metadata);
+        Assert.Equal(fetchedAt, location.DetailsFetchedAtUtc);
+        Assert.Equal(123, location.SizeBytes);
     }
 
     private static PrinterFileInventoryResult Result(

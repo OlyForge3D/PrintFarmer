@@ -11,6 +11,19 @@ public sealed record PrinterPrintMetadata
     public const int MaximumTextLength = 512;
     public const int MaximumTools = 16;
 
+    /// <summary>Column bound shared by every database provider.</summary>
+    public const int MaximumStoredJsonLength = 32768;
+
+    /// <summary>Storage-only encoding avoids unnecessary escaping; FitsStorage still enforces the column bound.</summary>
+    public static readonly System.Text.Json.JsonSerializerOptions StorageJsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>True when the stored JSON form fits the database column on every provider.</summary>
+    public bool FitsStorage() =>
+        System.Text.Json.JsonSerializer.Serialize(this, StorageJsonOptions).Length <= MaximumStoredJsonLength;
+
     /// <summary>Bed temperature in degrees Celsius.</summary>
     public double? BedTemperatureC { get; init; }
 

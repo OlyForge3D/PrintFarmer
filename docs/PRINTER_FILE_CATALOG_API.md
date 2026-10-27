@@ -57,6 +57,14 @@ requests share a 120-second deadline, 10,000-entry limit, depth limit of 16,
 and 8 MiB per-response limit. There is no HTTP request-count cap. Scans never
 download G-code bodies, per-file G-code headers, or thumbnails.
 
+Native-detail enrichment is best effort: it stops at 75% of the scan deadline
+(90 seconds by default), measured from the start of inventory traversal.
+Individual detail failures are safely logged and skipped so later files can
+still be enriched. Authentication failure stops further detail requests; neither
+it nor an exhausted detail budget discards a completed listing. The catalog
+service allows 15 seconds of teardown grace beyond the adapter's deadline to
+receive its result; this does not extend the printer-request budget.
+
 PrusaLink scans fetch native file details and store the full `display_name`,
 reported size, normalized print metadata, and successful-detail-fetch timestamp
 in the application's database. The raw short filename remains the location's
@@ -66,14 +74,27 @@ still match. Force Refresh fetches the details again. These catalog values do
 not expire with the thumbnail cache and remain available while the printer is
 offline or a preview cannot be loaded.
 
+When a scan cannot fetch details, saved details survive only with unchanged
+modification time, reported size (when present), provider version/hash,
+configuration, mutation epoch, and availability evidence. Missing modification
+time cannot prove reuse is safe. A successful response with no metadata replaces
+the previous snapshot rather than preserving stale values.
+
+Normalized metadata is stored as one bounded JSON display snapshot, not as
+individually searchable database columns. Storage uses relaxed JSON escaping
+and a 32,768-character serialized limit. A snapshot exceeding that limit is
+logged and omitted without losing the file listing or successful-detail-fetch
+marker. This encoding is confined to database storage, not HTML or API output.
+
 ### Discovery policy and metadata API
 
 The `PrinterFileIndex` settings section is saved independently through the
 existing settings shell. Its default cadence is 15 minutes with up to 20%
 deterministic per-printer jitter. Failures back off to at most six hours,
 including jitter. Entries become stale after two configured intervals.
-Authentication failures pause that printer until configuration changes or an
-authorized refresh is requested.
+Inventory traversal authentication failures pause that printer until
+configuration changes or an authorized refresh is requested. Optional detail
+authentication failures instead follow the best-effort behavior above.
 
 Discovery requires fresh, explicitly idle backend telemetry. Normalized `Idle`
 alone is insufficient because legacy normalizers also map unknown states to

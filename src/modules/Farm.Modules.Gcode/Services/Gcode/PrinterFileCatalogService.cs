@@ -21,6 +21,8 @@ public sealed class PrinterFileCatalogService(
     IPrinterStatusCacheReader statusCache,
     ILogger<PrinterFileCatalogService> logger)
 {
+    private static readonly TimeSpan AdapterDeadlineGrace = TimeSpan.FromSeconds(15);
+
     public async Task ScanAsync(Guid printerId, CancellationToken ct = default) =>
         _ = await ScanCoreAsync(printerId, false, ct);
 
@@ -66,7 +68,9 @@ public sealed class PrinterFileCatalogService(
             await using AppDbContext policyDb = await dbFactory.CreateDbContextAsync(ct);
             var settings = await PrinterFileIndexPolicy.ReadAsync(policyDb, ct);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lease.Token);
-            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds));
+
+            // Grace lets the adapter's own deadline fire first and return the listing it already completed.
+            deadline.CancelAfter(TimeSpan.FromSeconds(settings.ScanTimeoutSeconds) + AdapterDeadlineGrace);
             if (!PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), DateTime.UtcNow))
             {
                 return new(PrinterFileForceRefreshStatus.NotIdle, "waiting_for_confirmed_idle");
@@ -209,11 +213,33 @@ public sealed class PrinterFileCatalogService(
                 locations.Add(key, location);
             }
 
-            bool changed = location.SizeBytes != entry.SizeBytes ||
+            // A missed detail read keeps saved details while the listing evidence still matches them.
+            bool keepDetails = !isNew && !entry.DetailsFetchedAtUtc.HasValue && location.DetailsFetchedAtUtc.HasValue &&
+                entry.ModifiedValue is not null && location.ModifiedValue == entry.ModifiedValue &&
+                (entry.SizeBytes is null || location.SizeBytes == entry.SizeBytes) &&
+                location.ProviderVersion == entry.ProviderVersion && location.ProviderDigest == entry.ProviderHash &&
+                location.Availability == PrinterFileAvailability.Available &&
+                location.ConfigurationGeneration == lease.ConfigurationGeneration &&
+                location.MutationGeneration == lease.MutationGeneration;
+            long? sizeBytes = keepDetails ? entry.SizeBytes ?? location.SizeBytes : entry.SizeBytes;
+            string? observedDisplayName = entry.DisplayName ?? (keepDetails ? location.DisplayName : null);
+            PrinterPrintMetadata? storedMetadata = keepDetails ? location.Metadata : entry.Metadata;
+            DateTime? detailsFetchedAtUtc = keepDetails ? location.DetailsFetchedAtUtc : entry.DetailsFetchedAtUtc;
+            if (storedMetadata is not null && !storedMetadata.FitsStorage())
+            {
+                logger.LogWarning(
+                    "Skipping print metadata for catalog location {LocationId}: stored JSON exceeds {MaxLength} characters",
+                    location.Id,
+                    PrinterPrintMetadata.MaximumStoredJsonLength);
+                storedMetadata = null;
+            }
+
+            bool changed = location.SizeBytes != sizeBytes ||
                 location.ModifiedValue != entry.ModifiedValue ||
                 location.ProviderVersion != entry.ProviderVersion ||
                 location.ProviderDigest != entry.ProviderHash ||
-                JsonSerializer.Serialize(location.Metadata) != JsonSerializer.Serialize(entry.Metadata) ||
+                JsonSerializer.Serialize(location.Metadata, PrinterPrintMetadata.StorageJsonOptions) !=
+                    JsonSerializer.Serialize(storedMetadata, PrinterPrintMetadata.StorageJsonOptions) ||
                 location.ConfigurationGeneration != lease.ConfigurationGeneration;
             if (!isNew && ((force && !pinned.Contains(location.Id)) || changed ||
                     location.Availability == PrinterFileAvailability.Deleted))
@@ -221,13 +247,13 @@ public sealed class PrinterFileCatalogService(
                 location.ObservationRevision++;
             }
 
-            location.DisplayName = entry.DisplayName is { Length: > 0 and <= 512 } displayName &&
+            location.DisplayName = observedDisplayName is { Length: > 0 and <= 512 } displayName &&
                 !string.IsNullOrWhiteSpace(displayName) &&
                 !displayName.Any(c => char.IsControl(c) || c is '/' or '\\')
                 ? displayName : path[(path.LastIndexOf('/') + 1)..];
-            location.SizeBytes = entry.SizeBytes;
-            location.Metadata = entry.Metadata;
-            location.DetailsFetchedAtUtc = entry.DetailsFetchedAtUtc;
+            location.SizeBytes = sizeBytes;
+            location.Metadata = storedMetadata;
+            location.DetailsFetchedAtUtc = detailsFetchedAtUtc;
             location.ModifiedValue = entry.ModifiedValue;
             location.ProviderVersion = entry.ProviderVersion;
             location.ProviderDigest = entry.ProviderHash;

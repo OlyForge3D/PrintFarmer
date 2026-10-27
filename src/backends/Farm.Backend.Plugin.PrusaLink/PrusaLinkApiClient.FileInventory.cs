@@ -44,9 +44,11 @@ public partial class PrusaLinkApiClient
 
             if (scan.Options.IncludeFileDetails)
             {
-                await scan.EnrichAsync(entry => entry.DetailsFetchedAtUtc.HasValue
-                    ? Task.FromResult(entry)
-                    : ReadInventoryDetailsAsync(baseUrl, entry, credential, scan)).ConfigureAwait(false);
+                await scan.EnrichAsync(
+                    entry => entry.DetailsFetchedAtUtc.HasValue
+                        ? Task.FromResult(entry)
+                        : ReadInventoryDetailsAsync(baseUrl, entry, credential, scan),
+                    _logger).ConfigureAwait(false);
             }
 
             return unavailableStorage

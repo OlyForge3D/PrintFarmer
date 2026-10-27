@@ -49,6 +49,70 @@ public sealed class PrinterFileCatalogPersistenceTests
         Assert.False(context.Database.HasPendingModelChanges());
     }
 
+    [Theory]
+    [InlineData("sqlite", '\u754c')]
+    [InlineData("postgres", '\u754c')]
+    [InlineData("sqlserver", '\u754c')]
+    [InlineData("postgres", '"')]
+    [InlineData("postgres", '\\')]
+    public void MetadataConverter_WorstCaseValidText_FitsColumnBound(string provider, char repeated)
+    {
+        string text = new(repeated, PrinterPrintMetadata.MaximumTextLength);
+        double[] tools = Enumerable.Repeat(double.MaxValue, PrinterPrintMetadata.MaximumTools).ToArray();
+        PrinterPrintMetadata metadata = new()
+        {
+            EstimatedPrintTimeNormalMode = text,
+            FilamentType = text,
+            FillDensity = text,
+            MaterialName = text,
+            PrinterModel = text,
+            SupportMaterial = text,
+            Profile = text,
+            FilamentTypePerTool = Enumerable.Repeat(text, PrinterPrintMetadata.MaximumTools).ToArray(),
+            BedTemperaturePerToolC = tools,
+            NozzleTemperaturePerToolC = tools,
+            FilamentCostPerTool = tools,
+            FilamentUsedPerToolCm3 = tools,
+            FilamentUsedPerToolG = tools,
+            FilamentUsedPerToolMm = tools,
+            NozzleDiameterPerToolMm = tools,
+            BedTemperatureC = double.MaxValue,
+            PrintTimeSeconds = double.MaxValue,
+        };
+        Assert.True(metadata.IsValid());
+        using AppDbContext context = CreateProviderContext(provider);
+        IProperty property = context.GetService<IDesignTimeModel>().Model
+            .FindEntityType(typeof(PrinterFileLocation))!.FindProperty(nameof(PrinterFileLocation.Metadata))!;
+
+        string stored = Assert.IsType<string>(property.GetValueConverter()!.ConvertToProvider(metadata));
+
+        Assert.True(stored.Length <= property.GetMaxLength(), $"Stored metadata length {stored.Length}");
+        Assert.True(metadata.FitsStorage());
+        if (repeated != '\\' && repeated != '"')
+        {
+            Assert.True(System.Text.Json.JsonSerializer.Serialize(metadata).Length > property.GetMaxLength());
+        }
+
+        PrinterPrintMetadata roundTrip = Assert.IsType<PrinterPrintMetadata>(
+            property.GetValueConverter()!.ConvertFromProvider(stored));
+        Assert.Equal(text, roundTrip.Profile);
+        Assert.Equal(metadata.FilamentTypePerTool, roundTrip.FilamentTypePerTool!);
+    }
+
+    [Fact]
+    public void MetadataStorage_AlwaysEscapedValidText_ReportsOverflow()
+    {
+        string text = "x" + new string('\u2028', PrinterPrintMetadata.MaximumTextLength - 1);
+        PrinterPrintMetadata metadata = new()
+        {
+            Profile = text,
+            FilamentTypePerTool = Enumerable.Repeat(text, PrinterPrintMetadata.MaximumTools).ToArray(),
+        };
+
+        Assert.True(metadata.IsValid());
+        Assert.False(metadata.FitsStorage());
+    }
+
     [Fact]
     public async Task MigrateAsync_PopulatedSqlite_PreservesAssetsAndIndependentOrigins()
     {

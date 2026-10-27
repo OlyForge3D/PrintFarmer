@@ -549,13 +549,13 @@ public sealed class PrinterFileInventoryTests
     }
 
     [Theory]
-    [InlineData("{}", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
-    [InlineData("""{"type":"PRINT_FILE","name":"OTHER.BGC"}""", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
-    [InlineData("""{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000001}""", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
-    [InlineData("broken", HttpStatusCode.OK, PrinterFileInventoryReason.MalformedResponse)]
-    [InlineData("{}", HttpStatusCode.Forbidden, PrinterFileInventoryReason.AuthenticationRequired)]
-    public async Task GetFileInventoryAsync_PrusaDetailFailure_RetainsListingButDoesNotClaimCompleteEnrichment(
-        string details, HttpStatusCode status, PrinterFileInventoryReason reason)
+    [InlineData("{}", HttpStatusCode.OK)]
+    [InlineData("""{"type":"PRINT_FILE","name":"OTHER.BGC"}""", HttpStatusCode.OK)]
+    [InlineData("""{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000001}""", HttpStatusCode.OK)]
+    [InlineData("broken", HttpStatusCode.OK)]
+    [InlineData("{}", HttpStatusCode.Forbidden)]
+    public async Task GetFileInventoryAsync_PrusaDetailFailure_KeepsCompleteListingWithoutDetails(
+        string details, HttpStatusCode status)
     {
         using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath switch
         {
@@ -568,11 +568,39 @@ public sealed class PrinterFileInventoryTests
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
             "http://printer/", options: new() { IncludeFileDetails = true });
 
-        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(reason, result.Reason);
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
         Assert.True(Assert.Single(result.Coverage).IsComplete);
         Assert.Null(Assert.Single(result.Entries).DetailsFetchedAtUtc);
         Assert.Null(result.Entries[0].Metadata);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDetailFailure_ContinuesWithLaterFiles()
+    {
+        using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""),
+            "/api/v1/files/usb" => Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"A.BGC"},{"type":"PRINT_FILE","name":"B.BGC"},{"type":"PRINT_FILE","name":"C.BGC"}]}"""),
+            "/api/v1/files/usb/B.BGC" => Reply("{}", HttpStatusCode.InternalServerError),
+            "/api/v1/files/usb/A.BGC" => Reply("""{"type":"PRINT_FILE","name":"A.BGC","size":1,"meta":{"layer_height":0.2}}"""),
+            _ => Reply("""{"type":"PRINT_FILE","name":"C.BGC","size":3,"meta":{"layer_height":0.3}}""")
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry[] entries = [.. result.Entries.OrderBy(x => x.RelativePath, StringComparer.Ordinal)];
+        Assert.Equal(["A.BGC", "B.BGC", "C.BGC"], entries.Select(x => x.RelativePath));
+        Assert.NotNull(entries[0].DetailsFetchedAtUtc);
+        Assert.Null(entries[1].DetailsFetchedAtUtc);
+        Assert.Null(entries[1].Metadata);
+        Assert.NotNull(entries[2].DetailsFetchedAtUtc);
+        Assert.Equal(3, entries[2].SizeBytes);
+        Assert.NotNull(entries[2].Metadata);
+        Assert.Contains("/api/v1/files/usb/C.BGC", handler.Paths);
     }
 
     [Fact]
@@ -596,9 +624,10 @@ public sealed class PrinterFileInventoryTests
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
             "http://printer/", options: new() { IncludeFileDetails = true, Deadline = TimeSpan.FromMilliseconds(100) });
 
-        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(PrinterFileInventoryReason.Timeout, result.Reason);
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
         Assert.Equal(2, result.Entries.Length);
+        Assert.All(result.Entries, x => Assert.Null(x.DetailsFetchedAtUtc));
         Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/usb/FIRST.BGC"], handler.Paths);
     }
 
