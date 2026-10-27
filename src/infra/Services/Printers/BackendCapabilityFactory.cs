@@ -93,6 +93,27 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         }
     }
 
+    /// <summary>Detects the actual optional bounded enrichment client, independent of every other file capability.</summary>
+    public bool TryGetFileEnrichmentClientTyped(PrinterBackend backend, out ISupportsPrinterFileEnrichment? client)
+    {
+        client = null;
+        if (backend == PrinterBackend.Unknown)
+        {
+            return false;
+        }
+
+        try
+        {
+            client = _clientFactory.GetClient(backend) as ISupportsPrinterFileEnrichment;
+            return client is not null;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Native file enrichment unavailable for backend {Backend}", backend);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Discovers backend capabilities by checking the plugin registry and/or
     /// using reflection to detect capability marker interfaces on client implementations.

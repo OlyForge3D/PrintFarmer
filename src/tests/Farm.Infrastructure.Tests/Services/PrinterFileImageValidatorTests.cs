@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Infrastructure.Tests.Services;

@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.Printers;
+﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>One source tool slot. Index is zero-based; SourceId preserves a native identifier if provided.</summary>
 public sealed record PrinterFilamentTool

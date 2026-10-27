@@ -67,6 +67,17 @@ public interface IPrusaLinkApiClient
         string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct) =>
         Task.FromException<PrinterFilePreviewContent>(new PrinterFileCopyException("preview_unsupported"));
 
+    /// <summary>Bounded background enrichment; custom clients without this capability report Unsupported.</summary>
+    Task<PrinterFileEnrichmentContent> EnrichFileAsync(
+        string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential,
+        bool captureThumbnail, CancellationToken ct) =>
+        Task.FromResult(new PrinterFileEnrichmentContent(
+            Metadata: null,
+            MetadataState: PrinterFileEnrichmentState.Unsupported,
+            ThumbnailState: PrinterFileEnrichmentState.Unsupported,
+            MetadataReason: "unsupported",
+            ThumbnailReason: "unsupported"));
+
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
     /// <summary>Gets API version information.</summary>

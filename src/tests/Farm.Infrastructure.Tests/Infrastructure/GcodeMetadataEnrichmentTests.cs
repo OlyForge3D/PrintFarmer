@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging.Abstractions;

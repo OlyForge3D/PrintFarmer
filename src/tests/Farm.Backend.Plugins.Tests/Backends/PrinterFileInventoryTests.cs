@@ -462,6 +462,7 @@ public sealed class PrinterFileInventoryTests
             FilamentUsedCm3 = 12,
             FilamentUsedPerToolCm3 = [12, 0],
             FilamentUsedG = 15,
+            FilamentUsedGIsDerived = false,
             FilamentUsedPerToolG = [15, 0],
             FilamentUsedMm = 100,
             FilamentUsedPerToolMm = [100, 0],
@@ -489,7 +490,12 @@ public sealed class PrinterFileInventoryTests
             SupportMaterial = "0",
             Ironing = 0,
             RequiredResinMl = 25,
-            Profile = "Quality"
+            Profile = "Quality",
+            Tools =
+            [
+                new PrinterFilamentTool { Index = 0, Material = "PLA", FilamentUsedG = 15 },
+                new PrinterFilamentTool { Index = 1, Material = "PETG", FilamentUsedG = 0 }
+            ]
         };
         Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(entry.Metadata));
         Assert.True(entry.Metadata!.IsValid());
