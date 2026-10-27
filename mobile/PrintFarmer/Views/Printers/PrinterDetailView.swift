@@ -837,7 +837,8 @@ struct PrinterDetailView: View {
             onAction: { handleFilamentAction($0) },
             showsAllActions: true,
             spoolDetailsByID: spoolLookup.spoolsByID,
-            spoolLookupMessage: spoolLookup.statusMessage
+            spoolLookupMessage: spoolLookup.statusMessage,
+            isSpoolLookupPending: spoolLookup.isAwaitingResult
         )
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {

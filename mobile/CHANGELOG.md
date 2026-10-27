@@ -6,6 +6,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Filament loading flash (#3565)** — Opening the Filament tab no longer
+  briefly reports unknown spool amounts before the inventory lookup finishes.
+  Completed missing-data and lookup-failure states remain visible.
+
 - **Stable control panel (#3565)** — Loaded controls no longer disappear and
   reappear on printer offline/online updates; offline commands stay disabled.
   Homing and readiness changes update buttons immediately rather than waiting

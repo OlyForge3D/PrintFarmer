@@ -41,6 +41,37 @@ private final class SpoolLookupAuthorityState {
 
 @MainActor
 final class PrinterDetailSpoolLookupTests: XCTestCase {
+    func testInitialAndInFlightLookupArePendingButCompletedResultsAreNot() async throws {
+        let spool = try TestData.decodeSpoolmanSpool()
+        let authority = PrinterDetailSpoolLookupAuthority(
+            serverID: UUID(), userID: UUID(), generation: 1,
+            printerID: UUID(), spoolIDs: [spool.id]
+        )
+        let lookup = PrinterDetailSpoolLookup()
+        XCTAssertTrue(lookup.isAwaitingResult, "The first render precedes the lookup task")
+        let service = DelayedSpoolLookupService(
+            result: SpoolmanPagedResult(items: [spool], totalCount: 1)
+        ) {
+            XCTAssertTrue(lookup.isAwaitingResult, "An in-flight read is not an unknown weight")
+        }
+        await lookup.load(service: service, authority: authority, isCurrent: { true })
+        XCTAssertFalse(lookup.isAwaitingResult)
+        XCTAssertNotNil(lookup.spoolsByID[spool.id])
+
+        let missing = MockSpoolService()
+        await lookup.load(service: missing, authority: authority, isCurrent: { true })
+        XCTAssertFalse(lookup.isAwaitingResult)
+        XCTAssertEqual(lookup.statusMessage, "Some assigned spools were not found in inventory.")
+
+        missing.errorToThrow = NetworkError.timeout
+        await lookup.load(service: missing, authority: authority, isCurrent: { true })
+        XCTAssertFalse(lookup.isAwaitingResult)
+        XCTAssertTrue(lookup.statusMessage?.hasPrefix("Spool capacity unavailable:") == true)
+
+        lookup.invalidate()
+        XCTAssertTrue(lookup.isAwaitingResult, "A new authority must not inherit a settled result")
+    }
+
     func testLateLookupResultIsDiscardedAfterAuthoritySwitch() async throws {
         let result = SpoolmanPagedResult(
             items: [try TestData.decodeSpoolmanSpool()],
