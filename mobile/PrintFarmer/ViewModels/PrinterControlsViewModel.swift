@@ -1608,6 +1608,10 @@ final class PrinterControlsViewModel: ObservableObject {
             guard result.success else {
                 throw PrinterControlError.invalidRequest(result.message ?? "Motor release was rejected.")
             }
+            if self.pendingCommand == command {
+                // Acceptance invalidates cached homing; only subsequent telemetry can restore it.
+                self.printer.homedAxes = nil
+            }
         }
         finishAcceptedRequest(command)
     }

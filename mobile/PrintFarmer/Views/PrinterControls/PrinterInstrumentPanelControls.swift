@@ -371,7 +371,10 @@ struct PrinterInstrumentPanelControls: View {
             title: title,
             identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
             accessibilityTitle: "Move \(axis) \(direction)",
-            hint: available ? "Moves \(jogStep.formatted()) millimeters." : "\(axis) movement is unavailable.",
+            hint: available
+                ? JogSubgroup.homingBlockedHint(axis: axis, homedAxes: viewModel.printer.homedAxes)
+                    ?? "Moves \(jogStep.formatted()) millimeters."
+                : "\(axis) movement is unavailable.",
             compact: true, systemImage: symbol, value: pending ? "Pending" : nil,
             textSize: 13, minimumHeight: 44, isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: distance) } }

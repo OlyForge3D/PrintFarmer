@@ -357,13 +357,24 @@ struct JogSubgroup: View {
         if !viewModel.canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        if Self.isAxisHomed(selectedAxis, homedAxes: viewModel.printer.homedAxes) != true {
-            return "Home \(selectedAxis) before jogging."
+        if let reason = Self.homingBlockedHint(axis: selectedAxis, homedAxes: viewModel.printer.homedAxes) {
+            return reason
         }
         if direction > 0 {
             return String(localized: "Moves \(selectedAxis) positive \(stepLabelText) millimeters.", comment: "VoiceOver hint for positive jog per spec §4.1")
         }
         return String(localized: "Moves \(selectedAxis) negative \(stepLabelText) millimeters.", comment: "VoiceOver hint for negative jog per spec §4.1")
+    }
+
+    static func homingBlockedHint(axis: String, homedAxes: String?) -> String? {
+        switch isAxisHomed(axis, homedAxes: homedAxes) {
+        case nil:
+            return "\(axis) homing status is unknown. Jogging requires reported homing from the printer."
+        case false:
+            return "Home \(axis) before jogging."
+        case true:
+            return nil
+        }
     }
 
     func jogAccessibilityValue(isPending: Bool, hasError: Bool) -> String {
@@ -543,7 +554,10 @@ struct PrinterMotionControls: View {
         return ControlActionButton(
             title: title, identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
             accessibilityTitle: "Move \(axis) \(direction)",
-            hint: available ? "Moves \(step.formatted()) millimeters." : "\(axis) movement is unavailable.",
+            hint: available
+                ? JogSubgroup.homingBlockedHint(axis: axis, homedAxes: viewModel.printer.homedAxes)
+                    ?? "Moves \(step.formatted()) millimeters."
+                : "\(axis) movement is unavailable.",
             compact: true, systemImage: symbol, value: pending ? "Pending" : nil,
             minimumHeight: 48,
             isPending: pending

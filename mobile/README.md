@@ -158,6 +158,8 @@ keeps its own Keychain-stored credentials.
 The printer detail **Open in web** link opens that printer's configured native
 web interface (`frontendUrl`), not the PrintFarmer web app or backend API.
 It is hidden when no valid HTTP(S) frontend URL is available.
+Canonical printer detail responses include this sanitized native URL, with
+credentials, query parameters and fragments removed.
 
 ### Direct Motion Controls
 
@@ -168,6 +170,11 @@ axes to remain unchanged; current telemetry is used only to validate safety.
 Jogging additionally requires the corresponding axis to be reported homed.
 Unknown or unhomed axes stay disabled until a printer update reports homing;
 the same check applies immediately before dispatch.
+OctoPrint and PrusaLink currently provide no homing telemetry, so their jog
+buttons remain disabled even after a Home request succeeds. Unknown homing
+is not evidence that an axis is unhomed, and Home acceptance does not prove
+homing. Accepted motor release clears cached homing until a subsequent printer
+update supplies authoritative homing telemetry.
 
 A successful response means the backend accepted the command, not that physical
 motion completed. The in-flight request disables conflicting actions.

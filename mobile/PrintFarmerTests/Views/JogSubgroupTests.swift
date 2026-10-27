@@ -115,6 +115,12 @@ final class JogSubgroupTests: XCTestCase {
                         let axis = identifier.split(separator: ".")[3].uppercased()
                         XCTAssertEqual(button.isEnabled, homedAxes?.uppercased().contains(axis) == true,
                                        "\(identifier), homing: \(String(describing: homedAxes)), \(instrumentPanel)/\(type)")
+                        if homedAxes == nil {
+                            XCTAssertEqual(button.accessibilityHint,
+                                           "\(axis) homing status is unknown. Jogging requires reported homing from the printer.")
+                        } else if homedAxes?.uppercased().contains(axis) == false {
+                            XCTAssertEqual(button.accessibilityHint, "Home \(axis) before jogging.")
+                        }
                     }
                     let home = try XCTUnwrap(buttons(in: controller.view).first {
                         $0.accessibilityIdentifier == "printer.controls.home.all"
@@ -327,6 +333,24 @@ final class JogSubgroupTests: XCTestCase {
         let view = JogSubgroup(viewModel: vm)
         let hint = view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false)
         XCTAssertEqual(hint, "Disabled while printing.")
+    }
+
+    func test_jogAccessibilityHint_distinguishesUnknownFromExplicitlyUnhomed() throws {
+        var printer = try Self.idlePrinter()
+        let vm = PrinterControlsViewModel.configuredForTests(
+            printerService: MockPrinterService(), printer: printer
+        )
+        let view = JogSubgroup(viewModel: vm)
+        printer.homedAxes = nil
+        vm.handlePrinterUpdate(printer)
+        XCTAssertEqual(
+            view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false),
+            "X homing status is unknown. Jogging requires reported homing from the printer."
+        )
+        printer.homedAxes = ""
+        vm.handlePrinterUpdate(printer)
+        XCTAssertEqual(view.jogAccessibilityHint(direction: 1, stepLabelText: "1", hasError: false),
+                       "Home X before jogging.")
     }
 
     func test_jogAccessibilityValue_pending_returnsPending() throws {

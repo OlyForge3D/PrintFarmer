@@ -18,7 +18,8 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 - **Native printer web link (#3565)** — "Open in web" opens the printer's
   configured frontend URL rather than PrintFarmer's printer page. The link is
-  hidden if there is no valid HTTP(S) frontend address.
+  hidden if there is no valid HTTP(S) frontend address. Canonical detail
+  responses preserve the sanitized URL without credentials, queries or fragments.
 
 - **Request-scoped connection errors (#3565)** — A failed control request no
   longer claims "No internet connection" while the server banner is Connected.
@@ -27,7 +28,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 - **Jog homing gate (#3565)** — Jog buttons enable only for supported axes
   reported homed. Unknown or unhomed axes stay disabled without lockout text;
-  the same rule is checked again before dispatch.
+  the same rule is checked again before dispatch. OctoPrint and PrusaLink
+  lack homing telemetry, so Home acceptance cannot enable their jog buttons.
+  VoiceOver distinguishes unknown homing from explicitly unhomed axes.
+  Accepted motor release invalidates cached homing until subsequent telemetry.
 
 ### Removed
 

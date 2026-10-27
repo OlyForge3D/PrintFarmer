@@ -1903,8 +1903,55 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.disableMotorsCalledWith, previous.id)
         XCTAssertNil(vm.pendingCommand, "No motor-state callback exists")
         XCTAssertNil(vm.commandNotice, "Accepted motor release is silent")
-        XCTAssertEqual(vm.printer.homedAxes, previous.homedAxes)
+        XCTAssertNil(vm.printer.homedAxes, "Acceptance invalidates cached homing without inventing motor telemetry")
         XCTAssertEqual(vm.printer.x, previous.x)
+    }
+
+    func test_motorReleaseInvalidatesHomingOnlyOnAcceptanceAndRecoversFromSubsequentTelemetry() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = "xyz"
+        var caps = Self.fullCaps
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: printer, capabilities: caps)
+        await vm.loadCapabilities()
+        mockService.commandResultToReturn = CommandResult(success: false, message: "Release rejected")
+        await vm.disableMotors()
+        XCTAssertEqual(vm.lastError?.message, "Release rejected")
+        XCTAssertEqual(vm.printer.homedAxes, "xyz")
+        XCTAssertTrue(vm.canJog(axis: "X"), "A rejected release must not fabricate a change")
+
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        mockService.beforeDisableMotors = { await barrier.arriveAndWait() }
+        mockService.commandResultToReturn = CommandResult(success: true, message: nil)
+        let release = Task { await vm.disableMotors() }
+        await barrier.waitUntilArrived()
+        vm.handlePrinterUpdate(printer)
+        XCTAssertNotNil(vm.pendingCommand, "Pre-response telemetry must not release single-flight ownership")
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertNil(mockService.moveCalledWith)
+        barrier.release()
+        await release.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertNil(vm.commandNotice)
+        XCTAssertNil(vm.printer.homedAxes)
+        for axis in ["X", "Y", "Z"] {
+            XCTAssertFalse(vm.canJog(axis: axis), "Old homing cannot survive accepted motor release")
+            await vm.jog(axis: axis, distanceMm: 1)
+        }
+        XCTAssertNil(mockService.moveCalledWith)
+
+        printer.homedAxes = nil
+        vm.handlePrinterUpdate(printer)
+        XCTAssertFalse(vm.canJog(axis: "X"), "Unknown telemetry cannot restore homing")
+        printer.homedAxes = "xy"
+        vm.handlePrinterUpdate(printer)
+        XCTAssertTrue(vm.canJog(axis: "X"))
+        XCTAssertTrue(vm.canJog(axis: "Y"))
+        XCTAssertFalse(vm.canJog(axis: "Z"))
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertEqual(mockService.moveCalledWith?.axis, "X")
     }
 
     func test_newCommands_blockAllUnsafeStatesBeforeDispatch() async throws {

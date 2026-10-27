@@ -71,8 +71,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         XCTAssertTrue(farmButton.waitForExistence(timeout: 5))
         XCTAssertEqual(farmButton.label, "‹ Farm")
         let webLink = app.descendants(matching: .any)["printer.detail.web"]
-        XCTAssertTrue(webLink.waitForExistence(timeout: 5))
-        XCTAssertEqual(webLink.label, "Open in web ↗")
+        XCTAssertFalse(webLink.exists, "The demo fleet has no configured native frontend URL")
         let identity = app.otherElements["printer.detail.identity"]
         XCTAssertTrue(identity.waitForExistence(timeout: 8))
         let names = app.staticTexts.matching(NSPredicate(
