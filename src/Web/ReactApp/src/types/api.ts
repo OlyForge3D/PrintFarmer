@@ -80,6 +80,9 @@ export interface PrinterFileCatalogEntry {
   displayName: string;
   sizeBytes?: number | null;
   modifiedValue?: string | null;
+  metadata?: PrinterPrintMetadata | null;
+  /** Successful native-detail fetch, including a response with no metadata. */
+  detailsFetchedAtUtc?: string | null;
   observationRevision: number;
   configurationGeneration: number;
   availability: PrinterFileAvailability;
@@ -136,6 +139,51 @@ export interface PrinterFileCatalogPage {
 
 export type PrinterFilePreviewState = 'Available' | 'Unavailable' | 'Unsupported' | 'Deferred';
 
+/** Optional native measurements; per-tool arrays retain provider order. Cost has no assumed currency. */
+export interface PrinterPrintMetadata {
+  bedTemperatureC?: number | null;
+  bedTemperaturePerToolC?: number[] | null;
+  nozzleTemperatureC?: number | null;
+  nozzleTemperaturePerToolC?: number[] | null;
+  brimWidthMm?: number | null;
+  estimatedPrintTimeNormalMode?: string | null;
+  estimatedPrintTimeSeconds?: number | null;
+  fadedLayers?: number | null;
+  filamentCost?: number | null;
+  filamentCostPerTool?: number[] | null;
+  filamentUsedCm3?: number | null;
+  filamentUsedPerToolCm3?: number[] | null;
+  filamentUsedG?: number | null;
+  filamentUsedPerToolG?: number[] | null;
+  filamentUsedMm?: number | null;
+  filamentUsedPerToolMm?: number[] | null;
+  filamentType?: string | null;
+  filamentTypePerTool?: string[] | null;
+  fillDensity?: string | null;
+  initialExposureTimeSeconds?: number | null;
+  layerHeightMm?: number | null;
+  materialName?: string | null;
+  exposureTimeSeconds?: number | null;
+  maxExposureTimeSeconds?: number | null;
+  maxInitialExposureTimeSeconds?: number | null;
+  minExposureTimeSeconds?: number | null;
+  minInitialExposureTimeSeconds?: number | null;
+  nozzleDiameterMm?: number | null;
+  nozzleDiameterPerToolMm?: number[] | null;
+  normalPercentPresent?: boolean | null;
+  normalLeftPresent?: boolean | null;
+  quietPercentPresent?: boolean | null;
+  quietLeftPresent?: boolean | null;
+  layerInfoPresent?: boolean | null;
+  maxLayerZMm?: number | null;
+  printTimeSeconds?: number | null;
+  printerModel?: string | null;
+  supportMaterial?: string | null;
+  ironing?: number | null;
+  requiredResinMl?: number | null;
+  profile?: string | null;
+}
+
 /** GET /printer-files/locations/{id}/preview?observationRevision=n */
 export interface PrinterFilePreview {
   locationId: string;
@@ -148,6 +196,8 @@ export interface PrinterFilePreview {
   thumbnailUrl?: string | null;
   printTimeSeconds?: number | null;
   layerHeightMm?: number | null;
+  sizeBytes?: number | null;
+  metadata?: PrinterPrintMetadata | null;
 }
 
 // PrintJobStatusDto for Moonraker print job status

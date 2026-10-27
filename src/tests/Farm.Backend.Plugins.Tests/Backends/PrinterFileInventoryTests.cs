@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Backend.Plugin.FlashForge;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
@@ -236,11 +237,8 @@ public sealed class PrinterFileInventoryTests
         Assert.Equal(4, handler.Paths.Count);
     }
 
-    [Theory]
-    [InlineData(1, PrinterFileInventoryReason.RequestLimit, 1)]
-    [InlineData(3, PrinterFileInventoryReason.DepthLimit, 2)]
-    public async Task GetFileInventoryAsync_PrusaTraversalBudget_NeverClaimsRootComplete(
-        int requests, PrinterFileInventoryReason expected, int expectedCalls)
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDepthBudget_NeverClaimsRootComplete()
     {
         using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath == "/api/v1/storage"
             ? """{"storage_list":[{"path":"/custom","available":true}]}"""
@@ -248,12 +246,12 @@ public sealed class PrinterFileInventoryTests
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", options: new() { MaxRequests = requests, MaxDepth = 0 });
+            "http://printer/", options: new() { MaxDepth = 0 });
 
         Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(expected, result.Reason);
+        Assert.Equal(PrinterFileInventoryReason.DepthLimit, result.Reason);
         Assert.DoesNotContain(result.Coverage, coverage => coverage.IsComplete);
-        Assert.Equal(expectedCalls, handler.Paths.Count);
+        Assert.Equal(2, handler.Paths.Count);
     }
 
     [Fact]
@@ -353,27 +351,49 @@ public sealed class PrinterFileInventoryTests
     }
 
     [Fact]
-    public async Task GetFileInventoryAsync_PrusaDigestReservation_RespectsWireRequestCeiling()
+    public async Task GetFileInventoryAsync_PrusaDetails_MoreThan100RequestsCompletesWithoutFetchingBodies()
     {
-        using InventoryHandler handler = new(_ => throw new InvalidOperationException("No network request was budgeted"));
+        string listing = JsonSerializer.Serialize(new
+        {
+            type = "FOLDER",
+            children = Enumerable.Range(0, 105).Select(index => new { name = $"PART{index}.BGC", type = "PRINT_FILE" })
+        });
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => listing,
+            var path when path.StartsWith("/api/v1/files/usb/PART", StringComparison.Ordinal) =>
+                JsonSerializer.Serialize(new { type = "PRINT_FILE", name = path.Split('/')[^1], size = 123, meta = new { } }),
+            _ => throw new InvalidOperationException("Unexpected file body or thumbnail request")
+        }));
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", new() { ApiKey = "test-key" }, new() { MaxRequests = 1 });
+            "http://printer/", new() { ApiKey = "test-key" }, new() { IncludeFileDetails = true });
 
-        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
-        Assert.Empty(handler.Paths);
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        Assert.Equal(105, result.Entries.Length);
+        Assert.Equal(107, handler.Paths.Count);
+        Assert.All(result.Entries, entry =>
+        {
+            Assert.Equal(123, entry.SizeBytes);
+            Assert.NotNull(entry.DetailsFetchedAtUtc);
+            Assert.Null(entry.Metadata);
+        });
+        Assert.All(handler.ApiKeys, key => Assert.Equal("test-key", key));
+        Assert.All(handler.Methods, method => Assert.Equal(HttpMethod.Get, method));
     }
 
     [Fact]
-    public async Task GetFileInventoryAsync_PrusaDigestChallenge_CountsRetryInsideRequestCeiling()
+    public async Task GetFileInventoryAsync_PrusaDigestChallenge_AuthenticatesAndCompletesTraversal()
     {
         using InventoryHandler handler = new(request =>
         {
             if (request.Headers.Authorization?.Scheme == "Digest")
             {
-                return Reply("""{"storage_list":[{"path":"/usb","available":true}]}""");
+                return Reply(request.RequestUri!.AbsolutePath == "/api/v1/storage"
+                    ? """{"storage_list":[{"path":"/usb","available":true}]}"""
+                    : """{"type":"FOLDER","children":[]}""");
             }
 
             HttpResponseMessage challenge = Reply("{}", HttpStatusCode.Unauthorized);
@@ -383,12 +403,203 @@ public sealed class PrinterFileInventoryTests
         using HttpClient http = new(handler);
 
         PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", new() { Username = "maker", Password = "test-password" }, new() { MaxRequests = 2 });
+            "http://printer/", new() { Username = "maker", Password = "test-password" });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        // One challenge; the transport reuses the negotiated digest for later traversal requests.
+        Assert.Equal(["/api/v1/storage", "/api/v1/storage", "/api/v1/files/usb"], handler.Paths);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
+    }
+
+    [Theory]
+    [InlineData(0.2)]
+    [InlineData(0.0)]
+    public async Task GetFileInventoryAsync_PrusaDetails_MapsEveryNativeMetadataFieldWithoutChangingIdentity(double layerHeight)
+    {
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => """{"type":"FOLDER","children":[{"name":"PART~1.BGC","type":"PRINT_FILE","m_timestamp":1700000000}]}""",
+            "/api/v1/files/usb/PART~1.BGC" => $$$"""
+                {"name":"PART~1.BGC","type":"PRINT_FILE","display_name":"Long printable part.bgcode","size":629505,"m_timestamp":1700000000,
+                 "refs":{"download":"/usb/PART~1.BGC","thumbnail":"/thumb/l/usb/PART~1.BGC"},
+                 "meta":{"bed_temperature":60,"bed_temperature per tool":[60,0],"temperature":215,"temperature per tool":[215,0],
+                 "brim_width":0,"estimated printing time (normal mode)":"1h 2m","estimated_print_time":3720,"faded_layers":3,
+                 "filament cost":1.5,"filament cost per tool":[1.5,0],"filament used [cm3]":12,"filament used [cm3] per tool":[12,0],
+                 "filament used [g]":15,"filament used [g] per tool":[15,0],"filament used [mm]":100,"filament used [mm] per tool":[100,0],
+                 "filament_type":"PLA","filament_type per tool":["PLA","PETG"],"fill_density":"15%","initial_exposure_time":20,
+                 "layer_height":{{{JsonSerializer.Serialize(layerHeight)}}},"material_name":"Resin","exposure_time":2,"max_exposure_time":3,"max_initial_exposure_time":25,
+                 "min_exposure_time":1,"min_initial_exposure_time":15,"nozzle_diameter":0.4,"nozzle_diameter per tool":[0.4,0.6],
+                 "normal_percent_present":true,"normal_left_present":false,"quiet_percent_present":false,"quiet_left_present":true,
+                 "layer_info_present":false,"max_layer_z":42,"print_time":3700,"printer_model":"Future printer","support_material":"0",
+                 "ironing":0,"required_resin_ml":25,"profile":"Quality"}}
+                """,
+            _ => throw new InvalidOperationException("Unexpected body request")
+        }));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry entry = Assert.Single(result.Entries);
+        Assert.Equal("PART~1.BGC", entry.RelativePath);
+        Assert.Equal("Long printable part.bgcode", entry.DisplayName);
+        Assert.Equal(629505, entry.SizeBytes);
+        Assert.NotNull(entry.DetailsFetchedAtUtc);
+        PrinterPrintMetadata expected = new()
+        {
+            BedTemperatureC = 60,
+            BedTemperaturePerToolC = [60, 0],
+            NozzleTemperatureC = 215,
+            NozzleTemperaturePerToolC = [215, 0],
+            BrimWidthMm = 0,
+            EstimatedPrintTimeNormalMode = "1h 2m",
+            EstimatedPrintTimeSeconds = 3720,
+            FadedLayers = 3,
+            FilamentCost = 1.5,
+            FilamentCostPerTool = [1.5, 0],
+            FilamentUsedCm3 = 12,
+            FilamentUsedPerToolCm3 = [12, 0],
+            FilamentUsedG = 15,
+            FilamentUsedPerToolG = [15, 0],
+            FilamentUsedMm = 100,
+            FilamentUsedPerToolMm = [100, 0],
+            FilamentType = "PLA",
+            FilamentTypePerTool = ["PLA", "PETG"],
+            FillDensity = "15%",
+            InitialExposureTimeSeconds = 20,
+            LayerHeightMm = layerHeight,
+            MaterialName = "Resin",
+            ExposureTimeSeconds = 2,
+            MaxExposureTimeSeconds = 3,
+            MaxInitialExposureTimeSeconds = 25,
+            MinExposureTimeSeconds = 1,
+            MinInitialExposureTimeSeconds = 15,
+            NozzleDiameterMm = 0.4,
+            NozzleDiameterPerToolMm = [0.4, 0.6],
+            NormalPercentPresent = true,
+            NormalLeftPresent = false,
+            QuietPercentPresent = false,
+            QuietLeftPresent = true,
+            LayerInfoPresent = false,
+            MaxLayerZMm = 42,
+            PrintTimeSeconds = 3700,
+            PrinterModel = "Future printer",
+            SupportMaterial = "0",
+            Ironing = 0,
+            RequiredResinMl = 25,
+            Profile = "Quality"
+        };
+        Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(entry.Metadata));
+        Assert.True(entry.Metadata!.IsValid());
+        Assert.Equal(3, handler.Paths.Count);
+    }
+
+    [Theory]
+    [InlineData("1700000000", null, true, true)]
+    [InlineData("1700000000", 123L, true, true)]
+    [InlineData("1700000000", 124L, true, false)]
+    [InlineData("1700000001", null, true, false)]
+    [InlineData("null", null, true, false)]
+    [InlineData("1700000000", null, false, false)]
+    public async Task GetFileInventoryAsync_PrusaDetails_ReusesOnlyFetchedDetailsWithMatchingListingEvidence(
+        string timestamp, long? size, bool fetched, bool reuse)
+    {
+        PrinterPrintMetadata metadata = new() { BrimWidthMm = 0, QuietLeftPresent = false };
+        DateTime fetchedAt = DateTime.UtcNow.AddDays(-30);
+        PrinterFileInventoryEntry cached = new("usb", "PART.BGC", 123,
+            ModifiedValue: "1700000000", DisplayName: "Cached part.bgcode", Metadata: metadata,
+            DetailsFetchedAtUtc: fetched ? fetchedAt : null);
+        using InventoryHandler handler = new(request => Reply(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => """{"storage_list":[{"path":"/usb","available":true}]}""",
+            "/api/v1/files/usb" => $$$"""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"PART.BGC","size":{{{JsonSerializer.Serialize(size)}}},"m_timestamp":{{{timestamp}}}}]}""",
+            "/api/v1/files/usb/PART.BGC" => $$$"""{"type":"PRINT_FILE","name":"PART.BGC","size":{{{size ?? 123}}},"m_timestamp":{{{timestamp}}},"meta":{}}""",
+            _ => throw new InvalidOperationException("Unexpected request")
+        }));
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new()
+            {
+                IncludeFileDetails = true,
+                CachedEntries = new Dictionary<string, PrinterFileInventoryEntry>
+                {
+                    [PrinterInventoryPath.ComputeIdentity("usb", "PART.BGC")] = cached
+                }
+            });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
+        PrinterFileInventoryEntry entry = Assert.Single(result.Entries);
+        Assert.Equal(reuse ? 2 : 3, handler.Paths.Count);
+        Assert.NotNull(entry.DetailsFetchedAtUtc);
+        if (reuse)
+        {
+            Assert.Equal(fetchedAt, entry.DetailsFetchedAtUtc);
+            Assert.Same(metadata, entry.Metadata);
+            Assert.Equal(123, entry.SizeBytes);
+            Assert.Equal("Cached part.bgcode", entry.DisplayName);
+        }
+        else
+        {
+            Assert.Null(entry.Metadata);
+            Assert.NotEqual(fetchedAt, entry.DetailsFetchedAtUtc);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
+    [InlineData("""{"type":"PRINT_FILE","name":"OTHER.BGC"}""", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
+    [InlineData("""{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000001}""", HttpStatusCode.OK, PrinterFileInventoryReason.IncompleteResponse)]
+    [InlineData("broken", HttpStatusCode.OK, PrinterFileInventoryReason.MalformedResponse)]
+    [InlineData("{}", HttpStatusCode.Forbidden, PrinterFileInventoryReason.AuthenticationRequired)]
+    public async Task GetFileInventoryAsync_PrusaDetailFailure_RetainsListingButDoesNotClaimCompleteEnrichment(
+        string details, HttpStatusCode status, PrinterFileInventoryReason reason)
+    {
+        using InventoryHandler handler = new(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/storage" => Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""),
+            "/api/v1/files/usb" => Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"PART.BGC","m_timestamp":1700000000}]}"""),
+            _ => Reply(details, status)
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true });
 
         Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
-        Assert.Equal(PrinterFileInventoryReason.RequestLimit, result.Reason);
-        Assert.Equal(["/api/v1/storage", "/api/v1/storage"], handler.Paths);
-        Assert.Empty(result.Coverage);
+        Assert.Equal(reason, result.Reason);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
+        Assert.Null(Assert.Single(result.Entries).DetailsFetchedAtUtc);
+        Assert.Null(result.Entries[0].Metadata);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaDetailDeadline_StopsRemainingDetailRequests()
+    {
+        using InventoryHandler handler = new(async (request, token) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/api/v1/storage":
+                    return Reply("""{"storage_list":[{"path":"/usb","available":true}]}""");
+                case "/api/v1/files/usb":
+                    return Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"},{"type":"PRINT_FILE","name":"SECOND.BGC"}]}""");
+                default:
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                    return Reply("{}");
+            }
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = TimeSpan.FromMilliseconds(100) });
+
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.Timeout, result.Reason);
+        Assert.Equal(2, result.Entries.Length);
+        Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/usb/FIRST.BGC"], handler.Paths);
     }
 
     [Fact]

@@ -42,6 +42,13 @@ public partial class PrusaLinkApiClient
                 scan.Cover(root, true, PrinterFileInventoryEvidence.TraversedDirectories);
             }
 
+            if (scan.Options.IncludeFileDetails)
+            {
+                await scan.EnrichAsync(entry => entry.DetailsFetchedAtUtc.HasValue
+                    ? Task.FromResult(entry)
+                    : ReadInventoryDetailsAsync(baseUrl, entry, credential, scan)).ConfigureAwait(false);
+            }
+
             return unavailableStorage
                 ? scan.Failed(new PrinterFileInventoryException(PrinterFileInventoryReason.StorageUnavailable))
                 : scan.Complete();
@@ -92,9 +99,11 @@ public partial class PrusaLinkApiClient
                         .ConfigureAwait(false);
                     break;
                 case "PRINT_FILE":
-                    scan.Add(new(root, path, PrinterFileInventorySession.Size(child),
+                    PrinterFileInventoryEntry entry = new(root, path, PrinterFileInventorySession.Size(child),
                         PrinterFileInventorySession.Modified(child, "m_timestamp"),
-                        ModifiedValue: PrinterFileInventorySession.ModifiedValue(child, "m_timestamp")));
+                        ModifiedValue: PrinterFileInventorySession.ModifiedValue(child, "m_timestamp"),
+                        DisplayName: ReadFilePreviewString(child, "display_name"));
+                    scan.Add(ReuseInventoryDetails(entry, scan.Options));
                     break;
                 case "FILE":
                 case "FIRMWARE":
@@ -105,7 +114,59 @@ public partial class PrusaLinkApiClient
         }
     }
 
-    // Reserve two wire requests for each authenticated listing's potential Digest challenge/retry.
+    private static PrinterFileInventoryEntry ReuseInventoryDetails(
+        PrinterFileInventoryEntry entry, PrinterFileInventoryOptions options)
+    {
+        if (options.IncludeFileDetails && entry.ModifiedValue is not null &&
+            options.CachedEntries.TryGetValue(
+                PrinterInventoryPath.ComputeIdentity(entry.StorageRoot, entry.RelativePath), out var cached) &&
+            cached.StorageRoot == entry.StorageRoot && cached.RelativePath == entry.RelativePath &&
+            cached.DetailsFetchedAtUtc.HasValue && cached.ModifiedValue == entry.ModifiedValue &&
+            (entry.SizeBytes is null || entry.SizeBytes == cached.SizeBytes))
+        {
+            return entry with
+            {
+                SizeBytes = entry.SizeBytes ?? cached.SizeBytes,
+                DisplayName = entry.DisplayName ?? cached.DisplayName,
+                Metadata = cached.Metadata,
+                DetailsFetchedAtUtc = cached.DetailsFetchedAtUtc,
+            };
+        }
+
+        return entry;
+    }
+
+    private async Task<PrinterFileInventoryEntry> ReadInventoryDetailsAsync(
+        string baseUrl, PrinterFileInventoryEntry entry, PrinterCredential? credential,
+        PrinterFileInventorySession scan)
+    {
+        string path = string.Join('/', (entry.StorageRoot + "/" + entry.RelativePath)
+            .Split('/').Select(Uri.EscapeDataString));
+        using JsonDocument document = await ReadInventoryDocumentAsync(
+            baseUrl, "api/v1/files/" + path, credential, scan).ConfigureAwait(false);
+        JsonElement details = document.RootElement;
+        PrinterFileInventorySession.RequireUntruncated(details);
+        long? size = PrinterFileInventorySession.Size(details);
+        string? modified = PrinterFileInventorySession.ModifiedValue(details, "m_timestamp");
+        if (ReadFilePreviewString(details, "type") != "PRINT_FILE" ||
+            ReadFilePreviewString(details, "name") != entry.RelativePath[(entry.RelativePath.LastIndexOf('/') + 1)..] ||
+            (entry.SizeBytes.HasValue && entry.SizeBytes != size) ||
+            (entry.ModifiedValue is not null && entry.ModifiedValue != modified))
+        {
+            throw new PrinterFileInventoryException(PrinterFileInventoryReason.IncompleteResponse);
+        }
+
+        return entry with
+        {
+            SizeBytes = size,
+            ModifiedAt = PrinterFileInventorySession.Modified(details, "m_timestamp"),
+            ModifiedValue = modified,
+            DisplayName = ReadFilePreviewString(details, "display_name") ?? entry.DisplayName,
+            Metadata = ReadPrintFileMetadata(details.TryGetProperty("meta", out JsonElement meta) ? meta : default),
+            DetailsFetchedAtUtc = DateTime.UtcNow,
+        };
+    }
+
     private Task<JsonDocument> ReadInventoryDocumentAsync(
         string baseUrl, string path, PrinterCredential? credential, PrinterFileInventorySession scan) =>
         scan.ReadAsync(
@@ -117,5 +178,5 @@ public partial class PrusaLinkApiClient
                     new Uri(new Uri(baseUrl.TrimEnd('/') + "/"), path).ToString(), credential);
                 return await transport.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
                     .ConfigureAwait(false);
-            }, ResolvePrusaLinkDigestAuth(credential) is null ? 1 : 2);
+            });
 }

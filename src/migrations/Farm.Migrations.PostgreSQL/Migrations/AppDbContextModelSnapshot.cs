@@ -17,7 +17,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -6264,6 +6264,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<long>("ConfigurationGeneration")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTime?>("DetailsFetchedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -6283,6 +6286,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("LastSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Metadata")
+                        .HasMaxLength(32768)
+                        .HasColumnType("character varying(32768)");
 
                     b.Property<string>("ModifiedValue")
                         .HasMaxLength(128)

@@ -17,7 +17,8 @@ public interface ISupportsPrinterFilePreview
 
 /// <summary>Absent provider metadata remains null; it is never inferred from file size or name.</summary>
 public sealed record PrinterFilePreviewContent(
-    double? PrintTimeSeconds, double? LayerHeightMm, byte[]? Image = null, string? ContentType = null);
+    double? PrintTimeSeconds, double? LayerHeightMm, byte[]? Image = null, string? ContentType = null,
+    long? SizeBytes = null, PrinterPrintMetadata? Metadata = null);
 
 /// <summary>Shared bounded transport and observation validation for lightweight preview adapters.</summary>
 public static class PrinterFilePreviewTransport

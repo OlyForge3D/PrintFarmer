@@ -15,7 +15,7 @@ namespace Farm.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("Farm.Infrastructure.Data.AppSettingsEntity", b =>
                 {
@@ -6243,6 +6243,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<long>("ConfigurationGeneration")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("DetailsFetchedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -6261,6 +6264,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Metadata")
+                        .HasMaxLength(32768)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ModifiedValue")

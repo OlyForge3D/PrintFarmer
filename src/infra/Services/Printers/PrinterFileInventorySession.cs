@@ -12,7 +12,6 @@ public sealed class PrinterFileInventorySession : IDisposable
     private readonly List<PrinterFileInventoryEntry> _entries = [];
     private readonly List<PrinterFileInventoryCoverage> _coverage = [];
     private readonly HashSet<string> _identities = new(StringComparer.Ordinal);
-    private int _requests;
     private int _visitedEntries;
 
     public PrinterFileInventorySession(PrinterFileInventoryOptions? options, CancellationToken callerToken)
@@ -61,16 +60,27 @@ public sealed class PrinterFileInventorySession : IDisposable
     public void Cover(string root, bool complete, PrinterFileInventoryEvidence evidence) =>
         _coverage.Add(new(root, string.Empty, complete, evidence));
 
+    /// <summary>Enriches observations without losing completed listing evidence if a detail read fails.</summary>
+    public async Task EnrichAsync(Func<PrinterFileInventoryEntry, Task<PrinterFileInventoryEntry>> enrich)
+    {
+        for (int index = 0; index < _entries.Count; index++)
+        {
+            Token.ThrowIfCancellationRequested();
+            PrinterFileInventoryEntry entry = _entries[index];
+            PrinterFileInventoryEntry enriched = await enrich(entry).ConfigureAwait(false);
+            if (enriched.StorageRoot != entry.StorageRoot || enriched.RelativePath != entry.RelativePath)
+            {
+                throw new PrinterFileInventoryException(PrinterFileInventoryReason.InvalidPath);
+            }
+
+            _entries[index] = enriched;
+        }
+    }
+
     /// <summary>Reads one bounded JSON listing; the sender must use the supplied cancellation token.</summary>
-    public async Task<JsonDocument> ReadAsync(Func<CancellationToken, Task<HttpResponseMessage>> send, int requestCost = 1)
+    public async Task<JsonDocument> ReadAsync(Func<CancellationToken, Task<HttpResponseMessage>> send)
     {
         Token.ThrowIfCancellationRequested();
-        if (requestCost < 1 || requestCost > Options.MaxRequests - _requests)
-        {
-            throw new PrinterFileInventoryException(PrinterFileInventoryReason.RequestLimit);
-        }
-
-        _requests += requestCost;
         using HttpResponseMessage response = await send(Token).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
@@ -142,7 +152,7 @@ public sealed class PrinterFileInventorySession : IDisposable
                 PrinterFileInventoryOutcome.Unsupported,
             _ when _entries.Count > 0 || _coverage.Count > 0 ||
                 reason is PrinterFileInventoryReason.EntryLimit or PrinterFileInventoryReason.DepthLimit or
-                    PrinterFileInventoryReason.RequestLimit or PrinterFileInventoryReason.IncompleteResponse =>
+                    PrinterFileInventoryReason.IncompleteResponse =>
                 PrinterFileInventoryOutcome.Partial,
             _ => PrinterFileInventoryOutcome.Unavailable
         };

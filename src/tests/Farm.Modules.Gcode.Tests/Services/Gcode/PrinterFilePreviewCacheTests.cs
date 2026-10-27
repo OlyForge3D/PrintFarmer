@@ -123,6 +123,36 @@ public sealed class PrinterFilePreviewCacheTests : IDisposable
         await AssertInvalidContentAsync(new(printTimeSeconds, layerHeightMm));
 
     [Fact]
+    public async Task CacheAsync_NativeMetadata_RetainsZeroFalseAndToolOrder()
+    {
+        PrinterFilePreviewCache cache = new(_root);
+        PrinterPrintMetadata metadata = new()
+        {
+            BrimWidthMm = 0,
+            LayerHeightMm = 0,
+            EstimatedPrintTimeSeconds = 0,
+            QuietLeftPresent = false,
+            FilamentUsedPerToolG = [0, 2.5],
+            FilamentTypePerTool = ["PLA", "PETG"],
+        };
+        await cache.PutAsync(Key(1), new(DateTime.UtcNow, new(null, null, SizeBytes: 0, Metadata: metadata)),
+            CancellationToken.None);
+        PrinterFilePreviewCapture? capture = await cache.GetAsync(Key(1), CancellationToken.None);
+
+        Assert.NotNull(capture);
+        Assert.Equal(0, capture.Content.SizeBytes);
+        Assert.Equal(JsonSerializer.Serialize(metadata), JsonSerializer.Serialize(capture.Content.Metadata));
+    }
+
+    [Fact]
+    public async Task CacheAsync_InvalidNativeDetails_RejectsWriteAndEvictsRead()
+    {
+        await AssertInvalidContentAsync(new(null, null, SizeBytes: -1));
+        await AssertInvalidContentAsync(new(null, null, Metadata: new() { FilamentCost = -1 }));
+        await AssertInvalidContentAsync(new(null, null, Metadata: new() { Profile = "unsafe\ntext" }));
+    }
+
+    [Fact]
     public void Key_ChangesForEveryObservationIdentityComponent()
     {
         PrinterFileLocation location = new()
@@ -152,7 +182,7 @@ public sealed class PrinterFilePreviewCacheTests : IDisposable
         PrinterFilePreviewCache cache = new(_root);
         PrinterFilePreviewCapture capture = new(DateTime.UtcNow, content!);
         await Assert.ThrowsAsync<InvalidDataException>(() => cache.PutAsync(Key(1), capture, CancellationToken.None));
-        Assert.False(Directory.Exists(_root));
+        Assert.False(File.Exists(Path.Join(_root, Key(1) + ".json")));
 
         Directory.CreateDirectory(_root);
         string path = Path.Join(_root, Key(1) + ".json");

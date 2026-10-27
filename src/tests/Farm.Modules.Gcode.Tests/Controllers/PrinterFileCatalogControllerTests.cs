@@ -61,6 +61,34 @@ public sealed class PrinterFileCatalogControllerTests
     }
 
     [Fact]
+    public async Task ListAsync_PersistedDetails_ReturnsMetadataWithoutReadingPrinter()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        PrinterFileLocation location = await fixture.Db.PrinterFileLocations.SingleAsync(
+            x => x.SourcePrinterId == fixture.Visible);
+        DateTime fetched = new(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
+        location.DisplayName = "Long printable part.bgcode";
+        location.SizeBytes = 123;
+        location.DetailsFetchedAtUtc = fetched;
+        location.Metadata = new() { BrimWidthMm = 0, QuietLeftPresent = false, FilamentUsedPerToolG = [0, 2.5] };
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null));
+        JsonElement entry = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal("Long printable part.bgcode", entry.GetProperty("displayName").GetString());
+        Assert.Equal("public.gcode", entry.GetProperty("relativePath").GetString());
+        Assert.Equal(123, entry.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(fetched, entry.GetProperty("detailsFetchedAtUtc").GetDateTime());
+        JsonElement metadata = entry.GetProperty("metadata");
+        Assert.Equal(0, metadata.GetProperty("brimWidthMm").GetDouble());
+        Assert.False(metadata.GetProperty("quietLeftPresent").GetBoolean());
+        Assert.Equal(new double[] { 0, 2.5 },
+            metadata.GetProperty("filamentUsedPerToolG").EnumerateArray().Select(value => value.GetDouble()));
+        Assert.False(metadata.TryGetProperty("hasValues", out _));
+    }
+
+    [Fact]
     public async Task ListAsync_OriginIdsRequireIndependentLocalAssetAuthority()
     {
         await using var fixture = await Fixture.CreateAsync();

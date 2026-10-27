@@ -32,22 +32,27 @@ public partial class PrusaLinkApiClient
         string rootPrefix = string.Join('/', root.Split('/').Select(Uri.EscapeDataString));
         Uri detailsUri = PrinterFileCopyTransport.BuildUri(
             baseUrl, root, observation.RelativePath, root, "api/v1/files/" + rootPrefix + "/");
-        using JsonDocument details = await ReadFilePreviewDetailsAsync(detailsUri, observation, credential, ct)
+        using JsonDocument details = await ReadFilePreviewDetailsAsync(
+            detailsUri, observation, credential, ct, allowSizeEnrichment: true)
             .ConfigureAwait(false);
-        JsonElement metadata = details.RootElement.TryGetProperty("meta", out JsonElement meta) ? meta : default;
-        double? printTime = PrinterFilePreviewTransport.PositiveNumber(metadata, "estimated_print_time") ??
-            ParseFilePreviewDuration(ReadFilePreviewString(metadata, "estimated printing time (normal mode)"));
-        double? layerHeight = PrinterFilePreviewTransport.PositiveNumber(metadata, "layer_height");
+        long? size = PrinterFileInventorySession.Size(details.RootElement);
+        PrinterPrintMetadata? metadata = ReadPrintFileMetadata(
+            details.RootElement.TryGetProperty("meta", out JsonElement meta) ? meta : default);
+        double? printTime = metadata?.EstimatedPrintTimeSeconds is > 0 ? metadata.EstimatedPrintTimeSeconds :
+            ParseFilePreviewDuration(metadata?.EstimatedPrintTimeNormalMode) ??
+            (metadata?.PrintTimeSeconds is > 0 ? metadata.PrintTimeSeconds : null);
+        PrinterFilePreviewContent content = new(
+            printTime, metadata?.LayerHeightMm is > 0 ? metadata.LayerHeightMm : null, SizeBytes: size, Metadata: metadata);
         if (TryBuildFilePreviewThumbnailUri(baseUrl, details.RootElement) is not { } thumbnailUri)
         {
-            return new(printTime, layerHeight);
+            return content;
         }
 
         using HttpResponseMessage response = await SendFilePreviewRequestAsync(thumbnailUri, credential, ct)
             .ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.NoContent)
         {
-            return new(printTime, layerHeight);
+            return content;
         }
 
         using MemoryStream buffer = new();
@@ -58,14 +63,15 @@ public partial class PrusaLinkApiClient
         {
             // QOI is a documented PrusaLink thumbnail format that browsers cannot render.
             return image.AsSpan().StartsWith("qoif"u8)
-                ? new(printTime, layerHeight)
+                ? content
                 : throw new PrinterFileCopyException("invalid_preview_image");
         }
 
         // Detect ordinary overwrites during capture without claiming a version-bound snapshot.
-        using JsonDocument after = await ReadFilePreviewDetailsAsync(detailsUri, observation, credential, ct)
+        using JsonDocument after = await ReadFilePreviewDetailsAsync(
+            detailsUri, observation with { SizeBytes = size }, credential, ct)
             .ConfigureAwait(false);
-        return new(printTime, layerHeight, image, contentType);
+        return content with { Image = image, ContentType = contentType };
     }
 
     [GeneratedRegex(
@@ -74,7 +80,8 @@ public partial class PrusaLinkApiClient
     private static partial Regex FilePreviewDurationPattern();
 
     private async Task<JsonDocument> ReadFilePreviewDetailsAsync(
-        Uri uri, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct)
+        Uri uri, PrinterFileInventoryEntry observation, PrinterCredential? credential, CancellationToken ct,
+        bool allowSizeEnrichment = false)
     {
         byte[] bytes = await PrinterFilePreviewTransport.ReadAsync(
             token => SendFilePreviewRequestAsync(uri, credential, token),
@@ -96,9 +103,14 @@ public partial class PrusaLinkApiClient
             }
 
             string directory = observation.RelativePath[..(observation.RelativePath.LastIndexOf('/') + 1)];
-            PrinterFilePreviewTransport.ValidateObservation(observation, new(
+            PrinterFileInventoryEntry actual = new(
                 observation.StorageRoot, directory + name, PrinterFileInventorySession.Size(details),
-                ModifiedValue: PrinterFileInventorySession.ModifiedValue(details, "m_timestamp")));
+                ModifiedValue: PrinterFileInventorySession.ModifiedValue(details, "m_timestamp"));
+
+            // Some firmware omits listing sizes. Pin the first detail size for the post-image check.
+            PrinterFilePreviewTransport.ValidateObservation(
+                allowSizeEnrichment && observation.SizeBytes is null
+                    ? observation with { SizeBytes = actual.SizeBytes } : observation, actual);
             return document;
         }
         catch

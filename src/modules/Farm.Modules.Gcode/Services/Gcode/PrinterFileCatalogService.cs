@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -73,13 +74,30 @@ public sealed class PrinterFileCatalogService(
 
             try
             {
+                Dictionary<string, PrinterFileInventoryEntry> cachedEntries = [];
+                if (!force)
+                {
+                    var previous = await policyDb.PrinterFileLocations.AsNoTracking()
+                        .Where(x => x.SourcePrinterId == printerId &&
+                            x.Availability == PrinterFileAvailability.Available &&
+                            x.ConfigurationGeneration == lease.ConfigurationGeneration &&
+                            x.MutationGeneration == lease.MutationGeneration &&
+                            x.DetailsFetchedAtUtc != null)
+                        .ToArrayAsync(deadline.Token);
+                    cachedEntries = previous.ToDictionary(x => x.IdentityKey, x => new PrinterFileInventoryEntry(
+                        x.StorageRoot, x.RelativePath, x.SizeBytes, ProviderVersion: x.ProviderVersion,
+                        ProviderHash: x.ProviderDigest, ModifiedValue: x.ModifiedValue, DisplayName: x.DisplayName,
+                        Metadata: x.Metadata, DetailsFetchedAtUtc: x.DetailsFetchedAtUtc));
+                }
+
                 result = await client.GetFileInventoryAsync(
                     printer.BackendUrl,
                     printer.Credential,
                     new PrinterFileInventoryOptions
                     {
                         Deadline = TimeSpan.FromSeconds(settings.ScanTimeoutSeconds),
-                        MaxRequests = settings.MaxRequests,
+                        IncludeFileDetails = true,
+                        CachedEntries = cachedEntries,
                         MaxEntries = settings.MaxEntries,
                         MaxDepth = settings.MaxDepth,
                     },
@@ -162,7 +180,8 @@ public sealed class PrinterFileCatalogService(
         {
             if (!PrinterInventoryPath.TryCanonicalizeRoot(entry.StorageRoot, out string root) ||
                 !PrinterInventoryPath.TryCanonicalizeRelativePath(entry.RelativePath, out string path) ||
-                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0)
+                root != entry.StorageRoot || path != entry.RelativePath || entry.SizeBytes < 0 ||
+                (entry.Metadata is { } metadata && (!metadata.IsValid() || !entry.DetailsFetchedAtUtc.HasValue)))
             {
                 throw new InvalidOperationException("Inventory adapter returned a noncanonical observation.");
             }
@@ -194,6 +213,7 @@ public sealed class PrinterFileCatalogService(
                 location.ModifiedValue != entry.ModifiedValue ||
                 location.ProviderVersion != entry.ProviderVersion ||
                 location.ProviderDigest != entry.ProviderHash ||
+                JsonSerializer.Serialize(location.Metadata) != JsonSerializer.Serialize(entry.Metadata) ||
                 location.ConfigurationGeneration != lease.ConfigurationGeneration;
             if (!isNew && ((force && !pinned.Contains(location.Id)) || changed ||
                     location.Availability == PrinterFileAvailability.Deleted))
@@ -201,8 +221,13 @@ public sealed class PrinterFileCatalogService(
                 location.ObservationRevision++;
             }
 
-            location.DisplayName = path[(path.LastIndexOf('/') + 1)..];
+            location.DisplayName = entry.DisplayName is { Length: > 0 and <= 512 } displayName &&
+                !string.IsNullOrWhiteSpace(displayName) &&
+                !displayName.Any(c => char.IsControl(c) || c is '/' or '\\')
+                ? displayName : path[(path.LastIndexOf('/') + 1)..];
             location.SizeBytes = entry.SizeBytes;
+            location.Metadata = entry.Metadata;
+            location.DetailsFetchedAtUtc = entry.DetailsFetchedAtUtc;
             location.ModifiedValue = entry.ModifiedValue;
             location.ProviderVersion = entry.ProviderVersion;
             location.ProviderDigest = entry.ProviderHash;

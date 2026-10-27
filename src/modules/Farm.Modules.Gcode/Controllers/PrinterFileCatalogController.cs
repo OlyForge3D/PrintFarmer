@@ -93,6 +93,8 @@ public sealed class PrinterFileCatalogController(
                 x.RelativePath,
                 x.DisplayName,
                 x.SizeBytes,
+                x.Metadata,
+                x.DetailsFetchedAtUtc,
                 x.ModifiedValue,
                 x.ObservationRevision,
                 x.ConfigurationGeneration,

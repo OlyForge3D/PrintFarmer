@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Modules.Gcode.Services.Gcode;
 
 namespace Farm.Modules.Gcode.Tests.Services.Gcode;
@@ -27,7 +28,7 @@ public sealed class PrinterFilePreviewWireContractTests
         Assert.Equal(
             [
                 "locationId", "observationRevision", "capturedAtUtc", "hasImage", "thumbnailUrl",
-                "printTimeSeconds", "layerHeightMm", "reasonCode", "state",
+                "printTimeSeconds", "layerHeightMm", "reasonCode", "state", "sizeBytes",
             ],
             json.EnumerateObject().Select(property => property.Name));
         Assert.Equal(locationId, json.GetProperty("locationId").GetGuid());
@@ -53,14 +54,53 @@ public sealed class PrinterFilePreviewWireContractTests
         Assert.Equal(
             [
                 "locationId", "observationRevision", "capturedAtUtc", "hasImage",
-                "printTimeSeconds", "layerHeightMm", "state",
+                "printTimeSeconds", "layerHeightMm", "state", "sizeBytes",
             ],
             json.EnumerateObject().Select(property => property.Name));
         Assert.Equal(JsonValueKind.Null, json.GetProperty("capturedAtUtc").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("printTimeSeconds").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("layerHeightMm").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("sizeBytes").ValueKind);
         Assert.False(json.GetProperty("hasImage").GetBoolean());
         Assert.Equal("Unavailable", json.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public void Serialize_Metadata_UsesUnitSuffixedCamelCaseAndKeepsZeroFalseAndToolOrder()
+    {
+        PrinterPrintMetadata metadata = new()
+        {
+            BrimWidthMm = 0,
+            QuietLeftPresent = false,
+            FilamentUsedPerToolG = [12.5, 0],
+            FilamentTypePerTool = ["PETG", "PLA"],
+            NozzleDiameterMm = 0.4,
+            FilamentCost = 0,
+        };
+        PrinterFilePreviewDto dto = new(
+            Guid.Empty, 7, null, false, null, null, null, null, PrinterFilePreviewState.Available, 629505, metadata);
+        JsonSerializerOptions options = CreateWireOptions();
+
+        string serialized = JsonSerializer.Serialize(dto, options);
+        using JsonDocument document = JsonDocument.Parse(serialized);
+        JsonElement json = document.RootElement;
+
+        Assert.Equal(629505, json.GetProperty("sizeBytes").GetInt64());
+        JsonElement wire = json.GetProperty("metadata");
+        Assert.Equal(
+            [
+                "brimWidthMm", "filamentCost", "filamentUsedPerToolG", "filamentTypePerTool",
+                "nozzleDiameterMm", "quietLeftPresent",
+            ],
+            wire.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(0, wire.GetProperty("brimWidthMm").GetDouble());
+        Assert.Equal(0, wire.GetProperty("filamentCost").GetDouble());
+        Assert.Equal(JsonValueKind.False, wire.GetProperty("quietLeftPresent").ValueKind);
+        Assert.Equal([12.5, 0], wire.GetProperty("filamentUsedPerToolG").EnumerateArray().Select(x => x.GetDouble()));
+        Assert.Equal(["PETG", "PLA"], wire.GetProperty("filamentTypePerTool").EnumerateArray().Select(x => x.GetString()));
+        Assert.False(wire.TryGetProperty("hasValues", out _));
+        Assert.Equal(serialized, JsonSerializer.Serialize(
+            JsonSerializer.Deserialize<PrinterFilePreviewDto>(serialized, options), options));
     }
 
     [Fact]

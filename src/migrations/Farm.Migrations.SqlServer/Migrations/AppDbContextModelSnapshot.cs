@@ -17,7 +17,7 @@ namespace Farm.Migrations.SqlServer.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -6286,6 +6286,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<long>("ConfigurationGeneration")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTime?>("DetailsFetchedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(512)
@@ -6305,6 +6308,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("LastSeenAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("Metadata")
+                        .HasMaxLength(32768)
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ModifiedValue")
                         .HasMaxLength(128)

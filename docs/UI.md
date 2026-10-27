@@ -60,6 +60,16 @@ as **Unavailable**. File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
 
+For PrusaLink files, the panel also shows every supplied **Native print
+metadata** field, including filament use, temperatures, tool-specific values,
+and printer/profile information. Names, sizes, and these details are saved in
+the database during discovery, not held only in the expiring preview cache.
+They remain visible when thumbnail loading fails or the source is unavailable.
+The saved date identifies the observation; absent native values are **Unknown**,
+while explicit zero and false remain visible. Tool numbers follow provider
+order. Full display names do not replace the short filename used by file actions.
+Scheduled scans reuse unchanged details; **Force Refresh** refetches them.
+
 On-printer files offer two distinct actions:
 
 - **Copy to local library** (folder-arrow glyph) creates or reuses an owned

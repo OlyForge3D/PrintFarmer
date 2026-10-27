@@ -177,6 +177,27 @@ public sealed class PrusaLinkFilePreviewTests
         Assert.Equal([DetailsPath], handler.Paths);
     }
 
+    [Fact]
+    public async Task GetFilePreviewAsync_ZeroNativeMeasurements_PreservesMetadataWithoutInvalidLegacyScalars()
+    {
+        using Handler handler = new(Route(DetailsJson(change =>
+        {
+            change.Remove("refs");
+            change["meta"] = JsonNode.Parse("""{"estimated_print_time":0,"layer_height":0}""");
+        })));
+        using HttpClient http = new(handler);
+
+        PrinterFilePreviewContent result = await PreviewAsync(http);
+
+        Assert.NotNull(result.Metadata);
+        Assert.Equal(0, result.Metadata.EstimatedPrintTimeSeconds);
+        Assert.Equal(0, result.Metadata.LayerHeightMm);
+        Assert.True(result.Metadata.IsValid());
+        Assert.Null(result.PrintTimeSeconds);
+        Assert.Null(result.LayerHeightMm);
+        Assert.Equal([DetailsPath], handler.Paths);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("/")]

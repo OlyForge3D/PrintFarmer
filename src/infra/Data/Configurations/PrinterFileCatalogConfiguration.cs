@@ -1,5 +1,8 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -15,6 +18,15 @@ public sealed class PrinterFileLocationConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.RelativePath).HasMaxLength(2048);
         builder.Property(x => x.IdentityKey).HasMaxLength(64).IsUnicode(false);
         builder.Property(x => x.DisplayName).HasMaxLength(512);
+        builder.Property(x => x.Metadata).HasMaxLength(32768).HasConversion(
+            value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
+            value => JsonSerializer.Deserialize<PrinterPrintMetadata>(value, (JsonSerializerOptions?)null))
+            .Metadata.SetValueComparer(new ValueComparer<PrinterPrintMetadata?>(
+                (left, right) => JsonSerializer.Serialize(left, (JsonSerializerOptions?)null) ==
+                    JsonSerializer.Serialize(right, (JsonSerializerOptions?)null),
+                value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null).GetHashCode(),
+                value => JsonSerializer.Deserialize<PrinterPrintMetadata>(
+                    JsonSerializer.Serialize(value, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)));
         builder.Property(x => x.ModifiedValue).HasMaxLength(128);
         builder.Property(x => x.ProviderVersion).HasMaxLength(512);
         builder.Property(x => x.ProviderDigest).HasMaxLength(512);

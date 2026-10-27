@@ -2,6 +2,7 @@
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,9 @@ public sealed class PrinterFileCatalogPersistenceTests
             index.Properties.Select(property => property.Name)
                 .SequenceEqual(["SourcePrinterId", "IdentityKey"]));
         Assert.Equal(64, location.FindProperty(nameof(PrinterFileLocation.IdentityKey))!.GetMaxLength());
+        Assert.Equal(32768, location.FindProperty(nameof(PrinterFileLocation.Metadata))!.GetMaxLength());
+        Assert.True(location.FindProperty(nameof(PrinterFileLocation.Metadata))!.IsNullable);
+        Assert.True(location.FindProperty(nameof(PrinterFileLocation.DetailsFetchedAtUtc))!.IsNullable);
         Assert.True(location.FindProperty(nameof(PrinterFileLocation.Revision))!.IsConcurrencyToken);
         Assert.Equal(DeleteBehavior.SetNull, Assert.Single(location.GetForeignKeys()).DeleteBehavior);
 
@@ -117,7 +121,7 @@ public sealed class PrinterFileCatalogPersistenceTests
         };
         context.AddRange(printer, asset);
         await context.SaveChangesAsync();
-        await context.Database.MigrateAsync();
+        await AssertDetailsUpgradeAsync(context);
         Assert.Equal(asset.Id, (await context.GcodeFiles.SingleAsync(x => x.Id == asset.Id)).Id);
 
         PrinterFileLocation location = NewLocation(printer.Id, "gcodes", "one/model.gcode");
@@ -162,6 +166,72 @@ public sealed class PrinterFileCatalogPersistenceTests
         Assert.Equal(printer.Id, retainedOrigin.SourcePrinterId);
         Assert.Equal("one/model.gcode", retainedOrigin.RelativePath);
         Assert.Equal(new string('a', 64), retainedOrigin.ContentSha256);
+    }
+
+    private static async Task AssertDetailsUpgradeAsync(AppDbContext context)
+    {
+        string previous = context.Database.GetMigrations()
+            .TakeWhile(name => !name.EndsWith("_PersistPrinterFileDetails", StringComparison.Ordinal))
+            .Last();
+        await context.GetService<IMigrator>().MigrateAsync(previous);
+        PrinterFileLocation old = NewLocation(Guid.NewGuid(), "usb", "PART~1.BGC");
+        DateTime observed = new(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
+
+        // Insert using the pre-upgrade schema, which has neither detail column.
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "PrinterFileLocations"
+                ("Id", "Revision", "SourcePrinterId", "StorageRoot", "RelativePath", "IdentityKey",
+                 "DisplayName", "SizeBytes", "ObservationRevision", "ConfigurationGeneration",
+                 "MutationGeneration", "FirstSeenAtUtc", "LastSeenAtUtc", "Availability")
+            VALUES ({old.Id}, {old.Revision}, {old.SourcePrinterId}, {old.StorageRoot},
+                    {old.RelativePath}, {old.IdentityKey}, {"Long printable part.bgcode"}, {123L},
+                    {old.ObservationRevision}, {old.ConfigurationGeneration}, {old.MutationGeneration},
+                    {observed}, {observed}, {"Available"})
+            """);
+        await context.Database.MigrateAsync();
+
+        PrinterFileLocation stored = await context.PrinterFileLocations.SingleAsync(x => x.Id == old.Id);
+        Assert.Equal(old.RelativePath, stored.RelativePath);
+        Assert.Equal(old.IdentityKey, stored.IdentityKey);
+        Assert.Equal("Long printable part.bgcode", stored.DisplayName);
+        Assert.Equal(123L, stored.SizeBytes);
+        Assert.Null(stored.Metadata);
+        Assert.Null(stored.DetailsFetchedAtUtc);
+
+        stored.Metadata = new()
+        {
+            BrimWidthMm = 0,
+            QuietLeftPresent = false,
+            FilamentUsedPerToolG = [0, 2.5],
+            FilamentTypePerTool = ["PLA", "PETG"],
+            Profile = "Fine detail",
+        };
+        stored.DetailsFetchedAtUtc = observed;
+        await context.SaveChangesAsync();
+        context.Entry(stored).State = EntityState.Detached;
+        stored = await context.PrinterFileLocations.SingleAsync(x => x.Id == old.Id);
+        Assert.Equal(observed, stored.DetailsFetchedAtUtc);
+        Assert.NotNull(stored.Metadata);
+        Assert.Equal(0, stored.Metadata.BrimWidthMm);
+        Assert.False(stored.Metadata.QuietLeftPresent);
+        Assert.Equal(new double[] { 0, 2.5 }, stored.Metadata.FilamentUsedPerToolG!);
+        Assert.Equal(new[] { "PLA", "PETG" }, stored.Metadata.FilamentTypePerTool!);
+        Assert.Equal("Fine detail", stored.Metadata.Profile);
+
+        stored.Metadata.FilamentUsedPerToolG![1] = 4;
+        await context.SaveChangesAsync();
+        context.Entry(stored).State = EntityState.Detached;
+        stored = await context.PrinterFileLocations.SingleAsync(x => x.Id == old.Id);
+        Assert.Equal(new double[] { 0, 4 }, stored.Metadata!.FilamentUsedPerToolG!);
+
+        stored.Metadata = null;
+        await context.SaveChangesAsync();
+        context.Entry(stored).State = EntityState.Detached;
+        stored = await context.PrinterFileLocations.SingleAsync(x => x.Id == old.Id);
+        Assert.Null(stored.Metadata);
+        Assert.Equal(observed, stored.DetailsFetchedAtUtc);
+        context.Remove(stored);
+        await context.SaveChangesAsync();
     }
 
     [Fact]

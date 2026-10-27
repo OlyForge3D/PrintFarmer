@@ -52,9 +52,19 @@ Catalog support is independent of legacy file-list support, authenticated
 streaming copy, and safe remote-delete support. A successful inventory does not
 grant any of those mutation capabilities. A complete empty listing differs from
 an HTTP/authentication/protocol failure; bounds or malformed responses never
-produce invented complete emptiness. Inventory traversal is capped at 100
-requests, 10,000 entries, depth 16, and 120 seconds, without G-code body,
-per-file header, or thumbnail requests.
+produce invented complete emptiness. Inventory traversal and native-detail
+requests share a 120-second deadline, 10,000-entry limit, depth limit of 16,
+and 8 MiB per-response limit. There is no HTTP request-count cap. Scans never
+download G-code bodies, per-file G-code headers, or thumbnails.
+
+PrusaLink scans fetch native file details and store the full `display_name`,
+reported size, normalized print metadata, and successful-detail-fetch timestamp
+in the application's database. The raw short filename remains the location's
+path and action identity; a long display name does not rename the file.
+Scheduled scans reuse saved details only when listing evidence and configuration
+still match. Force Refresh fetches the details again. These catalog values do
+not expire with the thumbnail cache and remain available while the printer is
+offline or a preview cannot be loaded.
 
 ### Discovery policy and metadata API
 
@@ -114,13 +124,48 @@ invalidate catalog and preview queries; preview bodies are fetched on demand,
 not during indexing. Unchanged locations pinned by unfinished file operations
 keep their revision so refresh does not invalidate those operations. Refresh
 again after the operation finishes to invalidate that retained preview.
-Background scans continue to retain revisions for unchanged files.
+Background scans continue to retain revisions for unchanged files. PrusaLink
+native details are refreshed during the forced scan, independently of the
+on-demand thumbnail capture.
 
 Listing accepts `printerId`, `search` (at most 200 characters), `availability`
 (`Available`, `Missing`, `Deleted`), `stale`, `page`, and `pageSize`
 (1-200, default 50). Source authorization is applied before counts,
 pagination, filtering, origins, and scan status. Responses contain canonical
 root/path observations, not credentials or printer URLs.
+
+Each location also includes `displayName`, optional `sizeBytes`, optional
+`metadata`, and optional `detailsFetchedAtUtc`. The latter records a successful
+native-detail fetch, including a valid response with no supported metadata.
+Absent fields mean **unknown**, not zero or false. An empty saved result must
+not be replaced by older preview-cache metadata. Existing installations acquire
+details on their next eligible scan; migrations preserve their existing catalog.
+
+The optional camelCase `metadata` object normalizes all 41 fields in PrusaLink's
+[PrintFileMetadata schema](https://github.com/prusa3d/Prusa-Link-Web/blob/master/spec/openapi.yaml).
+Only fields supplied and validated by the adapter are included:
+
+| Fields | Type and units |
+| --- | --- |
+| `printerModel`, `profile`, `materialName`, `filamentType`, `fillDensity`, `supportMaterial` | String; provider text is preserved |
+| `estimatedPrintTimeNormalMode` | Provider's textual duration |
+| `printTimeSeconds`, `estimatedPrintTimeSeconds` | Number, seconds |
+| `layerHeightMm`, `maxLayerZMm`, `brimWidthMm`, `nozzleDiameterMm` | Number, millimeters |
+| `bedTemperatureC`, `nozzleTemperatureC` | Number, degrees Celsius |
+| `bedTemperaturePerToolC`, `nozzleTemperaturePerToolC` | Number array, degrees Celsius |
+| `nozzleDiameterPerToolMm`, `filamentUsedPerToolMm` | Number array, millimeters |
+| `filamentTypePerTool` | String array |
+| `filamentUsedMm`, `filamentUsedG`, `filamentUsedCm3` | Number, millimeters / grams / cubic centimeters respectively |
+| `filamentUsedPerToolG`, `filamentUsedPerToolCm3` | Number array, grams / cubic centimeters respectively |
+| `filamentCost`, `filamentCostPerTool` | Number / number array; currency unspecified by the provider |
+| `requiredResinMl` | Number, milliliters |
+| `fadedLayers`, `ironing` | Number; provider value is preserved |
+| `exposureTimeSeconds`, `initialExposureTimeSeconds`, `minExposureTimeSeconds`, `maxExposureTimeSeconds`, `minInitialExposureTimeSeconds`, `maxInitialExposureTimeSeconds` | Number, seconds |
+| `normalPercentPresent`, `normalLeftPresent`, `quietPercentPresent`, `quietLeftPresent`, `layerInfoPresent` | Boolean |
+
+Tool arrays retain provider order. Zero and false are valid supplied values.
+These are source-reported observations, not independently verified print
+parameters or evidence of remote byte equality.
 
 Search ignores case on SQLite, PostgreSQL, and SQL Server. It lowers the stored
 path and the search text explicitly instead of relying on provider collation,
@@ -195,8 +240,14 @@ Preview JSON uses this camelCase contract:
   "capturedAtUtc": "2026-10-26T18:00:00Z",
   "hasImage": true,
   "thumbnailUrl": "/api/printer-files/locations/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/thumbnail?observationRevision=7",
+  "sizeBytes": 123456,
   "printTimeSeconds": 3600,
-  "layerHeightMm": 0.2
+  "layerHeightMm": 0.2,
+  "metadata": {
+    "printerModel": "COREONE",
+    "printTimeSeconds": 3600,
+    "layerHeightMm": 0.2
+  }
 }
 ```
 
@@ -205,8 +256,8 @@ Preview JSON uses this camelCase contract:
 - `Unsupported`: no certified lightweight preview adapter; no capture date.
 - `Deferred`: no fresh, explicit idle status or no available file-I/O lease.
   Returns HTTP `200`, `reasonCode: "printer_busy"`, no image or capture date.
-- A null print time, layer height, or image means explicitly unavailable, not
-  zero or an inferred value. `capturedAtUtc` is the real metadata/image fetch
+- A missing or null metadata field means unknown, not zero or an inferred
+  value. An absent image means unavailable. `capturedAtUtc` is the real preview fetch
   time, retained on cache hits. It is not a source-version guarantee.
 
 Catalog `printers[]` includes `supportsPreview`, `canPreview`,
@@ -219,7 +270,7 @@ currently certified adapters.
 | --- | --- | --- |
 | Moonraker | Native per-file metadata, estimated time, layer height, and optional native PNG/JPEG/WebP | Certified authenticated `gcodes` stream |
 | OctoPrint | Native per-file analysis estimated time; image and layer height explicitly unavailable | Certified authenticated `local` stream |
-| PrusaLink | Native per-file details (estimated time and layer height when reported) and optional native PNG/JPEG thumbnail from `/thumb/...` or `/api/thumbnails/...` refs only; QOI and other refs are ignored | Unsupported until native streaming is certified |
+| PrusaLink | All supported native print metadata and reported size; optional native PNG/JPEG thumbnail from `/thumb/...` or `/api/thumbnails/...` refs only; QOI and other refs are ignored | Unsupported until native streaming is certified |
 | FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
 
 Preview never fetches G-code to parse metadata or render an image. Moonraker
@@ -233,7 +284,12 @@ PrusaLink reads `/api/v1/files/<storage>/<path>` details with the same
 returned, details are re-read to detect a concurrent overwrite. Thumbnail refs
 must be same-origin, at most 1024 characters, and cannot traverse paths.
 
-The server cache is private filesystem data under
+The preview/image cache is separate from durable catalog metadata. Preview
+responses prefer saved catalog details (including a saved empty result);
+on-demand metadata is a fallback before the first successful detail scan.
+Evicting a preview never erases database metadata, display names, or sizes.
+
+The server preview cache is private filesystem data under
 `<ContentRoot>/App_Data/printer-file-previews`, outside the web root, and is
 never exposed by static-file middleware or the library. It is limited to
 256 entries and 64 MiB, with a 24-hour lifetime; oldest entries are evicted
