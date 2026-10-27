@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -342,6 +343,90 @@ public class BinaryGcodeReaderTests
 
     private static GcodeMetadataExtractorService Extractor() => new(NullLogger<GcodeMetadataExtractorService>.Instance);
 
+    [Fact]
+    public async Task ReadBoundedAsync_ValidatedHeader_ReportsIndependentReadyOutcomes()
+    {
+        byte[] file = CreateFile([MetadataBlock(2, "layer_height = 0.2\n"), Block(5, Png, width: 1, height: 1)]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file, completeFile: false, captureThumbnail: true);
+
+        Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
+        Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
+        Assert.Equal(new KeyValuePair<string, string>("layer_height", "0.2"), Assert.Single(result.Content.Metadata));
+        Assert.Equal(Png, Assert.Single(result.Content.Thumbnails).Data);
+    }
+
+    [Theory]
+    [InlineData(false, "region_limit", PrinterFileEnrichmentState.Partial)]
+    [InlineData(true, "truncated", PrinterFileEnrichmentState.Failed)]
+    public async Task ReadBoundedAsync_TruncatedImage_PreservesEarlierMetadata(
+        bool completeFile, string reason, PrinterFileEnrichmentState imageState)
+    {
+        byte[] file = CreateFile([MetadataBlock(2, "layer_height = 0.2\n"), Block(5, Png, width: 1, height: 1)]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file[..^20], completeFile, captureThumbnail: true);
+
+        Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
+        Assert.Single(result.Content.Metadata);
+        Assert.Equal(imageState, result.ThumbnailState);
+        Assert.Equal(reason, result.ThumbnailReason);
+        Assert.Empty(result.Content.Thumbnails);
+    }
+
+    [Fact]
+    public async Task ReadBoundedAsync_UnsupportedCompression_ReportsPartialRatherThanAbsence()
+    {
+        byte[] file = CreateFile([
+            Block(2, "filament_type = PLA\n"u8.ToArray(), compression: 2),
+            MetadataBlock(4, "layer_height = 0.2\n"),
+            Block(5, Png, compression: 3, width: 1, height: 1),
+        ]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file, completeFile: true, captureThumbnail: true);
+
+        Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
+        Assert.Equal("unsupported_compression", result.MetadataReason);
+        Assert.Single(result.Content.Metadata);
+        Assert.Equal(PrinterFileEnrichmentState.Unsupported, result.ThumbnailState);
+        Assert.Equal("unsupported_compression", result.ThumbnailReason);
+    }
+
+    [Theory]
+    [InlineData(0, PrinterFileEnrichmentState.Failed, "invalid_image")]
+    [InlineData(2, PrinterFileEnrichmentState.Unsupported, "unsupported_image_format")]
+    public async Task ReadBoundedAsync_InvalidImage_DoesNotDiscardMetadata(
+        int format, PrinterFileEnrichmentState imageState, string reason)
+    {
+        byte[] file = CreateFile([MetadataBlock(2, "layer_height = 0.2\n"), Block(5, Png, format: (ushort)format)]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file, completeFile: true, captureThumbnail: true);
+
+        Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
+        Assert.Equal(imageState, result.ThumbnailState);
+        Assert.Equal(reason, result.ThumbnailReason);
+        Assert.Empty(result.Content.Thumbnails);
+    }
+
+    [Fact]
+    public async Task ReadBoundedAsync_CapturePaused_StillReadsFollowingMetadata()
+    {
+        byte[] file = CreateFile([Block(5, Png, compression: 2), MetadataBlock(2, "layer_height = 0.2\n")]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file, completeFile: true, captureThumbnail: false);
+
+        Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
+        Assert.Single(result.Content.Metadata);
+        Assert.Equal(PrinterFileEnrichmentState.Deferred, result.ThumbnailState);
+        Assert.Empty(result.Content.Thumbnails);
+    }
+
+    [Fact]
+    public async Task ReadBoundedAsync_DecodedAggregate_StopsAtFourMiB()
+    {
+        byte[] block = Block(2, Enumerable.Repeat((byte)'#', 1024 * 1024).ToArray(), compression: 1);
+        byte[] file = CreateFile([MetadataBlock(2, "layer_height = 0.2\n"), .. Enumerable.Repeat(block, 4)]);
+        var result = await BinaryGcodeReader.ReadBoundedAsync(file, completeFile: true, captureThumbnail: true);
+
+        Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
+        Assert.Equal("header_too_large", result.MetadataReason);
+        Assert.Single(result.Content.Metadata);
+    }
+
     private static byte[] MetadataBlock(ushort type, string text) => Block(type, Encoding.UTF8.GetBytes(text));
 
     // Fixtures follow libbgcode's little-endian wire specification, independently of the reader.
@@ -366,7 +451,7 @@ public class BinaryGcodeReaderTests
     }
 
     private static byte[] Block(ushort type, byte[] payload, ushort compression = 0, ushort encoding = 0,
-        ushort format = 0, ushort width = 200, bool rawDeflate = false, uint? declaredSize = null)
+        ushort format = 0, ushort width = 200, bool rawDeflate = false, uint? declaredSize = null, ushort height = 200)
     {
         byte[] stored = payload;
         if (compression == 1)
@@ -393,7 +478,7 @@ public class BinaryGcodeReaderTests
         if (type == 5)
         {
             writer.Write(width);
-            writer.Write((ushort)200);
+            writer.Write(height);
         }
         writer.Write(stored);
         writer.Write(Checksum(output.ToArray()));

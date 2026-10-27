@@ -87,6 +87,36 @@ public sealed record PrinterPrintMetadata
     /// <summary>Layer height in millimeters.</summary>
     public double? LayerHeightMm { get; init; }
 
+    /// <summary>Source-reported total layer count, never estimated from height.</summary>
+    public int? LayerCount { get; init; }
+
+    /// <summary>Infill density as a percentage from zero through one hundred.</summary>
+    public double? InfillPercentage { get; init; }
+
+    /// <summary>Source-reported infill pattern.</summary>
+    public string? InfillPattern { get; init; }
+
+    /// <summary>Whether supports are enabled; null means the source did not say.</summary>
+    public bool? SupportEnabled { get; init; }
+
+    /// <summary>Source-reported support type, such as tree or normal.</summary>
+    public string? SupportType { get; init; }
+
+    /// <summary>Source-reported support style or generation mode.</summary>
+    public string? SupportStyle { get; init; }
+
+    /// <summary>Slicer name, including a vendor prefix when supplied.</summary>
+    public string? SlicerName { get; init; }
+
+    /// <summary>Slicer version, including prerelease/build suffixes.</summary>
+    public string? SlicerVersion { get; init; }
+
+    /// <summary>Explicitly identified tools; absent measurements remain null in their original slots.</summary>
+    public PrinterFilamentTool[]? Tools { get; init; }
+
+    /// <summary>True only when total grams were derived from a complete set of tool weights.</summary>
+    public bool? FilamentUsedGIsDerived { get; init; }
+
     /// <summary>Provider's material name.</summary>
     public string? MaterialName { get; init; }
 
@@ -158,9 +188,10 @@ public sealed record PrinterPrintMetadata
             FadedLayers, FilamentCost, FilamentUsedCm3, FilamentUsedG, FilamentUsedMm, InitialExposureTimeSeconds,
             LayerHeightMm, ExposureTimeSeconds, MaxExposureTimeSeconds, MaxInitialExposureTimeSeconds,
             MinExposureTimeSeconds, MinInitialExposureTimeSeconds, NozzleDiameterMm, MaxLayerZMm,
-            PrintTimeSeconds, Ironing, RequiredResinMl];
+            PrintTimeSeconds, Ironing, RequiredResinMl, LayerCount, InfillPercentage];
         string?[] texts = [EstimatedPrintTimeNormalMode, FilamentType, FillDensity, MaterialName,
-            PrinterModel, SupportMaterial, Profile];
+            PrinterModel, SupportMaterial, Profile, InfillPattern, SupportType, SupportStyle,
+            SlicerName, SlicerVersion];
         double[]?[] tools = [BedTemperaturePerToolC, NozzleTemperaturePerToolC, FilamentCostPerTool,
             FilamentUsedPerToolCm3, FilamentUsedPerToolG, FilamentUsedPerToolMm, NozzleDiameterPerToolMm];
         return numbers.All(value => value is null || IsValidNumber(value.Value)) &&
@@ -168,7 +199,14 @@ public sealed record PrinterPrintMetadata
             tools.All(values => values is null || (values.Length is > 0 and <= MaximumTools &&
                 values.All(IsValidNumber))) &&
             (FilamentTypePerTool is null || (FilamentTypePerTool.Length is > 0 and <= MaximumTools &&
-                FilamentTypePerTool.All(IsValidText)));
+                FilamentTypePerTool.All(IsValidText))) &&
+            InfillPercentage is not > 100 &&
+            (FilamentUsedGIsDerived is not true || FilamentUsedG.HasValue) &&
+            (Tools is null || (Tools.Length is > 0 and <= MaximumTools &&
+                Tools.All(tool => tool is not null && tool.IsValid()) &&
+                Tools.Select(tool => tool.Index).Distinct().Count() == Tools.Length &&
+                Tools.Where(tool => tool.SourceId is not null).Select(tool => tool.SourceId)
+                    .Distinct(StringComparer.Ordinal).Count() == Tools.Count(tool => tool.SourceId is not null)));
     }
 
     /// <summary>Native numeric measurements may be zero but must be finite and nonnegative.</summary>

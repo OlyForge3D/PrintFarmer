@@ -104,6 +104,46 @@ public sealed class PrinterFilePreviewWireContractTests
     }
 
     [Fact]
+    public void Serialize_EnrichmentMetadata_PreservesUnknownToolSlotsAndStringStates()
+    {
+        PrinterPrintMetadata metadata = new()
+        {
+            LayerCount = 381,
+            InfillPercentage = 15,
+            InfillPattern = "grid",
+            SupportEnabled = false,
+            SlicerName = "Snapmaker Orca",
+            SlicerVersion = "2.4.0-alpha",
+            Tools =
+            [
+                new() { Index = 0, Material = "PLA", Color = "#000000", FilamentUsedG = 138.2 },
+                new() { Index = 1 },
+                new() { Index = 2, SourceId = "tool2", Material = "PETG", FilamentUsedG = 0 },
+            ],
+        };
+        JsonSerializerOptions options = CreateWireOptions();
+        string serialized = JsonSerializer.Serialize(metadata, options);
+        using JsonDocument document = JsonDocument.Parse(serialized);
+        JsonElement json = document.RootElement;
+        Assert.Equal(381, json.GetProperty("layerCount").GetInt32());
+        Assert.Equal("2.4.0-alpha", json.GetProperty("slicerVersion").GetString());
+        Assert.Equal(JsonValueKind.False, json.GetProperty("supportEnabled").ValueKind);
+        JsonElement tools = json.GetProperty("tools");
+        Assert.Equal(3, tools.GetArrayLength());
+        Assert.Equal("#000000", tools[0].GetProperty("color").GetString());
+        Assert.Equal(["index"], tools[1].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(1, tools[1].GetProperty("index").GetInt32());
+        Assert.Equal("tool2", tools[2].GetProperty("sourceId").GetString());
+        Assert.Equal(0, tools[2].GetProperty("filamentUsedG").GetDouble());
+        Assert.Equal(serialized, JsonSerializer.Serialize(
+            JsonSerializer.Deserialize<PrinterPrintMetadata>(serialized, options), options));
+        foreach (PrinterFileEnrichmentState state in Enum.GetValues<PrinterFileEnrichmentState>())
+        {
+            Assert.Equal($"\"{state}\"", JsonSerializer.Serialize(state, options));
+        }
+    }
+
+    [Fact]
     public void PreviewState_DeclaredValues_MatchFrontendContract()
     {
         Assert.Equal(
