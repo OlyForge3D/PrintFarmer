@@ -1501,6 +1501,8 @@ struct PrinterDetailView: View {
                     }
                 )
                 .id(cameraReloadToken)
+            } else if printer.cameraAccessMode == .streamOnly, !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
@@ -1509,7 +1511,9 @@ struct PrinterDetailView: View {
                 noCameraPlaceholder()
             }
             #else
-            if let data = viewModel.snapshotData {
+            if printer.cameraAccessMode == .streamOnly, !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
+            } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
@@ -1537,6 +1541,18 @@ struct PrinterDetailView: View {
             unsupportedCameraPlaceholder()
         case .none:
             noCameraPlaceholder()
+        }
+    }
+
+    @ViewBuilder
+    private func streamOnlySnapshotPreview(printer: Printer, maxMediaHeight: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            if let data = viewModel.snapshotData {
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
+            } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+                authenticatedSnapshotImage(printerId: printer.id)
+            }
+            liveViewPausedPlaceholder()
         }
     }
 
@@ -1609,6 +1625,15 @@ struct PrinterDetailView: View {
         }
         .frame(height: 120)
         .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedPlaceholder() -> some View {
+        Text("Live view paused")
+            .font(.subheadline)
+            .foregroundStyle(Color.pfTextSecondary)
+            .frame(height: 120)
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("printer.detail.camera.livepaused")
     }
 
     private func unsupportedCameraPlaceholder() -> some View {
