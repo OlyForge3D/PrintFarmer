@@ -100,7 +100,10 @@ struct PrinterFilamentSection: View {
     }
 
     private func compactRow(_ row: PrinterFilamentPresentation.Row) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        let layout = showsAllActions && dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return layout {
             if embedded {
                 Image(systemName: "circle.circle")
                     .font(.system(size: 36, weight: .light))
@@ -127,10 +130,9 @@ struct PrinterFilamentSection: View {
                 if showsAllActions, row.hasAssignment,
                    let name = row.spoolName ?? row.spoolID.flatMap({ spoolDetailsByID[$0]?.name }) {
                     Text(name)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
-                        .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                 }
                 if showsAllActions && row.hasAssignment {
                     let material = row.material ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.material }
@@ -206,10 +208,18 @@ struct PrinterFilamentSection: View {
     private func coverageQuantities(_ row: PrinterFilamentPresentation.Row) -> some View {
         let remaining = row.coverage?.remainingGrams
         let demand = row.coverage?.currentJobRequiredGrams
-        return HStack(spacing: 4) {
-            Text("\(quantityText(remaining)) remaining")
-            Text("·").accessibilityHidden(true)
-            Text("\(quantityText(demand)) job demand")
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                Text("\(quantityText(remaining)) remaining")
+                Text("·").accessibilityHidden(true)
+                Text("\(quantityText(demand)) job demand")
+            }
+            .fixedSize(horizontal: true, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(quantityText(remaining)) remaining")
+                Text("\(quantityText(demand)) job demand")
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .font(.footnote.monospacedDigit())
         .foregroundStyle(row.coverage?.status == .runout ? Color.pfWarning : Color.pfTextSecondary)
