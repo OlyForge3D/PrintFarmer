@@ -129,10 +129,7 @@ struct PrinterFilamentSection: View {
                 }
                 if showsAllActions, row.hasAssignment,
                    let name = row.spoolName ?? row.spoolID.flatMap({ spoolDetailsByID[$0]?.name }) {
-                    Text(name)
-                        .font(.headline)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
+                    SpoolName(name: name)
                 }
                 if showsAllActions && row.hasAssignment {
                     let material = row.material ?? row.spoolID.flatMap { spoolDetailsByID[$0]?.material }
@@ -186,6 +183,18 @@ struct PrinterFilamentSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("printer.filament.row.\(row.id)")
+    }
+
+    struct SpoolName: View {
+        let name: String
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        var body: some View {
+            Text(name)
+                .font(.headline)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder

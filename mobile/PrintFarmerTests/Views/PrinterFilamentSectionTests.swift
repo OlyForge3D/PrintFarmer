@@ -12,7 +12,7 @@ final class PrinterFilamentSectionTests: XCTestCase {
         for width: CGFloat in [320, 700] {
             for size in sizes {
                 let image = try await filamentCardImage(width: width, size: size, spoolName: "Prusament Galaxy Black")
-                let lines = try recognizedText(in: image).map(\.text)
+                let lines = try recognizedText(in: image)
                 let words = lines.joined(separator: " ").split(whereSeparator: \.isWhitespace).map(String.init)
                 for word in ["Prusament", "Galaxy", "Black", "remaining", "job", "demand", "Swap", "Scan", "spool"] {
                     XCTAssertTrue(words.contains(word), "\(width)pt \(size): missing whole word \(word): \(lines)")
@@ -25,7 +25,7 @@ final class PrinterFilamentSectionTests: XCTestCase {
         }
     }
 
-    func testSpoolNameScalesThroughEveryDynamicTypeSize() async throws {
+    func testSpoolNameScalesThroughEveryDynamicTypeSize() {
         let sizes: [DynamicTypeSize] = [
             .xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge,
             .accessibility1, .accessibility2, .accessibility3, .accessibility4, .accessibility5
@@ -33,14 +33,17 @@ final class PrinterFilamentSectionTests: XCTestCase {
         for width: CGFloat in [320, 700] {
             var previousHeight: CGFloat = 0
             for size in sizes {
-                let image = try await filamentCardImage(width: width, size: size, spoolName: "Prusament")
-                let lines = try recognizedText(in: image)
-                let name = try XCTUnwrap(lines.first { $0.text == "Prusament" }, "\(width)pt \(size): \(lines)")
+                let name = PrinterFilamentSection.SpoolName(name: "Prusament")
+                    .environment(\.dynamicTypeSize, size)
+                let host = UIHostingController(rootView: name)
+                host.safeAreaRegions = []
+                let fitting = host.sizeThatFits(in: CGSize(width: width, height: 10_000))
                 XCTAssertGreaterThan(
-                    name.height, previousHeight,
+                    fitting.height, previousHeight,
                     "The rendered spool name must grow, including beyond xxxLarge: \(width)pt \(size)"
                 )
-                previousHeight = name.height
+                XCTAssertLessThanOrEqual(fitting.width, width)
+                previousHeight = fitting.height
             }
         }
     }
@@ -86,16 +89,12 @@ final class PrinterFilamentSectionTests: XCTestCase {
         return image
     }
 
-    private func recognizedText(in image: UIImage) throws -> [(text: String, height: CGFloat)] {
+    private func recognizedText(in image: UIImage) throws -> [String] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
         try VNImageRequestHandler(cgImage: try XCTUnwrap(image.cgImage)).perform([request])
-        return (request.results ?? []).compactMap { observation in
-            observation.topCandidates(1).first.map {
-                (text: $0.string, height: observation.boundingBox.height * image.size.height)
-            }
-        }
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
     }
 
     func testFilamentTabWaitsForSpoolLookupBeforeShowingUnknownQuantities() async throws {
