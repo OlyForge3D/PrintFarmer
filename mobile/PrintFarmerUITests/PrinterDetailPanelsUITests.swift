@@ -1100,10 +1100,17 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         XCTAssertTrue(lastFarmCard.waitForExistence(timeout: 8), "The final offline Farm card must exist.")
         XCTAssertTrue(lastFarmCard.label.contains("Sovol SV06"))
         XCTAssertTrue(precedingFarmCard.waitForExistence(timeout: 8), "The prior idle card must exist.")
-        XCTAssertGreaterThan(
-            lastFarmCard.frame.minY,
-            precedingFarmCard.frame.minY,
-            "The final sorted Farm card must appear below the preceding card."
+        let precedingCardFrame = precedingFarmCard.frame
+        let lastCardFrame = lastFarmCard.frame
+        let precedingCardComesFirst =
+            precedingCardFrame.minY < lastCardFrame.minY - 1
+                || (
+                    abs(precedingCardFrame.minY - lastCardFrame.minY) <= 1
+                        && precedingCardFrame.minX < lastCardFrame.minX
+                )
+        XCTAssertTrue(
+            precedingCardComesFirst,
+            "The final sorted Farm card must follow the preceding card in grid reading order."
         )
         let visibleFarmCards = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-")
