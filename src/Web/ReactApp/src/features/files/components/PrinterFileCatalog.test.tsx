@@ -190,7 +190,10 @@ describe('Printer file catalog', () => {
     expect(within(cellUnder('Status', row)).getAllByRole('listitem').map(item => item.textContent))
       .toEqual(['Available', 'Stale']);
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute('href', '/admin/settings?q=printer%20file');
+    expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute(
+      'href',
+      '/admin/settings?scope=system&tab=general&sub=system&field=PrinterFileIndex.enabled',
+    );
     // Per-printer discovery toggles live in Edit printer > Files; only the all-printers Refresh is here.
     expect(screen.getByRole('button', { name: 'Force refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
@@ -221,6 +224,12 @@ describe('Printer file catalog', () => {
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
       const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
       expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
+      // Same size and padding as the adjacent toggle buttons, so both render at the same height.
+      for (const sizing of ['text-sm', 'py-2', 'px-3']) {
+        expect(screen.getByTitle('Grid view')).toHaveClass(sizing);
+        expect(refresh).toHaveClass(sizing);
+      }
+      expect(refresh).not.toHaveClass('h-10');
       expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
       expect(refresh.textContent).toBe('');
       expect(mocks.refresh).not.toHaveBeenCalled();
@@ -695,6 +704,17 @@ describe('Printer file catalog', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'part.gcode' })).not.toBeInTheDocument());
     await waitFor(() => expect(name).toHaveFocus());
+  });
+
+  it('opens details when the table preview is clicked and returns focus to the filename', async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+    const row = await findRow('part.gcode');
+    await user.click(within(row).getByTestId('printer-file-thumbnail'));
+    expect(screen.getByRole('dialog', { name: 'part.gcode' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'part.gcode' })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(row).getByRole('button', { name: 'part.gcode, show details' })).toHaveFocus());
   });
 
   it('docks details beside a grid card on wide screens; Escape closes it only when no dialog is above it', async () => {
@@ -1192,6 +1212,14 @@ describe('Printer file catalog', () => {
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Queue' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete from printer' })).not.toBeInTheDocument();
+  });
+
+  it('links to printer file index settings only for farm settings administrators', async () => {
+    mocks.hasPermission.mockImplementation((resource: string, action: string) =>
+      !(resource === 'system_settings' && action === 'admin'));
+    renderCatalog();
+    await findRow('part.gcode');
+    expect(screen.queryByRole('link', { name: 'Discovery settings' })).not.toBeInTheDocument();
   });
 
   it('never fetches without catalog permission', () => {

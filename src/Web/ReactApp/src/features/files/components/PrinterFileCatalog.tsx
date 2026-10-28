@@ -8,6 +8,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { buildSettingsPath } from '@/features/settings/settings-navigation';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { apiClient } from '@/services/api';
@@ -60,6 +61,12 @@ const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
 const REFRESH_ALL_LABEL = 'Force refresh all online printers';
 const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers; waits up to two minutes for I/O capacity, then up to two minutes per scan.';
 const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
+const DISCOVERY_SETTINGS_PATH = buildSettingsPath({
+  scopeId: 'system',
+  categoryId: 'general',
+  subPageId: 'system',
+  field: 'PrinterFileIndex.enabled',
+});
 
 interface RefreshTarget {
   id: string;
@@ -339,7 +346,7 @@ export function PrinterFileCatalog() {
           <h2 id="printer-catalog-heading" className="text-lg font-semibold text-pf-text-primary">On printers</h2>
           <p className="text-sm text-pf-text-secondary">Metadata observations, not owned library files. Browsing never downloads G-code.</p>
         </div>
-        {hasPermission('settings', 'read') && <Link to="/admin/settings?q=printer%20file" className="text-sm text-pf-accent underline">Discovery settings</Link>}
+        {hasPermission('system_settings', 'admin') && <Link to={DISCOVERY_SETTINGS_PATH} className="text-sm text-pf-accent underline">Discovery settings</Link>}
       </div>
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
@@ -393,7 +400,7 @@ export function PrinterFileCatalog() {
                   explainedDisabled
                   disabled={refreshTargets.length === 0 || refreshBusy}
                   aria-busy={refreshBusy}
-                  className="h-10 w-10 p-0"
+                  className="px-3"
                   iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
                   onClick={() => refreshAll.mutate(refreshTargets)}
                 />
@@ -454,7 +461,14 @@ export function PrinterFileCatalog() {
                                 onChange={rowSelection.onToggle}
                               />
                             </td>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                            {/* Mouse shortcut matching the card view; keyboard users open details from the name button. */}
+                            <td
+                              className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'cursor-pointer')}
+                              onClick={event => details.open(
+                                entry.id,
+                                event.currentTarget.closest('tr')?.querySelector<HTMLElement>('[data-file-details-trigger]') ?? null,
+                              )}
+                            >
                               <PrinterFileThumbnail entry={entry} source={sourceFor(entry)} size="row" />
                             </td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'max-w-xs')}>
