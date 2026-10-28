@@ -264,9 +264,8 @@ export function PrinterFileCatalog() {
   const refreshTargets: RefreshTarget[] = manageableSources
     .filter(printer => onlinePrinterIds.has(printer.id))
     .map(({ id, name }) => ({ id, name }));
-  const serverScanning = catalog.data?.scans.some(scan =>
-    scan.isScanning && refreshTargets.some(target => target.id === scan.printerId)) ?? false;
-  const refreshBusy = refreshAll.isPending || discoveryPending || serverScanning;
+  // Background leases do not block requests; the API waits for exclusive I/O capacity.
+  const refreshBusy = refreshAll.isPending || discoveryPending;
   const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
     const source = sourceFor(entry);
     if (!source) return [];

@@ -140,21 +140,32 @@ describe('PrinterFileDiscoverySection', () => {
     expect(refresh).toHaveAttribute('aria-busy', 'false');
   });
 
-  it('blocks refresh while the server reports an active scan, then unlocks after completion', async () => {
+  it('allows refresh during background I/O without mistaking the lease for a pending user request', async () => {
+    let complete!: () => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
     mocks.catalog.mockResolvedValue(page({ scans: [{ ...completeScan, isScanning: true }] }));
     const user = userEvent.setup();
-    const { queryClient } = renderSection();
+    const { onSubmit } = renderSection();
     const refresh = await screen.findByRole('button', { name: 'Force refresh' });
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(refresh).not.toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    await user.click(refresh);
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith('printer-1', true));
     expect(refresh).toHaveAttribute('aria-disabled', 'true');
     expect(refresh).toHaveAttribute('aria-busy', 'true');
     await user.click(refresh);
     await user.keyboard('{Enter} ');
-    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
 
-    mocks.catalog.mockResolvedValue(page());
-    await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+    await act(async () => complete());
     await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
     expect(refresh).toHaveAttribute('aria-busy', 'false');
+    expect(mocks.catalog).toHaveBeenCalledTimes(2);
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.');
+    expect(mocks.enabled).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('reports why a force refresh did not run instead of claiming success', async () => {

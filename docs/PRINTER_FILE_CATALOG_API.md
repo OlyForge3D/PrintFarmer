@@ -161,11 +161,14 @@ Catalog responses include `maxConcurrentIo`, the configured deployment-wide
 capacity. The bulk refresh control uses that value as its bounded parallel
 request count, defaulting to two when talking to an older server. Per-printer
 failures do not abort the remaining batch. Both icon-only refresh controls stay
-inactive through the requests and awaited catalog/preview cache reload, and
-while an applicable server I/O lease is observed. `isScanning` includes
-background enrichment holding that exclusive per-printer lease: a completed
-file listing does not mean metadata and thumbnail acquisition has finished.
-Force refresh stays disabled during that work to prevent overlapping requests.
+inactive through a pending user refresh and its awaited catalog/preview cache
+reload, including when switching between the catalog and printer settings.
+Background I/O alone does not disable either control: `isScanning` includes
+enrichment holding the exclusive per-printer lease, not just inventory scans.
+A forced request can register interactive demand and use the bounded
+`source_busy` retry above while background work releases ownership. The server
+lease and I/O slots prevent overlapping work; a polled UI snapshot does not.
+A completed listing does not mean metadata and thumbnail acquisition is done.
 
 A published force refresh advances `observationRevision` even for unchanged
 files, except unchanged locations pinned by unfinished file operations. The

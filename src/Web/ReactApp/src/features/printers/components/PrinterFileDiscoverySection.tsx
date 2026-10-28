@@ -81,7 +81,8 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
   const pendingEnabled = change.isPending && change.variables?.kind === 'enabled' ? change.variables.enabled : undefined;
   const enabled = pendingEnabled ?? status?.enabled ?? true;
   const reason = describeReasonCode(status?.reasonCode);
-  const refreshing = refreshPending || !!status?.isScanning;
+  // isScanning also includes background enrichment; only an interactive request makes this control busy.
+  const refreshing = refreshPending;
 
   return (
     <section aria-labelledby={headingId} className="border-t pt-5 mt-5">

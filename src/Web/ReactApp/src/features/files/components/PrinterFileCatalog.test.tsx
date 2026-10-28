@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileDeleteOperation, PrinterFileOperation, PrinterPrintMetadata } from '@/types/api';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
+import { PrinterFileDiscoverySection } from '@/features/printers/components/PrinterFileDiscoverySection';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
@@ -317,20 +318,67 @@ describe('Printer file catalog', () => {
       expect(refresh).toHaveAttribute('aria-busy', 'false');
     });
 
-    it('stays disabled for a server-reported scan until a later status reports completion', async () => {
-      mocks.catalog.mockResolvedValue({ ...catalog, scans: [{ ...catalog.scans[0], isScanning: true }] });
+    it('allows the batch during background I/O and unlocks after refresh even if that I/O remains active', async () => {
+      let complete!: () => void;
+      mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+      mocks.catalog.mockResolvedValue({
+        ...catalog,
+        printers: [managed('source', 'Source printer'), managed('other', 'Other printer')],
+        scans: [{ ...catalog.scans[0], outcome: 'Complete', isScanning: true }],
+      });
       const user = userEvent.setup();
       const { queryClient } = renderCatalog();
       const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      expect(refresh).not.toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('aria-busy', 'false');
+      await user.click(refresh);
+      await waitFor(() => expect(mocks.refresh.mock.calls).toEqual([['source', true], ['other', true]]));
       expect(refresh).toHaveAttribute('aria-disabled', 'true');
       expect(refresh).toHaveAttribute('aria-busy', 'true');
       await user.click(refresh);
-      expect(mocks.refresh).not.toHaveBeenCalled();
+      await user.keyboard('{Enter} ');
+      expect(mocks.refresh).toHaveBeenCalledTimes(2);
 
-      mocks.catalog.mockResolvedValue(catalog);
-      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+      await act(async () => complete());
       await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
       expect(refresh).toHaveAttribute('aria-busy', 'false');
+      expect(mocks.catalog).toHaveBeenCalledTimes(2);
+      expect(queryClient.getQueriesData<PrinterFileCatalogPage>({ queryKey: ['printer-file-catalog'] })[0][1]?.scans[0].isScanning)
+        .toBe(true);
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        'Force refresh completed for 2 printers. Previews reload on demand.');
+    });
+
+    it.each(['catalog', 'printer settings'])('keeps a refresh started in %s busy after switching surfaces', async initialSurface => {
+      let complete!: () => void;
+      mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      const controls = (surface: string) => (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            {surface === 'catalog' ? <PrinterFileCatalog /> : <PrinterFileDiscoverySection printerId="source" />}
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      const user = userEvent.setup();
+      const { rerender } = render(controls(initialSurface));
+      const initialLabel = initialSurface === 'catalog' ? 'Force refresh all online printers' : 'Force refresh';
+      await user.click(await screen.findByRole('button', { name: initialLabel }));
+      await waitFor(() => expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith('source', true));
+
+      rerender(controls(initialSurface === 'catalog' ? 'printer settings' : 'catalog'));
+      const nextLabel = initialSurface === 'catalog' ? 'Force refresh' : 'Force refresh all online printers';
+      const refresh = await screen.findByRole('button', { name: nextLabel });
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('aria-busy', 'true');
+      await user.click(refresh);
+      await user.keyboard('{Enter} ');
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+      await act(async () => complete());
+      await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+      expect(refresh).toHaveAttribute('aria-busy', 'false');
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
     });
 
     it.each([0, 17, 1.5])('rejects an invalid server capacity of %s before any printer work', async maxConcurrentIo => {
