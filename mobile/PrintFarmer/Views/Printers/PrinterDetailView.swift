@@ -1501,7 +1501,9 @@ struct PrinterDetailView: View {
                     }
                 )
                 .id(cameraReloadToken)
-            } else if printer.cameraAccessMode == .streamOnly, !viewModel.showLivestream {
+            } else if printer.cameraAccessMode == .streamOnly,
+                      viewModel.canShowLivestream,
+                      !viewModel.showLivestream {
                 streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
@@ -1511,7 +1513,9 @@ struct PrinterDetailView: View {
                 noCameraPlaceholder()
             }
             #else
-            if printer.cameraAccessMode == .streamOnly, !viewModel.showLivestream {
+            if printer.cameraAccessMode == .streamOnly,
+               viewModel.canShowLivestream,
+               !viewModel.showLivestream {
                 streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
             } else if let data = viewModel.snapshotData {
                 snapshotImage(from: data, maxHeight: maxMediaHeight)
@@ -1546,12 +1550,13 @@ struct PrinterDetailView: View {
 
     @ViewBuilder
     private func streamOnlySnapshotPreview(printer: Printer, maxMediaHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            if let data = viewModel.snapshotData {
-                snapshotImage(from: data, maxHeight: maxMediaHeight)
-            } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
-                authenticatedSnapshotImage(printerId: printer.id)
-            }
+        if let data = viewModel.snapshotData {
+            snapshotImage(from: data, maxHeight: maxMediaHeight)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+            authenticatedSnapshotImage(printerId: printer.id)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else {
             liveViewPausedPlaceholder()
         }
     }
@@ -1628,11 +1633,23 @@ struct PrinterDetailView: View {
     }
 
     private func liveViewPausedPlaceholder() -> some View {
+        liveViewPausedLabel()
+            .frame(height: 120)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedBadge() -> some View {
+        liveViewPausedLabel()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(8)
+    }
+
+    private func liveViewPausedLabel() -> some View {
         Text("Live view paused")
             .font(.subheadline)
             .foregroundStyle(Color.pfTextSecondary)
-            .frame(height: 120)
-            .frame(maxWidth: .infinity)
             .accessibilityIdentifier("printer.detail.camera.livepaused")
     }
 
