@@ -136,8 +136,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
                 return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
             }
-            // Scrolling the Farm grid in the simulator can trap the main thread in a
-            // LazyVGrid placement loop, so filter with Farm search instead of swiping.
+            // Search by name rather than scrolling through the full grid to locate a target card.
             if tapPoint() == nil, let name = Self.fixturePrinterNames[printerID] {
                 searchFarm(name)
                 _ = printerCard.waitForExistence(timeout: 8)
@@ -151,8 +150,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 .tap()
         }
 
-        /// Filters the Farm by name. Swiping the Farm LazyVGrid in the simulator can
-        /// trap the main thread in a placement loop, so tests search instead.
+        /// Filters the Farm by name so a target card can be located without scrolling the full grid.
         /// Submitting dismisses the keyboard so it stops covering cards and the dock.
         func searchFarm(_ query: String) {
             let searchButton = app.buttons["farm.search"]
@@ -273,9 +271,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             if !isIPad {
                 XCTAssertTrue(printerList.exists, "Farm printer cards must remain in a scrollable list.")
             }
-            // Swiping the Farm LazyVGrid in the simulator can trap the main thread in a
-            // placement loop (it also fails on development), so locate each card with
-            // Farm search instead. PrinterListViewModelTests covers the #3509 sort.
+            // Locate cards directly with Farm search; PrinterListViewModelTests covers the #3509 sort.
             func farmCard(_ name: String, _ detail: String? = nil) -> XCUIElement {
                 searchFarm(name)
                 let predicate = detail.map {
@@ -1076,6 +1072,62 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
     func testCaptureApprovedScreensAtNormalTextSize() {
         captureApprovedMockupScreens()
+    }
+
+    func testLastFarmCardClearsBottomNavigationChrome() {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        let scanButton = app.buttons["navigation.scan"]
+        XCTAssertTrue(scanButton.waitForExistence(timeout: 8))
+        // All-filter orders offline printers last; Sovol is the only offline card in this fixture.
+        let lastFarmCard = app.buttons["farm-card-32590000-0000-0000-0000-000000000004"]
+        let precedingFarmCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
+
+        for _ in 0..<16 where
+            !lastFarmCard.isHittable
+                || lastFarmCard.frame.maxY > scanButton.frame.minY - 112
+        {
+            farmScroll.swipeUp()
+        }
+
+        XCTAssertTrue(lastFarmCard.waitForExistence(timeout: 8), "The final offline Farm card must exist.")
+        XCTAssertTrue(lastFarmCard.label.contains("Sovol SV06"))
+        XCTAssertTrue(precedingFarmCard.waitForExistence(timeout: 8), "The prior idle card must exist.")
+        if isIPad {
+            XCTAssertGreaterThan(lastFarmCard.frame.minX, precedingFarmCard.frame.minX)
+            XCTAssertEqual(lastFarmCard.frame.minY, precedingFarmCard.frame.minY, accuracy: 1)
+        } else {
+            XCTAssertGreaterThan(lastFarmCard.frame.minY, precedingFarmCard.frame.minY)
+        }
+        let visibleFarmCards = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-")
+        ).allElementsBoundByIndex.filter(\.isHittable)
+        let lastVisibleFarmCard = visibleFarmCards.max {
+            if abs($0.frame.minY - $1.frame.minY) > 1 {
+                return $0.frame.minY < $1.frame.minY
+            }
+            return $0.frame.minX < $1.frame.minX
+        }
+        XCTAssertEqual(
+            lastVisibleFarmCard?.identifier,
+            lastFarmCard.identifier,
+            "The final sorted Farm card must be the bottom-most visible card."
+        )
+        XCTAssertTrue(lastFarmCard.isHittable, "The final Farm card must scroll above bottom navigation.")
+        XCTAssertLessThanOrEqual(
+            lastFarmCard.frame.maxY,
+            scanButton.frame.minY - 112,
+            isIPad
+                ? "The final Farm card must retain 112 points of clearance above the Scan footer and home-indicator area."
+                : "The final Farm card must retain 112 points of clearance above the Scan footer and tab bar."
+        )
     }
 
     /// The "Camera" header sits above the media, which spans the card width (#3496).
