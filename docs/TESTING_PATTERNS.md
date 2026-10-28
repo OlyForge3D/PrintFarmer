@@ -215,6 +215,28 @@ Controller and SignalR serialization use camelCase names and string enums
 not authorize changes to mobile DTOs, backend serialization, or worker contracts.
 Runtime tests alone do not prove fixture typings: run both compiler gates.
 
+## Native PostgreSQL printer-file leases
+
+`PrinterFileLeaseProviderTests` in `Farm.Infrastructure.Tests` requires
+`PFARM_TEST_POSTGRES_CONN` pointing to an isolated PostgreSQL test server with
+permission to create databases. Each case migrates and deletes its own
+GUID-named database; never use production credentials. Missing configuration
+fails explicitly rather than silently skipping provider coverage.
+
+From `src`, run:
+
+```powershell
+dotnet test .\tests\Farm.Infrastructure.Tests\Farm.Infrastructure.Tests.csproj -c Debug --filter "FullyQualifiedName~PrinterFileLeaseProviderTests" --settings .\vstest.runsettings --blame-hang --blame-hang-timeout 3m --blame-hang-dump-type mini
+```
+
+The synchronized-reader case requires a real PostgreSQL `40001`, successful
+whole-transaction recovery, and no leaked ownership. The bounded contention
+cases use 32 synthetic printers and 64 acquisitions at capacities 2, 4, 8 and
+16. They require the full configured capacity to be occupied concurrently,
+reject duplicate printer ownership and oversubscription, and verify released
+fences after completion. These `DbHeavy` tests exercise native database behavior
+without contacting printers; they are not a live-farm throughput benchmark.
+
 ## Direct motion-control testing
 
 Current test entry points:
