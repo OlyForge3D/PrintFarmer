@@ -179,6 +179,10 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
                 "printer.controls.sensor.chamber.TargetTemperature.value"
             ], state)
             XCTAssertTrue(controls.allSatisfy { !$0.isEnabled }, "\(state) must disable the entire sensor target row")
+            let field = try XCTUnwrap(controls.first {
+                $0.accessibilityIdentifier == "printer.controls.sensor.chamber.TargetTemperature.value"
+            } as? UITextField)
+            XCTAssertEqual(field.accessibilityHint, "Controls are locked while a print is active.")
             XCTAssertEqual(service.setSensorValueCallCount, 0)
         }
     }
