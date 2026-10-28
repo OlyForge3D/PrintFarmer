@@ -1,12 +1,16 @@
 ﻿using System.Data;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace Farm.Infrastructure.Services.Gcode.PrinterFiles;
 
@@ -17,6 +21,7 @@ public sealed class PrinterFileLeaseCoordinator(
     ILogger<PrinterFileLeaseCoordinator> logger) : IPrinterFileLeaseCoordinator
 {
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(45);
+    internal const int AcquisitionAttempts = 8;
 
     public Task<IPrinterFileLease?> TryAcquireAsync(
         Guid printerId, bool interactive, CancellationToken ct = default) =>
@@ -28,134 +33,184 @@ public sealed class PrinterFileLeaseCoordinator(
     private async Task<IPrinterFileLease?> TryAcquireCoreAsync(
         Guid printerId, bool interactive, bool requireIdle, CancellationToken ct)
     {
+        for (int attempt = 1; attempt <= AcquisitionAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await TryAcquireOnceAsync(printerId, interactive, requireIdle, ct);
+            }
+            catch (Exception ex) when (IsAcquisitionConflict(ex))
+            {
+                logger.LogDebug(ex, "Printer file lease acquisition raced for {PrinterId}; attempt {Attempt}", printerId, attempt);
+            }
+
+            if (attempt < AcquisitionAttempts)
+            {
+                // The aborted transaction and tracker are disposed before retrying the entire allocation.
+                int backoffMs = Math.Min(25 << (attempt - 1), 250) + RandomNumberGenerator.GetInt32(25, 100);
+                await Task.Delay(TimeSpan.FromMilliseconds(backoffMs), ct);
+            }
+        }
+
+        logger.LogWarning(
+            "Printer file lease acquisition remained contended for {PrinterId} after {Attempts} attempts; deferring",
+            printerId, AcquisitionAttempts);
+        return null;
+    }
+
+    private static bool IsAcquisitionConflict(Exception exception)
+    {
+        // Npgsql's non-retrying execution strategy wraps serialization failures in InvalidOperationException.
+        if (exception is InvalidOperationException { InnerException: { } inner })
+        {
+            exception = inner;
+        }
+
+        if (exception is DbUpdateConcurrencyException)
+        {
+            return true;
+        }
+
+        if (exception is DbUpdateException update)
+        {
+            if (PartInventoryService.IsUniqueViolation(update))
+            {
+                return true;
+            }
+
+            exception = update.InnerException ?? update;
+        }
+
+        return exception switch
+        {
+            PostgresException postgres => postgres.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected,
+            SqlException sqlServer => sqlServer.Number is 1205 or 3960 or 1222,
+            SqliteException sqlite => sqlite.SqliteErrorCode is 5 or 6,
+            _ => false,
+        };
+    }
+
+    private async Task<IPrinterFileLease?> TryAcquireOnceAsync(
+        Guid printerId, bool interactive, bool requireIdle, CancellationToken ct)
+    {
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        try
+        DateTime now = DateTime.UtcNow;
+        var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
+        Printer? printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == printerId, ct);
+        if (printer is null || !printer.IsEnabled)
         {
-            DateTime now = DateTime.UtcNow;
-            var settings = await PrinterFileIndexPolicy.ReadAsync(db, ct);
-            Printer? printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == printerId, ct);
-            if (printer is null || !printer.IsEnabled)
+            return null;
+        }
+
+        if (!await db.AppSettingsEntities.AnyAsync(x => x.Key == PrinterFileIndexSettings.SectionName, ct))
+        {
+            db.AppSettingsEntities.Add(new AppSettingsEntity
             {
-                return null;
+                Key = PrinterFileIndexSettings.SectionName,
+                SettingsJson = JsonSerializer.Serialize(settings),
+                UpdatedAt = now,
+            });
+        }
+
+        string fingerprint = PrinterFileIndexPolicy.ConfigurationFingerprint(printer);
+        PrinterFileScanState? state = await db.PrinterFileScanStates
+            .SingleOrDefaultAsync(x => x.SourcePrinterId == printerId, ct);
+        if (state is null)
+        {
+            state = new PrinterFileScanState
+            {
+                Id = printerId,
+                SourcePrinterId = printerId,
+                RegisteredPrinterId = printerId,
+                ConfigurationFingerprint = fingerprint,
+                NextScanAtUtc = now + PrinterFileIndexPolicy.InitialJitter(printerId, settings),
+            };
+            db.PrinterFileScanStates.Add(state);
+        }
+
+        if (state.ConfigurationFingerprint != fingerprint)
+        {
+            state.ConfigurationFingerprint = fingerprint;
+            state.ConfigurationGeneration++;
+            state.ConsecutiveFailures = 0;
+            state.Outcome = PrinterFileScanOutcome.NeverScanned;
+            state.NextScanAtUtc = now;
+        }
+
+        if (interactive)
+        {
+            state.InteractiveRequestedAtUtc = now;
+        }
+
+        bool occupied = state.LeaseOwner.HasValue && state.LeaseExpiresAtUtc > now;
+        bool confirmedIdle = !requireIdle || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
+
+        // Due per-file enrichment may claim an idle background lease before the next inventory scan.
+        bool scheduled = state.NextScanAtUtc <= now ||
+            (!interactive && settings.Enabled && state.Enabled && confirmedIdle && !occupied &&
+             await PrinterFileEnrichmentSchedule.AnyDueAsync(
+                 db, printerId, state.ConfigurationGeneration, state.MutationGeneration, now, ct));
+        bool deferred = !interactive && (!settings.Enabled || !state.Enabled ||
+            !scheduled ||
+            state.InteractiveRequestedAtUtc > now.AddMinutes(-2) ||
+            !confirmedIdle);
+        if (occupied || deferred || !confirmedIdle)
+        {
+            if (!occupied && !interactive && settings.Enabled && state.Enabled &&
+                state.NextScanAtUtc <= now && !confirmedIdle)
+            {
+                state.NextScanAtUtc = now + TimeSpan.FromSeconds(30) +
+                    PrinterFileIndexPolicy.InitialJitter(printerId, settings);
+                state.ReasonCode = "waiting_for_confirmed_idle";
             }
 
-            if (!await db.AppSettingsEntities.AnyAsync(x => x.Key == PrinterFileIndexSettings.SectionName, ct))
-            {
-                db.AppSettingsEntities.Add(new AppSettingsEntity
-                {
-                    Key = PrinterFileIndexSettings.SectionName,
-                    SettingsJson = JsonSerializer.Serialize(settings),
-                    UpdatedAt = now,
-                });
-            }
-
-            string fingerprint = PrinterFileIndexPolicy.ConfigurationFingerprint(printer);
-            PrinterFileScanState? state = await db.PrinterFileScanStates
-                .SingleOrDefaultAsync(x => x.SourcePrinterId == printerId, ct);
-            if (state is null)
-            {
-                state = new PrinterFileScanState
-                {
-                    Id = printerId,
-                    SourcePrinterId = printerId,
-                    RegisteredPrinterId = printerId,
-                    ConfigurationFingerprint = fingerprint,
-                    NextScanAtUtc = now + PrinterFileIndexPolicy.InitialJitter(printerId, settings),
-                };
-                db.PrinterFileScanStates.Add(state);
-            }
-
-            if (state.ConfigurationFingerprint != fingerprint)
-            {
-                state.ConfigurationFingerprint = fingerprint;
-                state.ConfigurationGeneration++;
-                state.ConsecutiveFailures = 0;
-                state.Outcome = PrinterFileScanOutcome.NeverScanned;
-                state.NextScanAtUtc = now;
-            }
-
-            if (interactive)
-            {
-                state.InteractiveRequestedAtUtc = now;
-            }
-
-            bool occupied = state.LeaseOwner.HasValue && state.LeaseExpiresAtUtc > now;
-            bool confirmedIdle = !requireIdle || PrinterFileIndexPolicy.IsConfirmedIdle(statusCache.GetSnapshot(printerId), now);
-
-            // Due per-file enrichment may claim an idle background lease before the next inventory scan.
-            bool scheduled = state.NextScanAtUtc <= now ||
-                (!interactive && settings.Enabled && state.Enabled && confirmedIdle && !occupied &&
-                 await PrinterFileEnrichmentSchedule.AnyDueAsync(
-                     db, printerId, state.ConfigurationGeneration, state.MutationGeneration, now, ct));
-            bool deferred = !interactive && (!settings.Enabled || !state.Enabled ||
-                !scheduled ||
-                state.InteractiveRequestedAtUtc > now.AddMinutes(-2) ||
-                !confirmedIdle);
-            if (occupied || deferred || !confirmedIdle)
-            {
-                if (!occupied && !interactive && settings.Enabled && state.Enabled &&
-                    state.NextScanAtUtc <= now && !confirmedIdle)
-                {
-                    state.NextScanAtUtc = now + TimeSpan.FromSeconds(30) +
-                        PrinterFileIndexPolicy.InitialJitter(printerId, settings);
-                    state.ReasonCode = "waiting_for_confirmed_idle";
-                }
-
-                await db.SaveChangesAsync(ct);
-                await transaction.CommitAsync(ct);
-                return null;
-            }
-
-            List<PrinterFileIoSlot> slots = await db.PrinterFileIoSlots.OrderBy(x => x.Id).ToListAsync(ct);
-            PrinterFileIoSlot? slot = null;
-            int occupiedSlots = slots.Count(x => x.LeaseOwner.HasValue && x.LeaseExpiresAtUtc > now);
-            for (int number = 1; occupiedSlots < settings.MaxConcurrentIo && number <= settings.MaxConcurrentIo; number++)
-            {
-                PrinterFileIoSlot? candidate = slots.SingleOrDefault(x => x.Id == number);
-                if (candidate is null)
-                {
-                    candidate = new PrinterFileIoSlot { Id = number };
-                    db.PrinterFileIoSlots.Add(candidate);
-                }
-
-                if (!candidate.LeaseOwner.HasValue || candidate.LeaseExpiresAtUtc <= now)
-                {
-                    slot = candidate;
-                    break;
-                }
-            }
-
-            if (slot is null)
-            {
-                await db.SaveChangesAsync(ct);
-                await transaction.CommitAsync(ct);
-                return null;
-            }
-
-            Guid owner = Guid.NewGuid();
-            state.LeaseOwner = owner;
-            state.LeaseExpiresAtUtc = now + LeaseDuration;
-            state.LeaseFence++;
-            state.InteractiveRequestedAtUtc = null;
-            slot.LeaseOwner = owner;
-            slot.SourcePrinterId = printerId;
-            slot.LeaseExpiresAtUtc = state.LeaseExpiresAtUtc;
-            slot.LeaseFence++;
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            return new Lease(dbFactory, statusCache, logger, state, slot, fingerprint, interactive, requireIdle, ct);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            logger.LogDebug(ex, "Printer file lease acquisition raced for {PrinterId}", printerId);
             return null;
         }
-        catch (DbUpdateException ex) when (PartInventoryService.IsUniqueViolation(ex))
+
+        List<PrinterFileIoSlot> slots = await db.PrinterFileIoSlots.OrderBy(x => x.Id).ToListAsync(ct);
+        PrinterFileIoSlot? slot = null;
+        int occupiedSlots = slots.Count(x => x.LeaseOwner.HasValue && x.LeaseExpiresAtUtc > now);
+        int start = RandomNumberGenerator.GetInt32(settings.MaxConcurrentIo);
+        for (int index = 0; occupiedSlots < settings.MaxConcurrentIo && index < settings.MaxConcurrentIo; index++)
         {
-            logger.LogDebug(ex, "Printer file lease enrollment raced for {PrinterId}", printerId);
+            int number = ((start + index) % settings.MaxConcurrentIo) + 1;
+            PrinterFileIoSlot? candidate = slots.SingleOrDefault(x => x.Id == number);
+            if (candidate is null)
+            {
+                candidate = new PrinterFileIoSlot { Id = number };
+                db.PrinterFileIoSlots.Add(candidate);
+            }
+
+            if (!candidate.LeaseOwner.HasValue || candidate.LeaseExpiresAtUtc <= now)
+            {
+                slot = candidate;
+                break;
+            }
+        }
+
+        if (slot is null)
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             return null;
         }
+
+        Guid owner = Guid.NewGuid();
+        state.LeaseOwner = owner;
+        state.LeaseExpiresAtUtc = now + LeaseDuration;
+        state.LeaseFence++;
+        state.InteractiveRequestedAtUtc = null;
+        slot.LeaseOwner = owner;
+        slot.SourcePrinterId = printerId;
+        slot.LeaseExpiresAtUtc = state.LeaseExpiresAtUtc;
+        slot.LeaseFence++;
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return new Lease(dbFactory, statusCache, logger, state, slot, fingerprint, interactive, requireIdle, ct);
     }
 
     private sealed class Lease : IPrinterFileLease

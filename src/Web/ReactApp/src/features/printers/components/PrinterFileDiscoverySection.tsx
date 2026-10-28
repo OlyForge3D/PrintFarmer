@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Alert, Button, Spinner, Toggle } from '@/common/components/ui';
 import { RefreshIcon } from '@/common/components/icons/MdiIcons';
@@ -37,13 +37,20 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
   const { hasPermission } = useAuth();
   const canRead = hasPermission('printer_files', 'read');
   const queryClient = useQueryClient();
+  // Shared across mounts so a remounted control stays disabled while any force refresh is still running.
+  const refreshPending = useIsMutating({
+    mutationKey: ['printer-file-discovery'],
+    predicate: mutation => (mutation.state.variables as Partial<DiscoveryChange> | undefined)?.kind !== 'enabled',
+  }) > 0;
   // A one-item catalog page carries this printer's scan status and the caller's authority.
   const catalog = useQuery({
     queryKey: ['printer-file-catalog', 'discovery', printerId],
     queryFn: ({ signal }) => apiClient.getPrinterFileCatalog({ printerId, pageSize: 1 }, signal),
     enabled: canRead,
+    refetchInterval: query => query.state.data?.scans.some(scan => scan.isScanning) ? 2_000 : 30_000,
   });
   const change = useMutation({
+    mutationKey: ['printer-file-discovery'],
     mutationFn: (request: DiscoveryChange) => request.kind === 'refresh'
       ? apiClient.refreshPrinterFileIndex(printerId, true)
       : apiClient.setPrinterFileIndexEnabled(printerId, request.enabled),
@@ -74,7 +81,7 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
   const pendingEnabled = change.isPending && change.variables?.kind === 'enabled' ? change.variables.enabled : undefined;
   const enabled = pendingEnabled ?? status?.enabled ?? true;
   const reason = describeReasonCode(status?.reasonCode);
-  const refreshing = change.isPending && change.variables?.kind === 'refresh';
+  const refreshing = refreshPending || !!status?.isScanning;
 
   return (
     <section aria-labelledby={headingId} className="border-t pt-5 mt-5">
@@ -130,18 +137,19 @@ export function PrinterFileDiscoverySection({ printerId }: PrinterFileDiscoveryS
                   type="button"
                   size="sm"
                   variant="secondary"
-                  iconLeft={<RefreshIcon className="h-4 w-4" />}
-                  loading={refreshing}
-                  disabled={change.isPending}
-                  title="Bypass schedule and cached previews. Requires an idle printer and a free I/O slot; may take up to two minutes."
+                  aria-label="Force refresh"
+                  aria-busy={refreshing}
+                  className="h-10 w-10 p-0"
+                  iconLeft={<RefreshIcon aria-hidden="true" className={`h-4 w-4${refreshing ? ' animate-spin' : ''}`} />}
+                  explainedDisabled
+                  disabled={change.isPending || refreshing}
+                  title="Bypass schedule and cached previews. Requires an idle printer and a free I/O slot; waits up to two minutes for capacity, then up to two minutes to scan."
                   onClick={() => change.mutate({ kind: 'refresh' })}
-                >
-                  Force refresh
-                </Button>
+                />
               </div>
               <p className="text-xs text-pf-text-secondary">
                 Changes apply immediately and are not saved with this form. Scans run only while the printer is idle.
-                Force refresh bypasses automatic-discovery settings and backoff; busy printers must be retried.
+                Force refresh bypasses automatic-discovery settings and backoff; it waits briefly for file I/O capacity, but never interrupts printing.
                 Global scan cadence and budgets are in Admin Settings &gt; Files.
               </p>
             </>

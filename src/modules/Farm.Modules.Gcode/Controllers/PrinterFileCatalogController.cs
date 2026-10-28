@@ -213,7 +213,17 @@ public sealed class PrinterFileCatalogController(
                 isScanning = x.LeaseOwner.HasValue && x.LeaseExpiresAtUtc > DateTime.UtcNow,
                 isStale = !x.LastCompleteScanAtUtc.HasValue || x.LastCompleteScanAtUtc < staleBefore,
             }).ToArrayAsync(ct);
-        return Ok(new { items, total, page, pageSize, printers, scans, automaticDiscoveryEnabled = policy.Enabled });
+        return Ok(new
+        {
+            items,
+            total,
+            page,
+            pageSize,
+            printers,
+            scans,
+            automaticDiscoveryEnabled = policy.Enabled,
+            maxConcurrentIo = policy.MaxConcurrentIo,
+        });
     }
 
     /// <summary>

@@ -600,14 +600,29 @@ export class ApiClient {
   }
 
   async refreshPrinterFileIndex(printerId: string, force = false): Promise<void> {
-    const response = await this.client.post<{ code: string }>(
-      `/printer-files/printers/${encodeURIComponent(printerId)}/refresh`,
-      undefined,
-      // A forced scan can use the full 120-second server budget.
-      force ? { params: { force: true }, timeout: 150_000 } : undefined,
-    );
-    if (force && (response.status !== 200 || response.data?.code !== 'refresh_completed')) {
-      throw new Error('The server did not confirm a completed force refresh. Reload the catalog before retrying.');
+    const capacityDeadline = Date.now() + 120_000;
+    for (;;) {
+      try {
+        const response = await this.client.post<{ code: string }>(
+          `/printer-files/printers/${encodeURIComponent(printerId)}/refresh`,
+          undefined,
+          // A forced scan can use the full 120-second server budget after acquiring capacity.
+          force ? { params: { force: true }, timeout: 150_000 } : undefined,
+        );
+        if (force && (response.status !== 200 || response.data?.code !== 'refresh_completed')) {
+          throw new Error('The server did not confirm a completed force refresh. Reload the catalog before retrying.');
+        }
+        return;
+      } catch (error) {
+        // Only source_busy proves no scan started. Never replay a timeout, lost response or partial scan.
+        const busy = typeof error === 'object' && error !== null &&
+          'statusCode' in error && error.statusCode === 409 &&
+          'data' in error && typeof error.data === 'object' && error.data !== null &&
+          'code' in error.data && error.data.code === 'source_busy';
+        const delay = 1_000 + Math.floor(Math.random() * 500);
+        if (!force || !busy || Date.now() + delay >= capacityDeadline) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
   }
 

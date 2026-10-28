@@ -143,6 +143,8 @@ export interface PrinterFileCatalogPage {
   printers: PrinterFileCatalogSource[];
   scans: PrinterFileScanStatus[];
   automaticDiscoveryEnabled: boolean;
+  /** Shared deployment I/O budget; older servers omit this (clients use two workers). */
+  maxConcurrentIo?: number;
 }
 
 export type PrinterFilePreviewState = 'Available' | 'Unavailable' | 'Unsupported' | 'Deferred';

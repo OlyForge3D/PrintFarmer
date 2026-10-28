@@ -64,6 +64,13 @@
 
 ### Fixes
 
+- Retry printer-file lease allocation conflicts as whole transactions instead
+  of failing scans on wrapped PostgreSQL serialization errors. Bulk Force
+  Refresh now uses the configured I/O capacity rather than scanning printers
+  serially, with bounded retries only when no scan started. Both refresh
+  controls are icon-only and remain inactive through refresh, cache reload,
+  and observed server scans (#3571).
+
 - Update System.Security.Cryptography.Xml and its transitive Pkcs dependency
   from 10.0.10 to 10.0.14 across .NET projects, resolving high- and
   moderate-severity NuGet security advisories (#3568).

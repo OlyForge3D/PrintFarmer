@@ -11,6 +11,7 @@ using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Settings;
 using Farm.Modules.Gcode.Controllers;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Http;
@@ -58,6 +59,31 @@ public sealed class PrinterFileCatalogControllerTests
         Assert.DoesNotContain(fixture.Hidden.ToString(), json, StringComparison.OrdinalIgnoreCase);
         Assert.Single(document.RootElement.GetProperty("printers").EnumerateArray());
         Assert.Single(document.RootElement.GetProperty("scans").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData(null, 2)]
+    [InlineData(1, 1)]
+    [InlineData(4, 4)]
+    [InlineData(16, 16)]
+    public async Task ListAsync_ReportsConfiguredRefreshConcurrency(int? configured, int expected)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        if (configured is { } maxConcurrentIo)
+        {
+            fixture.Db.AppSettingsEntities.Add(new AppSettingsEntity
+            {
+                Key = PrinterFileIndexSettings.SectionName,
+                SettingsJson = JsonSerializer.Serialize(new PrinterFileIndexSettings { MaxConcurrentIo = maxConcurrentIo }),
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await fixture.Db.SaveChangesAsync();
+            fixture.Db.ChangeTracker.Clear();
+        }
+
+        using JsonDocument document = ReadOk(await fixture.Controller.ListAsync(null, null));
+
+        Assert.Equal(expected, document.RootElement.GetProperty("maxConcurrentIo").GetInt32());
     }
 
     [Fact]

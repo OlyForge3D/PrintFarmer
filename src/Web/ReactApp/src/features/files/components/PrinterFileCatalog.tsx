@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
@@ -58,7 +58,7 @@ interface Selection {
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
 const REFRESH_ALL_LABEL = 'Force refresh all online printers';
-const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers and free I/O slots; may take up to two minutes per printer.';
+const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers; waits up to two minutes for I/O capacity, then up to two minutes per scan.';
 const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
 
 interface RefreshTarget {
@@ -74,6 +74,11 @@ export function PrinterFileCatalog() {
   const { hasPermission } = useAuth();
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
+  // Shared across mounts so a remounted control stays disabled while any force refresh is still running.
+  const discoveryPending = useIsMutating({
+    mutationKey: ['printer-file-discovery'],
+    predicate: mutation => (mutation.state.variables as { kind?: string } | undefined)?.kind !== 'enabled',
+  }) > 0;
   const [intent, setIntent] = useState<Intent | null>(null);
   const [deleteIntent, setDeleteIntent] = useState<PrinterFileDeleteIntent | null>(null);
   const [destination, setDestination] = useState('');
@@ -116,7 +121,8 @@ export function PrinterFileCatalog() {
       stale: freshness ? freshness === 'stale' : undefined, page, pageSize: PAGE_SIZE,
     }, signal),
     enabled: canRead,
-    refetchInterval: CATALOG_POLL_MS,
+    refetchInterval: query => query.state.data?.scans.some(scan => scan.isScanning)
+      ? OPERATION_POLL_MS : CATALOG_POLL_MS,
   });
   const history = useQuery({
     queryKey: ['printer-file-operations'],
@@ -198,18 +204,27 @@ export function PrinterFileCatalog() {
       }
     },
   });
-  // Sequential requests avoid consuming all deployment I/O slots with this batch.
   const refreshAll = useMutation({
+    mutationKey: ['printer-file-discovery'],
     mutationFn: async (targets: RefreshTarget[]) => {
-      const failures: string[] = [];
-      for (const target of targets) {
-        try {
-          await apiClient.refreshPrinterFileIndex(target.id, true);
-        } catch (error) {
-          failures.push(`${target.name}: ${describePrinterFileFailure(error).message}`);
-        }
+      const concurrency = catalog.data?.maxConcurrentIo ?? 2;
+      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+        throw new Error('The server returned an invalid printer-file I/O budget. Reload the catalog before retrying.');
       }
-      return failures;
+      const failures: (string | undefined)[] = new Array(targets.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+        while (next < targets.length) {
+          const index = next++;
+          const target = targets[index];
+          try {
+            await apiClient.refreshPrinterFileIndex(target.id, true);
+          } catch (error) {
+            failures[index] = `${target.name}: ${describePrinterFileFailure(error).message}`;
+          }
+        }
+      }));
+      return failures.filter((failure): failure is string => failure !== undefined);
     },
     onSuccess: async (failures, targets) => {
       const completed = targets.length - failures.length;
@@ -224,6 +239,7 @@ export function PrinterFileCatalog() {
         queryClient.invalidateQueries({ queryKey: ['printer-file-thumbnail'] }),
       ]);
     },
+    onError: (error: Error) => toast.error(`Failed to force refresh: ${error.message}`),
   });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
     setIntent({ entry, action, key: generateUUID() });
@@ -241,6 +257,9 @@ export function PrinterFileCatalog() {
   const refreshTargets: RefreshTarget[] = manageableSources
     .filter(printer => onlinePrinterIds.has(printer.id))
     .map(({ id, name }) => ({ id, name }));
+  const serverScanning = catalog.data?.scans.some(scan =>
+    scan.isScanning && refreshTargets.some(target => target.id === scan.printerId)) ?? false;
+  const refreshBusy = refreshAll.isPending || discoveryPending || serverScanning;
   const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
     const source = sourceFor(entry);
     if (!source) return [];
@@ -372,13 +391,12 @@ export function PrinterFileCatalog() {
                   aria-label={REFRESH_ALL_LABEL}
                   title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
                   explainedDisabled
-                  disabled={refreshTargets.length === 0}
-                  loading={refreshAll.isPending}
-                  iconLeft={<RefreshIcon className={ACTION_ICON_CLASS} />}
+                  disabled={refreshTargets.length === 0 || refreshBusy}
+                  aria-busy={refreshBusy}
+                  className="h-10 w-10 p-0"
+                  iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
                   onClick={() => refreshAll.mutate(refreshTargets)}
-                >
-                  Force refresh
-                </Button>
+                />
               )}
             </div>
           </div>

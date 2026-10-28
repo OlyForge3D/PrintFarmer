@@ -113,10 +113,18 @@ races scan ownership returns `409` with `scan_state_changed`; refresh state and
 retry the deliberate Refresh or enable/disable action.
 
 Database-backed, renewable ownership shares two aggregate I/O slots by default
-and permits only one feature operation per printer. Configuration, registration,
-policy, and ownership are fenced again in the publication transaction. No
-database transaction spans printer HTTP requests. A superseded scan cannot
-publish positive observations or mark files missing.
+(`PrinterFileIndex.MaxConcurrentIo`, range 1-16) and permits only one feature
+operation per printer. Configuration, registration, policy, and ownership are
+fenced again in the publication transaction. No database transaction spans
+printer HTTP requests. A superseded scan cannot publish positive observations
+or mark files missing.
+
+Lease acquisition retries recognized serialization, deadlock, lock, and
+concurrency conflicts up to eight attempts with jittered backoff. Every attempt
+uses a fresh context and retries the entire serializable allocation transaction,
+not just the failed statement. Available-slot selection starts at a randomized
+slot to reduce collisions. Exhausted acquisition conflicts are logged and defer
+the work; unexpected database failures are not treated as contention.
 
 | Endpoint | Behavior |
 | --- | --- |
@@ -131,15 +139,30 @@ evidence. With `force=true`, the request waits for the scan and returns `200`
 with `{ "code": "refresh_completed", "files": N }` only after a complete listing
 is published. Deferrals, interrupted/superseded scans, and incomplete inventories
 return `409` with `code` and `reasonCode`; examples include
-`waiting_for_confirmed_idle` and `refresh_incomplete`. A database state race
-returns `409` with `code: "scan_state_changed"`. These failures must not be
-presented as successful or scheduled force refreshes.
+`waiting_for_confirmed_idle` and `refresh_incomplete`. Unavailable ownership,
+including exhausted acquisition retries, returns `409` with
+`code: "source_busy"` before a scan starts. A database state race returns `409`
+with `code: "scan_state_changed"`. These failures must not be presented as
+successful or scheduled force refreshes.
 
 Forced scans use the same inventory bounds, exclusive per-printer ownership, and
 deployment-wide I/O slots as background scans. They require confirmed-idle
-telemetry at acquisition, lease renewal, and publication; occupied slots or a
-non-idle printer require a later deliberate retry. They do not enable automatic
-discovery or change its configured cadence.
+telemetry at acquisition, lease renewal, and publication. They do not enable
+automatic discovery or change its configured cadence.
+
+The React client retries only forced requests rejected with `409 source_busy`,
+using 1-1.5-second jitter within a 120-second capacity-wait window. Once a scan
+starts, its own deadline applies; the client allows 150 seconds for each forced
+HTTP request. Explicit non-idle responses, incomplete scans, state changes,
+network failures, and timeouts are not replayed automatically. Those outcomes
+require an operator to inspect current state before deliberately retrying.
+
+Catalog responses include `maxConcurrentIo`, the configured deployment-wide
+capacity. The bulk refresh control uses that value as its bounded parallel
+request count, defaulting to two when talking to an older server. Per-printer
+failures do not abort the remaining batch. Both icon-only refresh controls stay
+inactive through the requests and awaited catalog/preview cache reload, and
+while an applicable server scan is observed.
 
 A published force refresh advances `observationRevision` even for unchanged
 files, except unchanged locations pinned by unfinished file operations. The

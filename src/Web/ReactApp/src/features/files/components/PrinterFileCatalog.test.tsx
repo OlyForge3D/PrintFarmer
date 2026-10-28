@@ -222,6 +222,7 @@ describe('Printer file catalog', () => {
       const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
       expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
       expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
+      expect(refresh.textContent).toBe('');
       expect(mocks.refresh).not.toHaveBeenCalled();
 
       await user.click(refresh);
@@ -235,25 +236,102 @@ describe('Printer file catalog', () => {
       await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
     });
 
-    it('scans one printer at a time, continues past a failure, and names the printer and reason', async () => {
-      mocks.catalog.mockResolvedValue({ ...catalog, printers: [managed('source', 'Source printer'), managed('other', 'Other printer')] });
-      let rejectFirst!: (error: unknown) => void;
-      mocks.refresh
-        .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirst = reject; }))
-        .mockResolvedValueOnce(undefined);
+    it.each([undefined, 1, 2, 4])('bounds parallel refreshes to capacity %s and continues past a named failure', async maxConcurrentIo => {
+      const capacity = maxConcurrentIo ?? 2;
+      const targets = Array.from({ length: capacity + 2 }, (_, index) => managed(`printer-${index}`, `Printer ${index}`));
+      printerList.value = targets.map(printer => ({ ...printer, isEnabled: true, isOnline: true }));
+      mocks.catalog.mockResolvedValue({ ...catalog, printers: targets, maxConcurrentIo });
+      const pending: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+      let active = 0;
+      let peak = 0;
+      mocks.refresh.mockImplementation(() => {
+        peak = Math.max(peak, ++active);
+        return new Promise<void>((resolve, reject) => pending.push({ resolve, reject }))
+          .finally(() => { active--; });
+      });
+      const user = userEvent.setup();
+      renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      await user.click(refresh);
+
+      await waitFor(() => expect(mocks.refresh.mock.calls).toEqual(targets.slice(0, capacity).map(target => [target.id, true])));
+      expect(active).toBe(capacity);
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+      await act(async () => pending[0].reject({ statusCode: 409, message: 'Request failed with status code 409',
+        data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' } }));
+      await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(capacity + 1));
+      expect(active).toBe(capacity);
+      for (let index = 1; index < targets.length; index++) {
+        await waitFor(() => expect(pending[index]).toBeDefined());
+        await act(async () => pending[index].resolve());
+      }
+
+      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+        'Failed to force refresh: Printer 0: waiting for confirmed idle'));
+      expect(mocks.refresh.mock.calls).toEqual(targets.map(target => [target.id, true]));
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        `Force refresh completed for ${targets.length - 1} printers. Previews reload on demand.`);
+      expect(peak).toBe(capacity);
+      expect(active).toBe(0);
+      await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+    });
+
+    it('blocks pointer and keyboard repeats until the scan and catalog reload finish', async () => {
+      let complete!: () => void;
+      let reload!: (page: PrinterFileCatalogPage) => void;
+      mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+      mocks.catalog.mockResolvedValueOnce(catalog)
+        .mockImplementationOnce(() => new Promise<PrinterFileCatalogPage>(resolve => { reload = resolve; }));
+      const user = userEvent.setup();
+      renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      await user.click(refresh);
+      await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+      expect(refresh.textContent).toBe('');
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('aria-busy', 'true');
+      await user.click(refresh);
+      await user.keyboard('{Enter} ');
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+      await act(async () => complete());
+      await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('aria-busy', 'true');
+      await user.click(refresh);
+      await user.keyboard('{Enter} ');
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+      await act(async () => reload(catalog));
+      await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+      expect(refresh).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('stays disabled for a server-reported scan until a later status reports completion', async () => {
+      mocks.catalog.mockResolvedValue({ ...catalog, scans: [{ ...catalog.scans[0], isScanning: true }] });
+      const user = userEvent.setup();
+      const { queryClient } = renderCatalog();
+      const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
+      expect(refresh).toHaveAttribute('aria-disabled', 'true');
+      expect(refresh).toHaveAttribute('aria-busy', 'true');
+      await user.click(refresh);
+      expect(mocks.refresh).not.toHaveBeenCalled();
+
+      mocks.catalog.mockResolvedValue(catalog);
+      await act(async () => { await queryClient.invalidateQueries({ queryKey: ['printer-file-catalog'] }); });
+      await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+      expect(refresh).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it.each([0, 17, 1.5])('rejects an invalid server capacity of %s before any printer work', async maxConcurrentIo => {
+      mocks.catalog.mockResolvedValue({ ...catalog, maxConcurrentIo });
       const user = userEvent.setup();
       renderCatalog();
       await user.click(await screen.findByRole('button', { name: 'Force refresh all online printers' }));
-
-      await waitFor(() => expect(mocks.refresh.mock.calls).toEqual([['source', true]]));
-      expect(mocks.toastSuccess).not.toHaveBeenCalled();
-      rejectFirst({ statusCode: 409, message: 'Request failed with status code 409',
-        data: { code: 'waiting_for_confirmed_idle', reasonCode: 'waiting_for_confirmed_idle' } });
-
       await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
-        'Failed to force refresh: Source printer: waiting for confirmed idle'));
-      expect(mocks.refresh.mock.calls).toEqual([['source', true], ['other', true]]);
-      expect(mocks.toastSuccess).toHaveBeenCalledWith('Force refresh completed for 1 printer. Previews reload on demand.');
+        'Failed to force refresh: The server returned an invalid printer-file I/O budget. Reload the catalog before retrying.'));
+      expect(mocks.refresh).not.toHaveBeenCalled();
     });
 
     it('explains why it is unavailable when no printer the user manages is online', async () => {

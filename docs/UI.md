@@ -111,14 +111,24 @@ Per-printer automatic discovery, scan status, and **Force refresh** live in the
 and are not part of the form save. Global discovery cadence and budgets remain
 under Admin Settings > Files.
 
-**Force refresh**, to the right of the table/card view toggle on **On printers**,
-scans every online printer you can manage, one at a time. Both refresh controls
-bypass the automatic-discovery switches, schedule, and backoff for inventory,
-and mark background enrichment due.
-They still require a confirmed-idle printer and a free I/O slot; idle status is
-checked again during the scan and before publication. A scan can take up to two
-minutes per printer. Success means a complete listing was published, not merely
-scheduled; failures name the printer and reason so busy printers can be retried.
+The icon-only **Force refresh** control, to the right of the table/card view
+toggle on **On printers**, scans every online printer you can manage with bounded
+parallelism. The catalog's `maxConcurrentIo` sets the client pool size: two by
+default, configurable from one to 16 under Admin Settings > Files. The database
+still enforces the shared I/O budget across API replicas and background work.
+Both refresh controls retain accessible names and tooltips, show a busy
+indicator, and cannot be activated again until refresh and cache reload finish.
+An observed server scan also keeps the affected control inactive.
+
+Both controls bypass automatic-discovery switches, schedule, and backoff for
+inventory, and mark background enrichment due. They still require a
+confirmed-idle printer and a free I/O slot; idle status is checked again during
+the scan and before publication. The client retries only a confirmed
+`source_busy` response, within a two-minute capacity-wait window. This is separate
+from the scan's own two-minute budget. Other failures, including timeouts with an
+unknown outcome, are not automatically replayed. Success means a complete
+listing was published, not merely scheduled; failures name the printer and
+reason without stopping the remaining printers.
 
 Images are reacquired later by the background pipeline, not by opening the
 panel or waiting for force refresh. A complete listing does not guarantee every

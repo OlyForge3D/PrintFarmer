@@ -9,11 +9,121 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Npgsql;
 
 namespace Farm.Infrastructure.Tests.Services;
 
 public sealed class PrinterFileLeaseCoordinatorTests
 {
+    [Theory]
+    [InlineData("40001", true)]
+    [InlineData("40001", false)]
+    [InlineData("40P01", true)]
+    [InlineData("23505", false)]
+    [InlineData("sqlite_busy", false)]
+    [InlineData("concurrency", false)]
+    public async Task AcquireAsync_TransactionConflictRetriesFreshContextWithoutLeakingOwnership(string code, bool wrapped)
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        List<FaultingDbContext> attempts = fixture.InjectSaveFailures(
+            attempt => attempt == 1 ? AcquisitionConflict(code, wrapped) : null);
+
+        await using IPrinterFileLease? lease = await fixture.Coordinator.TryAcquireAsync(fixture.First, true);
+
+        Assert.NotNull(lease);
+        Assert.Equal(2, attempts.Count);
+        Assert.All(attempts, db => Assert.True(db.Disposed));
+        Assert.Equal(1, lease.Fence);
+        await using AppDbContext persisted = fixture.Factory.CreateDbContext();
+        PrinterFileScanState state = Assert.Single(await persisted.PrinterFileScanStates.ToArrayAsync());
+        PrinterFileIoSlot slot = Assert.Single(await persisted.PrinterFileIoSlots.ToArrayAsync());
+        Assert.Equal(lease.OwnerId, state.LeaseOwner);
+        Assert.Equal(lease.OwnerId, slot.LeaseOwner);
+        Assert.Equal(0, state.ConsecutiveFailures);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_ExhaustedSerializationConflictsReturnBusyWithoutPersistingFailure()
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        List<FaultingDbContext> attempts = fixture.InjectSaveFailures(_ => AcquisitionConflict("40001", true));
+
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, true));
+
+        Assert.Equal(PrinterFileLeaseCoordinator.AcquisitionAttempts, attempts.Count);
+        Assert.All(attempts, db => Assert.True(db.Disposed));
+        await using AppDbContext persisted = fixture.Factory.CreateDbContext();
+        Assert.Empty(await persisted.PrinterFileScanStates.ToArrayAsync());
+        Assert.Empty(await persisted.PrinterFileIoSlots.ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("23503")]
+    [InlineData("08006")]
+    public async Task AcquireAsync_NonContentionFailurePropagatesWithoutRetry(string code)
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        Exception failure = AcquisitionConflict(code, true);
+        List<FaultingDbContext> attempts = fixture.InjectSaveFailures(_ => failure);
+
+        Exception? actual = await Record.ExceptionAsync(() => fixture.Coordinator.TryAcquireAsync(fixture.First, true));
+
+        Assert.Same(failure, actual);
+        Assert.True(Assert.Single(attempts).Disposed);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_CancellationDuringConflictStopsRetry()
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        using var cancellation = new CancellationTokenSource();
+        List<FaultingDbContext> attempts = fixture.InjectSaveFailures(_ =>
+        {
+            cancellation.Cancel();
+            return AcquisitionConflict("40001", true);
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            fixture.Coordinator.TryAcquireAsync(fixture.First, true, cancellation.Token));
+
+        Assert.True(Assert.Single(attempts).Disposed);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_DistinctPrintersHoldTwoSlotsAndReducedBudgetBlocksFurtherAcquisition()
+    {
+        await using var fixture = await Fixture.CreateAsync(2);
+        await using IPrinterFileLease? first = await fixture.Coordinator.TryAcquireAsync(fixture.First, true);
+        await using IPrinterFileLease? second = await fixture.Coordinator.TryAcquireAsync(fixture.Second, true);
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotEqual(first.OwnerId, second.OwnerId);
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            Assert.Equal(2, await db.PrinterFileIoSlots.CountAsync(x => x.LeaseOwner != null));
+            AppSettingsEntity policy = await db.AppSettingsEntities.SingleAsync();
+            policy.SettingsJson = JsonSerializer.Serialize(new PrinterFileIndexSettings { MaxConcurrentIo = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        await first.DisposeAsync();
+        Assert.Null(await fixture.Coordinator.TryAcquireAsync(fixture.First, true));
+        await second.DisposeAsync();
+        await using IPrinterFileLease? replacement = await fixture.Coordinator.TryAcquireAsync(fixture.First, true);
+        Assert.NotNull(replacement);
+    }
+
+    private static Exception AcquisitionConflict(string code, bool wrapped)
+    {
+        Exception failure = code switch
+        {
+            "concurrency" => new DbUpdateConcurrencyException("simulated concurrency conflict"),
+            "sqlite_busy" => new DbUpdateException("simulated save conflict", new SqliteException("database is locked", 5)),
+            _ => new DbUpdateException("simulated save conflict", new PostgresException("simulated conflict", "ERROR", "ERROR", code)),
+        };
+        return wrapped ? new InvalidOperationException("An exception has been raised that is likely due to a transient failure.", failure) : failure;
+    }
+
     [Fact]
     public async Task RenewalAsync_UnexpectedFailureCancelsOwnershipAndDisposeDoesNotMaskOutcome()
     {
@@ -343,6 +453,21 @@ public sealed class PrinterFileLeaseCoordinatorTests
 
         public PrinterFileLeaseCoordinator Coordinator { get; }
 
+        public List<FaultingDbContext> InjectSaveFailures(Func<int, Exception?> failure)
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
+            List<FaultingDbContext> attempts = [];
+            Mock.Get(Factory).Setup(x => x.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() =>
+                {
+                    int attempt = attempts.Count + 1;
+                    var context = new FaultingDbContext(options, () => failure(attempt));
+                    attempts.Add(context);
+                    return context;
+                });
+            return attempts;
+        }
+
         public void SetIdle(Guid printerId) => SetActivity(printerId, "ready");
 
         public void SetActivity(Guid printerId, string activity) =>
@@ -444,5 +569,28 @@ public sealed class PrinterFileLeaseCoordinatorTests
         }
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    }
+
+    private sealed class FaultingDbContext(DbContextOptions<AppDbContext> options, Func<Exception?> failureAfterSave) : AppDbContext(options)
+    {
+        public bool Disposed { get; private set; }
+
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            int result = await base.SaveChangesAsync(cancellationToken);
+            // Fail after writes so a retry must roll back both the state and slot before creating a fresh context.
+            if (failureAfterSave() is { } failure)
+            {
+                throw failure;
+            }
+
+            return result;
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await base.DisposeAsync();
+            Disposed = true;
+        }
     }
 }
