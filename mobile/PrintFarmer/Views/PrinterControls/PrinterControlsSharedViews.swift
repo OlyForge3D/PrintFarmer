@@ -133,7 +133,7 @@ struct PrinterSensorControlRows: View {
                 }
             }
         )
-        .disabled(!viewModel.canControlSensors || current == nil)
+        .disabled(!viewModel.canControlSensors || viewModel.isPrintingOrPaused || current == nil)
     }
 }
 

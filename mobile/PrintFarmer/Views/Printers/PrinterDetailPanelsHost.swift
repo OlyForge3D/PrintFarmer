@@ -734,22 +734,16 @@ struct PrinterDetailTemperatureStrip: View {
             }
             .font(.footnote)
             .padding(.bottom, 5)
-            if dynamicTypeSize.isAccessibilitySize {
-                Text(value.measuredText).font(.system(size: essentialReadingSize)).monospacedDigit()
-                Text("Target: \(value.targetText)").font(.footnote).monospacedDigit()
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else {
-                (
-                    Text(compactTemperature(value.measured, isOnline: value.isOnline))
-                        .font(.system(size: essentialReadingSize))
-                    + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
-                        .font(.footnote).foregroundColor(.pfTextSecondary)
-                )
-                .monospacedDigit()
-                // Current and target stay on one line in narrow columns (256pt).
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            }
+            (
+                Text(compactTemperature(value.measured, isOnline: value.isOnline))
+                    .font(.system(size: essentialReadingSize))
+                + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
+                    .font(.footnote).foregroundColor(.pfTextSecondary)
+            )
+            .monospacedDigit()
+            // Keep measured and target on one compact line at every text size.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 18)

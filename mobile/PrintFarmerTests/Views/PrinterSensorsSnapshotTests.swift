@@ -143,6 +143,46 @@ final class PrinterSensorsSnapshotTests: XCTestCase {
         }
     }
 
+    func test_controlSensorRows_areDisabledWhilePrintingOrPaused() async throws {
+        for state in ["printing", "Paused"] {
+            var printer = try TestData.decodePrinter()
+            printer.isOnline = true
+            printer.state = state
+            printer.sensors = [PrinterSensor(
+                id: "chamber", displayName: "Chamber", kind: .chamber,
+                readings: [SensorReading(quantity: .targetTemperature, value: .number(40), unit: .celsius)],
+                writable: [SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)]
+            )]
+            let service = MockPrinterService()
+            var capabilities = PrinterBackendCapabilities.fallback(for: .moonraker)
+            capabilities.supportsSensorControl = true
+            service.capabilitiesToReturn = capabilities
+            let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await model.loadCapabilities()
+            defer { model.deactivate() }
+            XCTAssertTrue(model.canControlSensors, "This regression covers the print-state gate, not access checks")
+            XCTAssertTrue(model.isPrintingOrPaused)
+
+            let controller = host(PrinterSensorControlRows(viewModel: model, compact: true))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            window.rootViewController = controller
+            window.isHidden = false
+            defer { window.isHidden = true }
+            try await settle(controller)
+
+            let controls = nativeControls(in: controller.view).filter {
+                $0.accessibilityIdentifier?.hasPrefix("printer.controls.sensor.chamber.TargetTemperature.") == true
+            }
+            XCTAssertEqual(Set(controls.compactMap(\.accessibilityIdentifier)), [
+                "printer.controls.sensor.chamber.TargetTemperature.increase",
+                "printer.controls.sensor.chamber.TargetTemperature.decrease",
+                "printer.controls.sensor.chamber.TargetTemperature.value"
+            ], state)
+            XCTAssertTrue(controls.allSatisfy { !$0.isEnabled }, "\(state) must disable the entire sensor target row")
+            XCTAssertEqual(service.setSensorValueCallCount, 0)
+        }
+    }
+
     private func nativeControls(in view: UIView) -> [UIControl] {
         (view as? UIControl).map { [$0] } ?? view.subviews.flatMap { nativeControls(in: $0) }
     }
