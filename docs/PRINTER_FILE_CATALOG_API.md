@@ -162,7 +162,10 @@ capacity. The bulk refresh control uses that value as its bounded parallel
 request count, defaulting to two when talking to an older server. Per-printer
 failures do not abort the remaining batch. Both icon-only refresh controls stay
 inactive through the requests and awaited catalog/preview cache reload, and
-while an applicable server scan is observed.
+while an applicable server I/O lease is observed. `isScanning` includes
+background enrichment holding that exclusive per-printer lease: a completed
+file listing does not mean metadata and thumbnail acquisition has finished.
+Force refresh stays disabled during that work to prevent overlapping requests.
 
 A published force refresh advances `observationRevision` even for unchanged
 files, except unchanged locations pinned by unfinished file operations. The
@@ -350,8 +353,10 @@ currently certified adapters.
 | FlashForge, SDCP, others | Unsupported; no G-code fallback | Unsupported until native streaming is certified |
 
 Acquisition runs only with fresh confirmed-idle telemetry under the renewable,
-exclusive per-printer lease and deployment I/O budget. Native facts win;
-fallback reads only bounded regions, never imports the file, and never uses the
+exclusive per-printer lease and deployment I/O budget. Native facts win, and
+native thumbnails are acquired before optional metadata fallback so a slow
+G-code read cannot prevent an already-available preview from being captured.
+Fallback reads only bounded regions, never imports the file, and never uses the
 explicit Copy/Download path. Each file has at most eight wire attempts (including
 authentication retries), 8 MiB of responses, and 15 seconds. A slice handles at
 most eight files and 16 MiB. Metadata responses are limited to 256 KiB, text
@@ -359,6 +364,13 @@ regions to 1 MiB each, binary prefixes and decoded data to 4 MiB each, and image
 to 2 MiB, 4096 pixels per edge, and 4,194,304 total pixels. Unsupported ranges,
 compression, image formats, or parser bounds yield explicit partial/unsupported
 outcomes, not an unbounded download.
+
+Acquired metadata and images retain independent outcomes if optional fallback
+exhausts the adapter's deadline or request/byte budget. The service safety
+timeout allows 15 seconds of grace beyond the adapter's 15-second deadline to
+return those partial results; it does not extend the printer I/O budget.
+Caller cancellation, lease loss, or a detected source change still discards
+the acquisition rather than publishing stale results.
 
 Image validation accepts supported PNG/JPEG/WebP payloads, not SVG or QOI.
 Redirects, off-origin references, ambiguous/encoded traversal paths, and

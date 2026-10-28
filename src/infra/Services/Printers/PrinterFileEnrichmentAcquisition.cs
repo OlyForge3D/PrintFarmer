@@ -277,6 +277,9 @@ public static class PrinterFileEnrichmentAcquisition
                     }
                 }
 
+                // The dedicated thumbnail read precedes optional bounded metadata fallback so a slow
+                // G-code read cannot consume the deadline before the cheaper image request runs.
+                ThumbnailOutcome? nativeThumbnail = await ReadNativeThumbnailAsync().ConfigureAwait(false);
                 bool needFallback = sources.ReadRegionAsync is not null && (native is null || MissingFields(native));
                 if (needFallback)
                 {
@@ -285,7 +288,7 @@ public static class PrinterFileEnrichmentAcquisition
                         : await ReadFallbackAsync(needTail: true).ConfigureAwait(false);
                 }
 
-                ThumbnailOutcome thumbnail = await ResolveThumbnailAsync().ConfigureAwait(false);
+                ThumbnailOutcome thumbnail = await ResolveThumbnailAsync(nativeThumbnail).ConfigureAwait(false);
                 if (readSource && sources.VerifyUnchangedAsync is { } verify && BudgetReason() is null)
                 {
                     // Best effort: only a detected change or disappearance discards the acquisition.
@@ -483,7 +486,32 @@ public static class PrinterFileEnrichmentAcquisition
                 image is null ? [] : [image], imageState, imageReason);
         }
 
-        private async Task<ThumbnailOutcome> ResolveThumbnailAsync()
+        private async Task<ThumbnailOutcome?> ReadNativeThumbnailAsync()
+        {
+            if (!captureThumbnail || nativeImage is not { } readImage)
+            {
+                return null;
+            }
+
+            if (BudgetReason() is { } exhausted)
+            {
+                return new(PrinterFileEnrichmentState.Deferred, exhausted);
+            }
+
+            readSource = true;
+            (byte[]? bytes, string? failure) = await TryAsync(
+                () => readImage(budget), missingIsFatal: false).ConfigureAwait(false);
+            if (failure is not null)
+            {
+                return failure == "source_missing"
+                    ? new(PrinterFileEnrichmentState.Absent, "thumbnail_missing")
+                    : new(StateFor(failure, hasValue: false), failure);
+            }
+
+            return Validate(bytes);
+        }
+
+        private async Task<ThumbnailOutcome> ResolveThumbnailAsync(ThumbnailOutcome? nativeThumbnail)
         {
             if (!captureThumbnail)
             {
@@ -491,34 +519,14 @@ public static class PrinterFileEnrichmentAcquisition
             }
 
             List<(PrinterFileEnrichmentState State, string? Reason)> misses = [];
-            if (nativeImage is { } readImage)
+            if (nativeThumbnail is { } nativeOutcome)
             {
-                if (BudgetReason() is { } exhausted)
+                if (nativeOutcome.State == PrinterFileEnrichmentState.Ready)
                 {
-                    misses.Add((PrinterFileEnrichmentState.Deferred, exhausted));
+                    return nativeOutcome;
                 }
-                else
-                {
-                    readSource = true;
-                    (byte[]? bytes, string? failure) = await TryAsync(
-                        () => readImage(budget), missingIsFatal: false).ConfigureAwait(false);
-                    if (failure is not null)
-                    {
-                        misses.Add(failure == "source_missing"
-                            ? (PrinterFileEnrichmentState.Absent, "thumbnail_missing")
-                            : (StateFor(failure, hasValue: false), failure));
-                    }
-                    else
-                    {
-                        ThumbnailOutcome checkedImage = Validate(bytes);
-                        if (checkedImage.State == PrinterFileEnrichmentState.Ready)
-                        {
-                            return checkedImage;
-                        }
 
-                        misses.Add((checkedImage.State, checkedImage.Reason));
-                    }
-                }
+                misses.Add((nativeOutcome.State, nativeOutcome.Reason));
             }
 
             if (sources.ReadRegionAsync is not null)

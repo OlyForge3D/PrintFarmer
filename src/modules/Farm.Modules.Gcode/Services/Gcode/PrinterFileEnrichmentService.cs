@@ -25,6 +25,7 @@ public sealed class PrinterFileEnrichmentService(
 {
     private const int MaximumReasonLength = 128;
     private const int UnsupportedBatchSize = 256;
+    private static readonly TimeSpan AdapterDeadlineGrace = TimeSpan.FromSeconds(15);
 
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -170,7 +171,9 @@ public sealed class PrinterFileEnrichmentService(
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lease.Token);
-            deadline.CancelAfter(PrinterFileEnrichmentLimits.FileDeadline);
+
+            // Grace lets the adapter's own deadline fire first and return the partial result it already acquired.
+            deadline.CancelAfter(PrinterFileEnrichmentLimits.FileDeadline + AdapterDeadlineGrace);
             try
             {
                 content = await client.EnrichFileAsync(

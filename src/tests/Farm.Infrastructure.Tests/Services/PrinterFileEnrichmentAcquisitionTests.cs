@@ -310,6 +310,35 @@ public sealed class PrinterFileEnrichmentAcquisitionTests
     }
 
     [Fact]
+    public async Task AcquireAsync_NativeImageIsReadBeforeFallbackCanExhaustTheBudget()
+    {
+        List<string> reads = [];
+        PrinterFileEnrichmentSources sources = new(
+            Native(PartialNative(), budget =>
+            {
+                budget.BeginRequest();
+                reads.Add("thumbnail");
+                return Task.FromResult<byte[]?>(Png);
+            }),
+            async (_, _, _, budget) =>
+            {
+                await Task.Yield();
+                reads.Add("fallback");
+                SpendRequests(budget);
+                return new PrinterFileRegion([], 0, false);
+            });
+
+        PrinterFileEnrichmentContent result = await RunAsync(10, sources);
+
+        Assert.Equal(["thumbnail", "fallback"], reads);
+        Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
+        Assert.Equal(Png, result.Image);
+        Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
+        Assert.Equal("request_limit", result.MetadataReason);
+        Assert.Equal(123, result.Metadata?.EstimatedPrintTimeSeconds);
+    }
+
+    [Fact]
     public async Task AcquireAsync_ThumbnailCapturePaused_DefersTheImageButStillEnrichesMetadata()
     {
         FakeFile file = new(Gcode(SlicerLine, "; layer_height = 0.20", ThumbnailBlock));

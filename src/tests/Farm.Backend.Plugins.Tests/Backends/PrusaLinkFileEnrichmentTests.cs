@@ -87,7 +87,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -116,7 +116,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal("bounded_gcode", result.MetadataSource);
         PrinterPrintMetadata metadata = Assert.IsType<PrinterPrintMetadata>(result.Metadata);
@@ -132,7 +132,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([HeadRange, TailRange], DownloadRanges(printer));
         Assert.Equal(2L * OneMiB, printer.DownloadBytesRead);
         Assert.Equal(printer.BytesRead, result.ResponseBytes);
@@ -156,7 +156,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([HeadRange, TailRange], DownloadRanges(printer));
         Assert.InRange(printer.DownloadBytesRead, 1L, OneMiB);
         Assert.Equal(printer.BytesRead, result.ResponseBytes);
@@ -179,7 +179,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(printer.Content.Length, printer.DownloadBytesRead);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -259,7 +259,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
     }
@@ -275,7 +275,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.All(printer.Calls, call => Assert.Equal(BaseUrl, call.Origin));
         Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
         Assert.Equal("redirect_refused", result.MetadataReason);
@@ -474,9 +474,9 @@ public sealed class PrusaLinkFileEnrichmentTests
         Assert.Equal(
             [
                 DetailsPath, DetailsPath,
-                DownloadPath, DownloadPath,
-                DownloadPath, DownloadPath,
                 ThumbnailPath, ThumbnailPath,
+                DownloadPath, DownloadPath,
+                DownloadPath, DownloadPath,
             ],
             printer.Paths);
         Assert.Equal([HeadRange, HeadRange, TailRange, TailRange], DownloadRanges(printer));
@@ -600,7 +600,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         AssertSourceChanged(result);
     }
 
@@ -625,7 +625,7 @@ public sealed class PrusaLinkFileEnrichmentTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EnrichAsync(printer, ct: cancellation.Token));
 
-        Assert.Equal([DetailsPath, DownloadPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath], printer.Paths);
     }
 
     private static async Task<PrinterFileEnrichmentContent> EnrichAsync(

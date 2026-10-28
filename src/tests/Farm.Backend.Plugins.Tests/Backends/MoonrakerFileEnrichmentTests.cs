@@ -53,9 +53,9 @@ public sealed class MoonrakerFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([MetadataQuery, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal<string?>(
-            [null, $"bytes=0-{printer.Content.Length - 1}", null, null], printer.Calls.Select(call => call.Range));
+            [null, null, $"bytes=0-{printer.Content.Length - 1}", null], printer.Calls.Select(call => call.Range));
         Assert.All(printer.Calls, call =>
         {
             Assert.Equal(BaseUrl, call.Origin);
@@ -98,7 +98,7 @@ public sealed class MoonrakerFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([MetadataQuery, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -148,7 +148,7 @@ public sealed class MoonrakerFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         Assert.Equal([HeadRange, TailRange], DownloadRanges(printer));
-        Assert.Equal([MetadataQuery, FilePath, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal(2L * OneMiB, printer.DownloadBytesRead);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -204,7 +204,7 @@ public sealed class MoonrakerFileEnrichmentTests
 
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
-        Assert.Equal([MetadataQuery, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal(printer.Content.Length, printer.DownloadBytesRead);
     }
 
@@ -267,7 +267,7 @@ public sealed class MoonrakerFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         AssertSourceChanged(result);
-        Assert.Equal([MetadataQuery, FilePath, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, FilePath, MetadataQuery], printer.Paths);
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public sealed class MoonrakerFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         Assert.All(printer.Calls, call => Assert.Equal(BaseUrl, call.Origin));
-        Assert.Equal([MetadataQuery, FilePath, LargeThumbnailPath, MetadataQuery], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
         Assert.Equal(RedirectRefused, result.MetadataReason);
         Assert.Equal(NativeSource, result.MetadataSource);
@@ -361,7 +361,7 @@ public sealed class MoonrakerFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         Assert.Equal(
-            [MetadataQuery, FilePath, LargeThumbnailPath, SmallThumbnailPath, MetadataQuery], printer.Paths);
+            [MetadataQuery, LargeThumbnailPath, SmallThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
         Assert.Equal(Png, result.Image);
     }
@@ -441,11 +441,11 @@ public sealed class MoonrakerFileEnrichmentTests
         Assert.Equal(
             [
                 MetadataQuery,
-                FilePath,
                 ThumbnailPathOf(600),
                 ThumbnailPathOf(500),
                 ThumbnailPathOf(400),
                 ThumbnailPathOf(300),
+                FilePath,
                 MetadataQuery,
             ],
             printer.Paths);
@@ -917,12 +917,12 @@ public sealed class MoonrakerFileEnrichmentTests
         Assert.Equal(
             [
                 MetadataQuery,
-                FilePath,
-                FilePath,
                 ThumbnailPathOf(600),
                 ThumbnailPathOf(500),
                 ThumbnailPathOf(400),
                 ThumbnailPathOf(300),
+                FilePath,
+                FilePath,
                 MetadataQuery,
             ],
             printer.Paths);
@@ -932,7 +932,7 @@ public sealed class MoonrakerFileEnrichmentTests
     }
 
     [Fact]
-    public async Task EnrichFileAsync_ResponseByteBudgetExhaustedByThumbnails_DefersTheThumbnailAndKeepsTheMetadata()
+    public async Task EnrichFileAsync_ResponseByteBudgetExhaustedByThumbnails_KeepsNativeMetadataWithoutFallback()
     {
         byte[] almostAnImage = new byte[PrinterFileEnrichmentLimits.MaximumImageBytes];
         using FakePrinter printer = new(LargeGcode(LargeHead, LargeTail))
@@ -953,9 +953,15 @@ public sealed class MoonrakerFileEnrichmentTests
         Assert.Equal(PrinterFileEnrichmentState.Deferred, result.ThumbnailState);
         Assert.Equal("response_limit", result.ThumbnailReason);
         Assert.Null(result.Image);
-        Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
-        Assert.Equal(NativeAndFileSource, result.MetadataSource);
-        Assert.True(result.ResponseBytes <= PrinterFileEnrichmentLimits.MaximumResponseBytes);
+        Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
+        Assert.Equal("response_limit", result.MetadataReason);
+        Assert.Equal(NativeSource, result.MetadataSource);
+        Assert.Equal(
+            new PrinterPrintMetadata { EstimatedPrintTimeSeconds = 123, LayerHeightMm = 0.2 },
+            result.Metadata);
+        Assert.DoesNotContain(FilePath, printer.Paths);
+        Assert.Equal(printer.BytesRead, result.ResponseBytes);
+        Assert.Equal(PrinterFileEnrichmentLimits.MaximumResponseBytes, result.ResponseBytes);
     }
 
     [Fact]
@@ -979,7 +985,7 @@ public sealed class MoonrakerFileEnrichmentTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EnrichAsync(printer, ct: cancellation.Token));
 
-        Assert.Equal([MetadataQuery, FilePath], printer.Paths);
+        Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath], printer.Paths);
     }
 
     [Theory]

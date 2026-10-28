@@ -46,12 +46,86 @@ public sealed class PrinterFileEnrichmentServiceTests
     }
 
     [Fact]
+    public async Task RunSliceAsync_AdapterDeadlinePreservesNativeMetadataAndThumbnail()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        Guid id = (await fixture.AddLocationsAsync(1))[0];
+        List<string> reads = [];
+        fixture.Client.Handler = async (observation, capture, token) =>
+        {
+            // Adapter setup starts its budget after the service's outer safety deadline.
+            await Task.Delay(TimeSpan.FromMilliseconds(50), token);
+            PrinterFileEnrichmentSources sources = new(
+                budget =>
+                {
+                    budget.BeginRequest();
+                    reads.Add("native");
+                    return Task.FromResult<PrinterFileNativeEnrichment?>(new(
+                        Fixture.ReadyContent(false).Metadata,
+                        ReadThumbnailAsync: imageBudget =>
+                        {
+                            imageBudget.BeginRequest();
+                            reads.Add("thumbnail");
+                            return Task.FromResult<byte[]?>(Fixture.Png);
+                        }));
+                },
+                async (_, _, _, budget) =>
+                {
+                    budget.BeginRequest();
+                    reads.Add("fallback");
+                    await Task.Delay(Timeout.InfiniteTimeSpan, budget.Token);
+                    throw new InvalidOperationException("The deadline must cancel the stalled read.");
+                });
+            return await PrinterFileEnrichmentAcquisition.AcquireAsync(observation, sources, capture, token);
+        };
+
+        Assert.Equal(1, await fixture.Service.RunSliceAsync(fixture.Lease.Object, Ct));
+
+        PrinterFileLocation location = await fixture.LocationAsync(id);
+        PrinterFileEnrichment row = await fixture.EnrichmentAsync(id);
+        Assert.Equal(PrinterFileEnrichmentState.Partial, row.MetadataState);
+        Assert.Equal("deadline", row.MetadataReason);
+        Assert.Equal("native", row.MetadataSource);
+        Assert.Equal(3600d, location.Metadata!.EstimatedPrintTimeSeconds);
+        Assert.Equal(0.2d, location.Metadata.LayerHeightMm);
+        Assert.Equal(1, location.ObservationRevision);
+        Assert.Equal(PrinterFileEnrichmentState.Ready, row.ThumbnailState);
+        Assert.Null(row.ThumbnailReason);
+        PrinterFilePreviewContent? image = await fixture.Store.ReadAsync(row.ArtifactId!.Value, Ct);
+        Assert.Equal(Fixture.Png, image!.Image);
+        Assert.Equal(["native", "thumbnail", "fallback"], reads);
+        Assert.Empty(await fixture.ReservationsAsync());
+    }
+
+    [Fact]
+    public async Task RunSliceAsync_LeaseCancellationDiscardsAcquisitionAndReleasesReservation()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        Guid id = (await fixture.AddLocationsAsync(1))[0];
+        using CancellationTokenSource cancellation = new();
+        fixture.Lease.SetupGet(x => x.Token).Returns(cancellation.Token);
+        fixture.Client.Handler = async (_, capture, token) =>
+        {
+            await cancellation.CancelAsync();
+            token.ThrowIfCancellationRequested();
+            return Fixture.ReadyContent(capture);
+        };
+
+        Assert.Equal(0, await fixture.Service.RunSliceAsync(fixture.Lease.Object, Ct));
+
+        Assert.Single(fixture.Client.Calls);
+        Assert.Empty(await fixture.EnrichmentsAsync());
+        Assert.Null((await fixture.LocationAsync(id)).Metadata);
+        Assert.Empty(await fixture.ReservationsAsync());
+    }
+
+    [Fact]
     public async Task RunSliceAsync_ResumesFairlyAcrossSlicesSoFailingFilesCannotStarveOthers()
     {
         await using Fixture fixture = await Fixture.CreateAsync();
         List<Guid> ids = await fixture.AddLocationsAsync(10);
         int calls = 0;
-        fixture.Client.Handler = async (_, capture) =>
+        fixture.Client.Handler = async (_, capture, _) =>
         {
             await Task.Yield();
             return ++calls <= PrinterFileEnrichmentLimits.MaximumFilesPerSlice
@@ -91,7 +165,7 @@ public sealed class PrinterFileEnrichmentServiceTests
     {
         await using Fixture fixture = await Fixture.CreateAsync();
         await fixture.AddLocationsAsync(4);
-        fixture.Client.Handler = (_, capture) => Task.FromResult(
+        fixture.Client.Handler = (_, capture, _) => Task.FromResult(
             Fixture.ReadyContent(capture) with { ResponseBytes = 10L * 1024 * 1024 });
 
         Assert.Equal(2, await fixture.Service.RunSliceAsync(fixture.Lease.Object, Ct));
@@ -109,7 +183,7 @@ public sealed class PrinterFileEnrichmentServiceTests
     {
         await using Fixture fixture = await Fixture.CreateAsync();
         Guid id = (await fixture.AddLocationsAsync(1))[0];
-        fixture.Client.Handler = async (_, capture) =>
+        fixture.Client.Handler = async (_, capture, _) =>
         {
             await using AppDbContext db = fixture.CreateContext();
             PrinterFileLocation location = await db.PrinterFileLocations.SingleAsync(x => x.Id == id);
@@ -190,7 +264,7 @@ public sealed class PrinterFileEnrichmentServiceTests
     {
         await using Fixture fixture = await Fixture.CreateAsync();
         Guid id = (await fixture.AddLocationsAsync(1))[0];
-        fixture.Client.Handler = (_, capture) => Task.FromResult(
+        fixture.Client.Handler = (_, capture, _) => Task.FromResult(
             Fixture.ReadyContent(capture) with { Image = "not an image"u8.ToArray() });
 
         Assert.Equal(1, await fixture.Service.RunSliceAsync(fixture.Lease.Object, Ct));
@@ -212,7 +286,7 @@ public sealed class PrinterFileEnrichmentServiceTests
         await fixture.Service.RunSliceAsync(fixture.Lease.Object, Ct);
         Guid previous = (await fixture.EnrichmentAsync(id)).ArtifactId!.Value;
         await fixture.MakeDueAsync(id);
-        fixture.Client.Handler = async (_, _) =>
+        fixture.Client.Handler = async (_, _, _) =>
         {
             await Task.Yield();
             throw new HttpRequestException("offline");
@@ -328,15 +402,15 @@ public sealed class PrinterFileEnrichmentServiceTests
     {
         public List<(string Path, bool Capture)> Calls { get; } = [];
 
-        public Func<PrinterFileInventoryEntry, bool, Task<PrinterFileEnrichmentContent>> Handler { get; set; } =
-            (_, capture) => Task.FromResult(Fixture.ReadyContent(capture));
+        public Func<PrinterFileInventoryEntry, bool, CancellationToken, Task<PrinterFileEnrichmentContent>> Handler { get; set; } =
+            (_, capture, _) => Task.FromResult(Fixture.ReadyContent(capture));
 
         public Task<PrinterFileEnrichmentContent> EnrichFileAsync(
             string baseUrl, PrinterFileInventoryEntry observation, PrinterCredential? credential,
             bool captureThumbnail, CancellationToken ct)
         {
             Calls.Add((observation.RelativePath, captureThumbnail));
-            return Handler(observation, captureThumbnail);
+            return Handler(observation, captureThumbnail, ct);
         }
     }
 

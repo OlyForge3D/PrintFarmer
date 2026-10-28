@@ -50,9 +50,9 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal<string?>(
-            [null, $"bytes=0-{printer.Content.Length - 1}", null, null], printer.Calls.Select(call => call.Range));
+            [null, null, $"bytes=0-{printer.Content.Length - 1}", null], printer.Calls.Select(call => call.Range));
         Assert.All(printer.Calls, call =>
         {
             Assert.Equal(BaseUrl, call.Origin);
@@ -85,7 +85,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -115,7 +115,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(FileSource, result.MetadataSource);
@@ -136,7 +136,7 @@ public sealed class OctoPrintFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         Assert.Equal([HeadRange, TailRange], DownloadRanges(printer));
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(2L * OneMiB, printer.DownloadBytesRead);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -157,7 +157,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([HeadRange, TailRange], DownloadRanges(printer));
         Assert.InRange(printer.DownloadBytesRead, 1L, OneMiB);
         Assert.Equal(printer.BytesRead, result.ResponseBytes);
@@ -182,7 +182,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(printer.Content.Length, printer.DownloadBytesRead);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Null(result.MetadataReason);
@@ -197,7 +197,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer, observation: printer.Observation with { SizeBytes = null });
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
@@ -267,7 +267,7 @@ public sealed class OctoPrintFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         AssertSourceChanged(result);
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public sealed class OctoPrintFileEnrichmentTests
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
         Assert.All(printer.Calls, call => Assert.Equal(BaseUrl, call.Origin));
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Partial, result.MetadataState);
         Assert.Equal(RedirectRefused, result.MetadataReason);
         Assert.Equal(NativeSource, result.MetadataSource);
@@ -365,7 +365,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);
         Assert.Equal(NativeAndFileSource, result.MetadataSource);
@@ -388,8 +388,8 @@ public sealed class OctoPrintFileEnrichmentTests
         Assert.Equal(
             [
                 "/api/files/local/" + escaped,
-                "/downloads/files/local/" + escaped,
                 ThumbnailPath,
+                "/downloads/files/local/" + escaped,
                 "/api/files/local/" + escaped,
             ],
             printer.Paths);
@@ -456,7 +456,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, expectedPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, expectedPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
         Assert.Equal(Png, result.Image);
         Assert.Equal("image/png", result.ContentType);
@@ -537,7 +537,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Absent, result.ThumbnailState);
         Assert.Equal(ThumbnailMissing, result.ThumbnailReason);
         Assert.Null(result.Image);
@@ -583,7 +583,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.ThumbnailState);
         Assert.Equal(Png, result.Image);
         Assert.Equal("image/png", result.ContentType);
@@ -892,7 +892,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
-        Assert.Equal([DetailsPath, DownloadPath, DownloadPath, ThumbnailPath, DetailsPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.InRange(printer.Calls.Count, 1, PrinterFileEnrichmentLimits.MaximumRequests);
         Assert.InRange(result.ResponseBytes, 1L, PrinterFileEnrichmentLimits.MaximumResponseBytes);
         Assert.Equal(printer.BytesRead, result.ResponseBytes);
@@ -919,7 +919,7 @@ public sealed class OctoPrintFileEnrichmentTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => EnrichAsync(printer, ct: cancellation.Token));
 
-        Assert.Equal([DetailsPath, DownloadPath], printer.Paths);
+        Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath], printer.Paths);
     }
 
     private static async Task<PrinterFileEnrichmentContent> EnrichAsync(

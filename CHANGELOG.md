@@ -64,6 +64,11 @@
 
 ### Fixes
 
+- Preserve acquired printer-file metadata and thumbnails when optional G-code
+  fallback times out. Native thumbnail acquisition now precedes fallback, and
+  the service lets the adapter report partial results before its safety timeout
+  (#3571).
+
 - Retry printer-file lease allocation conflicts as whole transactions instead
   of failing scans on wrapped PostgreSQL serialization errors. Bulk Force
   Refresh now uses the configured I/O capacity rather than scanning printers
