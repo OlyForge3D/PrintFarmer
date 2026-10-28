@@ -1122,12 +1122,11 @@ final class APIClientTests: XCTestCase {
         let url = URL(string: "https://mock.invalid/cancel")!
 
         let entryBarrier = AsyncBarrier()
-        let releaseBarrier = AsyncBarrier()
+        let releaseHandler = DispatchSemaphore(value: 0)
         let stopBarrier = AsyncBarrier()
         let completions = CompletionLog()
         defer {
             entryBarrier.close()
-            releaseBarrier.close()
             stopBarrier.close()
             completions.close()
         }
@@ -1135,9 +1134,9 @@ final class APIClientTests: XCTestCase {
         session.onStopLoading = { stopBarrier.signal() }
         session.onCompletion = { delivered in completions.record(delivered: delivered) }
 
-        session.asyncRequestHandler = { request in
+        session.requestHandler = { request in
             entryBarrier.signal()
-            await releaseBarrier.arriveAndWait()
+            releaseHandler.wait()
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data("late".utf8))
         }
 
@@ -1145,16 +1144,15 @@ final class APIClientTests: XCTestCase {
             try await session.urlSession.data(from: url).0
         }
 
-        // Handler is provably parked inside startLoading.
+        // The handler has entered startLoading and cannot return before release.
         await entryBarrier.waitUntilArrived()
-        await releaseBarrier.waitUntilReleaseWaiterCount(1)
 
-        // Cancel while the handler is parked, then wait until stopLoading fences.
+        // Cancel while the handler is inside startLoading, then wait for the fence.
         task.cancel()
         await stopBarrier.waitUntilArrived()
 
-        // Release the parked handler; its terminal callback must be suppressed.
-        releaseBarrier.release()
+        // Release the handler; its terminal callback must be suppressed.
+        releaseHandler.signal()
 
         do {
             let data = try await task.value
