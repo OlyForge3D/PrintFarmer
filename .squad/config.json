@@ -25,5 +25,5 @@
     "hicks": "medium",
     "vasquez": "medium"
   },
-  "stateBackend": "two-layer"
+  "stateBackend": "local"
 }
