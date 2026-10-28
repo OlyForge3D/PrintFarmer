@@ -80,6 +80,7 @@ final class PreheatSubgroupTests: XCTestCase {
                     $0.accessibilityIdentifier == "printer.controls.\(heater.rawValue).target"
                 } as? UITextField)
                 XCTAssertEqual(field.accessibilityLabel, "\(heater.title) target in degrees Celsius")
+                XCTAssertTrue(field.isEnabled, "The compact readout must not disable tap-to-edit targets")
                 // Accessibility sizes right-align so every row keeps one gap to °C (N12).
                 XCTAssertEqual(field.textAlignment, type.isAccessibilitySize ? .right : .center,
                                "The target reads as a tappable value chip")
@@ -105,6 +106,15 @@ final class PreheatSubgroupTests: XCTestCase {
                     XCTAssertGreaterThanOrEqual(frame.minX, -1)
                     XCTAssertLessThanOrEqual(frame.maxX, width + 1)
                 }
+            }
+            if type.isAccessibilitySize {
+                let visible = try recognizedTexts(controller)
+                XCTAssertTrue(visible.contains { $0.contains("/") && $0.contains("215") },
+                              "Accessibility-size hotend readout stays compact: \(visible)")
+                XCTAssertTrue(visible.contains { $0.contains("/") && $0.contains("60") },
+                              "Accessibility-size measured/target readouts stay compact: \(visible)")
+                XCTAssertFalse(visible.contains { $0.localizedCaseInsensitiveContains("target:") },
+                               "Accessibility-size readouts do not add a separate target caption: \(visible)")
             }
             let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
                 XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
