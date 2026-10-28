@@ -310,6 +310,16 @@ class EventTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    # Tests asserting a non-timeout outcome use these budgets only as hang detectors.
+    # The shared post-test idle window deliberately spans attempt teardown and the
+    # retry relaunch (test_idle_deadline_continues_across_attempt_restart), so it
+    # must absorb a cold interpreter exec of the stub, which exceeds 0.2s on macOS
+    # hosts. Timeout behaviour is proved separately with explicit tight budgets.
+    OUTCOME_INVOCATION_TIMEOUT = 30
+    OUTCOME_FINALIZATION_TIMEOUT = 10
+    TIGHT_INVOCATION_TIMEOUT = 1.5
+    TIGHT_FINALIZATION_TIMEOUT = 0.3
+
     def setUp(self):
         self.directory = Path("build/runner-tests") / uuid.uuid4().hex
         self.directory.mkdir(parents=True)
@@ -362,7 +372,7 @@ class RunnerTests(unittest.TestCase):
             "                if os.environ['RUNNER_TEST_RETRY_STATUS'] in ('Failure','Failed'):\n"
             "                    emit('RUNNER_TEST_ISSUE')\n"
             "            else:\n"
-            "                time.sleep(0.35 if mode=='long-body' else 0.06)\n"
+            "                time.sleep(float(os.environ.get('RUNNER_TEST_BODY_SECONDS', '0.06')))\n"
             "                emit('RUNNER_TEST_FINISH')\n"
             "                if mode.startswith('retry'):\n"
             "                    if mode!='retry-no-issue': emit('RUNNER_TEST_ISSUE')\n"
@@ -394,7 +404,8 @@ class RunnerTests(unittest.TestCase):
 
     def invoke(self, mode, status="Success", retry_failed_tests=False,
                retry_status="Success", extra_environment=None, *,
-               invocation_timeout=1.5, finalization_timeout=0.3, flush_seconds=0.1):
+               invocation_timeout=OUTCOME_INVOCATION_TIMEOUT,
+               finalization_timeout=OUTCOME_FINALIZATION_TIMEOUT, flush_seconds=0.1):
         marker = self.directory / "attempt-count"
         marker.unlink(missing_ok=True)
         environment = {
@@ -480,8 +491,10 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(
             self.bundle.with_name("Results-first.timing.json").exists()
         )
-        self.assertEqual(summary["invocation_budget_seconds"], 1.5)
-        self.assertEqual(summary["finalization_budget_seconds"], 0.3)
+        self.assertEqual(summary["invocation_budget_seconds"],
+                         self.OUTCOME_INVOCATION_TIMEOUT)
+        self.assertEqual(summary["finalization_budget_seconds"],
+                         self.OUTCOME_FINALIZATION_TIMEOUT)
 
     def test_unexpected_full_shard_retry_is_rejected_and_retained(self):
         self.bundle = self.directory / "FullShard.xcresult"
@@ -648,7 +661,10 @@ class RunnerTests(unittest.TestCase):
         self.assertLess(summary["post_last_test_seconds"], 3)
 
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
-        code, summary = self.invoke("ignore-interrupt")
+        code, summary = self.invoke(
+            "ignore-interrupt", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+            finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
         self.assertLess(summary["post_last_test_seconds"], 0.5)
@@ -664,11 +680,21 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(not state or state.startswith("Z"), state)
 
     def test_active_body_longer_than_finalization_budget_is_not_interrupted(self):
-        self.assertEqual(self.invoke("long-body")[0], 0)
+        # The body outlasts the idle budget; the post-body teardown is in-process only.
+        code, summary = self.invoke(
+            "long-body", extra_environment={"RUNNER_TEST_BODY_SECONDS": "1.5"},
+            finalization_timeout=1,
+        )
+        self.assertEqual(code, 0)
+        self.assertGreater(summary["invocation_seconds"],
+                           summary["finalization_budget_seconds"])
         self.assertFalse((self.bundle / "flushed").exists())
 
     def test_missing_events_hit_separate_invocation_bound(self):
-        code, summary = self.invoke("no-events")
+        code, summary = self.invoke(
+            "no-events", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+            finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["termination_reason"], "invocation-timeout")
         self.assertIsNone(summary["post_last_test_seconds"])
