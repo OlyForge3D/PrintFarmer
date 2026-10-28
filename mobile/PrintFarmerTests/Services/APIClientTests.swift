@@ -1121,20 +1121,23 @@ final class APIClientTests: XCTestCase {
         let session = MockURLProtocol.makeSession()
         let url = URL(string: "https://mock.invalid/cancel")!
 
-        let entryLatch = DispatchSemaphore(value: 0)
-        let releaseLatch = DispatchSemaphore(value: 0)
-        let stopLatch = DispatchSemaphore(value: 0)
+        let entryBarrier = AsyncBarrier()
+        let releaseBarrier = AsyncBarrier()
+        let stopBarrier = AsyncBarrier()
         let completions = CompletionLog()
-        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+        defer {
+            entryBarrier.close()
+            releaseBarrier.close()
+            stopBarrier.close()
+            completions.close()
+        }
 
-        session.onStopLoading = { stopLatch.signal() }
+        session.onStopLoading = { stopBarrier.signal() }
         session.onCompletion = { delivered in completions.record(delivered: delivered) }
 
-        session.requestHandler = { request in
-            entryLatch.signal()
-            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
-                throw URLError(.timedOut)
-            }
+        session.asyncRequestHandler = { request in
+            entryBarrier.signal()
+            await releaseBarrier.arriveAndWait()
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data("late".utf8))
         }
 
@@ -1143,24 +1146,15 @@ final class APIClientTests: XCTestCase {
         }
 
         // Handler is provably parked inside startLoading.
-        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: entryLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(entered, "Handler must enter startLoading before cancellation.")
+        await entryBarrier.waitUntilArrived()
+        await releaseBarrier.waitUntilReleaseWaiterCount(1)
 
         // Cancel while the handler is parked, then wait until stopLoading fences.
         task.cancel()
-        let fenced: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: stopLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(fenced, "stopLoading() must fence the load after cancellation.")
+        await stopBarrier.waitUntilArrived()
 
         // Release the parked handler; its terminal callback must be suppressed.
-        releaseLatch.signal()
+        releaseBarrier.release()
 
         do {
             let data = try await task.value
@@ -1170,12 +1164,7 @@ final class APIClientTests: XCTestCase {
         }
 
         // The handler's terminal callback must reach the fence and be suppressed.
-        let sawTerminal: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: completions.terminalLatch.wait(timeout: barrierTimeout) != .timedOut)
-            }
-        }
-        XCTAssertTrue(sawTerminal, "The handler's terminal callback must reach the lifecycle fence.")
+        await completions.waitUntilTerminal()
         XCTAssertEqual(completions.deliveredCount(), 0, "stopLoading() must suppress the terminal callback after cancellation.")
         XCTAssertEqual(completions.suppressedCount(), 1, "Exactly one terminal callback must be fenced/suppressed.")
         XCTAssertEqual(session.capturedRequests.count, 1)
@@ -1228,19 +1217,27 @@ private final class OrderedEventLog: @unchecked Sendable {
 }
 
 /// Records the delivered/suppressed outcome of each terminal `MockURLProtocol`
-/// callback via the session's `onCompletion` seam. `terminalLatch` lets a test
-/// causally await the fenced terminal decision with a fail-fast timeout.
+/// callback via the session's `onCompletion` seam. `terminalBarrier` lets a test
+/// causally await the fenced terminal decision without wall-clock timing.
 private final class CompletionLog: @unchecked Sendable {
     private let lock = NSLock()
     private var delivered = 0
     private var suppressed = 0
-    let terminalLatch = DispatchSemaphore(value: 0)
+    private let terminalBarrier = AsyncBarrier()
 
     func record(delivered isDelivered: Bool) {
         lock.lock()
         if isDelivered { delivered += 1 } else { suppressed += 1 }
         lock.unlock()
-        terminalLatch.signal()
+        terminalBarrier.signal()
+    }
+
+    func waitUntilTerminal() async {
+        await terminalBarrier.waitUntilArrived()
+    }
+
+    func close() {
+        terminalBarrier.close()
     }
 
     func deliveredCount() -> Int {
