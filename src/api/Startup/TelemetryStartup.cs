@@ -1,4 +1,5 @@
 ﻿using System;
+using Farm.Infrastructure.Services.Printers;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -118,7 +119,12 @@ public static class TelemetryStartup
                        .AddMeter("PrintFarmer.FailureDetection")
                        .AddMeter("PrintFarmer.API")
                        .AddMeter(Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics.MeterName)
-                       .AddMeter(Farm.Infrastructure.Services.Webhooks.WebhookMetrics.MeterName);
+                       .AddMeter(Farm.Infrastructure.Services.Webhooks.WebhookMetrics.MeterName)
+                       .AddMeter(PrinterFileEnrichmentMetrics.MeterName)
+                       .AddView(PrinterFileEnrichmentMetrics.FallbackDurationName, new ExplicitBucketHistogramConfiguration
+                       {
+                           Boundaries = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 15000, 30000],
+                       });
 
                 // Add console exporter only if explicitly enabled (same as tracing)
                 if (enableConsoleExporter)

@@ -386,6 +386,93 @@ refresh also make work due. Successful metadata remains useful when image
 capture cannot proceed, and local-capacity retries do not repeatedly read
 already-settled metadata.
 
+#### Fallback telemetry
+
+The `PrintFarmer.PrinterFileEnrichment` meter measures the shared acquisition
+pipeline for Moonraker, OctoPrint, and PrusaLink. It uses the API's existing
+OpenTelemetry exporters: scrape `/metrics` with Prometheus or configure
+`OpenTelemetry:OTLP:Endpoint`. `DISABLE_TELEMETRY=true` and the `Testing`
+environment disable export. Deploy the instrumentation and collect samples
+before drawing conclusions about live fallback frequency or latency.
+
+| OpenTelemetry instrument | Type / unit | Labels | Meaning |
+| --- | --- | --- | --- |
+| `printer_file.enrichment.started` | Counter / acquisitions | `backend` | Acquisitions started, including native-only attempts |
+| `printer_file.enrichment.fallback.started` | Counter / fallbacks | `backend`, `trigger` | Actual bounded G-code/BGCode fallback attempts |
+| `printer_file.enrichment.fallback.skipped` | Counter / fallbacks | `backend`, `trigger`, `reason` | Needed fallback not started because the budget was exhausted or the source was empty |
+| `printer_file.enrichment.fallback.duration` | Histogram / ms | `backend`, `trigger`, `outcome` | Elapsed fallback reads and parsing, including unsuccessful attempts |
+
+Labels are bounded: `backend` is `moonraker`, `octoprint`, `prusalink`, or
+`unknown`; `trigger` is `metadata`, `thumbnail`, or `metadata_and_thumbnail`.
+Skip reasons are `deadline`, `request_limit`, `response_limit`, or `empty_source`.
+Duration outcomes are `completed`, `partial`, `timeout`, `failed`, `cancelled`,
+or `error`. File paths, printer/user IDs, URLs, credentials and exception text
+are not metric labels.
+
+One acquisition starts at most one fallback; head/tail reads and reuse of its
+parsed thumbnail count together. Retries and revalidation are new acquisitions,
+not unique files. Metadata gaps can trigger fallback even when a native image
+is ready. Time covers the bounded reads and parsing only, excluding native
+metadata/images, final source verification, database and thumbnail publication.
+`completed` means the bounded parser finished conclusively, not that it found
+every field or a valid image, or that publication succeeded. `partial` preserves
+some fallback data despite an inconclusive read; `timeout` identifies the
+per-file deadline, `cancelled` caller cancellation, and `error` an unexpected
+exception that still propagates.
+
+Timeout samples measure time spent before interruption, not the time a full
+read would have needed. They consume the **remaining** shared 15-second budget
+after native work. Do not discard them when assessing cost: doing so biases
+latency toward successful reads. Histogram boundaries are 10, 50, 100, 250,
+500, 1000, 2500, 5000, 10000, 15000 and 30000 ms, plus infinity.
+
+Prometheus translates the names below. Fallback-start percentage by backend,
+including zero fallback when acquisition samples exist:
+
+```promql
+100 * (
+  sum by (backend) (rate(printer_file_enrichment_fallback_started_total[1h]))
+  or on (backend)
+  (0 * sum by (backend) (rate(printer_file_enrichment_started_total[1h])))
+) / sum by (backend) (rate(printer_file_enrichment_started_total[1h]))
+```
+
+Approximate p95 and mean fallback time in milliseconds, across all outcomes:
+
+```promql
+histogram_quantile(0.95,
+  sum by (le, backend) (
+    rate(printer_file_enrichment_fallback_duration_milliseconds_bucket[1h])
+  )
+)
+
+sum by (backend) (rate(printer_file_enrichment_fallback_duration_milliseconds_sum[1h]))
+/
+sum by (backend) (rate(printer_file_enrichment_fallback_duration_milliseconds_count[1h]))
+```
+
+Completed attempt counts by outcome (including timeouts) and skipped attempts
+by reason over the same window:
+
+```promql
+sum by (backend, outcome) (
+  increase(printer_file_enrichment_fallback_duration_milliseconds_count[1h])
+)
+
+sum by (backend, reason) (
+  increase(printer_file_enrichment_fallback_skipped_total[1h])
+)
+```
+
+No series can mean no recorded event or no working exporter/scrape; it is not
+proof of zero cost. A zero denominator means no observed acquisition activity,
+not a measured 0% fallback rate. Windowed rates need multiple scrapes and include
+in-flight work; histogram counts appear when an attempt ends, whereas start
+counters appear immediately. These measurements can refute a fallback-cost
+hypothesis, but cannot by themselves attribute latency to printer hardware,
+networking, or parsing. Misreading them could lead operators to change budgets
+or concurrency unnecessarily, delaying previews or increasing printer load.
+
 #### Shared thumbnail storage and upgrade requirements
 
 Apply the `AddPrinterFileEnrichment` AppDbContext migration for the configured

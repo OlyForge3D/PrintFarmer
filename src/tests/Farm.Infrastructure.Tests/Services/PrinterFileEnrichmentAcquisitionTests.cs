@@ -7,7 +7,7 @@ using Farm.Infrastructure.Services.Printers;
 namespace Farm.Infrastructure.Tests.Services;
 
 // Every fixture below is synthetic; nothing was captured from a real printer.
-public sealed class PrinterFileEnrichmentAcquisitionTests
+public sealed partial class PrinterFileEnrichmentAcquisitionTests
 {
     private const string PngBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";

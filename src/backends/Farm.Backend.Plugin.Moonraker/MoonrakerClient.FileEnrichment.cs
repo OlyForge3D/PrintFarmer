@@ -35,7 +35,8 @@ public partial class MoonrakerClient : ISupportsPrinterFileEnrichment
         }
 
         PrinterFileEnrichmentSources sources = new(session.ReadNativeAsync, session.ReadRegionAsync, session.VerifyUnchangedAsync);
-        return await PrinterFileEnrichmentAcquisition.AcquireAsync(observation, sources, captureThumbnail, ct)
+        return await PrinterFileEnrichmentAcquisition.AcquireAsync(
+            observation, sources, captureThumbnail, ct, backend: PrinterBackend.Moonraker)
             .ConfigureAwait(false);
     }
 

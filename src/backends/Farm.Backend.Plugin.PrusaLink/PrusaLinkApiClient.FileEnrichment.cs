@@ -35,7 +35,8 @@ public partial class PrusaLinkApiClient
 
         PrinterFileEnrichmentSources sources = new(
             session.ReadNativeAsync, session.ReadRegionAsync, session.VerifyUnchangedAsync);
-        return await PrinterFileEnrichmentAcquisition.AcquireAsync(observation, sources, captureThumbnail, ct)
+        return await PrinterFileEnrichmentAcquisition.AcquireAsync(
+            observation, sources, captureThumbnail, ct, backend: PrinterBackend.PrusaLink)
             .ConfigureAwait(false);
     }
 

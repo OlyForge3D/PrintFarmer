@@ -12,6 +12,12 @@
   for SQLite, PostgreSQL, or SQL Server; API replicas must share the database
   and persistent Gcode volume.
 
+- Measure bounded printer-file fallback frequency and elapsed time by backend
+  through the existing OpenTelemetry/Prometheus pipeline (#3571). Acquisition,
+  fallback-start and skipped counters plus a duration histogram distinguish
+  metadata/image triggers, timeouts, cancellations and failures without
+  exporting file paths, printer IDs or credentials.
+
 - Persist PrusaLink native file details in the database, including full display
   names, sizes, and all 41 supported print-metadata fields. Show saved details
   independently of thumbnail availability; reuse unchanged observations during
@@ -63,6 +69,10 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Align the Prometheus exporter with the OpenTelemetry 1.18 SDK so `/metrics`
+  exports samples instead of returning an empty HTTP 200 response after a
+  serializer type-load failure (#3571).
 
 - Preserve acquired printer-file metadata and thumbnails when optional G-code
   fallback times out. Native thumbnail acquisition now precedes fallback, and

@@ -46,10 +46,12 @@ public sealed class OctoPrintFileEnrichmentTests
     [Fact]
     public async Task EnrichFileAsync_NativeAnalysis_MapsEverySupportedFieldAndReadsTheAdvertisedThumbnail()
     {
+        using FileEnrichmentMetricCapture metrics = new();
         using FakePrinter printer = new(Gcode("G28"));
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
+        metrics.AssertAcquisition("octoprint", fallback: true);
         Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal<string?>(
             [null, null, $"bytes=0-{printer.Content.Length - 1}", null], printer.Calls.Select(call => call.Range));

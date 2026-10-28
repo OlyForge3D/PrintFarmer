@@ -42,10 +42,12 @@ public sealed class PrusaLinkFileEnrichmentTests
     [Fact]
     public async Task EnrichFileAsync_CompleteNativeMetadata_ReadsDetailsAndThumbnailWithoutDownloadingTheFile()
     {
+        using FileEnrichmentMetricCapture metrics = new();
         using FakePrinter printer = new(DefaultGcode()) { Meta = CompleteMeta() };
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
+        metrics.AssertAcquisition("prusalink", fallback: false);
         Assert.Equal([DetailsPath, ThumbnailPath, DetailsPath], printer.Paths);
         Assert.All(printer.Calls, call =>
         {
@@ -83,10 +85,12 @@ public sealed class PrusaLinkFileEnrichmentTests
     [Fact]
     public async Task EnrichFileAsync_IncompleteNativeMetadata_NativeWinsAndFileFillsOnlyMissingFields()
     {
+        using FileEnrichmentMetricCapture metrics = new();
         using FakePrinter printer = new(DefaultGcode()) { Meta = PartialMeta() };
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
+        metrics.AssertAcquisition("prusalink", fallback: true);
         Assert.Equal([DetailsPath, ThumbnailPath, DownloadPath, DetailsPath], printer.Paths);
         Assert.Equal([$"bytes=0-{printer.Content.Length - 1}"], DownloadRanges(printer));
         Assert.Equal(PrinterFileEnrichmentState.Ready, result.MetadataState);

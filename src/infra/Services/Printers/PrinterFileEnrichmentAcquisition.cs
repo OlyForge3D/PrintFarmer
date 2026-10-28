@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Gcode;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -51,11 +52,15 @@ public static class PrinterFileEnrichmentAcquisition
         PrinterFileEnrichmentSources sources,
         bool captureThumbnail,
         CancellationToken ct,
-        IGcodeMetadataExtractorService? extractor = null)
+        IGcodeMetadataExtractorService? extractor = null,
+        PrinterBackend backend = PrinterBackend.Unknown,
+        PrinterFileEnrichmentMetrics? metrics = null)
     {
         ArgumentNullException.ThrowIfNull(observation);
         ArgumentNullException.ThrowIfNull(sources);
         ct.ThrowIfCancellationRequested();
+        metrics ??= PrinterFileEnrichmentMetrics.Shared;
+        metrics.RecordEnrichment(backend);
         if (sources.ReadNativeAsync is null && sources.ReadRegionAsync is null)
         {
             return new(
@@ -67,7 +72,7 @@ public static class PrinterFileEnrichmentAcquisition
         }
 
         using PrinterFileEnrichmentBudget budget = new(ct);
-        Run run = new(observation, sources, captureThumbnail, budget, extractor ?? DefaultExtractor, ct);
+        Run run = new(observation, sources, captureThumbnail, budget, extractor ?? DefaultExtractor, backend, metrics, ct);
         return await run.ExecuteAsync().ConfigureAwait(false);
     }
 
@@ -108,6 +113,8 @@ public static class PrinterFileEnrichmentAcquisition
         private readonly PrinterFileEnrichmentBudget budget;
         private readonly IGcodeMetadataExtractorService extractor;
         private readonly CancellationToken ct;
+        private readonly PrinterBackend backend;
+        private readonly PrinterFileEnrichmentMetrics metrics;
         private PrinterPrintMetadata? native;
         private Func<PrinterFileEnrichmentBudget, Task<byte[]?>>? nativeImage;
         private long? size;
@@ -116,7 +123,8 @@ public static class PrinterFileEnrichmentAcquisition
 
         public Run(
             PrinterFileInventoryEntry observation, PrinterFileEnrichmentSources sources, bool captureThumbnail,
-            PrinterFileEnrichmentBudget budget, IGcodeMetadataExtractorService extractor, CancellationToken ct)
+            PrinterFileEnrichmentBudget budget, IGcodeMetadataExtractorService extractor,
+            PrinterBackend backend, PrinterFileEnrichmentMetrics metrics, CancellationToken ct)
         {
             this.observation = observation;
             this.sources = sources;
@@ -124,6 +132,8 @@ public static class PrinterFileEnrichmentAcquisition
             this.budget = budget;
             this.extractor = extractor;
             this.ct = ct;
+            this.backend = backend;
+            this.metrics = metrics;
             size = observation.SizeBytes is >= 0 ? observation.SizeBytes : null;
         }
 
@@ -283,9 +293,10 @@ public static class PrinterFileEnrichmentAcquisition
                 bool needFallback = sources.ReadRegionAsync is not null && (native is null || MissingFields(native));
                 if (needFallback)
                 {
-                    fallback = BudgetReason() is { } stop
-                        ? Fallback.Failure(stop)
-                        : await ReadFallbackAsync(needTail: true).ConfigureAwait(false);
+                    string trigger = captureThumbnail && nativeThumbnail?.State != PrinterFileEnrichmentState.Ready
+                        ? "metadata_and_thumbnail"
+                        : "metadata";
+                    fallback = await AcquireFallbackAsync(needTail: true, trigger).ConfigureAwait(false);
                 }
 
                 ThumbnailOutcome thumbnail = await ResolveThumbnailAsync(nativeThumbnail).ConfigureAwait(false);
@@ -304,6 +315,47 @@ public static class PrinterFileEnrichmentAcquisition
             catch (Exception ex) when (ReasonOf(ex) is { } reason)
             {
                 return Terminal(reason);
+            }
+        }
+
+        private async Task<Fallback> AcquireFallbackAsync(bool needTail, string trigger)
+        {
+            if (BudgetReason() is { } stop)
+            {
+                metrics.SkipFallback(backend, trigger, stop);
+                return Fallback.Failure(stop);
+            }
+
+            if (size == 0)
+            {
+                metrics.SkipFallback(backend, trigger, "empty_source");
+                return await ReadFallbackAsync(needTail).ConfigureAwait(false);
+            }
+
+            long started = metrics.StartFallback(backend, trigger);
+            string outcome = "error";
+            try
+            {
+                Fallback result = await ReadFallbackAsync(needTail).ConfigureAwait(false);
+                outcome = result.Reason == "deadline" ? "timeout"
+                    : result.Conclusive && result.Reason is null ? "completed"
+                    : result.Metadata is { HasValues: true } || result.Images.Count > 0 ? "partial"
+                    : "failed";
+                return result;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                outcome = "cancelled";
+                throw;
+            }
+            catch (Exception ex) when (ReasonOf(ex) is { } reason)
+            {
+                outcome = reason == "deadline" ? "timeout" : "failed";
+                throw;
+            }
+            finally
+            {
+                metrics.CompleteFallback(backend, trigger, outcome, started);
             }
         }
 
@@ -533,14 +585,7 @@ public static class PrinterFileEnrichmentAcquisition
             {
                 if (fallback is null)
                 {
-                    if (BudgetReason() is { } stop)
-                    {
-                        misses.Add((PrinterFileEnrichmentState.Deferred, stop));
-                    }
-                    else
-                    {
-                        fallback = await ReadFallbackAsync(needTail: false).ConfigureAwait(false);
-                    }
+                    fallback = await AcquireFallbackAsync(needTail: false, "thumbnail").ConfigureAwait(false);
                 }
 
                 if (fallback is { } embedded)

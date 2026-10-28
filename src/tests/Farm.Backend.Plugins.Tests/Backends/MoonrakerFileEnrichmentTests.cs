@@ -49,10 +49,12 @@ public sealed class MoonrakerFileEnrichmentTests
     [Fact]
     public async Task EnrichFileAsync_RichNativeMetadata_MapsEverySupportedFieldAndReadsTheLargestThumbnail()
     {
+        using FileEnrichmentMetricCapture metrics = new();
         using FakePrinter printer = new(Gcode("G28")) { Meta = RichMeta() };
 
         PrinterFileEnrichmentContent result = await EnrichAsync(printer);
 
+        metrics.AssertAcquisition("moonraker", fallback: true);
         Assert.Equal([MetadataQuery, LargeThumbnailPath, FilePath, MetadataQuery], printer.Paths);
         Assert.Equal<string?>(
             [null, null, $"bytes=0-{printer.Content.Length - 1}", null], printer.Calls.Select(call => call.Range));

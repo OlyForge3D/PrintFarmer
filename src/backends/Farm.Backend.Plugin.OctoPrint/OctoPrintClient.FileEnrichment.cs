@@ -38,7 +38,8 @@ public partial class OctoPrintClient : ISupportsPrinterFileEnrichment
         }
 
         PrinterFileEnrichmentSources sources = new(session.ReadNativeAsync, session.ReadRegionAsync, session.VerifyUnchangedAsync);
-        return await PrinterFileEnrichmentAcquisition.AcquireAsync(observation, sources, captureThumbnail, ct)
+        return await PrinterFileEnrichmentAcquisition.AcquireAsync(
+            observation, sources, captureThumbnail, ct, backend: PrinterBackend.OctoPrint)
             .ConfigureAwait(false);
     }
 
