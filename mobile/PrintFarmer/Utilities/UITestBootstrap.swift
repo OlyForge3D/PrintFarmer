@@ -2958,6 +2958,45 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
 }
 
 #if DEBUG
+/// #3457 diagnostic only, not a product contract: records List `onMove` deliveries and
+/// fixture repository move calls so Harvest XCUI can tell a cancelled drop from a no-op.
+final class QueueReorderUITestDiagnostics: @unchecked Sendable {
+    static let shared = QueueReorderUITestDiagnostics()
+    @MainActor static var isActive: Bool {
+        UITestBootstrap.isEnabled && UITestBootstrap.mode == .authenticatedQueueReorder
+    }
+
+    private let lock = NSLock()
+    private var onMoveCount = 0
+    private var lastOnMove = "none"
+    private var repositoryMoveCount = 0
+
+    func recordOnMove(offsets: IndexSet, destination: Int) {
+        lock.withLock {
+            onMoveCount += 1
+            lastOnMove = "\(offsets.map { String($0) }.joined(separator: ","))->\(destination)"
+        }
+    }
+
+    func recordRepositoryMove() {
+        lock.withLock { repositoryMoveCount += 1 }
+    }
+
+    var summary: String {
+        lock.withLock {
+            Self.summary(
+                onMoveCount: onMoveCount,
+                lastOnMove: lastOnMove,
+                repositoryMoveCount: repositoryMoveCount
+            )
+        }
+    }
+
+    static func summary(onMoveCount: Int, lastOnMove: String, repositoryMoveCount: Int) -> String {
+        "onMove=\(onMoveCount) last=\(lastOnMove) repositoryMoves=\(repositoryMoveCount)"
+    }
+}
+
 private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sendable {
     private let lock = NSLock()
     private var queueJobs = QueueReorderUITestJobService.makeQueueJobs()
@@ -2973,7 +3012,8 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
         reviewedRowVersion: String,
         neighbor: QueuePositionNeighbor
     ) async throws -> MoveQueuedJobResponse {
-        try lock.withLock {
+        QueueReorderUITestDiagnostics.shared.recordRepositoryMove()
+        return try lock.withLock {
             guard let source = queueJobs.firstIndex(where: { $0.job.jobUUID == id }),
                   let neighborIndex = queueJobs.firstIndex(where: {
                       switch neighbor {

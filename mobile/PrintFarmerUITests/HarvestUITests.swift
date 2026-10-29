@@ -105,6 +105,7 @@ final class HarvestUITests: QueueUITestBase {
             // slot, so drop past its midpoint (between the two boundary rows).
             try requireDraggable(alphaHandle, "alpha reorder handle before priority drag")
             try requireDraggable(priorityBoundary, "priority-boundary row")
+            let priorityDiagnosticsBefore = reorderDiagnostics(in: app)
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: priorityBoundary.coordinate(
@@ -113,7 +114,13 @@ final class HarvestUITests: QueueUITestBase {
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
             )
-            XCTAssertTrue(crossGroupError.waitForExistence(timeout: 5),
+            let priorityRejected = crossGroupError.waitForExistence(timeout: 5)
+            attachReorderDiagnostics(
+                "priority boundary",
+                before: priorityDiagnosticsBefore,
+                after: reorderDiagnostics(in: app)
+            )
+            XCTAssertTrue(priorityRejected,
                           "A drop into another priority group must be rejected visibly.")
             try requireDraggable(alphaHandle, "alpha reorder handle after priority drag")
             XCTAssertEqual(currentGroupOrder(), reorderedGroup,
@@ -140,6 +147,7 @@ final class HarvestUITests: QueueUITestBase {
 
             try requireDraggable(alphaHandle, "alpha reorder handle before printer drag")
             try requireDraggable(printerBoundary, "printer-boundary row")
+            let printerDiagnosticsBefore = reorderDiagnostics(in: app)
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: printerBoundary.coordinate(
@@ -148,12 +156,32 @@ final class HarvestUITests: QueueUITestBase {
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
             )
-            XCTAssertTrue(crossGroupError.waitForExistence(timeout: 5),
+            let printerRejected = crossGroupError.waitForExistence(timeout: 5)
+            attachReorderDiagnostics(
+                "printer boundary",
+                before: printerDiagnosticsBefore,
+                after: reorderDiagnostics(in: app)
+            )
+            XCTAssertTrue(printerRejected,
                           "A drop into another printer group must be rejected visibly.")
             try requireDraggable(alphaHandle, "alpha reorder handle after printer drag")
             XCTAssertEqual(currentGroupOrder(), restoredGroup,
                            "Dragging to another printer group must not reorder this group.")
         }
+    }
+
+    /// #3457 diagnostic only: reads the DEBUG queue-reorder fixture's onMove and
+    /// repository move counters. It never gates the test's own assertions.
+    private func reorderDiagnostics(in app: XCUIApplication) -> String {
+        let label = app.descendants(matching: .any)["jobList.reorderDiagnostics"]
+        return label.exists ? label.label : "<unavailable>"
+    }
+
+    private func attachReorderDiagnostics(_ name: String, before: String, after: String) {
+        let attachment = XCTAttachment(string: "before: \(before)\nafter: \(after)")
+        attachment.name = "Queue reorder diagnostics (\(name))"
+        attachment.lifetime = .deleteOnSuccess
+        add(attachment)
     }
 
     /// Fails with a diagnosable message instead of letting XCTest synthesise a

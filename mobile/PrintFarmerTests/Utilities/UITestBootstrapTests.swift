@@ -625,4 +625,24 @@ final class UITestBootstrapTests: XCTestCase {
         }
         return defaults
     }
+
+    #if DEBUG
+    // MARK: - #3457 queue reorder diagnostics (diagnostic only)
+
+    func test_queueReorderDiagnostics_summarisesOnMoveAndRepositoryCalls() {
+        let diagnostics = QueueReorderUITestDiagnostics()
+        XCTAssertEqual(diagnostics.summary, "onMove=0 last=none repositoryMoves=0")
+
+        diagnostics.recordOnMove(offsets: IndexSet(integer: 2), destination: 5)
+        XCTAssertEqual(diagnostics.summary, "onMove=1 last=2->5 repositoryMoves=0")
+
+        diagnostics.recordRepositoryMove()
+        diagnostics.recordOnMove(offsets: IndexSet(integer: 1), destination: 0)
+        XCTAssertEqual(diagnostics.summary, "onMove=2 last=1->0 repositoryMoves=1")
+    }
+
+    func test_queueReorderDiagnostics_isInactiveOutsideQueueReorderUITests() {
+        XCTAssertFalse(QueueReorderUITestDiagnostics.isActive)
+    }
+    #endif
 }

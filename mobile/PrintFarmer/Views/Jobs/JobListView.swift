@@ -12,6 +12,9 @@ struct JobListView: View {
     @State private var retryTask: Task<Void, Never>?
     @State private var showsJobHistory = false
     @State private var historyNavigationPath: [AppDestination] = []
+    #if DEBUG
+    @State private var queueReorderDiagnostics: String?
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     private var activePrinterStatusRequestKey: String {
@@ -49,6 +52,11 @@ struct JobListView: View {
             }
         }
         .task {
+            #if DEBUG
+            if QueueReorderUITestDiagnostics.isActive {
+                queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+            }
+            #endif
             viewModel.activate()
             viewModel.configure(jobService: services.jobService)
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
@@ -232,11 +240,25 @@ struct JobListView: View {
                             .moveDisabled(!canMove)
                     }
                     .onMove { offsets, destination in
+                        #if DEBUG
+                        if QueueReorderUITestDiagnostics.isActive {
+                            QueueReorderUITestDiagnostics.shared.recordOnMove(
+                                offsets: offsets,
+                                destination: destination
+                            )
+                            queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+                        }
+                        #endif
                         Task { @MainActor in
                             await viewModel.moveQueuedRows(
                                 fromOffsets: offsets,
                                 toOffset: destination
                             )
+                            #if DEBUG
+                            if QueueReorderUITestDiagnostics.isActive {
+                                queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+                            }
+                            #endif
                         }
                     }
                 }
@@ -328,6 +350,20 @@ struct JobListView: View {
             $queueEditMode
         )
         .accessibilityIdentifier("jobList.combined.list")
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            // #3457 diagnostic only: zero-geometry label read by Harvest XCUI, not a List row.
+            if let queueReorderDiagnostics {
+                Text(queueReorderDiagnostics)
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(queueReorderDiagnostics)
+                    .accessibilityIdentifier("jobList.reorderDiagnostics")
+            }
+        }
+        #endif
     }
 
     private func recentFailuresHeader(count: Int) -> some View {
