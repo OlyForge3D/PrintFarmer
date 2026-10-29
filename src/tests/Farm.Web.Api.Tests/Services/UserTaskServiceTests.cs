@@ -640,39 +640,134 @@ public class UserTaskServiceTests
         UserTaskService firstService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
         UserTaskService secondService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
 
+        using CancellationTokenSource operationCancellation = new();
         Task<UserTaskDto> firstOperation = firstService.CreateOrUpdateProfileImportTaskAsync(
-            CreateProfileImportDto(printerModelId, firstPrinterId));
-        await state.FirstAddAttempted.WaitAsync(TimeSpan.FromSeconds(5));
+            CreateProfileImportDto(printerModelId, firstPrinterId), operationCancellation.Token);
+        try
+        {
+            await WaitForProfileImportSignalAsync(
+                state.FirstAddAttempted, firstOperation, "first add attempted", state.DescribeProgress, TimeSpan.FromSeconds(5));
 
-        Task<UserTaskDto> secondOperation = secondService.CreateOrUpdateProfileImportTaskAsync(
-            CreateProfileImportDto(printerModelId, secondPrinterId));
-        bool secondAddArmedBeforeInsert = await WaitForSignalAsync(state.SecondAddAttempted, TimeSpan.FromSeconds(1));
+            Task<UserTaskDto> secondOperation = secondService.CreateOrUpdateProfileImportTaskAsync(
+                CreateProfileImportDto(printerModelId, secondPrinterId), operationCancellation.Token);
+            bool secondAddArmedBeforeInsert = await WaitForSignalAsync(state.SecondAddAttempted, TimeSpan.FromSeconds(1));
+
+            state.AllowFirstInsert();
+            await WaitForProfileImportSignalAsync(
+                firstCreatedBroadcastEntered.Task, firstOperation, "first created broadcast entered", state.DescribeProgress, TimeSpan.FromSeconds(5));
+            state.AllowConflictingInsert();
+
+            if (secondAddArmedBeforeInsert)
+            {
+                await WaitForProfileImportSignalAsync(
+                    updatedBroadcastCompleted.Task, secondOperation, "updated broadcast completed", state.DescribeProgress, TimeSpan.FromSeconds(5));
+            }
+
+            _ = allowFirstCreatedBroadcast.TrySetResult(true);
+
+            UserTaskDto[] results = await Task.WhenAll(firstOperation, secondOperation);
+            UserTask finalTask = state.GetOpenTask(printerModelId);
+            List<Guid> relatedPrinterIds = JsonSerializer.Deserialize<List<Guid>>(finalTask.RelatedEntityIdsJson!)!;
+
+            Assert.Equal(2, results.Length);
+            Assert.All(results, result => Assert.Equal(finalTask.Id, result.Id));
+            Assert.Single(createdBroadcasts);
+            Assert.Single(updatedBroadcasts);
+            Assert.Equal(2, orderedBroadcasts.Count);
+            Assert.Equal(1, orderedBroadcasts[0].RelatedEntityCount);
+            Assert.Equal(2, orderedBroadcasts[1].RelatedEntityCount);
+            Assert.Equal(2, relatedPrinterIds.Count);
+            Assert.Contains(firstPrinterId, relatedPrinterIds);
+            Assert.Contains(secondPrinterId, relatedPrinterIds);
+        }
+        finally
+        {
+            await operationCancellation.CancelAsync();
+            state.AllowFirstInsert();
+            state.AllowConflictingInsert();
+            _ = allowFirstCreatedBroadcast.TrySetResult(true);
+        }
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_ReloadFaults_ReportsOriginalOperationException()
+    {
+        InverseInterleavingProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateInverseInterleavingProfileImportRepository(state);
+        InvalidOperationException expected = new("Injected committed-task reload failure");
+        repository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(expected);
+        UserTaskService service = new(repository.Object, _loggerMock.Object, _broadcasterMock.Object);
+        TaskCompletionSource<bool> broadcastEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<UserTaskDto> operation = service.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(Guid.NewGuid(), Guid.NewGuid()));
+        Task wait = WaitForProfileImportSignalAsync(
+            broadcastEntered.Task, operation, "first created broadcast entered", state.DescribeProgress, TimeSpan.FromSeconds(5));
 
         state.AllowFirstInsert();
-        await firstCreatedBroadcastEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        state.AllowConflictingInsert();
+#pragma warning disable VSTHRD003 // The assertion observes the fixture wait started above, not foreign work.
+        InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() => wait);
+#pragma warning restore VSTHRD003
 
-        if (secondAddArmedBeforeInsert)
+        Assert.Same(expected, actual);
+        Assert.False(broadcastEntered.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_InsertHeld_ReportsStageWithoutReleasingInsert()
+    {
+        InverseInterleavingProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateInverseInterleavingProfileImportRepository(state);
+        UserTaskService service = new(repository.Object, _loggerMock.Object);
+        TaskCompletionSource<bool> broadcastEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<UserTaskDto> operation = service.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(Guid.NewGuid(), Guid.NewGuid()));
+        try
         {
-            await updatedBroadcastCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+#pragma warning disable VSTHRD003 // The assertion races this test's own signal and service operation.
+            TimeoutException exception = await Assert.ThrowsAsync<TimeoutException>(() => WaitForProfileImportSignalAsync(
+                broadcastEntered.Task, operation, "first created broadcast entered", state.DescribeProgress, TimeSpan.Zero));
+#pragma warning restore VSTHRD003
+
+            Assert.Contains("first created broadcast entered", exception.Message);
+            Assert.Contains("operation=WaitingForActivation", exception.Message);
+            Assert.Contains("firstInsertAllowed=False", exception.Message);
+            Assert.Contains("firstInsertCompleted=False", exception.Message);
+            Assert.Contains("reloadAttempts=0", exception.Message);
+            Assert.Contains("threadPoolThreads=", exception.Message);
+            Assert.False(operation.IsCompleted);
         }
+        finally
+        {
+            state.AllowFirstInsert();
+            _ = await operation.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
 
-        _ = allowFirstCreatedBroadcast.TrySetResult(true);
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_SignalArrives_DoesNotRequireOperationCompletion()
+    {
+        TaskCompletionSource<bool> operation = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        UserTaskDto[] results = await Task.WhenAll(firstOperation, secondOperation);
-        UserTask finalTask = state.GetOpenTask(printerModelId);
-        List<Guid> relatedPrinterIds = JsonSerializer.Deserialize<List<Guid>>(finalTask.RelatedEntityIdsJson!)!;
+        await WaitForProfileImportSignalAsync(
+            Task.CompletedTask, operation.Task, "first created broadcast entered", () => "unused", TimeSpan.FromSeconds(5));
 
-        Assert.Equal(2, results.Length);
-        Assert.All(results, result => Assert.Equal(finalTask.Id, result.Id));
-        Assert.Single(createdBroadcasts);
-        Assert.Single(updatedBroadcasts);
-        Assert.Equal(2, orderedBroadcasts.Count);
-        Assert.Equal(1, orderedBroadcasts[0].RelatedEntityCount);
-        Assert.Equal(2, orderedBroadcasts[1].RelatedEntityCount);
-        Assert.Equal(2, relatedPrinterIds.Count);
-        Assert.Contains(firstPrinterId, relatedPrinterIds);
-        Assert.Contains(secondPrinterId, relatedPrinterIds);
+        Assert.False(operation.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_OperationCompletesWithoutSignal_ReportsMissingStage()
+    {
+        TaskCompletionSource<bool> signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+#pragma warning disable VSTHRD003 // The assertion supplies this test's own signal.
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() => WaitForProfileImportSignalAsync(
+            signal.Task, Task.CompletedTask, "first created broadcast entered", () => "completed operation", TimeSpan.FromSeconds(5)));
+#pragma warning restore VSTHRD003
+
+        Assert.Contains("Operation completed without signaling first created broadcast entered", exception.Message);
+        Assert.Contains("completed operation", exception.Message);
+        Assert.False(signal.Task.IsCompleted);
     }
 
     [Fact]
@@ -1111,6 +1206,40 @@ public class UserTaskServiceTests
         return completedTask == signal;
     }
 
+    private static async Task WaitForProfileImportSignalAsync(
+        Task signal, Task operation, string stage, Func<string> describeProgress, TimeSpan timeout)
+    {
+        try
+        {
+#pragma warning disable VSTHRD003 // Both tasks belong to the caller-controlled concurrency fixture.
+            _ = await Task.WhenAny(signal, operation).WaitAsync(timeout);
+#pragma warning restore VSTHRD003
+        }
+        catch (TimeoutException ex)
+        {
+            ThreadPool.GetAvailableThreads(out int workers, out int completionPorts);
+            throw new TimeoutException(
+                $"Timed out waiting for {stage}: signal={signal.Status}; operation={operation.Status}; {describeProgress()}; " +
+                $"threadPoolThreads={ThreadPool.ThreadCount}; pendingWorkItems={ThreadPool.PendingWorkItemCount}; " +
+                $"availableWorkers={workers}; availableCompletionPorts={completionPorts}. Scheduling delay is not proven by this snapshot.", ex);
+        }
+
+        // Observe an operation fault before it can be disguised as a missing fixture signal.
+#pragma warning disable VSTHRD003 // These are the same caller-controlled tasks raced above.
+        if (operation.IsCompleted)
+        {
+            await operation;
+        }
+
+        if (!signal.IsCompleted)
+        {
+            throw new InvalidOperationException($"Operation completed without signaling {stage}: {describeProgress()}");
+        }
+
+        await signal;
+#pragma warning restore VSTHRD003
+    }
+
     private sealed class ProfileImportRepositoryState
     {
         private readonly object _sync = new();
@@ -1235,10 +1364,16 @@ public class UserTaskServiceTests
         private readonly TaskCompletionSource<bool> _allowConflictingInsert =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _addAttemptCount;
+        private int _reloadAttemptCount;
 
         public Task FirstAddAttempted => _firstAddAttempted.Task;
 
         public Task SecondAddAttempted => _secondAddAttempted.Task;
+
+        public string DescribeProgress() =>
+            $"addAttempts={Volatile.Read(ref _addAttemptCount)}; firstInsertAllowed={_allowFirstInsert.Task.IsCompletedSuccessfully}; " +
+            $"firstInsertCompleted={_firstInsertCompleted.Task.IsCompletedSuccessfully}; " +
+            $"conflictingInsertAllowed={_allowConflictingInsert.Task.IsCompletedSuccessfully}; reloadAttempts={Volatile.Read(ref _reloadAttemptCount)}";
 
         public void AllowFirstInsert()
         {
@@ -1265,6 +1400,7 @@ public class UserTaskServiceTests
 
         public Task<UserTask?> GetByIdAsync(Guid id, CancellationToken _)
         {
+            Interlocked.Increment(ref _reloadAttemptCount);
             lock (_sync)
             {
                 return Task.FromResult(_tasks.TryGetValue(id, out UserTask? task) ? Clone(task) : null);
