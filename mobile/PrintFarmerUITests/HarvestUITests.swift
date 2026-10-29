@@ -62,6 +62,7 @@ final class HarvestUITests: QueueUITestBase {
         XCTAssertTrue(gammaHandle.exists)
         XCTAssertTrue(gammaHandle.isHittable)
         try requireDraggable(alphaHandle, "alpha reorder handle")
+        try requireDraggable(beta, "beta drop target")
         let originalAlphaY = alpha.frame.minY
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -103,6 +104,7 @@ final class HarvestUITests: QueueUITestBase {
             // #3457: the priority boundary's centre is also the legal end-of-group
             // slot, so drop past its midpoint (between the two boundary rows).
             try requireDraggable(alphaHandle, "alpha reorder handle before priority drag")
+            try requireDraggable(priorityBoundary, "priority-boundary row")
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: priorityBoundary.coordinate(
@@ -117,6 +119,26 @@ final class HarvestUITests: QueueUITestBase {
             XCTAssertEqual(currentGroupOrder(), reorderedGroup,
                            "Dragging to another priority group must not reorder this group.")
 
+            // A valid move back refreshes the queue, which clears the previous
+            // rejection, so the printer-boundary drop must produce its own error.
+            try requireDraggable(beta, "beta drop target before move back")
+            alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+                forDuration: 1,
+                thenDragTo: beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+                withVelocity: .slow,
+                thenHoldForDuration: 0.5
+            )
+            let restoredGroup = [alpha.identifier, beta.identifier, gamma.identifier]
+            let movedBack = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    !crossGroupError.exists && currentGroupOrder() == restoredGroup
+                },
+                object: nil
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [movedBack], timeout: 5), .completed,
+                           "Dragging alpha back above beta should reorder and clear the rejection.")
+
+            try requireDraggable(alphaHandle, "alpha reorder handle before printer drag")
             try requireDraggable(printerBoundary, "printer-boundary row")
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
@@ -126,10 +148,10 @@ final class HarvestUITests: QueueUITestBase {
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
             )
+            XCTAssertTrue(crossGroupError.waitForExistence(timeout: 5),
+                          "A drop into another printer group must be rejected visibly.")
             try requireDraggable(alphaHandle, "alpha reorder handle after printer drag")
-            XCTAssertTrue(crossGroupError.exists,
-                          "A drop into another printer group must stay rejected.")
-            XCTAssertEqual(currentGroupOrder(), reorderedGroup,
+            XCTAssertEqual(currentGroupOrder(), restoredGroup,
                            "Dragging to another printer group must not reorder this group.")
         }
     }
