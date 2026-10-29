@@ -210,6 +210,8 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/HarvestUITests",
             "PrintFarmerUITests/PartsInventoryUITests",
             "PrintFarmerUITests/PrinterListUITests",
+            "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset",
+            "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType",
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
             "PrintFarmerUITests/UIWaitBudgetTests",
@@ -252,18 +254,38 @@ class EventTests(unittest.TestCase):
 
         declarations = set()
         sources_by_suite = {}
+        superclasses_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
             contents = source.read_text()
-            suite_declarations = list(re.finditer(r"\bclass\s+(\w+)\s*:", contents))
+            suite_declarations = list(re.finditer(
+                r"\bclass\s+(\w+)\s*:\s*([\w.]+)",
+                contents,
+            ))
             for index, declaration in enumerate(suite_declarations):
                 suite = declaration.group(1)
                 declarations.add(suite)
+                superclasses_by_suite[suite] = declaration.group(2).rsplit(".", 1)[-1]
                 next_declaration = (
                     suite_declarations[index + 1].start()
                     if index + 1 < len(suite_declarations)
                     else len(contents)
                 )
                 sources_by_suite[suite] = contents[declaration.start():next_declaration]
+
+        def test_methods_for_suite(suite):
+            methods = set()
+            visited = set()
+            while suite in sources_by_suite and suite not in visited:
+                visited.add(suite)
+                methods.update(re.findall(
+                    r"\bfunc\s+(test\w+)\s*\(",
+                    sources_by_suite[suite],
+                ))
+                suite = superclasses_by_suite.get(suite)
+                if suite is None:
+                    break
+            return methods
+
         for selectors in selectors_by_family.values():
             for selector in selectors:
                 selector_parts = selector.split("/")
@@ -278,9 +300,9 @@ class EventTests(unittest.TestCase):
                         )
                 if len(selector_parts) == 3:
                     with self.subTest(selector=selector):
-                        self.assertRegex(
-                            sources_by_suite[suite],
-                            rf"\bfunc\s+{selector_parts[2]}\s*\(",
+                        self.assertIn(
+                            selector_parts[2],
+                            test_methods_for_suite(suite),
                             "A stale method selector executes zero XCTest cases",
                         )
         for family, selectors in selectors_by_family.items():
@@ -297,10 +319,7 @@ class EventTests(unittest.TestCase):
                     len(selector.split("/")) == 3
                     for selector in suite_selectors_by_suite[suite]
                 ):
-                    source_methods = set(re.findall(
-                        r"\bfunc\s+(test\w+)\s*\(",
-                        sources_by_suite[suite],
-                    ))
+                    source_methods = test_methods_for_suite(suite)
                     with self.subTest(family=family, suite=suite):
                         self.assertEqual(
                             selected_methods,

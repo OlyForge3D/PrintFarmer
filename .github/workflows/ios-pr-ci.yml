@@ -343,6 +343,8 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: iphone-4
             family: iPhone
@@ -376,6 +378,8 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: ipad-4
             family: iPad
