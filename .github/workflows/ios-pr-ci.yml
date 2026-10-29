@@ -354,6 +354,7 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
           - key: ipad-1
             family: iPad
             shard: 1
@@ -389,6 +390,7 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
               -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:

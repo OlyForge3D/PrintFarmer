@@ -215,6 +215,7 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
             "PrintFarmerUITests/UIWaitBudgetTests",
+            "PrintFarmerUITests/PrinterDetailHeaderUITests",
         ]
         self.assertEqual(Counter(selectors_by_family["iPhone"]), Counter(shared))
         self.assertEqual(
