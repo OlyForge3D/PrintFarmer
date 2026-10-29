@@ -65,7 +65,6 @@ final class HarvestUITests: QueueUITestBase {
         try requireDraggable(beta, "beta drop target")
         let originalAlphaY = alpha.frame.minY
         let legalDiagnosticsBefore = try reorderCounts(in: app)
-        retainReorderState("legal move down", phase: "before")
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         source.press(
@@ -133,7 +132,6 @@ final class HarvestUITests: QueueUITestBase {
             // prevented priority gesture.
             try requireDraggable(beta, "beta drop target before move back")
             let moveBackDiagnosticsBefore = try reorderCounts(in: app)
-            retainReorderState("legal move back", phase: "before")
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
@@ -191,7 +189,6 @@ final class HarvestUITests: QueueUITestBase {
     ) throws {
         let before = try reorderCounts(in: app, file: file, line: line)
         XCTAssertEqual(currentOrder(), expectedOrder, file: file, line: line)
-        retainReorderState("\(name) boundary", phase: "before")
         handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
             forDuration: 1,
             thenDragTo: boundary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)),
@@ -278,8 +275,9 @@ final class HarvestUITests: QueueUITestBase {
     /// #3457 R3457-D01 diagnostic retention only. Video, synthesized events and
     /// automatic snapshots follow the test plan's plan-wide system-attachment policy
     /// (deleted on success), so this test keeps its own screenshot and hierarchy
-    /// before and after each drag on success too. Passing and failing attempts
-    /// can then be compared. Captured outside the gesture, so timing is unchanged.
+    /// after each drag on success too. R3457-RISK-01 isolation experiment: no
+    /// pre-gesture capture, so each press starts at the pre-retention timing; the
+    /// "before" state is the keepAlways counter attachment.
     private func retainReorderState(_ name: String, phase: String) {
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Queue reorder \(phase) screenshot (\(name))"
