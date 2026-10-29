@@ -42,6 +42,28 @@ paths and emits outputs consumed by the conditional jobs. This produces a
 required, stable check name even when no application build runs, such as a
 docs-only PR.
 
+## Squad upgrades
+
+Squad CLI upgrades can overwrite customized automation and install upstream-only
+workflows. Reconcile against the committed PrintFarmer versions before opening
+a PR targeting `development`:
+
+- Preserve shared `scripts/ci/squad-routing.cjs` routing, per-issue serialization,
+  owner rechecks, and Scribe/Ralph dispatch exclusions.
+- Preserve the canonical review and merge policies in
+  [Copilot instructions](../.github/copilot-instructions.md#readiness-and-merge-review-gate).
+- Keep Copilot assignment in `squad-issue-assign.yml`; triage and heartbeat
+  dispatch that workflow instead of assigning the bot directly. API acceptance
+  is not proof that a coding session started.
+- Exclude upstream `squad-ci`, `squad-docs`, `squad-insider-release`,
+  `squad-preview`, `squad-promote`, and `squad-release` workflows. PrintFarmer
+  already owns its application CI, Pages deployment, and releases.
+- Keep `*.local-backup` upgrade artifacts out of commits; workflow backups are
+  ignored alongside agent backups.
+
+Run the focused routing, reviewer-dispatch, verdict-gate, and verdict-verifier
+tests under `scripts/ci/tests/`, plus yamllint on changed workflow YAML.
+
 ## iOS toolchain
 
 All iOS build, test, and release jobs use GitHub's explicit `macos-26` arm64

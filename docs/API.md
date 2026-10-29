@@ -1744,6 +1744,41 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 
 ## 3D Model API
 
+### List Models for Slicer Pickers
+
+```http
+GET /api/3d-models/picker
+Authorization: Bearer <token>
+```
+
+Returns only the fields needed by the New Slice Job picker (`id`, `name`,
+`fileName`, `fileType`, and `uploadedAt`). It includes valid models from the
+shared library, ordered by upload time descending, and uses the same
+`LibrarySync` authorization policy as the full model-list endpoint. The dedicated
+projection avoids loading model metadata or tags for picker requests; Desktop
+exchange tokens must carry `LibrarySync`.
+
+The local in-memory SQLite comparison below measures the service call plus JSON
+serialization, after five warmups and across 20 requests per size. Command counts
+include only the model and tag queries used by each list; unrelated host background
+queries are excluded. Response bytes are uncompressed UTF-8 JSON.
+
+| Models | List | Queries/request | JSON bytes | Latency p50/p95 (ms) | Managed allocation p50/p95 (bytes) |
+|---:|---|---:|---:|---:|---:|
+| 10 | Full | 21 | 8,781 | 1.754 / 2.377 | 558,568 / 565,536 |
+| 10 | Picker | 1 | 1,731 | 0.197 / 0.369 | 86,976 / 91,016 |
+| 100 | Full | 201 | 87,801 | 13.712 / 16.200 | 4,638,304 / 4,646,656 |
+| 100 | Picker | 1 | 17,301 | 0.447 / 0.473 | 148,936 / 152,064 |
+| 1,000 | Full | 2,001 | 878,001 | 117.624 / 201.081 | 44,699,176 / 45,873,072 |
+| 1,000 | Picker | 1 | 173,001 | 1.345 / 2.373 | 897,400 / 906,336 |
+
+These are local comparative measurements, not end-to-end HTTP or browser timings.
+The database was in-memory SQLite; PostgreSQL, SQL Server, network transfer, and
+browser rendering were not measured. Managed allocation deltas use process-wide
+GC counters, so background runtime activity can add noise and the values are not
+isolated per-request allocation profiles. The harness is
+`src/tests/Farm.Slicer.Module.Tests/Integration/Model3DPickerBenchmarkEvidenceTests.cs`.
+
 ### Upload a Model
 
 ```http

@@ -222,13 +222,15 @@ const mockModelList = [
   {
     id: 'model-3d-1',
     fileName: 'stored-model.3mf',
-    originalFileName: 'test-model.3mf',
+    name: 'test-model.3mf',
+    fileType: '3mf',
     uploadedAt: '2026-06-02T00:00:00Z',
   },
   {
     id: 'model-stl-1',
     fileName: 'stored-model.stl',
-    originalFileName: 'test-model.stl',
+    name: 'test-model.stl',
+    fileType: 'stl',
     uploadedAt: '2026-06-02T00:00:00Z',
   },
 ];
@@ -244,7 +246,8 @@ const mockModelListWithGuid = [
   {
     id: mockLibraryModelGuid,
     fileName: 'library-model.3mf',
-    originalFileName: 'library-model.3mf',
+    name: 'library-model.3mf',
+    fileType: '3mf',
     uploadedAt: '2026-06-02T00:00:00Z',
   },
 ];
@@ -602,6 +605,33 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('slicer-settings-panel')).toBeInTheDocument();
       });
+    });
+
+    it('loads the lightweight picker endpoint and falls back to the stored name when display name is empty', async () => {
+      vi.mocked(apiClient.get).mockResolvedValueOnce({
+        data: [{
+          id: 'legacy-model',
+          name: '',
+          fileName: 'legacy-model.stl',
+          fileType: 'stl',
+          uploadedAt: '2026-06-02T00:00:00Z',
+        }],
+      } as never);
+
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toBeInTheDocument();
+        expect(apiClient.get).toHaveBeenCalledWith('/3d-models/picker');
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+      await waitFor(() => {
+        expect(screen.getByTestId('slicer-workspace')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
+
+      expect(await screen.findByText('legacy-model.stl')).toBeInTheDocument();
+      expect(apiClient.get).not.toHaveBeenCalledWith('/3d-models');
     });
   });
 
@@ -1843,7 +1873,7 @@ describe('NewSliceJobPage', () => {
         resolveModelsList = resolve;
       });
       vi.mocked(apiClient.get).mockImplementation(((url: string) => {
-        if (url === '/3d-models') {
+        if (url === '/3d-models/picker') {
           return modelsListPromise;
         }
         return threeMfBuffer().then((data) => ({ data }));
@@ -1927,7 +1957,7 @@ describe('NewSliceJobPage', () => {
 
       it('sends the persisted library model GUID as model3DId when the URL matches an authenticated internal model', async () => {
         vi.mocked(apiClient.get).mockImplementation(((url: string) => {
-          if (url === '/3d-models') {
+          if (url === '/3d-models/picker') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
           return threeMfBuffer().then((data) => ({ data }));
@@ -1962,7 +1992,7 @@ describe('NewSliceJobPage', () => {
 
       it('omits model3DId (never a synthetic string) when the URL does not match any persisted library model', async () => {
         vi.mocked(apiClient.get).mockImplementation(((url: string) => {
-          if (url === '/3d-models') {
+          if (url === '/3d-models/picker') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
           return threeMfBuffer().then((data) => ({ data }));
@@ -2014,7 +2044,7 @@ describe('NewSliceJobPage', () => {
         // any other unmatched external URL: libraryModelId stays unset and
         // model3DId is omitted.
         vi.mocked(apiClient.get).mockImplementation(((url: string) => {
-          if (url === '/3d-models') {
+          if (url === '/3d-models/picker') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
           return threeMfBuffer().then((data) => ({ data }));

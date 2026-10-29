@@ -136,8 +136,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
                 return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
             }
-            // Scrolling the Farm grid in the simulator can trap the main thread in a
-            // LazyVGrid placement loop, so filter with Farm search instead of swiping.
+            // Search by name rather than scrolling through the full grid to locate a target card.
             if tapPoint() == nil, let name = Self.fixturePrinterNames[printerID] {
                 searchFarm(name)
                 _ = printerCard.waitForExistence(timeout: 8)
@@ -151,8 +150,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 .tap()
         }
 
-        /// Filters the Farm by name. Swiping the Farm LazyVGrid in the simulator can
-        /// trap the main thread in a placement loop, so tests search instead.
+        /// Filters the Farm by name so a target card can be located without scrolling the full grid.
         /// Submitting dismisses the keyboard so it stops covering cards and the dock.
         func searchFarm(_ query: String) {
             let searchButton = app.buttons["farm.search"]
@@ -273,9 +271,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             if !isIPad {
                 XCTAssertTrue(printerList.exists, "Farm printer cards must remain in a scrollable list.")
             }
-            // Swiping the Farm LazyVGrid in the simulator can trap the main thread in a
-            // placement loop (it also fails on development), so locate each card with
-            // Farm search instead. PrinterListViewModelTests covers the #3509 sort.
+            // Locate cards directly with Farm search; PrinterListViewModelTests covers the #3509 sort.
             func farmCard(_ name: String, _ detail: String? = nil) -> XCUIElement {
                 searchFarm(name)
                 let predicate = detail.map {
@@ -1078,6 +1074,68 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
         captureApprovedMockupScreens()
     }
 
+    func testLastFarmCardClearsBottomNavigationChrome() {
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        let scanButton = app.buttons["navigation.scan"]
+        XCTAssertTrue(scanButton.waitForExistence(timeout: 8))
+        // All-filter orders offline printers last; Sovol is the only offline card in this fixture.
+        let lastFarmCard = app.buttons["farm-card-32590000-0000-0000-0000-000000000004"]
+        let precedingFarmCard = app.buttons["farm-card-10000000-0001-0000-0000-000000000002"]
+
+        for _ in 0..<16 where
+            !lastFarmCard.isHittable
+                || lastFarmCard.frame.maxY > scanButton.frame.minY - 112
+        {
+            farmScroll.swipeUp()
+        }
+
+        XCTAssertTrue(lastFarmCard.waitForExistence(timeout: 8), "The final offline Farm card must exist.")
+        XCTAssertTrue(lastFarmCard.label.contains("Sovol SV06"))
+        XCTAssertTrue(precedingFarmCard.waitForExistence(timeout: 8), "The prior idle card must exist.")
+        let precedingCardFrame = precedingFarmCard.frame
+        let lastCardFrame = lastFarmCard.frame
+        let precedingCardComesFirst =
+            precedingCardFrame.minY < lastCardFrame.minY - 1
+                || (
+                    abs(precedingCardFrame.minY - lastCardFrame.minY) <= 1
+                        && precedingCardFrame.minX < lastCardFrame.minX
+                )
+        XCTAssertTrue(
+            precedingCardComesFirst,
+            "The final sorted Farm card must follow the preceding card in grid reading order."
+        )
+        let visibleFarmCards = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-")
+        ).allElementsBoundByIndex.filter(\.isHittable)
+        let lastVisibleFarmCard = visibleFarmCards.max {
+            if abs($0.frame.minY - $1.frame.minY) > 1 {
+                return $0.frame.minY < $1.frame.minY
+            }
+            return $0.frame.minX < $1.frame.minX
+        }
+        XCTAssertEqual(
+            lastVisibleFarmCard?.identifier,
+            lastFarmCard.identifier,
+            "The final sorted Farm card must be the bottom-most visible card."
+        )
+        XCTAssertTrue(lastFarmCard.isHittable, "The final Farm card must scroll above bottom navigation.")
+        XCTAssertLessThanOrEqual(
+            lastFarmCard.frame.maxY,
+            scanButton.frame.minY - 112,
+            isIPad
+                ? "The final Farm card must retain 112 points of clearance above the Scan footer and home-indicator area."
+                : "The final Farm card must retain 112 points of clearance above the Scan footer and tab bar."
+        )
+    }
+
     /// The "Camera" header sits above the media, which spans the card width (#3496).
     func testCameraHeaderSitsAboveFullWidthMedia() {
         openFarmCard("10000000-0001-0000-0000-000000000001")
@@ -1586,6 +1644,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // Same header in every mode: the badge is gone (#3496 N08).
         XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
+        XCTAssertFalse(app.staticTexts["printer.detail.camera.livepaused"].exists)
         let named = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         named.name = "status-camera-header-full-width-media"
         named.lifetime = .keepAlways
@@ -1613,6 +1672,8 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         let media = app.descendants(matching: .any)["printer.detail.camera.media"]
         let toggle = app.buttons["printer.detail.camera.livetoggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        let liveViewPaused = app.staticTexts["printer.detail.camera.livepaused"]
+        XCTAssertFalse(liveViewPaused.exists, "Live mode does not show the paused message")
         XCTAssertGreaterThanOrEqual(toggle.frame.minY, media.frame.minY - 1, "The mode toggle sits on the media, not in the header")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
@@ -1624,9 +1685,12 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // R3514-B12: a stream-only camera must stay switchable after choosing snapshot.
         toggle.tap()
         XCTAssertTrue(app.buttons["Switch to livestream"].waitForExistence(timeout: 5), "Toggle stays reachable in snapshot mode")
+        XCTAssertTrue(liveViewPaused.waitForExistence(timeout: 5))
+        XCTAssertEqual(liveViewPaused.label, "Live view paused")
         XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Camera")
         app.buttons["Switch to livestream"].tap()
         XCTAssertTrue(app.buttons["Switch to snapshot"].waitForExistence(timeout: 5))
+        XCTAssertFalse(liveViewPaused.exists, "Live mode hides the paused message")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
             "Livestream returns after switching back"

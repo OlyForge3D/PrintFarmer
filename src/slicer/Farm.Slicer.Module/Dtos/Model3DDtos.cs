@@ -83,6 +83,16 @@ public class Model3DDto
 }
 
 /// <summary>
+/// Lightweight 3D model list entry for picker clients.
+/// </summary>
+public sealed record Model3DPickerDto(
+    Guid Id,
+    string? Name,
+    string FileName,
+    string FileType,
+    DateTime UploadedAt);
+
+/// <summary>
 /// Entry in a hierarchical model file listing (file or directory).
 /// </summary>
 public record Model3DEntryDto(

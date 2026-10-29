@@ -101,7 +101,7 @@ struct PrinterSensorControlRows: View {
             fieldIdentifier: id + ".value",
             fieldLabel: spokenTitle + (unitSpoken.isEmpty ? "" : " in \(unitSpoken)"),
             // Disabled rows explain why to VoiceOver only; no visible caption (#3548).
-            fieldHint: viewModel.sensorRowMessage
+            fieldHint: viewModel.heatRowBlockedReason ?? viewModel.sensorRowMessage
                 ?? "Double tap to enter a value, then choose Set. Range \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
                 + (allowsOff ? "; zero switches it off." : "."),
             stepLabel: { "\($0 ? "Increase" : "Decrease") \(spokenTitle)" },
@@ -133,7 +133,7 @@ struct PrinterSensorControlRows: View {
                 }
             }
         )
-        .disabled(!viewModel.canControlSensors || current == nil)
+        .disabled(!viewModel.canControlSensors || viewModel.isPrintingOrPaused || current == nil)
     }
 }
 

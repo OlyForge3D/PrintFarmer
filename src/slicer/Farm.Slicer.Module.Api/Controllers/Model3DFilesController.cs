@@ -204,6 +204,31 @@ public class Model3DFilesController(
     }
 
     /// <summary>
+    /// Lists the fields needed to select a 3D model for slicing.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the request.</param>
+    [HttpGet("picker")]
+    [Authorize(Policy = "LibrarySync")]
+    [ProducesResponseType(typeof(IReadOnlyList<Model3DPickerDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPickerModelsAsync(CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<Model3DPickerDto> models = await _modelService.ListPickerModelsAsync(ct);
+            return Ok(models);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list 3D model picker entries");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to list models");
+        }
+    }
+
+    /// <summary>
     /// Lists all 3D model folders recursively.
     /// </summary>
     /// <param name="ct">Cancellation token.</param>

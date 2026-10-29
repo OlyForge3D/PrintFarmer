@@ -179,11 +179,8 @@ fixtures/wire-contracts/manifest.json.lock
 # Squad: ignore runtime state (logs, inbox, sessions)
 # Note: .squad/casting/* is identity and MUST be committed to main, not ignored
 .squad/.scratch/
-# Squad: state owned by squad-state branch (two-layer/orphan backend)
-.squad/decisions.md
-.squad/agents/*/history.md
-# /Squad: state owned by squad-state branch
 
 # Squad: local CLI artifacts
 .squad/.first-run
 .github/agents/*.local-backup
+.github/workflows/*.local-backup

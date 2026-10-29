@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 
 namespace Farm.Infrastructure.Repositories.Catalog;
 
@@ -13,6 +14,9 @@ namespace Farm.Infrastructure.Repositories.Catalog;
 /// </summary>
 public interface ICatalogRepository
 {
+    /// <summary>Projects requested task names in sequential batches of at most 100 distinct model IDs.</summary>
+    Task<IReadOnlyList<ProfileTaskModelDto>> GetProfileTaskModelsAsync(IEnumerable<Guid> modelIds, CancellationToken ct = default);
+
     /// <summary>Gets all manufacturers as lightweight tuples.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default);

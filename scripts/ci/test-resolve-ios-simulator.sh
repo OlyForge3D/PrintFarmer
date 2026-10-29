@@ -363,6 +363,24 @@ for name, count in [('ios-pr-ci', 3), ('ci', 1), ('testflight-beta', 1)]:
     assert text.count('!= "17F113"') == count, name
     assert 'xcode-27' not in text and '27A266a' not in text, name
 
+text = (root / '.github/workflows/ios-pr-ci.yml').read_text()
+unit = text.split('  test:\n', 1)[1].split('  xcui-shards:\n', 1)[0]
+assert 'name: Unit Tests (iOS)' in unit
+assert 'family: iPhone' in unit and 'selector: PrintFarmerTests\n' in unit
+assert 'artifact: ios-test-results\n' in unit
+assert 'name: Filament accessibility (iPad)' in unit
+assert 'family: iPad' in unit
+assert 'selector: PrintFarmerTests/PrinterFilamentSectionTests\n' in unit
+assert 'artifact: ios-filament-ipad-results\n' in unit
+assert 'IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}' in unit
+assert 'IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}' in unit
+assert '"-only-testing:$UNIT_TEST_SELECTOR"' in unit
+assert "if: matrix.family == 'iPad'" in unit
+assert "--test-id 'PrinterFilamentSectionTests/testFilamentCardKeepsWholeWordsAndControlsAtEveryAccessibilitySize()'" in unit
+assert "wc -l | tr -d ' ')\" = 10" in unit
+assert 'mobile/build/FilamentAttachments/' in unit
+assert 'name: ${{ matrix.artifact }}' in unit
+
 PY
 }
 

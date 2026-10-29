@@ -1,4 +1,5 @@
 ﻿using System.Data.Common;
+using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -21,11 +22,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Xunit.Abstractions;
 
 namespace Farm.Modules.Gcode.Tests.Controllers;
 
 public sealed class PrinterFileCatalogControllerTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public PrinterFileCatalogControllerTests(ITestOutputHelper output) => _output = output;
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -432,11 +438,48 @@ public sealed class PrinterFileCatalogControllerTests
             $"control: the per-printer loop should grow with printer count (1: {one.Legacy}, 20: {twenty.Legacy})");
     }
 
-    private static async Task<CatalogMeasurement> MeasureCatalogAsync(int printerCount)
+    [Fact]
+    public async Task ListAsync_MeasureRepeatedPollCostAtRepresentativeCardinalities()
+    {
+        foreach ((int Printers, int FilesPerPrinter) in new[] { (1, 100), (5, 500), (20, 250) })
+        {
+            CatalogMeasurement measurement = await MeasureCatalogAsync(
+                Printers, FilesPerPrinter, repeatedPolls: 30, pageSize: 25);
+            _output.WriteLine(
+                "sqlite-direct | printers={0} | files={1} | page=25 | SQL avg={2} commands/{3:F2} ms | " +
+                "authority={4} commands/{5:F2} ms | local-filter={6} commands/{7:F2} ms | " +
+                "synthetic capability-factory={8} calls/{9:F2} us per poll | response={10} bytes | " +
+                "process alloc~={11:F0} bytes/poll | latency mean={12:F2} ms p50={13:F2} ms p95={14:F2} ms | " +
+                "SQL p50={15:F2} ms p95={16:F2} ms",
+                measurement.PrinterCount,
+                measurement.FileCount,
+                measurement.Catalog,
+                measurement.SqlMillisecondsPerPoll,
+                measurement.Authority,
+                measurement.AuthorityMilliseconds,
+                measurement.LocalFilterCommands,
+                measurement.LocalFilterMilliseconds,
+                measurement.CapabilityCallsPerPoll,
+                measurement.CapabilityMicrosecondsPerPoll,
+                measurement.ResponseBytes,
+                measurement.AllocatedBytesPerPoll,
+                measurement.MeanMilliseconds,
+                measurement.P50Milliseconds,
+                measurement.P95Milliseconds,
+                measurement.SqlP50Milliseconds,
+                measurement.SqlP95Milliseconds);
+        }
+    }
+
+    private async Task<CatalogMeasurement> MeasureCatalogAsync(
+        int printerCount,
+        int filesPerPrinter = 1,
+        int repeatedPolls = 1,
+        int pageSize = 200)
     {
         CommandCountingInterceptor counter = new();
-        Mock<IBackendClientFactory> backends = CreateBackends();
-        await using Fixture fixture = await Fixture.CreateAsync(counter, backends.Object);
+        MeasuringBackendClientFactory backends = new();
+        await using Fixture fixture = await Fixture.CreateAsync(counter, backends);
         AppDbContext db = fixture.Db;
         Role role = new() { Id = Guid.NewGuid(), Name = "catalog-test-operator", DisplayName = "Catalog test", IsActive = true };
         db.Users.Add(new User
@@ -504,73 +547,166 @@ public sealed class PrinterFileCatalogControllerTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         List<Guid> grouped = [];
+        List<Guid> groupedFiles = [];
         for (int i = 0; i < printerCount; i++)
         {
             Guid printerId = await fixture.AddPrinterAsync($"grouped-{i:D2}", groupId: group.Id);
-            PrinterFileLocation location = await fixture.AddLocationAsync(printerId, $"grouped/{i:D2}.gcode");
-            GcodeFile file = new()
+            grouped.Add(printerId);
+            for (int j = 0; j < filesPerPrinter; j++)
             {
-                Id = Guid.NewGuid(),
-                FolderId = folder.Id,
-                FileName = $"grouped-{i:D2}.gcode",
-                FileHash = $"hash-{i:D2}",
-                PrinterGroupId = group.Id,
-            };
-            db.GcodeFiles.Add(file);
-            db.PrinterFileOrigins.Add(new PrinterFileOrigin
-            {
-                Id = Guid.NewGuid(),
-                OperationId = Guid.NewGuid(),
-                LocationId = location.Id,
-                GcodeFileId = file.Id,
-                SourcePrinterId = printerId,
-                StorageRoot = location.StorageRoot,
-                RelativePath = location.RelativePath,
-            });
+                string path = $"grouped/{i:D2}/{j:D4}.gcode";
+                PrinterFileLocation location = new()
+                {
+                    Id = Guid.NewGuid(),
+                    SourcePrinterId = printerId,
+                    RegisteredPrinterId = printerId,
+                    StorageRoot = "gcodes",
+                    RelativePath = path,
+                    IdentityKey = PrinterInventoryPath.ComputeIdentity("gcodes", path),
+                    DisplayName = Path.GetFileName(path),
+                };
+                GcodeFile file = new()
+                {
+                    Id = Guid.NewGuid(),
+                    FolderId = folder.Id,
+                    FileName = Path.GetFileName(path),
+                    FileHash = $"hash-{i:D2}-{j:D4}",
+                    PrinterGroupId = group.Id,
+                };
+                db.PrinterFileLocations.Add(location);
+                db.GcodeFiles.Add(file);
+                db.PrinterFileOrigins.Add(new PrinterFileOrigin
+                {
+                    Id = Guid.NewGuid(),
+                    OperationId = Guid.NewGuid(),
+                    LocationId = location.Id,
+                    GcodeFileId = file.Id,
+                    SourcePrinterId = printerId,
+                    StorageRoot = location.StorageRoot,
+                    RelativePath = location.RelativePath,
+                });
+                groupedFiles.Add(file.Id);
+            }
+
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
-            grouped.Add(printerId);
         }
 
         db.ChangeTracker.Clear();
         QueueResourceAuthorizationService resources = new(db);
         PrinterFileAccessService access = new(db, new EfUsersRepository(db), resources);
-        PrinterFileCatalogController controller = fixture.CreateController(access, resources, backends.Object);
-
-        counter.Reset();
-        IActionResult result = await controller.ListAsync(null, null, pageSize: 200);
-        int catalog = counter.CommandCount;
-        using (JsonDocument document = ReadOk(result))
-        {
-            Assert.Equal(printerCount + 2, document.RootElement.GetProperty("total").GetInt32());
-            JsonElement[] printers = [.. document.RootElement.GetProperty("printers").EnumerateArray()];
-            Assert.Equal(printerCount + 2, printers.Length);
-            foreach (JsonElement printer in printers.Where(x => grouped.Contains(x.GetProperty("id").GetGuid())))
-            {
-                Assert.True(printer.GetProperty("canManage").GetBoolean());
-                Assert.True(printer.GetProperty("canCopy").GetBoolean());
-                Assert.True(printer.GetProperty("canDelete").GetBoolean());
-            }
-
-            JsonElement[] groupedItems = [.. document.RootElement.GetProperty("items").EnumerateArray()
-                .Where(x => grouped.Contains(x.GetProperty("printerId").GetGuid()))];
-            Assert.Equal(printerCount, groupedItems.Length);
-            Assert.All(groupedItems, item => Assert.Single(item.GetProperty("localCopies").EnumerateArray()));
-        }
+        PrinterFileCatalogController controller = fixture.CreateController(access, resources, backends);
 
         Guid[] enabled = [.. grouped, fixture.Visible, fixture.Hidden];
         counter.Reset();
+        Stopwatch authorityTimer = Stopwatch.StartNew();
         PrinterFileCatalogAuthority authority = await access.GetCatalogAuthorityAsync(fixture.Actor, enabled);
+        authorityTimer.Stop();
         int authorityCount = counter.CommandCount;
         Assert.Equal(enabled.Order(), authority.Readable.Order());
 
+        counter.Reset();
+        Stopwatch localFilterTimer = Stopwatch.StartNew();
+        _ = await access.FilterAccessibleLocalAsync(fixture.Actor, groupedFiles.Take(pageSize).ToArray());
+        localFilterTimer.Stop();
+        int localFilterCount = counter.CommandCount;
+
+        int warmupPolls = repeatedPolls > 1 ? 3 : 0;
+        byte[]? firstPayload = null;
+        for (int i = 0; i < warmupPolls; i++)
+        {
+            _ = await SerializeCatalogAsync(controller, pageSize);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        List<double> pollMilliseconds = new(repeatedPolls);
+        List<double> sqlMillisecondsPerPoll = new(repeatedPolls);
+        int catalogCommands = 0;
+        double sqlMilliseconds = 0;
+        long responseBytes = 0;
+        for (int i = 0; i < repeatedPolls; i++)
+        {
+            counter.Reset();
+            Stopwatch requestTimer = Stopwatch.StartNew();
+            byte[] payload = await SerializeCatalogAsync(controller, pageSize);
+            requestTimer.Stop();
+            pollMilliseconds.Add(requestTimer.Elapsed.TotalMilliseconds);
+            catalogCommands += counter.CommandCount;
+            sqlMilliseconds += counter.Elapsed.TotalMilliseconds;
+            sqlMillisecondsPerPoll.Add(counter.Elapsed.TotalMilliseconds);
+            responseBytes += payload.Length;
+            firstPayload ??= payload;
+            Assert.Equal(firstPayload, payload);
+            using JsonDocument document = JsonDocument.Parse(payload);
+            Assert.Equal((printerCount * filesPerPrinter) + 2, document.RootElement.GetProperty("total").GetInt32());
+            Assert.Equal(
+                Math.Min(pageSize, (printerCount * filesPerPrinter) + 2),
+                document.RootElement.GetProperty("items").GetArrayLength());
+            if (i == 0)
+            {
+                JsonElement[] printers = [.. document.RootElement.GetProperty("printers").EnumerateArray()];
+                Assert.Equal(printerCount + 2, printers.Length);
+                foreach (JsonElement printer in printers.Where(x => grouped.Contains(x.GetProperty("id").GetGuid())))
+                {
+                    Assert.True(printer.GetProperty("canManage").GetBoolean());
+                    Assert.True(printer.GetProperty("canCopy").GetBoolean());
+                    Assert.True(printer.GetProperty("canDelete").GetBoolean());
+                }
+
+                JsonElement[] groupedItems = [.. document.RootElement.GetProperty("items").EnumerateArray()
+                    .Where(x => grouped.Contains(x.GetProperty("printerId").GetGuid()))];
+                Assert.Equal(Math.Min(pageSize, printerCount * filesPerPrinter), groupedItems.Length);
+                Assert.All(groupedItems, item => Assert.Single(item.GetProperty("localCopies").EnumerateArray()));
+            }
+        }
+
+        long allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
         counter.Reset();
         foreach (Guid printerId in enabled)
         {
             Assert.True(await access.CanReadAsync(fixture.Actor, printerId));
         }
 
-        return new CatalogMeasurement(catalog, authorityCount, counter.CommandCount);
+        int legacyCount = counter.CommandCount;
+        double capabilityCallsPerPoll =
+            (backends.SupportChecks + backends.ClientResolutions) / (double)(warmupPolls + repeatedPolls);
+        return new CatalogMeasurement(
+            (printerCount * filesPerPrinter) + 2,
+            printerCount + 2,
+            (int)Math.Round(catalogCommands / (double)repeatedPolls),
+            authorityCount,
+            legacyCount,
+            localFilterCount,
+            authorityTimer.Elapsed.TotalMilliseconds,
+            localFilterTimer.Elapsed.TotalMilliseconds,
+            sqlMilliseconds / repeatedPolls,
+            responseBytes / repeatedPolls,
+            allocatedBytes / (double)repeatedPolls,
+            pollMilliseconds.Average(),
+            Percentile(pollMilliseconds, 0.50),
+            Percentile(pollMilliseconds, 0.95),
+            Percentile(sqlMillisecondsPerPoll, 0.50),
+            Percentile(sqlMillisecondsPerPoll, 0.95),
+            capabilityCallsPerPoll,
+            backends.Elapsed.TotalMicroseconds / (warmupPolls + repeatedPolls));
+    }
+
+    private static async Task<byte[]> SerializeCatalogAsync(PrinterFileCatalogController controller, int pageSize)
+    {
+        IActionResult result = await controller.ListAsync(null, null, pageSize: pageSize);
+        return JsonSerializer.SerializeToUtf8Bytes(
+            Assert.IsType<OkObjectResult>(result).Value,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private static double Percentile(IReadOnlyList<double> samples, double percentile)
+    {
+        double[] ordered = [.. samples.Order()];
+        int index = Math.Clamp((int)Math.Ceiling(percentile * ordered.Length) - 1, 0, ordered.Length - 1);
+        return ordered[index];
     }
 
     private static Mock<IBackendClientFactory> CreateBackends()
@@ -586,7 +722,58 @@ public sealed class PrinterFileCatalogControllerTests
         JsonDocument.Parse(JsonSerializer.Serialize(Assert.IsType<OkObjectResult>(result).Value,
             new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 
-    private sealed record CatalogMeasurement(int Catalog, int Authority, int Legacy);
+    private sealed record CatalogMeasurement(
+        int FileCount,
+        int PrinterCount,
+        int Catalog,
+        int Authority,
+        int Legacy,
+        int LocalFilterCommands,
+        double AuthorityMilliseconds,
+        double LocalFilterMilliseconds,
+        double SqlMillisecondsPerPoll,
+        long ResponseBytes,
+        double AllocatedBytesPerPoll,
+        double MeanMilliseconds,
+        double P50Milliseconds,
+        double P95Milliseconds,
+        double SqlP50Milliseconds,
+        double SqlP95Milliseconds,
+        double CapabilityCallsPerPoll,
+        double CapabilityMicrosecondsPerPoll);
+
+    private sealed class MeasuringBackendClientFactory : IBackendClientFactory
+    {
+        private readonly IBackendClient _client = new CopyCapableClient();
+
+        public int SupportChecks { get; private set; }
+
+        public int ClientResolutions { get; private set; }
+
+        public TimeSpan Elapsed { get; private set; }
+
+        public IBackendClient GetClient(PrinterBackend backend)
+        {
+            long started = Stopwatch.GetTimestamp();
+            ClientResolutions++;
+            IBackendClient client = backend == PrinterBackend.Moonraker
+                ? _client
+                : throw new ArgumentOutOfRangeException(nameof(backend));
+            Elapsed += Stopwatch.GetElapsedTime(started);
+            return client;
+        }
+
+        public IBackendClient GetClient(int backendValue) => GetClient((PrinterBackend)backendValue);
+
+        public bool IsBackendSupported(PrinterBackend backend)
+        {
+            long started = Stopwatch.GetTimestamp();
+            SupportChecks++;
+            bool supported = backend == PrinterBackend.Moonraker;
+            Elapsed += Stopwatch.GetElapsedTime(started);
+            return supported;
+        }
+    }
 
     private sealed class CopyCapableClient : IBackendClient, ISupportsPrinterFileCopy,
         ISupportsPrinterFileEnrichment, ISupportsFileInventory
@@ -612,12 +799,21 @@ public sealed class PrinterFileCatalogControllerTests
     {
         public int CommandCount { get; private set; }
 
-        public void Reset() => CommandCount = 0;
+        private Stopwatch? _commandTimer;
+
+        public TimeSpan Elapsed { get; private set; }
+
+        public void Reset()
+        {
+            CommandCount = 0;
+            Elapsed = TimeSpan.Zero;
+        }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
             DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
             return result;
         }
 
@@ -626,6 +822,22 @@ public sealed class PrinterFileCatalogControllerTests
             CancellationToken cancellationToken = default)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
+            return ValueTask.FromResult(result);
+        }
+
+        public override DbDataReader ReaderExecuted(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result)
+        {
+            StopTimer();
+            return result;
+        }
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            StopTimer();
             return ValueTask.FromResult(result);
         }
 
@@ -633,6 +845,7 @@ public sealed class PrinterFileCatalogControllerTests
             DbCommand command, CommandEventData eventData, InterceptionResult<object> result)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
             return result;
         }
 
@@ -641,6 +854,22 @@ public sealed class PrinterFileCatalogControllerTests
             CancellationToken cancellationToken = default)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
+            return ValueTask.FromResult(result);
+        }
+
+        public override object? ScalarExecuted(
+            DbCommand command, CommandExecutedEventData eventData, object? result)
+        {
+            StopTimer();
+            return result;
+        }
+
+        public override ValueTask<object?> ScalarExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, object? result,
+            CancellationToken cancellationToken = default)
+        {
+            StopTimer();
             return ValueTask.FromResult(result);
         }
 
@@ -648,6 +877,7 @@ public sealed class PrinterFileCatalogControllerTests
             DbCommand command, CommandEventData eventData, InterceptionResult<int> result)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
             return result;
         }
 
@@ -656,7 +886,33 @@ public sealed class PrinterFileCatalogControllerTests
             CancellationToken cancellationToken = default)
         {
             CommandCount++;
+            _commandTimer = Stopwatch.StartNew();
             return ValueTask.FromResult(result);
+        }
+
+        public override int NonQueryExecuted(
+            DbCommand command, CommandExecutedEventData eventData, int result)
+        {
+            StopTimer();
+            return result;
+        }
+
+        public override ValueTask<int> NonQueryExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, int result,
+            CancellationToken cancellationToken = default)
+        {
+            StopTimer();
+            return ValueTask.FromResult(result);
+        }
+
+        private void StopTimer()
+        {
+            if (_commandTimer is not null)
+            {
+                _commandTimer.Stop();
+                Elapsed += _commandTimer.Elapsed;
+                _commandTimer = null;
+            }
         }
     }
 
