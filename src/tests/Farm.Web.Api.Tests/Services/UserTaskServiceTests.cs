@@ -125,6 +125,119 @@ public class UserTaskServiceTests
     #region CreateOrUpdateProfileImportTaskAsync Tests
 
     [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_OverlappingBatchAndSingularRequests_RetainsFullUnion()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] ids = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+        ProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateProfileImportRepository(state);
+        UserTaskService first = new(repository.Object, _loggerMock.Object);
+        UserTaskService second = new(repository.Object, _loggerMock.Object);
+        UserTaskService third = new(repository.Object, _loggerMock.Object);
+
+        await Task.WhenAll(
+            first.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", [ids[0], ids[1], ids[0]])),
+            second.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", [ids[1], ids[2]])),
+            third.CreateOrUpdateProfileImportTaskAsync(CreateProfileImportDto(modelId, ids[3])));
+
+        UserTask persisted = state.GetOpenTask(modelId);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(persisted.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(ids));
+        Assert.Equal("4 printers waiting for slicer profiles", persisted.Description);
+        repository.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Once);
+
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_TerminalRace_RecoversWholeBatchAndSourceWithoutHistoricalIds()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask stale = CreateUserTask("Keep terminal", UserTaskType.ProfileImport);
+        stale.EntityId = modelId;
+        stale.EntityType = "PrinterModel";
+        stale.SourceKind = UserTaskSourceKind.Unspecified;
+        stale.SourceId = "source";
+        stale.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { Guid.NewGuid() });
+        _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        UserTask? added = null;
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) => added = task).Returns(Task.CompletedTask);
+        _repositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, CancellationToken _) => Task.FromResult(added));
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming));
+
+        Assert.NotNull(added);
+        Assert.NotEqual(stale.Id, result.Id);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(added.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming));
+        Assert.Equal(stale.SourceKind, added.SourceKind);
+        Assert.Equal(stale.SourceId, added.SourceId);
+        _broadcasterMock.Verify(b => b.BroadcastTaskCreatedAsync(
+            It.Is<UserTaskDto>(dto => dto.RelatedEntityCount == 2), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_UniqueInsertLoser_DetachesAndMergesWholeBatch()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid winnerPrinter = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask winner = CreateUserTask("Winner", UserTaskType.ProfileImport);
+        winner.EntityId = modelId;
+        winner.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { winnerPrinter });
+        _repositoryMock.SetupSequence(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((UserTask?)null).ReturnsAsync(winner);
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("unique", new SqliteException("unique", 19, 2067)));
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _repositoryMock.Setup(r => r.GetByIdAsync(winner.Id, It.IsAny<CancellationToken>())).ReturnsAsync(winner);
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming));
+
+        Assert.Equal(winner.Id, result.Id);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(winner.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming.Append(winnerPrinter)));
+        _repositoryMock.Verify(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskCreatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_RepeatedOccFailure_ExhaustsWithoutDroppingBatchOrBroadcasting()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask existing = CreateUserTask("Existing", UserTaskType.ProfileImport);
+        existing.RelatedEntityIdsJson = "[]";
+        _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<UserTask?>(new UserTask
+            {
+                Id = existing.Id,
+                Title = existing.Title,
+                RelatedEntityIdsJson = "[]"
+            }));
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) =>
+                Assert.True(JsonSerializer.Deserialize<Guid[]>(task.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming)))
+            .ThrowsAsync(new DbUpdateException("unique", new SqliteException("unique", 19, 2067)));
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
+            _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming)));
+
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task CreateOrUpdateProfileImportTaskAsync_WithNoExistingTask_CreatesNewTask()
     {
         // Arrange
