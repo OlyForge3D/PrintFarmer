@@ -143,10 +143,18 @@ public sealed class PrinterFileInventoryTests
     [InlineData("prusalink", true)]
     public async Task GetFileInventoryAsync_CancelOrDeadline_PreservesDistinctFailure(string backend, bool callerCancel)
     {
-        using InventoryHandler handler = new(async (_, token) =>
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        ManualClock clock = new();
+        bool cancelledBeforeDeadline = true;
+        bool cancelledAtDeadline = false;
+        using InventoryHandler handler = new((_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return Reply("{}");
+            clock.Advance(deadline - TimeSpan.FromTicks(1));
+            cancelledBeforeDeadline = token.IsCancellationRequested;
+            clock.Advance(TimeSpan.FromTicks(1));
+            cancelledAtDeadline = token.IsCancellationRequested;
+            token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
         });
         using HttpClient http = new(handler);
         using CancellationTokenSource cancellation = new();
@@ -155,8 +163,15 @@ public sealed class PrinterFileInventoryTests
             cancellation.Cancel();
         }
 
-        PrinterFileInventoryResult result = await CreateClient(backend, http).GetFileInventoryAsync(
-            "http://printer/", options: new() { Deadline = TimeSpan.FromMilliseconds(30) }, ct: cancellation.Token);
+        PrinterFileInventoryResult result = await CreateClient(backend, http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { Deadline = deadline }, ct: cancellation.Token);
+
+        if (!callerCancel)
+        {
+            Assert.False(cancelledBeforeDeadline);
+            Assert.True(cancelledAtDeadline);
+            Assert.Equal(deadline, clock.Elapsed);
+        }
 
         Assert.Equal(callerCancel ? PrinterFileInventoryOutcome.Cancelled : PrinterFileInventoryOutcome.Unavailable,
             result.Outcome);
@@ -606,29 +621,82 @@ public sealed class PrinterFileInventoryTests
     [Fact]
     public async Task GetFileInventoryAsync_PrusaDetailDeadline_StopsRemainingDetailRequests()
     {
-        using InventoryHandler handler = new(async (request, token) =>
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        TimeSpan detailBudget = deadline * 0.75;
+        TimeSpan traversal = TimeSpan.FromSeconds(50);
+        ManualClock clock = new();
+        bool cancelledBeforeBudget = true;
+        bool cancelledAtBudget = false;
+        using InventoryHandler handler = new((request, token) =>
         {
             switch (request.RequestUri!.AbsolutePath)
             {
                 case "/api/v1/storage":
-                    return Reply("""{"storage_list":[{"path":"/usb","available":true}]}""");
+                    return Task.FromResult(Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""));
                 case "/api/v1/files/usb":
-                    return Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"},{"type":"PRINT_FILE","name":"SECOND.BGC"}]}""");
+                    clock.Advance(traversal);
+                    return Task.FromResult(Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"},{"type":"PRINT_FILE","name":"SECOND.BGC"}]}"""));
                 default:
-                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
-                    return Reply("{}");
+                    clock.Advance(detailBudget - traversal - TimeSpan.FromTicks(1));
+                    cancelledBeforeBudget = token.IsCancellationRequested;
+                    clock.Advance(TimeSpan.FromTicks(1));
+                    cancelledAtBudget = token.IsCancellationRequested;
+                    token.ThrowIfCancellationRequested();
+                    throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
             }
         });
         using HttpClient http = new(handler);
 
-        PrinterFileInventoryResult result = await CreateClient("prusalink", http).GetFileInventoryAsync(
-            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = TimeSpan.FromMilliseconds(100) });
+        PrinterFileInventoryResult result = await CreatePrusaClient(http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = deadline });
 
+        Assert.False(cancelledBeforeBudget);
+        Assert.True(cancelledAtBudget);
+        Assert.Equal(detailBudget, clock.Elapsed);
         Assert.Equal(PrinterFileInventoryOutcome.Complete, result.Outcome);
         Assert.Equal(PrinterFileInventoryReason.None, result.Reason);
+        Assert.True(Assert.Single(result.Coverage).IsComplete);
         Assert.Equal(2, result.Entries.Length);
         Assert.All(result.Entries, x => Assert.Null(x.DetailsFetchedAtUtc));
         Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/usb/FIRST.BGC"], handler.Paths);
+    }
+
+    [Fact]
+    public async Task GetFileInventoryAsync_PrusaOverallDeadline_IsPartialTimeoutNotDetailBudgetStop()
+    {
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        ManualClock clock = new();
+        bool cancelledBeforeDeadline = true;
+        bool cancelledAtDeadline = false;
+        using InventoryHandler handler = new((request, token) =>
+        {
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/api/v1/storage":
+                    return Task.FromResult(Reply("""{"storage_list":[{"path":"/usb","available":true},{"path":"/local","available":true}]}"""));
+                case "/api/v1/files/usb":
+                    return Task.FromResult(Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"}]}"""));
+                default:
+                    clock.Advance(deadline - TimeSpan.FromTicks(1));
+                    cancelledBeforeDeadline = token.IsCancellationRequested;
+                    clock.Advance(TimeSpan.FromTicks(1));
+                    cancelledAtDeadline = token.IsCancellationRequested;
+                    token.ThrowIfCancellationRequested();
+                    throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
+            }
+        });
+        using HttpClient http = new(handler);
+
+        PrinterFileInventoryResult result = await CreatePrusaClient(http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { IncludeFileDetails = true, Deadline = deadline });
+
+        Assert.False(cancelledBeforeDeadline);
+        Assert.True(cancelledAtDeadline);
+        Assert.Equal(PrinterFileInventoryOutcome.Partial, result.Outcome);
+        Assert.Equal(PrinterFileInventoryReason.Timeout, result.Reason);
+        Assert.Equal("usb", Assert.Single(result.Coverage).StorageRoot);
+        Assert.Null(Assert.Single(result.Entries).DetailsFetchedAtUtc);
+        Assert.Equal(["/api/v1/storage", "/api/v1/files/usb", "/api/v1/files/local"], handler.Paths);
     }
 
     [Fact]
@@ -729,6 +797,18 @@ public sealed class PrinterFileInventoryTests
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 
+    private static ISupportsFileInventory CreateClient(string backend, HttpClient http, TimeProvider clock) => backend switch
+    {
+        "moonraker" => new MoonrakerClient(
+            http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings(), timeProvider: clock),
+        "octoprint" => new OctoPrintClient(http, clock),
+        "prusalink" => new PrusaLinkClient(CreatePrusaClient(http, clock)),
+        _ => throw new ArgumentOutOfRangeException(nameof(backend))
+    };
+
+    private static PrusaLinkApiClient CreatePrusaClient(HttpClient http, TimeProvider clock) =>
+        new(http, NullLogger<PrusaLinkApiClient>.Instance, ownsHttpClient: false, clock);
+
     private static HttpResponseMessage Reply(string json, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
@@ -758,6 +838,86 @@ public sealed class PrinterFileInventoryTests
             Methods.Add(request.Method);
             ApiKeys.Add(request.Headers.TryGetValues("X-Api-Key", out IEnumerable<string>? keys) ? keys.Single() : null);
             return _respond(request, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Minimal manual clock: timers fire synchronously inside <see cref="Advance"/>. Kept local because the plugins
+    /// test project intentionally does not reference Farm.Testing.Shared.
+    /// </summary>
+    private sealed class ManualClock : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<ManualTimer> _timers = [];
+        private long _ticks;
+
+        public TimeSpan Elapsed => TimeSpan.FromTicks(GetTimestamp());
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            lock (_gate)
+            {
+                return _ticks;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.Equal(Timeout.InfiniteTimeSpan, period);
+            ManualTimer timer = new(this, callback, state);
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        public void Advance(TimeSpan elapsed)
+        {
+            List<ManualTimer> due;
+            lock (_gate)
+            {
+                _ticks += elapsed.Ticks;
+                due = [.. _timers.Where(timer => timer.DueTicks <= _ticks)];
+                foreach (ManualTimer timer in due)
+                {
+                    _timers.Remove(timer);
+                }
+            }
+
+            foreach (ManualTimer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer(ManualClock owner, TimerCallback callback, object? state) : ITimer
+        {
+            public long DueTicks { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (owner._gate)
+                {
+                    owner._timers.Remove(this);
+                    if (dueTime != Timeout.InfiniteTimeSpan)
+                    {
+                        DueTicks = owner._ticks + dueTime.Ticks;
+                        owner._timers.Add(this);
+                    }
+                }
+
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose() => Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
         }
     }
 }
