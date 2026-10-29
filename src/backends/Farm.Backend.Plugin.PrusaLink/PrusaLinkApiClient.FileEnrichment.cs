@@ -42,8 +42,6 @@ public partial class PrusaLinkApiClient
 
     private sealed class FileEnrichmentSession
     {
-        private const int MaximumReferenceLength = 1024;
-
         private readonly PrusaLinkApiClient _owner;
         private readonly string _baseUrl;
         private readonly PrinterFileInventoryEntry _observation;
@@ -211,7 +209,7 @@ public partial class PrusaLinkApiClient
             return new NativeDetails(
                 ReadPrintFileMetadata(details.TryGetProperty("meta", out JsonElement meta) ? meta : default),
                 actual.SizeBytes,
-                IsExpectedDownloadReference(details),
+                HasExpectedDownloadReference(details),
                 TryBuildFilePreviewThumbnailUri(_baseUrl, details));
         }
 
@@ -228,36 +226,11 @@ public partial class PrusaLinkApiClient
         }
 
         // The printer's own reference is trusted only when it names exactly the file being enriched.
-        private bool IsExpectedDownloadReference(JsonElement details)
+        private bool HasExpectedDownloadReference(JsonElement details)
         {
-            if (!details.TryGetProperty("refs", out JsonElement refs) ||
-                ReadFilePreviewString(refs, "download") is not { Length: > 0 and <= MaximumReferenceLength } reference)
-            {
-                return false;
-            }
-
-            if (reference[0] != '/')
-            {
-                return Uri.TryCreate(reference, UriKind.Absolute, out Uri? absolute) &&
-                    string.Equals(absolute.AbsoluteUri, _downloadUri.AbsoluteUri, StringComparison.Ordinal);
-            }
-
-            string[] segments = reference[1..].Split('/');
-            if (segments.Length != _downloadSegments.Length)
-            {
-                return false;
-            }
-
-            for (int index = 0; index < segments.Length; index++)
-            {
-                if (!string.Equals(
-                    Uri.UnescapeDataString(segments[index]), _downloadSegments[index], StringComparison.Ordinal))
-                {
-                    return false;
-                }
-            }
-
-            return true;
+            JsonElement refs = details.TryGetProperty("refs", out JsonElement value) ? value : default;
+            return PrusaLinkApiClient.IsExpectedDownloadReference(
+                ReadFilePreviewString(refs, "download"), _downloadUri, _downloadSegments);
         }
 
         private sealed record NativeDetails(

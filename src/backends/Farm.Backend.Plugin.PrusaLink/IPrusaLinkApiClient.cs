@@ -78,6 +78,12 @@ public interface IPrusaLinkApiClient
             MetadataReason: "unsupported",
             ThumbnailReason: "unsupported"));
 
+    /// <summary>Copies the exact, confirmed native file path through bounded authenticated transport.</summary>
+    Task<PrinterFileCopyBytes> CopyFileToAsync(
+        string baseUrl, string storageRoot, string relativePath, PrinterCredential? credential,
+        System.IO.Stream destination, long maximumBytes, CancellationToken ct) =>
+        Task.FromException<PrinterFileCopyBytes>(new PrinterFileCopyException("copy_unsupported"));
+
     // ========== PRIMARY METHODS (PrinterCredential?) ==========
 
     /// <summary>Gets API version information.</summary>
