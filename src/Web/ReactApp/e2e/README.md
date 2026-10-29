@@ -163,6 +163,7 @@ correct scenario's own root URL:
 | `POST` | `/__emulator/reset`          | Restore the instance's complete deterministic baseline, including printer state, virtual time, files, history/totals, Spoolman, MMU, and faults. |
 | `POST` | `/__emulator/time/advance`   | Body `{ seconds }` — advances this instance's deterministic virtual clock; there is no direct "set progress" call, so `advancePrintProgress(scenario, percent)` converts percent → the equivalent `seconds` (progress = elapsedSeconds / 600). |
 | `GET`  | `/__emulator/printers`       | Authoritative current state (Klippy state, print state, filename, progress, virtual time) for this instance's printer(s). |
+| `POST` | `/__emulator/printer/sensor` | Body `{ objectName, fields }` — changes a configured Klipper sensor and emits a real Moonraker status update. |
 | `POST` | `/__emulator/printer/mmu`     | Select `None`, `HappyHare`, `Afc`, `Qidibox`, or `SnapmakerU1` for deterministic protocol/UI coverage. |
 
 These calls fail the test explicitly (naming the exact missing route and
@@ -217,6 +218,7 @@ npx playwright test e2e/emulator/ --workers=1 --headed   # watch in browser
 
 ```bash
 npx playwright test e2e/emulator/printer-status.spec.ts --workers=1
+npx playwright test e2e/emulator/printer-sensors-live.spec.ts --workers=1 --project=chromium
 npx playwright test e2e/emulator/job-lifecycle.spec.ts --workers=1
 npx playwright test e2e/emulator/discovery.spec.ts --workers=1
 npx playwright test e2e/emulator/printer-files.spec.ts --workers=1

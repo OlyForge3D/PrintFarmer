@@ -209,6 +209,12 @@ export interface MoonrakerControlClient {
   advancePrintProgress(scenario: MoonrakerControllableScenario, percent: number): Promise<void>;
   /** Fetch the emulator's authoritative current state for every printer in this instance's registry. */
   getPrinters(scenario: MoonrakerControllableScenario): Promise<Array<Record<string, unknown>>>;
+  /** Change one supported sensor reading and broadcast it through Moonraker's real status stream. */
+  updateSensor(
+    scenario: MoonrakerControllableScenario,
+    objectName: string,
+    fields: Record<string, number | boolean>,
+  ): Promise<void>;
   /** Select the deterministic MMU/toolhead wire protocol exposed by one emulator instance. */
   setMmuMode(scenario: MoonrakerControllableScenario, mode: MoonrakerMmuMode): Promise<void>;
 }
@@ -262,6 +268,14 @@ export function createMoonrakerControl(request: APIRequestContext): MoonrakerCon
         `Moonraker emulator control API printers query failed at ${url} (status ${res.status()})`
       ).toBeTruthy();
       return (await res.json()) as Array<Record<string, unknown>>;
+    },
+    async updateSensor(scenario, objectName, fields) {
+      const url = `${getMoonrakerEmulatorUrl(scenario)}/__emulator/printer/sensor`;
+      const res = await request.post(url, { data: { objectName, fields } });
+      expect(
+        res.ok(),
+        `Moonraker emulator sensor update failed for "${objectName}" at ${url} (status ${res.status()})`
+      ).toBeTruthy();
     },
     async setMmuMode(scenario, mode) {
       const url = `${getMoonrakerEmulatorUrl(scenario)}/__emulator/printer/mmu`;
