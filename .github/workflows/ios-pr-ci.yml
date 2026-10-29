@@ -355,6 +355,8 @@ jobs:
               -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
               -only-testing:PrintFarmerUITests/UIWaitBudgetTests
               -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
+              -only-testing:PrintFarmerUITests/Issue3561HeaderBandComparisonUITests/testControlPathWithoutSearchHasNoBandAboveFarmBack
+              -only-testing:PrintFarmerUITests/Issue3561HeaderBandComparisonUITests/testSearchFilterPathHasNoBandAboveFarmBack
           - key: ipad-1
             family: iPad
             shard: 1

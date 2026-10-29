@@ -217,7 +217,12 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/UIWaitBudgetTests",
             "PrintFarmerUITests/PrinterDetailHeaderUITests",
         ]
-        self.assertEqual(Counter(selectors_by_family["iPhone"]), Counter(shared))
+        # DO NOT MERGE: iPhone-only N3552-01 (#3561) isolation diagnostic.
+        iphone_diagnostic = [
+            "PrintFarmerUITests/Issue3561HeaderBandComparisonUITests/testControlPathWithoutSearchHasNoBandAboveFarmBack",
+            "PrintFarmerUITests/Issue3561HeaderBandComparisonUITests/testSearchFilterPathHasNoBandAboveFarmBack",
+        ]
+        self.assertEqual(Counter(selectors_by_family["iPhone"]), Counter(shared + iphone_diagnostic))
         self.assertEqual(
             Counter(selectors_by_family["iPad"]),
             Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
