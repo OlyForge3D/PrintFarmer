@@ -23,13 +23,10 @@ namespace Farm.Slicer.Module.Tests;
 public class CustomWebApplicationFactory : HostFixture<Program>
 {
     private static int _databaseCounter;
-    private readonly DbCommandInterceptor? _commandInterceptor;
 
-    public CustomWebApplicationFactory(DbCommandInterceptor? commandInterceptor = null)
+    public CustomWebApplicationFactory()
         : base($"slicer_test_{System.Threading.Interlocked.Increment(ref _databaseCounter)}")
     {
-        _commandInterceptor = commandInterceptor;
-
         // Force-load the Slicer API assembly so the integration shim's AppDomain scan
         // finds SlicerApiModuleRegistrar and registers ISlicerFileStorage.
         // Without this, .NET's lazy assembly loading means Farm.Slicer.Module.Api is
@@ -37,6 +34,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
         System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
             typeof(Farm.Slicer.Module.Api.SlicerApiExtensions).TypeHandle);
     }
+
+    /// <summary>Gets optional SQL instrumentation for specialized fixtures.</summary>
+    protected virtual DbCommandInterceptor? CommandInterceptor => null;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -77,9 +77,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
                 options.UseSqlite(
                     ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
-                if (_commandInterceptor is not null)
+                if (CommandInterceptor is not null)
                 {
-                    options.AddInterceptors(_commandInterceptor);
+                    options.AddInterceptors(CommandInterceptor);
                 }
             });
 
@@ -87,9 +87,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
             optionsBuilder.UseSqlite(
                 ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
-            if (_commandInterceptor is not null)
+            if (CommandInterceptor is not null)
             {
-                optionsBuilder.AddInterceptors(_commandInterceptor);
+                optionsBuilder.AddInterceptors(CommandInterceptor);
             }
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<SlicerDbContext>(_ => { }, ServiceLifetime.Scoped);
@@ -124,9 +124,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
                 options.UseSqlite(
                     ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
-                if (_commandInterceptor is not null)
+                if (CommandInterceptor is not null)
                 {
-                    options.AddInterceptors(_commandInterceptor);
+                    options.AddInterceptors(CommandInterceptor);
                 }
             });
 
@@ -134,9 +134,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
             appOptionsBuilder.UseSqlite(
                 ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
-            if (_commandInterceptor is not null)
+            if (CommandInterceptor is not null)
             {
-                appOptionsBuilder.AddInterceptors(_commandInterceptor);
+                appOptionsBuilder.AddInterceptors(CommandInterceptor);
             }
             services.AddSingleton(appOptionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>(_ => { }, ServiceLifetime.Scoped);

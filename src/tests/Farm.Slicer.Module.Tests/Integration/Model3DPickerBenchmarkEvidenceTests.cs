@@ -173,8 +173,11 @@ public sealed class Model3DPickerBenchmarkEvidenceTests : IAsyncLifetime, IDispo
         long AllocatedBytes);
 
     private sealed class PickerBenchmarkWebApplicationFactory(
-        CountingDbCommandInterceptor commandInterceptor) : CustomWebApplicationFactory(commandInterceptor)
+        CountingDbCommandInterceptor commandInterceptor) : CustomWebApplicationFactory
     {
+        protected override Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor? CommandInterceptor =>
+            commandInterceptor;
+
         protected override void ConfigureTestServices(IServiceCollection services)
         {
             ServiceDescriptor? artifactCleanupService = services.FirstOrDefault(descriptor =>
