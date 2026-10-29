@@ -64,6 +64,26 @@ describe('FilesPage folder navigation with the real file browser', () => {
     vi.mocked(apiClient.getGcodeFilesFolders).mockResolvedValue([]);
   });
 
+  it.each(['grid', 'explorer'] as const)('matches sort-order and folder button sizing in %s mode without changing sorting', async mode => {
+    renderPage(mode);
+    await screen.findByRole('checkbox', { name: 'Select part-1.stl' });
+    const foldersButton = screen.getByRole('button', { name: 'Folders' });
+    const sortButton = screen.getByRole('button', { name: 'Sort ascending' });
+    for (const button of [foldersButton, sortButton]) {
+      expect(button).toHaveClass('h-10', 'w-10', 'p-2');
+    }
+    fireEvent.click(sortButton);
+    await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortOrder: 'asc' }), expect.any(AbortSignal),
+    ));
+    expect(screen.getByRole('button', { name: 'Sort descending' })).toBe(sortButton);
+    expect(sortButton).toHaveClass('h-10', 'w-10', 'p-2');
+    fireEvent.click(sortButton);
+    await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortOrder: 'desc' }), expect.any(AbortSignal),
+    ));
+  });
+
   it.each(['grid', 'explorer'] as const)('filters on the server and resets page and selection in %s mode', async mode => {
     renderPage(mode);
     expect(await screen.findByRole('checkbox', { name: 'Select part-1.stl' })).not.toBeChecked();

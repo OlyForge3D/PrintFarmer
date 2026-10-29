@@ -71,6 +71,7 @@ export const FileBrowserToolbar = ({
           variant="secondary"
           size="sm"
           aria-label={sortOrder === 'asc' ? 'Sort descending' : 'Sort ascending'}
+          className="h-10 w-10 p-2"
           onClick={onToggleSortOrder}
         >
           {sortOrder === 'asc' ? '↑' : '↓'}
