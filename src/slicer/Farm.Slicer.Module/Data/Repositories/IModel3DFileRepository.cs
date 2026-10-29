@@ -47,6 +47,10 @@ public interface IModel3DFileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct);
 
+    /// <summary>Retrieves the picker fields for all valid models ordered by upload date descending.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Model3DPickerProjection>> ListValidPickerAsync(CancellationToken ct);
+
     /// <summary>Retrieves all valid models in a specific folder.</summary>
     /// <param name="folderId">The folder identifier (soft reference to core FolderNode).</param>
     /// <param name="ct">Cancellation token.</param>
