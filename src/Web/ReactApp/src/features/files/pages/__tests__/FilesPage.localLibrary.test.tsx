@@ -83,7 +83,7 @@ import { FilesPage } from '../FilesPage';
 
 const gcodeUploadedAt = '2026-08-07T09:30:00Z';
 
-function unifiedPage() {
+function unifiedPage(extractedInfill = 15) {
   return {
     items: [
       {
@@ -91,7 +91,7 @@ function unifiedPage() {
         fileSize: 2048, fileType: 'gcode', uploadedAt: gcodeUploadedAt, url: '/api/gcode-files/file/gcode-1',
         thumbnailUrl: '/thumbs/gcode-1.png', extractedPrintTime: 90, extractedLayerHeight: 0.2, requiredMaterial: 'PLA',
         extractedSlicerName: 'OrcaSlicer', extractedSlicerVersion: '2.3.0', extractedPrinterModelName: 'Bambu Lab X1C',
-        extractedNozzleDiameter: 0.4, extractedHotendTemp: 220, extractedBedTemp: 0, extractedInfill: 15,
+        extractedNozzleDiameter: 0.4, extractedHotendTemp: 220, extractedBedTemp: 0, extractedInfill,
         extractedMaterial: 'PETG', extractedFilamentLength: 1234.5, extractedPerimeters: 3,
       },
       {
@@ -214,9 +214,7 @@ describe('FilesPage local library', () => {
     [15, '15%'],
     [100, '100%'],
   ])('shows extracted infill %s as %s, reading legacy Slic3r fractions as percentages', async (extractedInfill, expected) => {
-    const page = unifiedPage();
-    page.items[0] = { ...page.items[0], extractedInfill };
-    apiMocks.getUnifiedFiles.mockResolvedValue(page);
+    apiMocks.getUnifiedFiles.mockResolvedValue(unifiedPage(extractedInfill));
     const user = userEvent.setup();
     renderPage();
     const table = screen.getByRole('table', { name: 'Mock table' });
