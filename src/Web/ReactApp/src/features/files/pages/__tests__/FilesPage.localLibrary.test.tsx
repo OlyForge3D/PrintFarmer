@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ColumnDef, FileItem, UseFileBrowserConfig } from '@/features/fileBrowser/types';
+import { FILE_TABLE_PREVIEW_CELL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 const apiMocks = vi.hoisted(() => ({
   downloadModel3dFile: vi.fn(),
@@ -59,11 +60,11 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
         <div>
           <output aria-label="compact">{String(compact)}</output>
           <table aria-label="Mock table">
-            <thead><tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Actions</th></tr></thead>
+            <thead><tr>{columns.map((column) => <th key={column.key} className={column.className}>{column.label}</th>)}<th>Actions</th></tr></thead>
             <tbody>
               {files.map((file) => (
                 <tr key={file.id}>
-                  {columns.map((column) => <td key={column.key}>{column.render ? column.render(file) : String(file[column.key as keyof FileItem] ?? '')}</td>)}
+                  {columns.map((column) => <td key={column.key} className={column.className}>{column.render ? column.render(file) : String(file[column.key as keyof FileItem] ?? '')}</td>)}
                   <td>{renderItemActions?.(file)}</td>
                 </tr>
               ))}
@@ -82,13 +83,16 @@ import { FilesPage } from '../FilesPage';
 
 const gcodeUploadedAt = '2026-08-07T09:30:00Z';
 
-function unifiedPage() {
+function unifiedPage(extractedInfill = 15) {
   return {
     items: [
       {
         source: 'Gcode', id: 'gcode-1', path: '/gcode', name: 'z-last.gcode', fileName: 'stored.gcode',
         fileSize: 2048, fileType: 'gcode', uploadedAt: gcodeUploadedAt, url: '/api/gcode-files/file/gcode-1',
         thumbnailUrl: '/thumbs/gcode-1.png', extractedPrintTime: 90, extractedLayerHeight: 0.2, requiredMaterial: 'PLA',
+        extractedSlicerName: 'OrcaSlicer', extractedSlicerVersion: '2.3.0', extractedPrinterModelName: 'Bambu Lab X1C',
+        extractedNozzleDiameter: 0.4, extractedHotendTemp: 220, extractedBedTemp: 0, extractedInfill,
+        extractedMaterial: 'PETG', extractedFilamentLength: 1234.5, extractedPerimeters: 3,
       },
       {
         source: 'Model', id: 'model-1', path: '/models', name: 'a-first.stl', fileName: 'stored.stl',
@@ -134,7 +138,10 @@ describe('FilesPage local library', () => {
     expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent))
       .toEqual(['Preview', 'Name', 'Size', 'Uploaded', 'Actions']);
     const cells = within(row).getAllByRole('cell');
-    // Decorative thumbnail (the adjacent filename names the row).
+    // The preview shrinks to the thumbnail so the name sits right beside it.
+    expect(within(table).getByRole('columnheader', { name: 'Preview' })).toHaveClass(FILE_TABLE_PREVIEW_CELL_CLASS);
+    expect(cells[0]).toHaveClass(FILE_TABLE_PREVIEW_CELL_CLASS);
+    expect(cells[1]).not.toHaveClass('w-px');
     expect(cells[0].querySelector('img')).toHaveAttribute('src', '/thumbs/gcode-1.png');
     expect(cells[2]).toHaveTextContent('2 KB');
     const uploaded = new Date(gcodeUploadedAt);
@@ -179,6 +186,16 @@ describe('FilesPage local library', () => {
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
     expect(detailValue(panel, 'Material')).toHaveTextContent(/^PLA$/);
+    // Extracted settings use the on-printer "Print settings" layout; settings the library does
+    // not extract are omitted rather than listed as unknown.
+    const settings = within(panel).getByRole('region', { name: 'Print settings' });
+    expect(within(settings).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+      .toEqual([
+        ['Slicer', 'OrcaSlicer 2.3.0'], ['Sliced for', 'Bambu Lab X1C'], ['Nozzle diameter', '0.4 mm'],
+        ['Nozzle temperature', '220 °C'], ['Bed temperature', '0 °C'], ['Infill', '15%'],
+        ['Filament type', 'PETG'], ['Filament length', '1234.5 mm'],
+      ]);
+    expect(within(settings).queryByText('Unknown')).not.toBeInTheDocument();
     expect(detailValue(panel, 'Uploaded').querySelector('time')).toHaveTextContent(new Date(gcodeUploadedAt).toLocaleDateString());
     const panelActions = within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button');
     expect(panelActions.map((button) => button.getAttribute('aria-label')))
@@ -192,6 +209,44 @@ describe('FilesPage local library', () => {
     await waitFor(() => expect(name).toHaveFocus());
   });
 
+  it.each([
+    [0.2, '20%'],
+    [15, '15%'],
+    [100, '100%'],
+  ])('shows extracted infill %s as %s, reading legacy Slic3r fractions as percentages', async (extractedInfill, expected) => {
+    apiMocks.getUnifiedFiles.mockResolvedValue(unifiedPage(extractedInfill));
+    const user = userEvent.setup();
+    renderPage();
+    const table = screen.getByRole('table', { name: 'Mock table' });
+    await user.click(await within(table).findByRole('button', { name: 'z-last.gcode, show details' }));
+    const settings = within(screen.getByRole('dialog', { name: 'z-last.gcode' })).getByRole('region', { name: 'Print settings' });
+    expect(detailValue(settings, 'Infill')).toHaveTextContent(new RegExp(`^${expected}$`));
+  });
+
+  it('opens details from the table preview by click and keyboard, restoring focus to the preview', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const table = screen.getByRole('table', { name: 'Mock table' });
+    const preview = await within(table).findByRole('button', { name: 'Preview of z-last.gcode, show details' });
+    expect(preview.querySelector('img')).toHaveAttribute('src', '/thumbs/gcode-1.png');
+    await user.click(preview);
+    const panel = screen.getByRole('dialog', { name: 'z-last.gcode' });
+    expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'z-last.gcode' })).not.toBeInTheDocument());
+    await waitFor(() => expect(preview).toHaveFocus());
+
+    // Models without a thumbnail still get a keyboard-operable preview trigger.
+    const modelPreview = within(table).getByRole('button', { name: 'Preview of a-first.stl, show details' });
+    modelPreview.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('dialog', { name: 'a-first.stl' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(modelPreview).toHaveFocus());
+    await user.keyboard(' ');
+    expect(screen.getByRole('dialog', { name: 'a-first.stl' })).toBeInTheDocument();
+  });
+
   it('opens model details from a card click without inventing print metadata, and acts from the panel', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -201,6 +256,7 @@ describe('FilesPage local library', () => {
     const panel = screen.getByRole('dialog', { name: 'a-first.stl' });
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unavailable$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unavailable$/);
+    expect(within(panel).queryByRole('region', { name: 'Print settings' })).not.toBeInTheDocument();
     expect(within(panel).getByText('Functional')).toBeInTheDocument();
     await user.click(within(panel).getByRole('button', { name: 'Download file' }));
     await waitFor(() => expect(apiMocks.downloadModel3dFile).toHaveBeenCalledWith('model-1', 'a-first.stl'));

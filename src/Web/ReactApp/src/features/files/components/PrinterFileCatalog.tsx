@@ -37,6 +37,7 @@ import {
   FILE_TABLE_HEAD_CLASS,
   FILE_TABLE_ROW_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TABLE_PREVIEW_CELL_CLASS,
   FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
 
@@ -404,7 +405,7 @@ export function PrinterFileCatalog() {
                     <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
                     <thead className={FILE_TABLE_HEAD_CLASS}><tr>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-10')}>{selectAllCheckbox()}</th>
-                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Preview</th>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, FILE_TABLE_PREVIEW_CELL_CLASS)}>Preview</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Name</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Printer</th>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Size</th>
@@ -429,7 +430,7 @@ export function PrinterFileCatalog() {
                             </td>
                             {/* Mouse shortcut matching the card view; keyboard users open details from the name button. */}
                             <td
-                              className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'cursor-pointer')}
+                              className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, FILE_TABLE_PREVIEW_CELL_CLASS, 'cursor-pointer')}
                               onClick={event => details.open(
                                 entry.id,
                                 event.currentTarget.closest('tr')?.querySelector<HTMLElement>('[data-file-details-trigger]') ?? null,

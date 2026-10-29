@@ -546,7 +546,7 @@ export const ExplorerView = ({
                     <th
                       key={column.key}
                       scope="col"
-                      className={`${FILE_TABLE_HEADER_CELL_CLASS} ${column.align === 'right' ? 'text-right' : ''}`}
+                      className={`${FILE_TABLE_HEADER_CELL_CLASS} ${column.align === 'right' ? 'text-right' : ''} ${column.className ?? ''}`}
                       aria-sort={sortable ? ariaSort : undefined}
                     >
                       {sortable ? (
@@ -618,7 +618,7 @@ export const ExplorerView = ({
                     {columns.map((column) => (
                       <td
                         key={`${file.id}-${column.key}`}
-                        className={`${compact ? COMPACT_FILE_TABLE_CELL_CLASS : 'px-3 py-2 text-pf-text-primary'} ${column.align === 'right' ? 'text-right' : ''}`}
+                        className={`${compact ? COMPACT_FILE_TABLE_CELL_CLASS : 'px-3 py-2 text-pf-text-primary'} ${column.align === 'right' ? 'text-right' : ''} ${column.className ?? ''}`}
                       >
                         {column.render
                           ? column.render(file)

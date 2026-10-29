@@ -73,6 +73,8 @@ export interface ColumnDef {
   sortable?: boolean;
   align?: 'left' | 'right';
   width?: string;
+  /** Extra classes applied to both the header and body cells of this column. */
+  className?: string;
   render?: (file: FileItem) => ReactNode;
 }
 

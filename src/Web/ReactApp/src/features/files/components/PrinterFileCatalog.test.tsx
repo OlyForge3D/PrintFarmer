@@ -12,6 +12,7 @@ import {
   COMPACT_FILE_TABLE_FRAME_CLASS,
   FILE_TABLE_HEAD_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TABLE_PREVIEW_CELL_CLASS,
   FILE_TABLE_ROW_CLASS,
   FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
@@ -202,6 +203,10 @@ describe('Printer file catalog', () => {
     }
     expect(within(table!).getAllByRole('columnheader').map(cell => cell.textContent))
       .toEqual(['', 'Preview', 'Name', 'Printer', 'Size', 'Modified', 'Actions']);
+    // The preview shrinks to the thumbnail so the name sits right beside it.
+    expect(within(table!).getByRole('columnheader', { name: 'Preview' })).toHaveClass(FILE_TABLE_PREVIEW_CELL_CLASS);
+    expect(within(row).getByTestId('printer-file-thumbnail').closest('td')).toHaveClass(FILE_TABLE_PREVIEW_CELL_CLASS);
+    expect(within(table!).getByRole('columnheader', { name: 'Name' })).not.toHaveClass('w-px');
     expect(within(table!).getByRole('checkbox', { name: 'Select all files on this page' })).toBeInTheDocument();
     expect(within(row).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
     expect(cellUnder('Size', row)).toHaveTextContent(/^Unknown$/);
