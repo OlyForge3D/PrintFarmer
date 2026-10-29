@@ -143,10 +143,18 @@ public sealed class PrinterFileInventoryTests
     [InlineData("prusalink", true)]
     public async Task GetFileInventoryAsync_CancelOrDeadline_PreservesDistinctFailure(string backend, bool callerCancel)
     {
-        using InventoryHandler handler = new(async (_, token) =>
+        TimeSpan deadline = TimeSpan.FromSeconds(100);
+        ManualClock clock = new();
+        bool cancelledBeforeDeadline = true;
+        bool cancelledAtDeadline = false;
+        using InventoryHandler handler = new((_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return Reply("{}");
+            clock.Advance(deadline - TimeSpan.FromTicks(1));
+            cancelledBeforeDeadline = token.IsCancellationRequested;
+            clock.Advance(TimeSpan.FromTicks(1));
+            cancelledAtDeadline = token.IsCancellationRequested;
+            token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Request was not cancelled at the deadline boundary.");
         });
         using HttpClient http = new(handler);
         using CancellationTokenSource cancellation = new();
@@ -155,8 +163,15 @@ public sealed class PrinterFileInventoryTests
             cancellation.Cancel();
         }
 
-        PrinterFileInventoryResult result = await CreateClient(backend, http).GetFileInventoryAsync(
-            "http://printer/", options: new() { Deadline = TimeSpan.FromMilliseconds(30) }, ct: cancellation.Token);
+        PrinterFileInventoryResult result = await CreateClient(backend, http, clock).GetFileInventoryAsync(
+            "http://printer/", options: new() { Deadline = deadline }, ct: cancellation.Token);
+
+        if (!callerCancel)
+        {
+            Assert.False(cancelledBeforeDeadline);
+            Assert.True(cancelledAtDeadline);
+            Assert.Equal(deadline, clock.Elapsed);
+        }
 
         Assert.Equal(callerCancel ? PrinterFileInventoryOutcome.Cancelled : PrinterFileInventoryOutcome.Unavailable,
             result.Outcome);
@@ -608,6 +623,7 @@ public sealed class PrinterFileInventoryTests
     {
         TimeSpan deadline = TimeSpan.FromSeconds(100);
         TimeSpan detailBudget = deadline * 0.75;
+        TimeSpan traversal = TimeSpan.FromSeconds(50);
         ManualClock clock = new();
         bool cancelledBeforeBudget = true;
         bool cancelledAtBudget = false;
@@ -618,9 +634,10 @@ public sealed class PrinterFileInventoryTests
                 case "/api/v1/storage":
                     return Task.FromResult(Reply("""{"storage_list":[{"path":"/usb","available":true}]}"""));
                 case "/api/v1/files/usb":
+                    clock.Advance(traversal);
                     return Task.FromResult(Reply("""{"type":"FOLDER","children":[{"type":"PRINT_FILE","name":"FIRST.BGC"},{"type":"PRINT_FILE","name":"SECOND.BGC"}]}"""));
                 default:
-                    clock.Advance(detailBudget - TimeSpan.FromTicks(1));
+                    clock.Advance(detailBudget - traversal - TimeSpan.FromTicks(1));
                     cancelledBeforeBudget = token.IsCancellationRequested;
                     clock.Advance(TimeSpan.FromTicks(1));
                     cancelledAtBudget = token.IsCancellationRequested;
@@ -777,6 +794,15 @@ public sealed class PrinterFileInventoryTests
         "moonraker" => new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings()),
         "octoprint" => new OctoPrintClient(http),
         "prusalink" => new PrusaLinkClient(http),
+        _ => throw new ArgumentOutOfRangeException(nameof(backend))
+    };
+
+    private static ISupportsFileInventory CreateClient(string backend, HttpClient http, TimeProvider clock) => backend switch
+    {
+        "moonraker" => new MoonrakerClient(
+            http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings(), timeProvider: clock),
+        "octoprint" => new OctoPrintClient(http, clock),
+        "prusalink" => new PrusaLinkClient(CreatePrusaClient(http, clock)),
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 
