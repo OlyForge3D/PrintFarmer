@@ -1535,15 +1535,15 @@ public sealed class MoonrakerSubscriptionService(
 
         _logger.LogDebug("Processing status update for printer {PrinterId}. Raw status: {StatusObjGetRawText}", printerId, statusObj.GetRawText());
 
-        // Moonraker may omit the webhooks object from subscription payloads on some Klipper setups.
-        // Any successful printer-object status still proves Klippy is reachable; only an explicit
-        // webhooks state should mark it not-ready/offline.
-        bool? resolvedReady = MoonrakerOnlineStatusClassifier.ResolveKlippyReady(statusObj);
+        // Moonraker may omit webhooks from subscription payloads. A printer-object status can
+        // establish initial readiness, but cannot override a previously reported shutdown.
+        bool? previousReady = _klippyReadyState.TryGetValue(printerId, out bool knownReady) ? knownReady : null;
+        bool? resolvedReady = MoonrakerOnlineStatusClassifier.ResolveKlippyReady(statusObj, previousReady);
         if (resolvedReady.HasValue)
         {
-            bool previousReady = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready;
+            bool wasReady = previousReady ?? false;
             _klippyReadyState[printerId] = resolvedReady.Value;
-            if (previousReady != resolvedReady.Value)
+            if (wasReady != resolvedReady.Value)
             {
                 _logger.LogInformation("Updated klippyReadyState for printer {PrinterId}: {IsReady}", printerId, resolvedReady.Value);
             }
@@ -1604,7 +1604,8 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         _ = state.Sensors.Apply(statusObj, DateTime.UtcNow);
-        if (resolvedReady == false)
+        if (resolvedReady == false ||
+            (_klippyReadyState.TryGetValue(printerId, out bool currentReady) && !currentReady))
         {
             _ = state.Sensors.MarkAllUnavailable();
         }
