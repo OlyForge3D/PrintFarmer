@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run production-mode iOS sensor E2E against isolated local backends."""
 
+import argparse
 import json
 import os
 import secrets
@@ -29,15 +30,45 @@ DEVELOPER_DIR = Path(os.environ.get(
 ))
 API_URL = os.environ.get("PRINTFARM_SENSOR_E2E_API_URL", "http://localhost:5245")
 MOONRAKER_URL = os.environ.get("PRINTFARM_SENSOR_E2E_MOONRAKER_URL", "http://127.0.0.1:7125")
-TEST_NAME = (
-    "PrintFarmerTests/PrinterSensorLiveStateTests/"
-    "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect"
-)
+DEFAULT_PROOF = "backend-ui"
+PROOFS = {
+    "backend-ui": {
+        "test_plan": "PrintFarmerLiveSensorE2E",
+        "test_name": (
+            "PrintFarmerUITests/PrinterSensorsLiveBackendUITests/"
+            "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends"
+        ),
+        "expected_test_id": (
+            "PrinterSensorsLiveBackendUITests/"
+            "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends()"
+        ),
+    },
+    "retained-state": {
+        "test_plan": "PrintFarmerLiveSensorStateE2E",
+        "test_name": (
+            "PrintFarmerTests/PrinterSensorLiveStateTests/"
+            "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect"
+        ),
+        "expected_test_id": (
+            "PrinterSensorLiveStateTests/"
+            "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect()"
+        ),
+    },
+}
 
-EXPECTED_TEST_ID = "/".join(TEST_NAME.split("/")[1:]) + "()"
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--proof",
+        choices=PROOFS,
+        default=DEFAULT_PROOF,
+        help="Live proof to run (default: backend-ui; retained-state is opt-in).",
+    )
+    return parser.parse_args(argv)
 
 
-def verify_named_test_succeeded(timing_path):
+def verify_named_test_succeeded(timing_path, expected_test_id):
     """Fail unless the bounded runner saw exactly the named test, once, as Success.
 
     run-tests.py rejects zero-test and failed runs but not skipped ones, and a
@@ -48,11 +79,27 @@ def verify_named_test_succeeded(timing_path):
         observed = [(test["identifier"], test["status"]) for test in tests]
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise RuntimeError(f"No usable runner test results at {timing_path}: {error}") from error
-    if observed != [(EXPECTED_TEST_ID, "Success")]:
+    if observed != [(expected_test_id, "Success")]:
         raise RuntimeError(
-            f"Expected exactly {EXPECTED_TEST_ID} with status Success; observed {observed}"
+            f"Expected exactly {expected_test_id} with status Success; observed {observed}"
         )
-    print(f"LIVE_SENSOR_E2E: verified {EXPECTED_TEST_ID} executed once with Success", flush=True)
+    print(
+        f"LIVE_SENSOR_E2E: verified {expected_test_id} executed once with Success",
+        flush=True,
+    )
+
+
+def build_test_command(proof_name, simulator_id, result_bundle):
+    proof = PROOFS[proof_name]
+    return [
+        sys.executable, "scripts/run-tests.py", "--",
+        "test", "-project", "PrintFarmer.xcodeproj", "-scheme", "PrintFarmer",
+        "-testPlan", proof["test_plan"],
+        "-destination", f"platform=iOS Simulator,id={simulator_id}",
+        "-only-testing:" + proof["test_name"],
+        "-parallel-testing-enabled", "NO",
+        "-resultBundlePath", str(result_bundle),
+    ]
 
 
 def ensure_port_free(port):
@@ -498,7 +545,8 @@ class ControlHandler(BaseHTTPRequestHandler):
         return
 
 
-def main():
+def main(argv=None):
+    proof_name = parse_args(argv).proof
     if not DEVELOPER_DIR.is_dir():
         raise RuntimeError(f"Required Xcode installation not found: {DEVELOPER_DIR}")
     os.environ["DEVELOPER_DIR"] = str(DEVELOPER_DIR)
@@ -631,17 +679,12 @@ def main():
             }, configuration)
 
         result_bundle = run_dir / "SensorsLive.xcresult"
-        command = [
-            sys.executable, "scripts/run-tests.py", "--",
-            "test", "-project", "PrintFarmer.xcodeproj", "-scheme", "PrintFarmer",
-            "-testPlan", "PrintFarmerLiveSensorE2E",
-            "-destination", f"platform=iOS Simulator,id={test_simulator_id}",
-            "-only-testing:" + TEST_NAME,
-            "-parallel-testing-enabled", "NO",
-            "-resultBundlePath", str(result_bundle),
-        ]
+        command = build_test_command(proof_name, test_simulator_id, result_bundle)
         run_logged(command, MOBILE, env, run_dir / "test.log")
-        verify_named_test_succeeded(result_bundle.with_suffix(".timing.json"))
+        verify_named_test_succeeded(
+            result_bundle.with_suffix(".timing.json"),
+            PROOFS[proof_name]["expected_test_id"],
+        )
     finally:
         if server is not None:
             server.shutdown()
