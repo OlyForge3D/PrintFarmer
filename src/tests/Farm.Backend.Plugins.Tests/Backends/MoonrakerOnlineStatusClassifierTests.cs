@@ -54,6 +54,16 @@ public sealed class MoonrakerOnlineStatusClassifierTests
     }
 
     [Fact]
+    public void ResolveKlippyReady_WhenPriorStateIsNotReadyAndStatusHasPrinterObjectsWithoutWebhooks_ReturnsNull()
+    {
+        using JsonDocument doc = JsonDocument.Parse("""{"temperature_sensor chamber":{"humidity":45}}""");
+
+        bool? result = MoonrakerOnlineStatusClassifier.ResolveKlippyReady(doc.RootElement, previousReady: false);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
     public void ResolveKlippyReady_WhenStatusOnlyHasUnknownShape_ReturnsNull()
     {
         using JsonDocument doc = JsonDocument.Parse("{}");

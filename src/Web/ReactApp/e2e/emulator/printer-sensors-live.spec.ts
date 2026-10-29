@@ -7,6 +7,7 @@ import {
   MOONRAKER_PRINTERS,
 } from '../fixtures/moonraker';
 import { API_BASE_URL, getStoredAuthToken } from '../fixtures/emulator-setup';
+import type { Request } from '@playwright/test';
 
 type JsonRecord = Record<string, unknown>;
 type SignalRStatusTarget = 'printerupdated' | 'printerstatusesreplayed';
@@ -146,7 +147,7 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       expect(emulatorUrl.port, 'Native emulator URL must include its dedicated loopback port').not.toBe('');
       const printerUrl = `${emulatorUrl.protocol}//${emulatorUrl.hostname}`;
       const detailsResponse = await request.get(
-        `${API_BASE_URL}/api/printers/${printerId}`,
+        `${API_BASE_URL}/api/printers/${printerId}/details`,
         { headers: { Authorization: `Bearer ${authToken}` } },
       );
       expect(detailsResponse.status(), 'Failed to read the ready printer before loopback configuration')
@@ -174,7 +175,7 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       expect(updateResponse.status(), 'Failed to configure the isolated ready printer for native loopback')
         .toBe(200);
       const readbackResponse = await request.get(
-        `${API_BASE_URL}/api/printers/${printerId}`,
+        `${API_BASE_URL}/api/printers/${printerId}/details`,
         { headers: { Authorization: `Bearer ${authToken}` } },
       );
       expect(readbackResponse.status(), 'Failed to read back the native loopback printer configuration')
@@ -189,23 +190,30 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
     const signalRStatuses: Array<SignalRStatus & { socketIndex: number }> = [];
     const printerSockets: string[] = [];
     const closedSockets = new Set<number>();
-    const printerApiRequests: string[] = [];
+    const printerApiResponses: string[] = [];
+    const pendingPrinterApiRequests = new Set<Request>();
     const printerStatusInvocations: number[] = [];
     const printerSubscriptionInvocations: Array<SignalRInvocation & { socketIndex: number }> = [];
     let blockPrinterApiRequests = false;
-    page.on('request', browserRequest => {
+    const isPrinterApiRead = (browserRequest: Request): boolean => {
       const url = new URL(browserRequest.url());
-      if (browserRequest.method() === 'GET' &&
-        (url.pathname === '/api/printers' || url.pathname.startsWith('/api/printers/'))) {
-        printerApiRequests.push(url.toString());
+      return browserRequest.method() === 'GET' &&
+        (url.pathname === '/api/printers' || url.pathname.startsWith('/api/printers/'));
+    };
+    page.on('request', browserRequest => {
+      if (isPrinterApiRead(browserRequest)) pendingPrinterApiRequests.add(browserRequest);
+    });
+    page.on('requestfinished', browserRequest => pendingPrinterApiRequests.delete(browserRequest));
+    page.on('requestfailed', browserRequest => pendingPrinterApiRequests.delete(browserRequest));
+    page.on('response', response => {
+      const browserRequest = response.request();
+      if (isPrinterApiRead(browserRequest)) {
+        printerApiResponses.push(browserRequest.url());
       }
     });
     await page.route('**/api/printers**', async route => {
       const browserRequest = route.request();
-      const url = new URL(browserRequest.url());
-      if (blockPrinterApiRequests &&
-        browserRequest.method() === 'GET' &&
-        (url.pathname === '/api/printers' || url.pathname.startsWith('/api/printers/'))) {
+      if (blockPrinterApiRequests && isPrinterApiRead(browserRequest)) {
         await route.abort();
         return;
       }
@@ -288,9 +296,9 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       };
       return win.__sensorCacheObservations ?? [];
     });
-    const hasUnavailableSensorSnapshot = (status: unknown): boolean =>
+    const hasUnavailableSensorSnapshot = (status: unknown, expectedHumidity = 53.1): boolean =>
       hasSensorReading(status, printerId, sensorId, 'Temperature', 42.6, false) &&
-      hasSensorReading(status, printerId, sensorId, 'Humidity', 53.1, false) &&
+      hasSensorReading(status, printerId, sensorId, 'Humidity', expectedHumidity, false) &&
       hasSensorReading(status, printerId, 'fan_generic auxiliary', 'FanSpeed', 68, false);
 
     const details = await getInlinePrinterDetails(page, printerName);
@@ -309,7 +317,8 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
     expectCachedFanState(initialClientStatus, 0);
 
     blockPrinterApiRequests = true;
-    const printerApiRequestsBeforeLiveChange = printerApiRequests.length;
+    await expect.poll(() => pendingPrinterApiRequests.size).toBe(0);
+    const printerApiResponsesBeforeLiveChange = printerApiResponses.length;
     const printerStatusInvocationsBeforeLiveChange = printerStatusInvocations.length;
     const control = createMoonrakerControl(request);
     await control.updateSensor('ready', sensorId, { temperature: 31.5, humidity: 45.6 });
@@ -332,7 +341,7 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       hasSensorReading(liveClientStatus, printerId, sensorId, 'Humidity', 45.6)
     ).toBe(true);
     expectCachedFanState(liveClientStatus, 42);
-    expect(printerApiRequests).toHaveLength(printerApiRequestsBeforeLiveChange);
+    expect(printerApiResponses).toHaveLength(printerApiResponsesBeforeLiveChange);
     expect(printerStatusInvocations).toHaveLength(printerStatusInvocationsBeforeLiveChange);
 
     const connectedSocketIndex = printerSockets.length - 1;
@@ -401,6 +410,14 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
         const latest = latestObserverStatus();
         return latest !== undefined && hasUnavailableSensorSnapshot(latest.status);
       }, { timeout: 10_000 }).toBe(true);
+      // This control emits a humidity-only, webhook-free delta while Klippy remains shut down.
+      await control.updateSensor('ready', sensorId, { humidity: 54.2 });
+      await expect.poll(() => {
+        const latest = latestObserverStatus();
+        return latest !== undefined &&
+          hasSensorReading(latest.status, printerId, sensorId, 'Humidity', 54.2, false) &&
+          hasUnavailableSensorSnapshot(latest.status, 54.2);
+      }, { timeout: 10_000 }).toBe(true);
       expect(signalRStatuses).toHaveLength(primaryStatusCountWhileDisconnected);
 
     } finally {
@@ -414,7 +431,8 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       hasSensorReading(status, printerId, sensorId, 'Temperature', 42.6)
     )).toBe(false);
 
-    const printerApiRequestsBeforeReconnect = printerApiRequests.length;
+    await expect.poll(() => pendingPrinterApiRequests.size).toBe(0);
+    const printerApiResponsesBeforeReconnect = printerApiResponses.length;
     const printerStatusInvocationsBeforeReconnect = printerStatusInvocations.length;
     const firstReconnectSocketIndex = printerSockets.length;
     await page.evaluate(async () => {
@@ -437,27 +455,27 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       const latest = latestReconnectFrame();
       return latest !== undefined &&
         (latest.target === 'printerstatusesreplayed' || latest.target === 'printerupdated') &&
-        hasUnavailableSensorSnapshot(latest.status);
+        hasUnavailableSensorSnapshot(latest.status, 54.2);
     }, { timeout: 20_000 }).toBe(true);
     const unavailableFrame = latestReconnectFrame();
     expect(unavailableFrame).toBeDefined();
 
     await expect.poll(async () =>
-      hasUnavailableSensorSnapshot(await readCachedStatus())
+      hasUnavailableSensorSnapshot(await readCachedStatus(), 54.2)
     , { timeout: 10_000 }).toBe(true);
     const primaryCacheObservations = await readPrimaryCacheObservations();
     const unavailableCacheObservation = [...primaryCacheObservations].reverse().find(
       observation => isRecord(observation.status) && observation.status.id === printerId
     );
     expect(unavailableCacheObservation).toBeDefined();
-    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.status)).toBe(true);
-    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.cachedStatus)).toBe(true);
+    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.status, 54.2)).toBe(true);
+    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.cachedStatus, 54.2)).toBe(true);
     expect(unavailableCacheObservation?.status).toEqual(unavailableFrame?.status);
     expect(unavailableCacheObservation?.cachedStatus).toEqual(unavailableCacheObservation?.status);
     expectCachedFanState(unavailableCacheObservation?.cachedStatus, 68, false);
-    expect(hasUnavailableSensorSnapshot(await readCachedStatus())).toBe(true);
+    expect(hasUnavailableSensorSnapshot(await readCachedStatus(), 54.2)).toBe(true);
     await expect(sensorRow.getByText('Unavailable', { exact: true })).toBeVisible();
-    expect(printerApiRequests).toHaveLength(printerApiRequestsBeforeReconnect);
+    expect(printerApiResponses).toHaveLength(printerApiResponsesBeforeReconnect);
     expect(printerStatusInvocations).toHaveLength(printerStatusInvocationsBeforeReconnect);
     if (unavailableFrame?.target === 'printerupdated') {
       expect(printerSubscriptionInvocations.some(({ socketIndex, target, arguments: args }) =>
@@ -512,7 +530,7 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       53.1,
     )).toBe(true);
     expectCachedFanState(reconnectedClientStatus, 68, true);
-    expect(printerApiRequests).toHaveLength(printerApiRequestsBeforeReconnect);
+    expect(printerApiResponses).toHaveLength(printerApiResponsesBeforeReconnect);
     expect(printerStatusInvocations).toHaveLength(printerStatusInvocationsBeforeReconnect);
 
     const emulatorResponse = await request.get(

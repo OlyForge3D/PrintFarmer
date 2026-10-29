@@ -630,6 +630,28 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TriggerHttpPollingFallbackAsync_AfterKlippyShutdown_SensorDeltaUpdatesReadingWithoutRestoringAvailability()
+    {
+        await ProcessStatusAsync(InitialStatus);
+        await ProcessMessageAsync("""{"jsonrpc":"2.0","method":"notify_klippy_shutdown"}""");
+        _client
+            .Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(true, "shutdown", null, null, null, null, null));
+        await _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
+        _broadcasts.Clear();
+
+        await ProcessStatusAsync("""{ "temperature_sensor chamber": { "humidity": 45 } }""");
+
+        PrinterStatusUpdate update = _broadcasts.OfType<PrinterStatusUpdate>().Should().ContainSingle().Subject;
+        update.IsOnline.Should().BeTrue();
+        Dictionary<string, PrinterSensorDto> sensors = ById(update.Sensors);
+        sensors["temperature_sensor chamber"].Available.Should().BeFalse();
+        sensors["temperature_sensor chamber"].Readings
+            .Single(reading => reading.Quantity == PrinterSensorQuantity.Humidity).Value.Number.Should().Be(45);
+    }
+
+    [Fact]
     public async Task ProcessStatusUpdateAsync_TargetOnlyUpdate_BroadcastsNewTarget()
     {
         await ProcessStatusAsync(InitialStatus);
