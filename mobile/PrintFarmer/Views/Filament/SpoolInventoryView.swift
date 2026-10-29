@@ -182,27 +182,19 @@ struct SpoolInventoryView: View {
                     alignment: .leading,
                     spacing: 8
                 ) {
-                    inventoryFilterButtons
+                    inventoryFilterButtons(allowsWrapping: true)
                 }
+                .padding(.horizontal)
             } else {
-                ViewThatFits(in: .horizontal) {
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        inventoryFilterButtons
+                        inventoryFilterButtons(allowsWrapping: false)
                     }
-                    .fixedSize(horizontal: true, vertical: false)
-
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 88, maximum: 150), alignment: .leading)],
-                        alignment: .leading,
-                        spacing: 8
-                    ) {
-                        inventoryFilterButtons
-                    }
+                    .padding(.horizontal)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal)
         .padding(.vertical, 8)
         .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .accessibilityElement(children: .contain)
@@ -210,20 +202,22 @@ struct SpoolInventoryView: View {
     }
 
     @ViewBuilder
-    private var inventoryFilterButtons: some View {
+    private func inventoryFilterButtons(allowsWrapping: Bool) -> some View {
         inventoryFilter(
             title: "All \(viewModel.count(for: nil))",
             identifier: "inventory.filter.all",
             selected: viewModel.selectedStatus == nil
                 && viewModel.selectedMaterial == nil
-                && !viewModel.showOnlyMissingNFC
+                && !viewModel.showOnlyMissingNFC,
+            allowsWrapping: allowsWrapping
         ) {
             withAnimation { viewModel.clearFilters() }
         }
         inventoryFilter(
             title: "Loaded \(viewModel.count(for: .inUse))",
             identifier: "inventory.filter.loaded",
-            selected: viewModel.selectedStatus == .inUse
+            selected: viewModel.selectedStatus == .inUse,
+            allowsWrapping: allowsWrapping
         ) {
             withAnimation {
                 viewModel.selectedStatus = viewModel.selectedStatus == .inUse ? nil : .inUse
@@ -232,7 +226,8 @@ struct SpoolInventoryView: View {
         inventoryFilter(
             title: "Low \(viewModel.count(for: .low))",
             identifier: "inventory.filter.low",
-            selected: viewModel.selectedStatus == .low
+            selected: viewModel.selectedStatus == .low,
+            allowsWrapping: allowsWrapping
         ) {
             withAnimation {
                 viewModel.selectedStatus = viewModel.selectedStatus == .low ? nil : .low
@@ -240,7 +235,7 @@ struct SpoolInventoryView: View {
         }
 
         ForEach(primaryInventoryMaterials, id: \.self) { material in
-            materialFilter(material)
+            materialFilter(material, allowsWrapping: allowsWrapping)
         }
 
         Menu {
@@ -266,6 +261,7 @@ struct SpoolInventoryView: View {
                 + (viewModel.showOnlyMissingNFC ? 1 : 0)
             Text(activeCount == 0 ? "More" : "More \(activeCount)")
                 .font(.caption.weight(.medium))
+                .fixedSize(horizontal: !allowsWrapping, vertical: false)
                 .foregroundStyle(activeCount > 0 ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -306,11 +302,12 @@ struct SpoolInventoryView: View {
         }
     }
 
-    private func materialFilter(_ material: String) -> some View {
+    private func materialFilter(_ material: String, allowsWrapping: Bool) -> some View {
         inventoryFilter(
             title: material,
             identifier: "inventory.filter.material.\(material)",
-            selected: viewModel.selectedMaterial == material
+            selected: viewModel.selectedMaterial == material,
+            allowsWrapping: allowsWrapping
         ) {
             withAnimation {
                 viewModel.selectedMaterial = viewModel.selectedMaterial == material ? nil : material
@@ -337,12 +334,13 @@ struct SpoolInventoryView: View {
         title: String,
         identifier: String,
         selected: Bool,
+        allowsWrapping: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .fixedSize(horizontal: false, vertical: true)
+                .fixedSize(horizontal: !allowsWrapping, vertical: allowsWrapping)
                 .foregroundStyle(selected ? .white : Color.pfTextSecondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
