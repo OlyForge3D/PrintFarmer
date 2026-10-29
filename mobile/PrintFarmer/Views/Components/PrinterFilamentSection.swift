@@ -342,7 +342,6 @@ struct PrinterFilamentSection: View {
                         .frame(maxWidth: .infinity, minHeight: 44, maxHeight: fillsHeight ? .infinity : nil)
                         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
-                        .disabledControlStyle(isDisabled: presentation.disabledReason(for: action) != nil, cornerRadius: 12)
                 } else {
                     Text(actionTitle(action))
                         .frame(minHeight: 44, alignment: .leading)
