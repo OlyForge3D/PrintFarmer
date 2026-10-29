@@ -48,7 +48,7 @@ export const FileBrowserToolbar = ({
       </div>
 
       {filterActions && (
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter files by type">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="File filters">
           {filterActions}
         </div>
       )}

@@ -62,11 +62,15 @@ see their names.
 
 #### Local-library folders
 
-The **Folder** dropdown replaces the local library's folder tree in both list and
-grid views. **All folders** shows the whole library; **Root** shows only files
+The folder-glyph **Folders** toolbar button reveals a compact row with the
+**Folder** dropdown and folder actions in both list and grid views. It starts
+collapsed; collapsing it preserves the filter and shows the selected path on
+the button. The **Type** dropdown replaces the All, 3D Models, G-Code, and Other
+buttons. **All folders** shows the whole library; **Root** shows only files
 assigned to `/`. Choosing another folder shows its direct files, not descendants,
 with filtering applied before server pagination and totals. The dropdown combines
-model and G-code folders; the breadcrumb links back to ancestors or All folders.
+model and G-code folders; the inline breadcrumb appears when a folder is selected
+and links back to ancestors or All folders.
 Changing folder resets the page and clears the selection and details panel.
 
 **New folder** creates a child of the current folder (Root when All folders is

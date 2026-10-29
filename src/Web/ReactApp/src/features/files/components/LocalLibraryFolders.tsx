@@ -7,6 +7,7 @@ import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 
 interface LocalLibraryFoldersProps {
+  controls?: { id: string; expanded: boolean };
   path: string;
   onNavigate: (path: string) => void;
   modelIds: string[];
@@ -35,7 +36,7 @@ async function runFolderOperations(operations: Array<{ label: string; run: () =>
 }
 
 export function LocalLibraryFolders({
-  path, onNavigate, modelIds, gcodeIds, canCreate, canMove, onMoved,
+  controls, path, onNavigate, modelIds, gcodeIds, canCreate, canMove, onMoved,
 }: LocalLibraryFoldersProps) {
   const id = useId();
   const queryClient = useQueryClient();
@@ -126,27 +127,27 @@ export function LocalLibraryFolders({
   const folderOptions = paths.map(folder => <option key={folder} value={folder}>{folderLabel(folder)}</option>);
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-pf-border bg-pf-bg-1 p-3">
-        <div className="w-full sm:w-64">
-          <Label htmlFor={`${id}-folder`}>Folder</Label>
-          <Select id={`${id}-folder`} value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
-            <option value="">All folders</option>
-            {folderOptions}
-          </Select>
-        </div>
-        {canCreate && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
-          create.reset(); setName(''); setCreating(true);
-        }}>New folder</Button>}
-        {selectedCount > 0 && <span className="self-center text-xs text-pf-text-secondary">{selectedCount} selected</span>}
-        {selectedCount > 0 && canMove && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
-          move.reset(); setDestination(path || '/');
-          setMoveSelection({ models: [...modelIds], gcode: [...gcodeIds] });
-        }}>Move to folder...</Button>}
-        <nav aria-label="Folder path" className="flex basis-full flex-wrap items-center gap-1 text-xs">
-          <Button size="sm" variant="subtle" disabled={busy} aria-current={!path ? 'page' : undefined}
-            onClick={() => onNavigate('')}>All folders</Button>
-          {path && <>
+    <>
+      <div id={controls?.id} hidden={controls ? !controls.expanded : false}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <label htmlFor={`${id}-folder`} className="text-sm text-pf-text-secondary">Folder</label>
+            <Select id={`${id}-folder`} containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
+              <option value="">All folders</option>
+              {folderOptions}
+            </Select>
+          </div>
+          {canCreate && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
+            create.reset(); setName(''); setCreating(true);
+          }}>New folder</Button>}
+          {selectedCount > 0 && <span className="self-center text-xs text-pf-text-secondary">{selectedCount} selected</span>}
+          {selectedCount > 0 && canMove && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
+            move.reset(); setDestination(path || '/');
+            setMoveSelection({ models: [...modelIds], gcode: [...gcodeIds] });
+          }}>Move to folder...</Button>}
+          {path && <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
+            <Button size="sm" variant="subtle" disabled={busy}
+              onClick={() => onNavigate('')}>All folders</Button>
             <span aria-hidden="true">/</span>
             <Button size="sm" variant="subtle" disabled={busy} aria-current={path === '/' ? 'page' : undefined}
               onClick={() => onNavigate('/')}>Root</Button>
@@ -157,8 +158,8 @@ export function LocalLibraryFolders({
                   onClick={() => onNavigate('/' + segments.slice(0, index + 1).join('/'))}>{segment}</Button>
               </Fragment>
             ))}
-          </>}
-        </nav>
+          </nav>}
+        </div>
       </div>
       {folders.isError && <div role="alert" className="text-sm text-pf-error">
         Could not load folders: {getErrorMessage(folders.error, 'Request failed')}{' '}
@@ -202,6 +203,6 @@ export function LocalLibraryFolders({
           {folderOptions}
         </Select>
       </Modal>
-    </div>
+    </>
   );
 }

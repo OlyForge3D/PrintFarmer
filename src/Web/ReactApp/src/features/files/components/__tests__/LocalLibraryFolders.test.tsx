@@ -67,12 +67,22 @@ describe('LocalLibraryFolders', () => {
     expect(within(select).getAllByRole('option').map(option => (option as HTMLOptionElement).value))
       .toEqual(['', '/', '/gcode', '/models', '/models/deep', '/shared']);
     expect(select).toHaveValue('');
+    expect(screen.queryByRole('navigation', { name: 'Folder path' })).not.toBeInTheDocument();
     fireEvent.change(select, { target: { value: '/models/deep' } });
     expect(props.onNavigate).toHaveBeenCalledWith('/models/deep');
     fireEvent.change(select, { target: { value: '/' } });
     expect(props.onNavigate).toHaveBeenLastCalledWith('/');
     fireEvent.change(select, { target: { value: '' } });
     expect(props.onNavigate).toHaveBeenLastCalledWith('');
+  });
+
+  it('keeps folder-load errors and retry visible while controls are collapsed', async () => {
+    vi.mocked(apiClient.listModelsFolders).mockRejectedValue(new Error('Folders offline'));
+    setup({ controls: { id: 'folder-controls', expanded: false } });
+    expect(screen.queryByRole('combobox', { name: 'Folder' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New folder' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Folders offline');
+    expect(screen.getByRole('button', { name: 'Retry folders' })).toBeVisible();
   });
 
   it('provides clickable ancestors and an explicit way back to all folders', async () => {

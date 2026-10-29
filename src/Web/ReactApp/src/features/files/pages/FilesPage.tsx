@@ -54,7 +54,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button } from '@/common/components/ui';
+import { Button, Select } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -760,25 +760,19 @@ export function FilesPage() {
     </>
   );
 
-  const filterButtons = (
-    <>
-      {FILE_TYPE_OPTIONS.map((option) => {
-        const isActive = selectedFilter === option.value;
-        return (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={isActive ? 'primary' : 'secondary'}
-            aria-pressed={isActive}
-            onClick={() => handleFilterChange(option.value)}
-            title={option.hint}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </>
+  const fileTypeFilter = (
+    <div className="flex items-center gap-2">
+      <label htmlFor="local-library-type" className="text-sm text-pf-text-secondary">Type</label>
+      <Select id="local-library-type" value={selectedFilter} className="min-w-32"
+        onChange={event => {
+          const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
+          if (option) handleFilterChange(option.value);
+        }}>
+        {FILE_TYPE_OPTIONS.map(option => (
+          <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
+        ))}
+      </Select>
+    </div>
   );
 
   return (
@@ -820,10 +814,11 @@ export function FilesPage() {
                   columns={modelColumns}
                   renderItemActions={renderItemActions}
                   renderCard={renderCard}
-                  filterActions={filterButtons}
+                  filterActions={fileTypeFilter}
                   extraToolbarActions={toolbarActions}
-                  renderFolderNavigation={(path, onNavigate) => (
+                  renderFolderNavigation={(path, onNavigate, controls) => (
                     <LocalLibraryFolders
+                      controls={controls}
                       path={path}
                       onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
                       modelIds={selectedModelIds}
