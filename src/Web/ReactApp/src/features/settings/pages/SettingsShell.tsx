@@ -1651,16 +1651,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     && matchingCategoryIds
     && matchingCategoryIds.length === 0;
 
-  // Page-level actions. The mode toggle arrives by portal from whichever content
-  // page owns it (see SettingsHeaderPortal); the palette is always available, so
-  // the shell renders it directly. Slot first so the page's own control sits to
-  // the left of the shell-wide one.
-  //
-  // The persistent workspace search (GH-2505) is deliberately scoped to the
-  // admin/system settings route only — it's the cross-group/advanced field
-  // search called for by the issue, distinct from the always-global modal
-  // palette button beside it, and personal `/settings` intentionally keeps
-  // its existing (much smaller) navigation surface untouched.
+  // Admin search advertises the global palette shortcut inline. Personal settings
+  // has no workspace search, so it retains a dedicated palette launcher.
   const headerActions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <div ref={setHeaderSlot} className="contents" />
@@ -1673,23 +1665,25 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           onQueryChange={handleWorkspaceQueryChange}
           onQueryCommit={commitSearchQuery}
           onSelect={handleWorkspaceResultSelect}
+          onOpenPalette={openCommandPalette}
         />
-      ) : null}
-      <Button
-        type="button"
-        variant="subtle"
-        size="sm"
-        onClick={openCommandPalette}
-        iconLeft={<SearchIcon className="h-4 w-4" />}
-        className="rounded-md border border-pf-border bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary"
-      >
-        <span className="inline-flex items-center gap-2">
-          <span>Search settings</span>
-          <kbd className="rounded-xs border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
-            {commandPaletteShortcut}
-          </kbd>
-        </span>
-      </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          onClick={openCommandPalette}
+          iconLeft={<SearchIcon className="h-4 w-4" />}
+          className="rounded-md border border-pf-border bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary"
+        >
+          <span className="inline-flex items-center gap-2">
+            <span>Search settings</span>
+            <kbd className="rounded-xs border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
+              {commandPaletteShortcut}
+            </kbd>
+          </span>
+        </Button>
+      )}
     </div>
   );
 

@@ -8,7 +8,6 @@ import { Modal } from '@/common/components/modals/Modal';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { buildSettingsPath } from '@/features/settings/settings-navigation';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { apiClient } from '@/services/api';
@@ -65,12 +64,6 @@ const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
 const REFRESH_ALL_LABEL = 'Force refresh all online printers';
 const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers; waits up to two minutes for I/O capacity, then up to two minutes per scan.';
 const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
-const DISCOVERY_SETTINGS_PATH = buildSettingsPath({
-  scopeId: 'system',
-  categoryId: 'general',
-  subPageId: 'system',
-  field: 'PrinterFileIndex.enabled',
-});
 
 interface RefreshTarget {
   id: string;
@@ -338,11 +331,6 @@ export function PrinterFileCatalog() {
 
   return (
     <section aria-label="On printers" className="space-y-4">
-      {hasPermission('system_settings', 'admin') && (
-        <div className="flex justify-end">
-          <Link to={DISCOVERY_SETTINGS_PATH} className="text-sm text-pf-accent underline">Discovery settings</Link>
-        </div>
-      )}
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}

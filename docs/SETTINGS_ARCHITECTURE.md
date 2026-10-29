@@ -60,6 +60,12 @@ operates under `system` scope with unified grouped direct-leaf navigation,
 single-pane mounting (no horizontal settings sub-tabs or scope switcher),
 accessible mobile drawer navigation, persistent cross-group workspace search,
 in-memory draft transition safety, and single page-level save presentation.
+Its header search placeholder includes the platform's command-palette shortcut
+(`Ctrl K`, or `⌘K` on macOS), without a redundant Search settings button.
+The shortcut still opens the global command palette; personal settings retains
+its launcher because it has no inline workspace search.
+The advertised shortcut also works while the admin search input is focused,
+without clearing its query; other editable fields retain their existing key handling.
 Personal `/settings` (`user` scope) remains a separate profile workspace with
 category and sub-tab navigation.
 
@@ -77,6 +83,16 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 8. **System**: System Config (`gen-system`)
 
 In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
+
+The desktop sidebar is capped at the available frame height and scrolls
+independently of the settings content. Short lists retain their natural height.
+Destinations below People & access, including **System → System Config**, remain
+reachable by scrolling or keyboard navigation.
+
+Printer-file discovery controls live under **System Config → Files → Printer
+file index** (`/admin/settings?scope=system&tab=general&sub=system`).
+They remain subject to `system_settings:admin`; the On printers tab does not
+carry a separate discovery-settings shortcut.
 
 ## NFC Management Authorization
 

@@ -211,10 +211,7 @@ describe('Printer file catalog', () => {
       expect(button).toHaveClass('p-1!');
     }
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute(
-      'href',
-      '/admin/settings?scope=system&tab=general&sub=system&field=PrinterFileIndex.enabled',
-    );
+    expect(screen.queryByRole('link', { name: 'Discovery settings' })).not.toBeInTheDocument();
     // Per-printer discovery toggles live in Edit printer > Files; only the all-printers Refresh is here.
     expect(screen.getByRole('button', { name: 'Force refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();

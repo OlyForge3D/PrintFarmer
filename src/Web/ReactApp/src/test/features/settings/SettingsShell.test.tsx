@@ -866,6 +866,20 @@ describe('SettingsShell', () => {
     });
   });
 
+  it('opens the palette from admin search with Ctrl+K and restores focus on Escape without a launcher', async () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system&tab=general&sub=farm');
+    const search = screen.getByRole('combobox', { name: 'Search all settings' });
+    expect(screen.queryByRole('button', { name: /Search settings/i })).not.toBeInTheDocument();
+    search.focus();
+    fireEvent.keyDown(search, { key: 'k', ctrlKey: true });
+
+    const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
+    await waitFor(() => expect(paletteSearch).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
+    await waitFor(() => expect(search).toHaveFocus());
+  });
+
   it('intercepts command palette navigation when a section is dirty', async () => {
     setAuthRoles(['farm_admin']);
     renderSettings('/admin/settings?scope=system');

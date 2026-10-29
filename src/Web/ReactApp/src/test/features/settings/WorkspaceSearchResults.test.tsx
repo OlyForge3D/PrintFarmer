@@ -83,6 +83,34 @@ describe('WorkspaceSearchResults', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['Win32', 'Ctrl K'],
+    ['MacIntel', '⌘K'],
+  ])('shows the palette shortcut in the placeholder on %s', (platform, shortcut) => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    render(<WorkspaceSearchResults initialQuery="" onQueryCommit={vi.fn()} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('combobox', { name: 'Search all settings' }))
+      .toHaveAttribute('placeholder', `Search all settings (${shortcut})`);
+  });
+
+  it.each(['ctrlKey', 'metaKey'] as const)('opens the palette from the focused search with %s+K without changing its query', modifier => {
+    const onOpenPalette = vi.fn();
+    const onSelect = vi.fn();
+    const onQueryCommit = vi.fn();
+    render(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={onSelect} onOpenPalette={onOpenPalette} />);
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'k', [modifier]: true });
+
+    expect(onOpenPalette).toHaveBeenCalledOnce();
+    expect(input).toHaveValue('log');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onQueryCommit).not.toHaveBeenCalled();
   });
 
   it('renders the search input seeded from initialQuery, closed until focused', () => {
