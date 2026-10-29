@@ -201,7 +201,7 @@ final class PrinterSensorLiveStateTests: XCTestCase {
         }
         defer { registration.subscription.cancel() }
         if registration.initial == expected {
-            return
+            stateExpectation.fulfill()
         }
         await fulfillment(of: [stateExpectation], timeout: 60)
         guard service.connectionState == expected else {

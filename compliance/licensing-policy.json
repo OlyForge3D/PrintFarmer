@@ -323,7 +323,7 @@
         "path": "mobile/PrintFarmerTests/ViewModels/PrinterDetailViewModelTests.swift",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
-        "contentSha256": "8d1b4bb6ba1f7f858f1b4c1748234d47ef93f207b235c5d6e2601dbed82878d8",
+        "contentSha256": "f6f7aa40f6e71852247b4715bad3edf59e532682b079a696f3e6321275a6e5bf",
         "reason": "Synthetic printer URL tests the iOS native web link rejects embedded credentials."
       }
     ]

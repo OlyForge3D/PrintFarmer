@@ -58,6 +58,25 @@ class VerifyNamedTestSucceededTests(unittest.TestCase):
         )
         self.assertEqual(proof["expected_test_id"], EXPECTED_RETAINED_STATE)
 
+    def test_connection_waiter_waits_even_when_initial_state_matches(self):
+        source = (
+            MOBILE / "PrintFarmerTests/ViewModels/PrinterDetailViewModelTests.swift"
+        ).read_text(encoding="utf-8")
+        waiter = source.split("private func waitForConnectionState(", 1)[1].split(
+            "private func waitForPrinterState(", 1
+        )[0]
+        before_wait, after_wait = waiter.split(
+            "await fulfillment(of: [stateExpectation], timeout: 60)", 1
+        )
+        self.assertNotIn("return", before_wait)
+        self.assertRegex(
+            before_wait,
+            r"if registration\.initial == expected \{\s*"
+            r"stateExpectation\.fulfill\(\)\s*\}",
+        )
+        self.assertIn("defer { registration.subscription.cancel() }", before_wait)
+        self.assertIn("guard service.connectionState == expected else", after_wait)
+
     def test_each_test_plan_selects_only_its_matching_proof(self):
         expected = {
             "backend-ui": (
