@@ -95,6 +95,29 @@ REST API endpoints organized by feature:
 - `JobSchedulingController` - Job scheduling and automation
 - `RetriesController` - Job retry management
 
+Maintenance analytics read paths use no-tracking scalar projections.
+Cost analysis groups positive costs by numeric year/month in the database
+(decimal sums), and uptime projects one row per printer with scoped log counts
+and downtime sums. Lifespan retains database component grouping and ordered
+date/hour history, but does not materialize maintenance entities or interval
+lists. Its transfer still scales with qualifying history; cost transfers only
+populated monthly buckets and uptime only printer summaries. Existing indexes
+are unchanged. Toolhead gating, rolling cost cutoff (including future records),
+eight-hours-per-day fallback, rounding, response contracts, and the separate
+per-log trends query are preserved.
+
+`MaintenanceAnalyticsProviderTests` covers SQLite execution, query shape,
+entity materialization, and parity for both toolhead feature states. Its
+Docker-category PostgreSQL/SQL Server tests require `PFARM_TEST_POSTGRES_CONN`
+and `PFARM_TEST_SQLSERVER_CONN`, respectively, plus permission to create a
+uniquely named disposable database. They migrate and remove only that database,
+never the database named in the supplied connection string. Missing connections
+fail explicitly rather than imply provider verification.
+The provisioned CI provider lane explicitly selects both Docker-category
+analytics cases from the infrastructure assembly and archives
+`maintenance-provider-tests.trx`. It verifies both exact fixture/method names
+passed, so an unrelated green provider suite cannot substitute for execution.
+
 #### Services
 Business logic layer:
 - `PrinterService` - Printer management, state tracking
