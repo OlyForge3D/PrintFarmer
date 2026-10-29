@@ -6,10 +6,9 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
-- **Printer detail nits (#3561)** — A disabled "Scan spool" pill now uses the
-  same dimmed, striped disabled chrome as other printer controls, without adding
-  lockout text. A UI regression test checks that the detail "‹ Farm" header
-  starts where the root header starts on iPhone and iPad.
+- **Disabled Scan spool pill (#3561, N3552-02)** — A disabled "Scan spool" pill
+  now uses the same dimmed, striped disabled chrome as other printer controls,
+  without adding lockout text.
 
 - **Filament Dynamic Type (#3535, #3536)** — Remaining amount and job demand
   stack without a separator when space is limited. Spool names scale through
