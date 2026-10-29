@@ -494,15 +494,15 @@ public static class PrinterFileEnrichmentAcquisition
             string? tailFailure = null;
             if (!complete && needTail)
             {
-                if (size is not > 0)
+                if (size is not { } sourceSize || sourceSize <= 0)
                 {
                     tailFailure = "invalid_source_size";
                 }
                 else
                 {
-                    long start = Math.Max(head.Bytes.Length, size.Value - PrinterFileEnrichmentLimits.TextRegionBytes);
+                    long start = Math.Max(head.Bytes.Length, sourceSize - PrinterFileEnrichmentLimits.TextRegionBytes);
                     (tail, tailFailure) = await TryAsync(
-                        () => ReadRegionAsync(start, checked((int)(size.Value - start)))).ConfigureAwait(false);
+                        () => ReadRegionAsync(start, checked((int)(sourceSize - start)))).ConfigureAwait(false);
                 }
             }
 
@@ -595,9 +595,8 @@ public static class PrinterFileEnrichmentAcquisition
                         misses.Add((embedded.ImageState, embedded.ImageReason));
                     }
 
-                    foreach (byte[] candidate in embedded.Images)
+                    foreach (ThumbnailOutcome checkedImage in embedded.Images.Select(Validate))
                     {
-                        ThumbnailOutcome checkedImage = Validate(candidate);
                         if (checkedImage.State == PrinterFileEnrichmentState.Ready)
                         {
                             return checkedImage;

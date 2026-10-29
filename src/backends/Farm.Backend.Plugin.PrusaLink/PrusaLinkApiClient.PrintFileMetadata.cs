@@ -103,7 +103,12 @@ public partial class PrusaLinkApiClient
                 colors = Value("filament_color per tool");
             }
 
-            int count = Math.Max(Count(weights), Math.Max(Count(types), Count(colors)));
+            // Every per-tool filament array sets the slot count so a tool without a weight keeps the total underived.
+            int count = new[]
+            {
+                weights, types, colors, Value("filament used [mm] per tool"), Value("filament used [cm3] per tool"),
+                Value("filament cost per tool"),
+            }.Max(Count);
             return count == 0 ? null : Enumerable.Range(0, count).Select(index =>
             {
                 string? color = ReadMetadataText(Item(colors, index));

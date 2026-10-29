@@ -8,6 +8,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -150,6 +151,45 @@ public sealed class PrinterFileThumbnailStoreTests
         await fixture.Store().CleanupAsync(Ct);
         Assert.Null(await fixture.Store().ReadAsync(artifact, Ct));
         Assert.Equal(0, await fixture.ChargedBytesAsync());
+    }
+
+    [Fact]
+    public async Task WorkerBatch_DiscoveryDisabled_StillRetiresUnreferencedArtifacts()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync(Maximum);
+        await fixture.WriteAsync();
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            AppSettingsEntity settings = await db.AppSettingsEntities
+                .SingleAsync(x => x.Key == PrinterFileIndexSettings.SectionName);
+            settings.SettingsJson = JsonSerializer.Serialize(
+                new PrinterFileIndexSettings { Enabled = false, ThumbnailCacheMaxBytes = Maximum });
+            await db.SaveChangesAsync();
+        }
+
+        int scans = 0;
+        ServiceCollection services = new();
+        services.AddScoped<IDbContextFactory<AppDbContext>>(_ => fixture.Factory);
+        services.AddScoped(_ => fixture.Store());
+        services.AddScoped<PrinterFileCatalogService>(_ =>
+        {
+            scans++;
+            throw new InvalidOperationException("discovery is disabled");
+        });
+        await using ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true,
+            ValidateOnBuild = true,
+        });
+
+        await new PrinterFileIndexWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<PrinterFileIndexWorker>.Instance)
+            .RunBatchAsync(Ct);
+
+        Assert.Equal(0, scans);
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        Assert.Equal(fixture.Clock.GetUtcNow().UtcDateTime,
+            (await current.PrinterFileThumbnailArtifacts.SingleAsync()).RetiredAtUtc);
     }
 
     [Theory]

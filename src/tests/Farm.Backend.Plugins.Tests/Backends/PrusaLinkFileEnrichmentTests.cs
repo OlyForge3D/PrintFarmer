@@ -83,6 +83,26 @@ public sealed class PrusaLinkFileEnrichmentTests
     }
 
     [Fact]
+    public async Task EnrichFileAsync_PerToolArraysOfDifferentLengths_KeepEveryToolAndNeverUnderstateTheTotal()
+    {
+        JsonObject meta = CompleteMeta();
+        meta.Remove("filament used [g]");
+        meta.Remove("filament_type per tool");
+        meta["filament used [g] per tool"] = new JsonArray(10);
+        meta["filament used [mm] per tool"] = new JsonArray(100, 200);
+        using FakePrinter printer = new(DefaultGcode()) { Meta = meta };
+
+        PrinterFileEnrichmentContent result = await EnrichAsync(printer);
+
+        PrinterPrintMetadata metadata = Assert.IsType<PrinterPrintMetadata>(result.Metadata);
+        Assert.Collection(metadata.Tools!,
+            tool => Assert.Equal(10, tool.FilamentUsedG),
+            tool => Assert.Null(tool.FilamentUsedG));
+        Assert.Null(metadata.FilamentUsedG);
+        Assert.Null(metadata.FilamentUsedGIsDerived);
+    }
+
+    [Fact]
     public async Task EnrichFileAsync_IncompleteNativeMetadata_NativeWinsAndFileFillsOnlyMissingFields()
     {
         using FileEnrichmentMetricCapture metrics = new();

@@ -332,7 +332,7 @@ public sealed class PrinterFileContentService(
         bool waiting = row is null || metadataState is PrinterFileEnrichmentState.Pending or PrinterFileEnrichmentState.Deferred ||
             thumbnailState is PrinterFileEnrichmentState.Pending or PrinterFileEnrichmentState.Deferred;
         PrinterFilePreviewState state = unsupported ? PrinterFilePreviewState.Unsupported :
-            metadata?.HasValues is true || hasImage || printTime.HasValue || layerHeight.HasValue || size.HasValue
+            metadata?.HasValues is true || hasImage || size.HasValue
                 ? PrinterFilePreviewState.Available :
             waiting ? PrinterFilePreviewState.Deferred : PrinterFilePreviewState.Unavailable;
         string? reason = hasImage ? null :

@@ -61,7 +61,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         ExtractAllProperties(comments, metadata, completeContent: false, ct);
         var image = captureThumbnail
             ? ExtractThumbnail(lines, metadata, bounded: true, ct)
-            : (PrinterFileEnrichmentState.Deferred, (string?)"capture-disabled");
+            : (PrinterFileEnrichmentState.Deferred, "capture-disabled");
         return new(metadata, PrinterFileEnrichmentState.Partial, image.Item1,
             metadataLimited ? "metadata-limit" : "bounded-source", image.Item2);
     }
@@ -817,8 +817,11 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             if (ThumbnailEndPattern.IsMatch(comment) && inBlock)
             {
                 inBlock = false;
-                if (skipBlock || (metadata.ThumbnailData is not null &&
-                    ((!selectedQoi && isQoi) || (selectedQoi == isQoi && selectedPixels >= pixels))))
+                bool selectedPreferredFormat = !selectedQoi && isQoi;
+                bool selectedLargerSameFormat = selectedQoi == isQoi && selectedPixels >= pixels;
+                bool keepSelected = metadata.ThumbnailData is not null &&
+                    (selectedPreferredFormat || selectedLargerSameFormat);
+                if (skipBlock || keepSelected)
                 {
                     continue;
                 }

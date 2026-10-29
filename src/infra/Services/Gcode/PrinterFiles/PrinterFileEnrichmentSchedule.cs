@@ -72,6 +72,24 @@ public static class PrinterFileEnrichmentSchedule
             .ToListAsync(ct);
     }
 
+    /// <summary>Most recent per-file enrichment attempt for each printer; it survives lease release, unlike lease expiry.</summary>
+    public static async Task<Dictionary<Guid, DateTime?>> LastAttemptByPrinterAsync(
+        AppDbContext db, IReadOnlyCollection<Guid> printerIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(printerIds);
+        if (printerIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await db.PrinterFileEnrichments
+            .Where(row => printerIds.Contains(row.Location.SourcePrinterId))
+            .GroupBy(row => row.Location.SourcePrinterId)
+            .Select(group => new { PrinterId = group.Key, LastAttemptAtUtc = group.Max(row => row.LastAttemptAtUtc) })
+            .ToDictionaryAsync(x => x.PrinterId, x => x.LastAttemptAtUtc, ct);
+    }
+
     public static bool IsDue(PrinterFileEnrichment? row, DateTime now) =>
         row is null ||
         row.MetadataState == PrinterFileEnrichmentState.Pending ||
