@@ -15,12 +15,12 @@
     {
       "parallelizable" : false,
       "selectedTests" : [
-        "PrinterSensorsLiveBackendUITests"
+        "PrinterSensorLiveStateTests/testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect"
       ],
       "target" : {
         "containerPath" : "container:PrintFarmer.xcodeproj",
-        "identifier" : "F7060002000000000000D001",
-        "name" : "PrintFarmerUITests"
+        "identifier" : "AFC2BA1C050C049765D60160",
+        "name" : "PrintFarmerTests"
       }
     }
   ],

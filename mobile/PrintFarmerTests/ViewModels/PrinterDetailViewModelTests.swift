@@ -1,6 +1,313 @@
 import XCTest
 @testable import PrintFarmer
 
+@MainActor
+final class PrinterSensorLiveStateTests: XCTestCase {
+    private struct Configuration: Decodable {
+        let username: String
+        let password: String
+        let apiURL: URL
+        let controlURL: URL
+    }
+
+    private struct LoginResponse: Decodable {
+        let token: String
+    }
+
+    private struct UpdateResponse: Decodable {
+        let updated: Bool
+    }
+
+    private var signalR: SignalRService?
+    private var viewModel: PrinterDetailViewModel?
+    private var stateObservers: [PrinterStateObserver] = []
+    private var evidence: [String] = []
+
+    override func tearDown() async throws {
+        viewModel?.isViewActive = false
+        await signalR?.disconnect()
+        if !evidence.isEmpty {
+            let attachment = XCTAttachment(string: evidence.joined(separator: "\n"))
+            attachment.name = "Production app sensor-state delivery trace"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        stateObservers.removeAll()
+        viewModel = nil
+        signalR = nil
+        try await super.tearDown()
+    }
+
+    func testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect() async throws {
+        let configurationURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("build/sensor-e2e-3419-config.json")
+        guard FileManager.default.fileExists(atPath: configurationURL.path) else {
+            throw XCTSkip("Run this integration test through scripts/run-live-sensor-e2e.py.")
+        }
+        let configuration = try JSONDecoder().decode(
+            Configuration.self,
+            from: Data(contentsOf: configurationURL)
+        )
+        let token = try await authenticate(configuration)
+        let apiClient = APIClient(
+            baseURL: configuration.apiURL,
+            authenticated: AuthenticatedIdentity(accessToken: token, serverID: UUID())
+        )
+        let printerService = PrinterService(apiClient: apiClient)
+        let printers = try await printerService.list()
+        let printer = try XCTUnwrap(printers.first { $0.name == "Moonraker Sensor E2E" })
+
+        let model = PrinterDetailViewModel(printerId: printer.id)
+        viewModel = model
+        model.configure(printerService: printerService)
+        model.setSnapshotPollingAllowed(false)
+
+        let hub = SignalRService(
+            serverURL: configuration.apiURL,
+            tokenProvider: { token }
+        )
+        signalR = hub
+        model.configureSignalR(hub)
+        try await hub.connect()
+        await hub.replacePrinterSubscriptions([printer.id])
+        await model.loadPrinter()
+
+        let initialPrinter = try XCTUnwrap(model.printer)
+        XCTAssertEqual(try XCTUnwrap(humidity(in: initialPrinter)), 42.0, accuracy: 0.001)
+        XCTAssertTrue(sensor(in: initialPrinter)?.available == true)
+        XCTAssertEqual(hub.connectionState, .connected)
+        record("baseline", printer: initialPrinter, connection: hub.connectionState)
+
+        try await setScenario("shutdown", configuration: configuration)
+        try await waitForPrinterState("Moonraker shutdown retains unavailable sensor state") {
+            $0.isOnline && self.sensor(in: $0)?.available == false
+        }
+        let shutdownPrinter = try XCTUnwrap(model.printer)
+        XCTAssertEqual(hub.connectionState, .connected)
+        record("Klippy shutdown; Moonraker reachable", printer: shutdownPrinter, connection: hub.connectionState)
+
+        try await setHumidity(53.1, configuration: configuration)
+        try await waitForPrinterState("Live humidity update reaches retained app state") {
+            self.hasHumidity(53.1, in: $0) && $0.isOnline && self.sensor(in: $0)?.available == false
+        }
+        let liveHumidityPrinter = try XCTUnwrap(model.printer)
+        record("sensor-only humidity update", printer: liveHumidityPrinter, connection: hub.connectionState)
+
+        try await postControl("/stop-api", payload: [:], configuration: configuration)
+        try await waitForConnectionState(.reconnecting, on: hub)
+        let disconnectedPrinter = try XCTUnwrap(model.printer)
+        XCTAssertTrue(disconnectedPrinter.isOnline)
+        XCTAssertEqual(sensor(in: disconnectedPrinter)?.available, false)
+        XCTAssertTrue(hasHumidity(53.1, in: disconnectedPrinter))
+        record("API transport disconnected", printer: disconnectedPrinter, connection: hub.connectionState)
+
+        try await setHumidity(67.4, configuration: configuration)
+        let retainedWhileDisconnected = try XCTUnwrap(model.printer)
+        XCTAssertTrue(hasHumidity(53.1, in: retainedWhileDisconnected))
+        XCTAssertFalse(hasHumidity(67.4, in: retainedWhileDisconnected))
+        record("emulator mutated while API is stopped", printer: retainedWhileDisconnected, connection: hub.connectionState)
+
+        try await postControl("/start-api", payload: [:], configuration: configuration)
+        try await waitForConnectionState(.connected, on: hub)
+        try await waitForPrinterState("Reconnect recovery publishes fresh humidity while sensor remains unavailable") {
+            self.hasHumidity(67.4, in: $0) && $0.isOnline && self.sensor(in: $0)?.available == false
+        }
+        let recoveredPrinter = try XCTUnwrap(model.printer)
+        record("SignalR reconnect recovery", printer: recoveredPrinter, connection: hub.connectionState)
+
+        try await setScenario("ready", configuration: configuration)
+        try await waitForPrinterState("Ready restoration marks retained sensor available") {
+            self.hasHumidity(42.0, in: $0) && $0.isOnline && self.sensor(in: $0)?.available == true
+        }
+        let readyPrinter = try XCTUnwrap(model.printer)
+        XCTAssertEqual(hub.connectionState, .connected)
+        record("Klippy ready restoration", printer: readyPrinter, connection: hub.connectionState)
+    }
+
+    private func authenticate(_ configuration: Configuration) async throws -> String {
+        var request = URLRequest(url: configuration.apiURL.appending(path: "/api/auth/login"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "usernameOrEmail": configuration.username,
+            "password": configuration.password,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw NSError(
+                domain: "PrinterSensorLiveStateTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "The isolated API login failed."]
+            )
+        }
+        return try JSONDecoder().decode(LoginResponse.self, from: data).token
+    }
+
+    private func postControl(
+        _ path: String,
+        payload: [String: Any],
+        configuration: Configuration
+    ) async throws -> Data {
+        var request = URLRequest(url: configuration.controlURL.appending(path: path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw NSError(
+                domain: "PrinterSensorLiveStateTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "The isolated E2E control request \(path) failed."]
+            )
+        }
+        return data
+    }
+
+    private func setHumidity(_ value: Double, configuration: Configuration) async throws {
+        let data = try await postControl(
+            "/moonraker-sensor",
+            payload: [
+                "objectName": "temperature_sensor endstop",
+                "fields": ["humidity": value],
+            ],
+            configuration: configuration
+        )
+        XCTAssertTrue(try JSONDecoder().decode(UpdateResponse.self, from: data).updated)
+    }
+
+    private func setScenario(_ scenario: String, configuration: Configuration) async throws {
+        let data = try await postControl(
+            "/moonraker-scenario",
+            payload: ["scenario": scenario],
+            configuration: configuration
+        )
+        XCTAssertTrue(try JSONDecoder().decode(UpdateResponse.self, from: data).updated)
+    }
+
+    private func waitForConnectionState(
+        _ expected: SignalRConnectionState,
+        on service: SignalRService
+    ) async throws {
+        let stateExpectation = expectation(description: "SignalR reaches \(expected)")
+        let registration = service.onConnectionStateChanged { state in
+            if state == expected {
+                stateExpectation.fulfill()
+            }
+        }
+        defer { registration.subscription.cancel() }
+        if registration.initial == expected {
+            return
+        }
+        await fulfillment(of: [stateExpectation], timeout: 60)
+        guard service.connectionState == expected else {
+            throw NSError(
+                domain: "PrinterSensorLiveStateTests",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "SignalR did not reach \(expected)."]
+            )
+        }
+    }
+
+    private func waitForPrinterState(
+        _ description: String,
+        until condition: @escaping @MainActor @Sendable (Printer) -> Bool
+    ) async throws {
+        guard let viewModel else {
+            throw NSError(
+                domain: "PrinterSensorLiveStateTests",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "The production printer detail model is unavailable."]
+            )
+        }
+        if let printer = viewModel.printer, condition(printer) {
+            return
+        }
+        let stateExpectation = expectation(description: description)
+        let observer = PrinterStateObserver(
+            viewModel: viewModel,
+            condition: condition,
+            expectation: stateExpectation
+        )
+        stateObservers.append(observer)
+        observer.start()
+        await fulfillment(of: [stateExpectation], timeout: 60)
+        stateObservers.removeAll { $0 === observer }
+        guard let printer = viewModel.printer, condition(printer) else {
+            throw NSError(
+                domain: "PrinterSensorLiveStateTests",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for retained app state: \(description)."]
+            )
+        }
+    }
+
+    private func sensor(in printer: Printer) -> PrinterSensor? {
+        printer.sensors.first { $0.id == "temperature_sensor endstop" }
+    }
+
+    private func humidity(in printer: Printer) -> Double? {
+        sensor(in: printer)?.reading(.humidity)?.value.number
+    }
+
+    private func hasHumidity(_ expected: Double, in printer: Printer) -> Bool {
+        humidity(in: printer).map { abs($0 - expected) < 0.001 } == true
+    }
+
+    private func record(
+        _ label: String,
+        printer: Printer,
+        connection: SignalRConnectionState
+    ) {
+        let available = sensor(in: printer).map { String($0.available) } ?? "missing"
+        let humidityValue = humidity(in: printer).map { String($0) } ?? "missing"
+        evidence.append(
+            "\(label): signalR=\(connection), printer.isOnline=\(printer.isOnline), " +
+                "sensor.available=\(available), humidity=\(humidityValue)"
+        )
+    }
+}
+
+@MainActor
+private final class PrinterStateObserver {
+    private let viewModel: PrinterDetailViewModel
+    private let condition: @MainActor @Sendable (Printer) -> Bool
+    private let expectation: XCTestExpectation
+
+    init(
+        viewModel: PrinterDetailViewModel,
+        condition: @escaping @MainActor @Sendable (Printer) -> Bool,
+        expectation: XCTestExpectation
+    ) {
+        self.viewModel = viewModel
+        self.condition = condition
+        self.expectation = expectation
+    }
+
+    func start() {
+        observe()
+    }
+
+    private func observe() {
+        withObservationTracking {
+            _ = viewModel.printer.map(condition)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let printer = self.viewModel.printer, self.condition(printer) {
+                    self.expectation.fulfill()
+                } else {
+                    self.observe()
+                }
+            }
+        }
+    }
+}
+
 /// Tests for PrinterDetailViewModel: commands, confirmations,
 /// state computation, and error handling.
 /// Uses MockPrinterService via configure() DI pattern.
