@@ -68,7 +68,7 @@ def wait_http(url, process, log_path, timeout=90):
     raise RuntimeError(f"Timed out waiting for {url}; last error: {last_error}; see {log_path}")
 
 
-def create_initial_admin(username, password):
+def create_initial_admin(username, password, bootstrap_secret):
     status, body = http_json(
         f"{API_URL}/api/setup/initial-admin",
         method="POST",
@@ -78,6 +78,7 @@ def create_initial_admin(username, password):
             "password": password,
             "firstName": "Sensor",
             "lastName": "E2E",
+            "bootstrapSecret": bootstrap_secret,
         },
     )
     if not 200 <= status < 300:
@@ -436,6 +437,7 @@ def main():
         "ConnectionStrings__Default": f"Data Source={run_dir / 'farm.sqlite'}",
         "Logging__LogLevel__Default": "Information",
         "WorkerAuth__SharedKey": secrets.token_urlsafe(32),
+        "PFARM__Setup__BootstrapSecret": secrets.token_urlsafe(32),
         "TestEmulator__Enabled": "true",
         "TestEmulator__Printers__0__Name": "Test Printer Alpha",
         "PRINTFARM_SENSOR_E2E_USERNAME": f"sensor-e2e-{secrets.token_hex(6)}",
@@ -507,6 +509,7 @@ def main():
         token = create_initial_admin(
             env["PRINTFARM_SENSOR_E2E_USERNAME"],
             env["PRINTFARM_SENSOR_E2E_PASSWORD"],
+            env["PFARM__Setup__BootstrapSecret"],
         )
         wait_for_printer_names(
             token,
