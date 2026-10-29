@@ -128,6 +128,15 @@ public interface IQueueRepository
     Task<int> CountActiveJobsUsingGcodeAsync(Guid gcodeFileId, CancellationToken ct);
 
     /// <summary>
+    /// Counts active jobs per gcode file using the same predicate as
+    /// <see cref="CountActiveJobsUsingGcodeAsync"/>, in bounded ID chunks.
+    /// Files without active jobs are omitted from the result.
+    /// </summary>
+    /// <param name="gcodeFileIds">Distinct gcode file IDs to check</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task<Dictionary<Guid, int>> CountActiveJobsUsingGcodesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct);
+
+    /// <summary>
     /// Get all print jobs assigned to any of the specified printers, ordered by priority and queue time.
     /// Used to batch-load jobs for multiple printers in a single DB query.
     /// </summary>
@@ -142,4 +151,12 @@ public interface IQueueRepository
     /// <param name="gcodeFileId">The G-code file ID whose references should be cleared</param>
     /// <param name="ct">Cancellation token for async operation</param>
     Task ClearGcodeFileReferencesAsync(Guid gcodeFileId, CancellationToken ct);
+
+    /// <summary>
+    /// Clears the tracked GcodeFileId of every print job referencing any of the specified files,
+    /// in bounded ID chunks. Changes are persisted by the caller's SaveChanges.
+    /// </summary>
+    /// <param name="gcodeFileIds">Distinct gcode file IDs whose references should be cleared</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task ClearGcodeFileReferencesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct);
 }

@@ -1,4 +1,6 @@
-﻿namespace Farm.Slicer.Module.Dtos;
+﻿using Farm.Infrastructure.Contracts.FileManagement;
+
+namespace Farm.Slicer.Module.Dtos;
 
 /// <summary>
 /// Request DTO for searching and filtering 3D model files.
@@ -50,6 +52,15 @@ public class DeleteModelsRequest
     /// <summary>List of model IDs to delete.</summary>
     public List<Guid> Ids { get; set; } = [];
 }
+
+/// <summary>
+/// Result of a bulk 3D model deletion.
+/// </summary>
+/// <param name="Deleted">Number of distinct requested model records that were removed.</param>
+/// <param name="Errors">Number of distinct requested IDs whose record was not removed.</param>
+/// <param name="Total">Number of distinct requested model IDs.</param>
+/// <param name="Results">One outcome per distinct requested ID, in request order.</param>
+public sealed record DeleteModelsResponse(int Deleted, int Errors, int Total, IReadOnlyList<BulkDeleteItemResult> Results);
 
 /// <summary>
 /// Request to create a virtual folder for 3D models.

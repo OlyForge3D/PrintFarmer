@@ -66,6 +66,26 @@ public class EfGcodeRepository(AppDbContext db) : IGcodeRepository
             .FirstOrDefaultAsync(g => g.Id == id, ct);
     }
 
+    public async Task<List<GcodeFile>> GetByIdsWithIncludesAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        List<GcodeFile> files = [];
+        foreach (Guid[] chunk in ids.Distinct().Chunk(BulkIdChunkSize))
+        {
+            files.AddRange(await _db.GcodeFiles
+                .Include(g => g.SourcePrinter)
+                .Include(g => g.PrinterModel)
+                .Include(g => g.Tags)
+                .Where(g => chunk.Contains(g.Id))
+                .ToListAsync(ct));
+        }
+
+        return files;
+    }
+
+    // Keeps each IN-list well below SQL Server's 2100-parameter limit.
+    private const int BulkIdChunkSize = 500;
+
     public Task<GcodeFile?> FindByHashAsync(string hash, CancellationToken ct)
     {
         return _db.GcodeFiles.FirstOrDefaultAsync(g => g.FileHash == hash, ct);
