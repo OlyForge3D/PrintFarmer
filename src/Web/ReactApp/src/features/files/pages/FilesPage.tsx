@@ -11,6 +11,7 @@ import {
   type FileQueryState,
   type UseFileBrowserConfig,
 } from '@/features/fileBrowser/types';
+import { FILE_TABLE_PREVIEW_CELL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
@@ -565,11 +566,24 @@ export function FilesPage() {
   }, [handleDownloadGcode, handleDownloadModel]);
 
   // The thumbnail sits between selection and name; type and extended metadata live in details.
+  // Like the On printers table, the preview opens details; here it is a real button so keyboard users can too.
   const modelColumns = useMemo<ColumnDef[]>(() => [
     {
       key: 'thumbnail',
       label: 'Preview',
-      render: (file) => <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />,
+      className: FILE_TABLE_PREVIEW_CELL_CLASS,
+      render: (file) => (
+        <Button
+          type="button"
+          variant="unstyled"
+          aria-label={`Preview of ${file.fileName}, show details`}
+          title={file.fileName}
+          className="block cursor-pointer rounded focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+          onClick={(event) => openDetails(file, event.currentTarget)}
+        >
+          <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />
+        </Button>
+      ),
     },
     {
       key: 'fileName',

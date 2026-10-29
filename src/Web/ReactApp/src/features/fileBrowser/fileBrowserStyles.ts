@@ -9,5 +9,7 @@ export const COMPACT_FILE_TABLE_FRAME_CLASS = 'overflow-x-auto rounded-lg border
 export const FILE_TABLE_HEAD_CLASS = 'sticky top-0 border-b border-pf-border bg-pf-bg-1';
 export const FILE_TABLE_HEADER_CELL_CLASS = 'px-3 py-2 text-left font-semibold text-pf-text-secondary text-xs uppercase tracking-wider';
 export const COMPACT_FILE_TABLE_CELL_CLASS = 'px-3 py-1.5 align-middle text-pf-text-primary';
+// Shrinks the preview column to its thumbnail and drops its trailing padding so the name sits close by.
+export const FILE_TABLE_PREVIEW_CELL_CLASS = 'w-px whitespace-nowrap pr-0!';
 export const FILE_TABLE_ROW_CLASS = 'border-b border-pf-border last:border-b-0 transition-colors';
 export const FILE_TOOLBAR_CONTROL_CLASS = '[&_input:not([type=checkbox])]:h-10 [&_select]:h-10 [&_button]:h-10';

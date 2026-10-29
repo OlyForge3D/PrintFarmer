@@ -221,6 +221,33 @@ describe("compact presentation (opt-in, used by /files)", () => {
     expect(screen.getByText("file.gcode").closest("td")).toHaveClass("py-1.5");
   });
 
+  it("applies a column's className to its header and body cells", () => {
+    render(
+      <ExplorerView
+        folders={folders}
+        files={files.filter((file) => !file.isDirectory)}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        onNavigate={vi.fn()}
+        currentPath="/"
+        renderActions={() => null}
+        sortBy="fileName"
+        sortOrder="asc"
+        onSort={vi.fn()}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
+        columns={[{ key: "thumbnail", label: "Preview", className: "w-px pr-0!", render: () => <span>thumb</span> }, ...columns]}
+        compact
+      />,
+    );
+    const table = screen.getByRole("table", { name: "Files list" });
+    expect(within(table).getByRole("columnheader", { name: "Preview" })).toHaveClass("w-px", "pr-0!");
+    expect(screen.getByText("thumb").closest("td")).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS, "w-px", "pr-0!");
+    expect(within(table).getByRole("button", { name: "Sort by Name" }).closest("th")).not.toHaveClass("w-px");
+  });
+
   it("keeps the default table unchanged for other file browsers", () => {
     renderTable();
     const table = screen.getByRole("table", { name: "Files list" });
