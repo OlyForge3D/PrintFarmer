@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "run-live-sensor-e2e.py"
@@ -82,6 +83,29 @@ class VerifyNamedTestSucceededTests(unittest.TestCase):
             self.assertEqual(target["target"]["identifier"], target_id)
             self.assertEqual(target["selectedTests"], selected_tests)
             self.assertEqual(len(plan["testTargets"]), 1)
+
+    def test_each_proof_plan_is_registered_without_changing_scheme_default(self):
+        scheme_path = (
+            MOBILE
+            / "PrintFarmer.xcodeproj/xcshareddata/xcschemes/PrintFarmer.xcscheme"
+        )
+        test_plans = ElementTree.parse(scheme_path).find("./TestAction/TestPlans")
+        self.assertIsNotNone(test_plans)
+        references = {
+            entry.attrib["reference"]: entry.attrib
+            for entry in test_plans.findall("TestPlanReference")
+        }
+        for proof in harness.PROOFS.values():
+            plan_reference = f"container:{proof['test_plan']}.xctestplan"
+            self.assertIn(plan_reference, references)
+        self.assertEqual(
+            references["container:PrintFarmer.xctestplan"].get("default"),
+            "YES",
+        )
+        self.assertNotIn(
+            "default",
+            references["container:PrintFarmerLiveSensorStateE2E.xctestplan"],
+        )
 
     def test_runner_command_selects_only_the_matching_plan_and_test(self):
         for proof_name, proof in harness.PROOFS.items():
