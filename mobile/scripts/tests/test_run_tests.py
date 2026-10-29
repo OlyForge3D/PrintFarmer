@@ -679,6 +679,85 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(summary["finalization_budget_seconds"], 2.5)
         self.assertLess(summary["post_last_test_seconds"], 3)
 
+    def test_hard_stop_uses_configured_deadline_deterministically(self):
+        clock = type("Clock", (), {})()
+        clock.nanoseconds = 0
+        deadline_ns = int(self.TIGHT_FINALIZATION_TIMEOUT * 1_000_000_000)
+        poll_ns = 10_000_000
+
+        def monotonic():
+            return clock.nanoseconds / 1_000_000_000
+
+        def sleep(seconds):
+            clock.nanoseconds += round(seconds * 1_000_000_000)
+            self.assertLessEqual(
+                clock.nanoseconds, deadline_ns + poll_ns,
+                "The runner did not hard-stop at its configured deadline",
+            )
+
+        class Process:
+            pid = 12345
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self):
+                return self.returncode
+
+        process = Process()
+        signals = []
+
+        def popen(command, start_new_session):
+            self.assertTrue(start_new_session)
+            stream_path = Path(command[command.index("-resultStreamPath") + 1])
+            stream_path.write_text("".join((
+                event("invocationStarted"),
+                event("actionStarted"),
+                event("testStarted"),
+                event("testFinished"),
+                event("actionFinished"),
+                event("invocationFinished"),
+            )))
+            return process
+
+        def killpg(pid, sig):
+            self.assertEqual(pid, process.pid)
+            signals.append((clock.nanoseconds, sig))
+            if sig == signal.SIGKILL:
+                process.returncode = -signal.SIGKILL
+
+        with patch.object(runner.time, "monotonic", side_effect=monotonic), \
+                patch.object(runner.time, "sleep", side_effect=sleep), \
+                patch.object(runner.subprocess, "Popen", side_effect=popen), \
+                patch.object(runner.os, "killpg", side_effect=killpg), \
+                patch("sys.stdout", new=io.StringIO()):
+            code = runner.run(
+                self.arguments,
+                invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+                finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+                flush_seconds=0.1,
+                poll_seconds=0.01,
+            )
+
+        self.assertEqual(code, 124)
+        self.assertEqual(
+            signals,
+            [
+                (deadline_ns - 100_000_000, signal.SIGINT),
+                (deadline_ns, signal.SIGKILL),
+                (deadline_ns + poll_ns, signal.SIGKILL),
+            ],
+        )
+        summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
+        self.assertEqual(summary["termination_reason"], "post-test-timeout")
+        self.assertEqual(
+            summary["finalization_budget_seconds"], self.TIGHT_FINALIZATION_TIMEOUT,
+        )
+        self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
+        self.assertEqual(summary["tests"][0]["identifier"], "Probe/test()")
+        self.assertTrue(self.bundle.with_suffix(".events.jsonl").read_text())
+
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
         code, summary = self.invoke(
             "ignore-interrupt", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
@@ -686,7 +765,11 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
-        self.assertLess(summary["post_last_test_seconds"], 0.5)
+        self.assertEqual(summary["termination_reason"], "post-test-timeout")
+        self.assertEqual(
+            summary["finalization_budget_seconds"], self.TIGHT_FINALIZATION_TIMEOUT,
+        )
+        self.assertEqual(summary["tests"][0]["identifier"], "Probe/test()")
         child = (self.bundle / "child.pid").read_text()
         # Reaping is OS-owned; a zombie has exited and no longer holds stdout.
         for _ in range(50):
