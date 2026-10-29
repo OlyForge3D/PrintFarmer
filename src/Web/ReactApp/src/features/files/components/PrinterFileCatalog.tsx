@@ -347,12 +347,12 @@ export function PrinterFileCatalog() {
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
       <div role="group" aria-label="Printer file controls" className={clsx('flex flex-wrap items-end gap-3', FILE_TOOLBAR_CONTROL_CLASS)}>
-        <FormField label="Search files" htmlFor="catalog-search" className="min-w-0 flex-1 basis-48">
+        <FormField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1 basis-48">
           <Input id="catalog-search" type="search" placeholder="Search filenames or paths" value={search} maxLength={200} onChange={event => changeFilter('remoteSearch', event.target.value)} />
         </FormField>
         <FormField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
           <Select id="catalog-printer" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
-            <option value="">All authorized printers</option>
+            <option value="">All</option>
             {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
           </Select>
         </FormField>

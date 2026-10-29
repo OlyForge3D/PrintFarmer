@@ -99,7 +99,7 @@ describe('FilesPage folder navigation with the real file browser', () => {
     expect(foldersButton.textContent).toBe('');
     expect(foldersButton.querySelector('svg')).toBeInTheDocument();
     for (const [label, control] of [
-      ['Search files', screen.getByRole('searchbox', { name: 'Search files' })],
+      ['Search', screen.getByRole('searchbox', { name: 'Search' })],
       ['Type', screen.getByRole('combobox', { name: 'Type' })],
       ['Sort', screen.getByRole('combobox', { name: 'Sort files' })],
       ['Folders', foldersButton],

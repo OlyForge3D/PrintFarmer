@@ -469,11 +469,11 @@ describe('Printer file catalog', () => {
     const user = userEvent.setup();
     renderCatalog();
     await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
-    if (change === 'filter') await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'part');
+    if (change === 'filter') await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'part');
     else await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
     expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
-    if (change === 'filter') await user.clear(screen.getByRole('searchbox', { name: 'Search files' }));
+    if (change === 'filter') await user.clear(screen.getByRole('searchbox', { name: 'Search' }));
     else await user.click(screen.getByRole('button', { name: 'Previous' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
   });
@@ -688,9 +688,11 @@ describe('Printer file catalog', () => {
     renderCatalog();
     const toolbar = screen.getByRole('group', { name: 'Printer file controls' });
     expect(toolbar).toHaveClass('flex', 'flex-wrap', 'items-end');
-    const search = within(toolbar).getByRole('searchbox', { name: 'Search files' });
+    const search = within(toolbar).getByRole('searchbox', { name: 'Search' });
     const printer = within(toolbar).getByRole('combobox', { name: 'Printer' });
     expect(printer).toBeVisible();
+    expect(within(printer).getByRole('option', { name: 'All' })).toHaveValue('');
+    expect(printer).toHaveValue('');
     expect(search).toBeVisible();
     expect(search).toHaveAttribute('placeholder', 'Search filenames or paths');
     expect(toolbar.firstElementChild).toContainElement(search);
@@ -711,7 +713,7 @@ describe('Printer file catalog', () => {
   it('keeps path search scoped to the selected printer and resets paging', async () => {
     const user = userEvent.setup();
     renderCatalog('/files?source=printers&printer=source&remotePage=2');
-    const search = screen.getByRole('searchbox', { name: 'Search files' });
+    const search = screen.getByRole('searchbox', { name: 'Search' });
     await user.type(search, 'Parts/part');
     await waitFor(() => expect(mocks.catalog).toHaveBeenLastCalledWith({
       printerId: 'source', search: 'Parts/part', page: 1, pageSize: 25,

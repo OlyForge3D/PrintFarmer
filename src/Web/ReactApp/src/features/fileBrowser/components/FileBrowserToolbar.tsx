@@ -34,13 +34,13 @@ export const FileBrowserToolbar = ({
 }: FileBrowserToolbarProps) => {
   return (
     <div className={clsx('flex flex-col gap-3 lg:flex-row lg:items-end', FILE_TOOLBAR_CONTROL_CLASS)} data-tour="gcode-toolbar">
-      <FormField label="Search files" htmlFor="file-browser-search" className="flex-1 min-w-0">
+      <FormField label="Search" htmlFor="file-browser-search" className="flex-1 min-w-0">
         <Input
           id="file-browser-search"
           type="search"
           value={search}
           placeholder="Search files"
-          aria-label="Search files"
+          aria-label="Search"
           onChange={(e) => onSearchChange(e.target.value)}
           className="min-w-[16rem]"
         />
