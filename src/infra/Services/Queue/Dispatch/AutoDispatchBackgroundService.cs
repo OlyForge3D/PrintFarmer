@@ -60,45 +60,29 @@ public sealed class AutoDispatchBackgroundService(
             {
                 // In-memory events are wake-up hints; a periodic database scan is the durable
                 // source of eligible work after dropped events or process restarts (#900).
-                DispatchTriggerEvent triggerEvent;
+                bool scanDue;
+                DispatchTriggerEvent? triggerEvent;
                 using (CancellationTokenSource readCts =
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task completed = await Task.WhenAny(readTask, scanDelay);
-
-                    if (completed == scanDelay)
-                    {
-                        await readCts.CancelAsync();
-                        try
-                        {
-                            _ = await readTask;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // Expected: the periodic durable scan won this wait.
-                        }
-
-                        await scanDelay;
-                        await RunDurableScanAsync(stoppingToken);
-                        scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
-                        continue;
-                    }
-
-                    try
-                    {
-                        triggerEvent = await readTask;
-                    }
-                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
+                    (scanDue, triggerEvent) = await AwaitNextWakeAsync(readTask, scanDelay, readCts);
                 }
 
                 // Dispatch via a tracked worker so idle printers run concurrently under the
                 // configured capacity limit, with rerun coalescing and graceful drain on
                 // shutdown. The cross-process database claim prevents duplicates.
-                StartTrackedWorker(triggerEvent, stoppingToken);
+                if (triggerEvent is { } owned)
+                {
+                    StartTrackedWorker(owned, stoppingToken);
+                }
+
+                if (scanDue)
+                {
+                    await scanDelay;
+                    await RunDurableScanAsync(stoppingToken);
+                    scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -111,6 +95,41 @@ public sealed class AutoDispatchBackgroundService(
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
+    }
+
+    /// <summary>
+    /// Waits for the next trigger event or the durable scan deadline. An expired deadline
+    /// always reports the scan as due, even when a backlogged read completed synchronously and
+    /// would otherwise win every <see cref="Task.WhenAny(Task[])"/>. A trigger event already
+    /// taken from the reader owns its printer, so it is returned for dispatch rather than
+    /// dropped, including when it races the read cancellation.
+    /// </summary>
+    internal static async Task<(bool ScanDue, DispatchTriggerEvent? TriggerEvent)> AwaitNextWakeAsync(
+        Task<DispatchTriggerEvent> readTask,
+        Task scanDelay,
+        CancellationTokenSource readCts)
+    {
+#pragma warning disable VSTHRD003 // The loop owns both tasks; hosted services have no synchronization context.
+        await Task.WhenAny(readTask, scanDelay);
+        if (!scanDelay.IsCompleted)
+        {
+            return (false, await readTask);
+        }
+
+        if (!readTask.IsCompleted)
+        {
+            await readCts.CancelAsync();
+        }
+
+        try
+        {
+            return (true, await readTask);
+        }
+        catch (OperationCanceledException) when (readCts.IsCancellationRequested)
+        {
+            return (true, null);
+        }
+#pragma warning restore VSTHRD003
     }
 
     private void StartTrackedWorker(

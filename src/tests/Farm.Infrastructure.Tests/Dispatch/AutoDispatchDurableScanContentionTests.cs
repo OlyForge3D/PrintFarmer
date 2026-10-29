@@ -382,6 +382,82 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
             .Should().BeFalse();
     }
 
+    [Fact]
+    public async Task AwaitNextWakeAsync_ExpiredScanWithBacklogRead_RunsScanAndKeepsTheConsumedEvent()
+    {
+        // A backlogged reader completes synchronously, so it is already done when the expired
+        // deadline is examined. Neither may starve the other: the scan is due and the event that
+        // was taken (and now owns its printer) is still dispatched.
+        var trigger = new AutoDispatchTrigger();
+        var printerId = Guid.NewGuid();
+        trigger.NotifyJobQueued(printerId);
+        using var readCts = new CancellationTokenSource();
+        Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+        readTask.IsCompletedSuccessfully.Should().BeTrue("the precondition is a backlogged reader");
+
+        (bool scanDue, DispatchTriggerEvent? triggerEvent) =
+            await AutoDispatchBackgroundService.AwaitNextWakeAsync(readTask, Task.CompletedTask, readCts);
+
+        scanDue.Should().BeTrue();
+        triggerEvent.Should().NotBeNull();
+        triggerEvent!.Value.PrinterId.Should().Be(printerId);
+        triggerEvent.Value.SkipIdleThreshold.Should().BeTrue();
+        readCts.IsCancellationRequested.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AwaitNextWakeAsync_ExpiredScanWithIdleReader_CancelsTheReadWithoutAnEvent()
+    {
+        var trigger = new AutoDispatchTrigger();
+        using var readCts = new CancellationTokenSource();
+        Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+
+        (bool scanDue, DispatchTriggerEvent? triggerEvent) =
+            await AutoDispatchBackgroundService.AwaitNextWakeAsync(readTask, Task.CompletedTask, readCts);
+
+        scanDue.Should().BeTrue();
+        triggerEvent.Should().BeNull();
+        readCts.IsCancellationRequested.Should().BeTrue();
+        readTask.IsCanceled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AwaitNextWakeAsync_EventTakenWhileCancellingTheRead_IsStillReturnedForDispatch()
+    {
+        // The reader can take an event after the scan deadline wins but before it observes the
+        // cancellation. Dropping it would leave that printer's trigger ownership in flight.
+        var printerId = Guid.NewGuid();
+        var read = new TaskCompletionSource<DispatchTriggerEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var readCts = new CancellationTokenSource();
+        using CancellationTokenRegistration registration = readCts.Token.Register(
+            () => read.TrySetResult(new DispatchTriggerEvent(printerId, SkipIdleThreshold: false)));
+
+        (bool scanDue, DispatchTriggerEvent? triggerEvent) =
+            await AutoDispatchBackgroundService.AwaitNextWakeAsync(read.Task, Task.CompletedTask, readCts);
+
+        scanDue.Should().BeTrue();
+        triggerEvent.Should().NotBeNull();
+        triggerEvent!.Value.PrinterId.Should().Be(printerId);
+    }
+
+    [Fact]
+    public async Task AwaitNextWakeAsync_PendingScanWithEvent_DispatchesWithoutCancelling()
+    {
+        var trigger = new AutoDispatchTrigger();
+        var printerId = Guid.NewGuid();
+        trigger.NotifyPrinterIdle(printerId);
+        var pendingScan = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var readCts = new CancellationTokenSource();
+        Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+
+        (bool scanDue, DispatchTriggerEvent? triggerEvent) =
+            await AutoDispatchBackgroundService.AwaitNextWakeAsync(readTask, pendingScan.Task, readCts);
+
+        scanDue.Should().BeFalse();
+        triggerEvent!.Value.PrinterId.Should().Be(printerId);
+        readCts.IsCancellationRequested.Should().BeFalse();
+    }
+
     private AppDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connectionString)

@@ -180,7 +180,8 @@ public readonly record struct DispatchTriggerEvent(
 - Respects `MaxConcurrentDispatches` limit to prevent thundering herd
 - Tracks in-flight dispatch count with `Interlocked` operations
 - Runs a durable reconciliation scan at startup and every 30 seconds to re-notify eligible printers;
-  trigger traffic does not postpone the 30-second scan deadline
+  trigger traffic, including a backlog of queued triggers, does not postpone the 30-second scan
+  deadline, and a trigger already read when the scan becomes due is still dispatched
 
 **Transient database contention:** The durable reconciliation scan only reads state and re-notifies
 printers, so skipping one scan is dispatch-safe. When a scan fails with transient lock contention,
