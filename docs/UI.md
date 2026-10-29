@@ -49,26 +49,62 @@ Main overview page showing all printers with real-time status.
   64 header blocks, or 16 MiB of header data) show no metadata.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one or several selected files. Add
-  `&printer=<printerId>` to scope the catalog to one printer.
+  `&printer=<printerId>` to scope the catalog to one printer. Filters appear
+  directly without a duplicate source heading and description. **Printer** and
+  **Path search** share a responsive toolbar with the view buttons and refresh.
+  Availability and freshness remain file metadata, not filter dropdowns;
+  old `availability` and `freshness` URL parameters do not filter this view.
 
+**Local library** and **On printers** use the shared themed tabs. The selected
+source stays URL-driven, and only its content is mounted.
 Both sources share the same compact card grid and 12px table, with the same
 file, status, and action glyphs. Selecting a card or file name opens a details
 panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
 it and returns focus). The panel shows a larger preview, type, size, path,
 source, print time, and layer height. Values the source cannot provide are shown
-as **Unavailable**. File dates display as dates only; hover for the full
+as **Unknown** (or an accessible dash). File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
 
-For PrusaLink files, the panel also shows every supplied **Native print
-metadata** field, including filament use, temperatures, tool-specific values,
-and printer/profile information. Names, sizes, and these details are saved in
-the database during discovery, not held only in the expiring preview cache.
-They remain visible when thumbnail loading fails or the source is unavailable.
-The saved date identifies the observation; absent native values are **Unknown**,
-while explicit zero and false remain visible. Tool numbers follow provider
-order. Full display names do not replace the short filename used by file actions.
-Scheduled scans reuse unchanged details; **Force Refresh** refetches them.
+Tables share their border, header, row spacing, selection styling, and dense
+action buttons. Local library omits **Type** and On printers omits **Status**
+from the table; these values remain in file details (and on cards).
+
+#### Local-library folders
+
+The folder-glyph **Folders** toolbar button reveals a compact row with the
+**Folder** dropdown and folder actions in both list and grid views. It starts
+collapsed; the button is glyph-only with an accessible **Folders** name.
+An active folder highlights the button, and its tooltip shows the selected path.
+Control labels sit above their inputs, matching **On printers**.
+Collapsing preserves the filter. The **Type** dropdown replaces the All, 3D Models, G-Code, and Other
+buttons. **All folders** shows the whole library; **Root** shows only files
+assigned to `/`. Choosing another folder shows its direct files, not descendants,
+with filtering applied before server pagination and totals. The dropdown combines
+model and G-code folders; the inline breadcrumb appears when a folder is selected
+and links back to ancestors or All folders.
+Changing folder resets the page and clears the selection and details panel.
+
+**New folder** creates a child of the current folder (Root when All folders is
+selected) in both libraries. Select files and use **Move to folder...** to choose
+their destination. These controls require create permission for the affected
+libraries. Model and G-code operations are separate requests: partial failures are
+reported, not rolled back. After an incomplete move, review the refreshed library
+and reselect remaining files before retrying. Folder-load errors also offer retry.
+
+#### Print settings
+
+The **Print settings** section presents time, layer height/count, nozzle size,
+temperatures, infill, supports, filament weight, and slicer identity. A
+**Filament by tool** table keeps each reported tool's color, material, and weight
+aligned; missing values stay unknown rather than borrowing another tool's data.
+Additional supplied native fields appear under **Other reported fields**.
+Moonraker, OctoPrint, and PrusaLink use one native-first background pipeline with
+bounded G-code/BGCode fallback. No missing settings or material values are guessed.
+Saved database metadata remains visible independently of thumbnail availability.
+The panel distinguishes collecting, retained earlier details, and failed reads.
+Explicit zero and false remain visible where valid. Full display names do not
+replace the short filename used by file actions.
 
 On-printer files offer two distinct actions:
 
@@ -95,27 +131,45 @@ applies to (for example, `Copy 2 of 3 selected`).
   batch. The server still checks each file. Results are reported per file; a
   delete whose outcome is unknown is never resent automatically.
 
-Remote previews load lazily, only for visible items on printers whose backend
-supports them. They are fetched only when the printer is idle, cached per file
-version, and labelled with their capture date. Indexing itself remains
-metadata-only.
+Preview records and images load lazily from PrintFarmer's local database and
+storage for visible items. Browsing or opening details never contacts a
+printer. Metadata and thumbnails are acquired in bounded background slices only
+when the printer is confirmed idle. Saved images survive restarts and remain
+readable while the printer is busy or offline. API replicas must share the
+database and Gcode storage volume; the default thumbnail capacity is 512 MiB.
+At capacity, healthy images are retained and metadata collection continues.
+See [storage setup and limits](PRINTER_FILE_CATALOG_API.md#shared-thumbnail-storage-and-upgrade-requirements).
 
 Per-printer automatic discovery, scan status, and **Force refresh** live in the
 **Files** section of the printer's Edit dialog. Those changes apply immediately
 and are not part of the form save. Global discovery cadence and budgets remain
 under Admin Settings > Files.
 
-**Force refresh**, to the right of the table/card view toggle on **On printers**,
-scans every online printer you can manage, one at a time. Both refresh controls
-bypass the automatic-discovery switches, schedule, backoff, and cached previews.
-They still require a confirmed-idle printer and a free I/O slot; idle status is
-checked again during the scan and before publication. A scan can take up to two
-minutes per printer. Success means a complete listing was published, not merely
-scheduled; failures name the printer and reason so busy printers can be retried.
+The icon-only **Force refresh** control, to the right of the table/card view
+toggle on **On printers**, scans every online printer you can manage with bounded
+parallelism. The catalog's `maxConcurrentIo` sets the client pool size: two by
+default, configurable from one to 16 under Admin Settings > Files. The database
+still enforces the shared I/O budget across API replicas and background work.
+Both refresh controls retain accessible names and tooltips, show a busy
+indicator, and cannot be activated again until refresh and cache reload finish.
+An observed server scan also keeps the affected control inactive.
 
-Previews reload on demand after a successful force refresh, not eagerly as part
-of indexing. Files pinned by unfinished file operations retain their preview
-revision to preserve those operations; force refresh again after they finish.
+Both controls bypass automatic-discovery switches, schedule, and backoff for
+inventory, and mark background enrichment due. They still require a
+confirmed-idle printer and a free I/O slot; idle status is checked again during
+the scan and before publication. The client retries only a confirmed
+`source_busy` response, within a two-minute capacity-wait window. This is separate
+from the scan's own two-minute budget. Other failures, including timeouts with an
+unknown outcome, are not automatically replayed. Success means a complete
+listing was published, not merely scheduled; failures name the printer and
+reason without stopping the remaining printers.
+
+Images are reacquired later by the background pipeline, not by opening the
+panel or waiting for force refresh. A complete listing does not guarantee every
+image is ready. Same-source images remain visible while revalidation is pending.
+Files pinned by unfinished operations retain their action revision; enrichment
+does not change that revision. Automatic discovery must be enabled for the
+background enrichment pass.
 
 The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
 wizard, management page, progress UI, and harvest-filtered library view are

@@ -75,7 +75,7 @@ function renderShell(initialRoute = '/settings') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
-          <SettingsShell />
+          <SettingsShell routeScope={initialRoute.startsWith('/admin/settings') ? 'system' : 'user'} />
         </GlobalCommandPaletteProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -115,6 +115,15 @@ describe('settings shell header actions (#1010)', () => {
 
     const launcher = screen.getByRole('button', { name: /search settings/i });
     expect(launcher.textContent).toMatch(/(⌘K|Ctrl K)/);
+  });
+
+  it('advertises the palette shortcut in admin search without a duplicate launcher', () => {
+    renderShell('/admin/settings?scope=system&tab=general&sub=farm');
+
+    const search = screen.getByRole('combobox', { name: 'Search all settings' });
+    expect(pageHeaderOf(search)).toBeTruthy();
+    expect(search).toHaveAttribute('placeholder', expect.stringMatching(/^Search all settings \((⌘K|Ctrl K)\)$/));
+    expect(screen.queryByRole('button', { name: /search settings/i })).not.toBeInTheDocument();
   });
 
   it('has no sticky toolbar left anywhere in the shell', () => {

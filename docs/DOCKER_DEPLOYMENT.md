@@ -595,6 +595,7 @@ services:
     environment:
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/uploads
+      - PRINTER_FILE_THUMBNAIL_PATH=/data/printer-file-thumbnails
       - ASPNETCORE_Kestrel__Certificates__Default__Path=/data/certificates/server.pfx
 ```
 

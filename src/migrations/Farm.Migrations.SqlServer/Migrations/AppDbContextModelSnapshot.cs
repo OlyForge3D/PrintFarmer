@@ -6245,6 +6245,71 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("PrinterDispatchStates");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileEnrichment", b =>
+                {
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AcquiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ExtractorVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MetadataReason")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("MetadataSource")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("MetadataState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
+                    b.Property<string>("SourceIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("ThumbnailReason")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("ThumbnailState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("LocationId");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("NextAttemptAtUtc");
+
+                    b.ToTable("PrinterFileEnrichments");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileIoSlot", b =>
                 {
                     b.Property<int>("Id")
@@ -6718,6 +6783,88 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Enabled", "NextScanAtUtc");
 
                     b.ToTable("PrinterFileScanStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailArtifact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentSha256");
+
+                    b.HasIndex("RetiredAtUtc");
+
+                    b.ToTable("PrinterFileThumbnailArtifacts");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("ReservedBytes")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.ToTable("PrinterFileThumbnailReservations");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileThumbnailStorageLock", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PrinterFileThumbnailStorageLocks");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Revision = 0L
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
@@ -9783,6 +9930,24 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileEnrichment", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileThumbnailArtifact", "Artifact")
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterFileLocation", "Location")
+                        .WithOne()
+                        .HasForeignKey("Farm.Infrastructure.Domain.PrinterFileEnrichment", "LocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Artifact");
+
+                    b.Navigation("Location");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterFileLocation", b =>

@@ -54,6 +54,7 @@ export interface UseFileBrowserResult {
   viewMode: ViewMode;
   selectedIds: string[];
   isLoading: boolean;
+  error: Error | null;
   isMutating: boolean;
   pageSize: number;
   setSearch: (value: string) => void;
@@ -241,7 +242,7 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
   }, []);
 
   const navigate = useCallback((nextPath: string) => {
-    setPath(nextPath || '/');
+    setPath(nextPath);
     setPage(1);
   }, []);
 
@@ -272,6 +273,7 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
     viewMode,
     selectedIds,
     isLoading: filesQuery.isLoading || filesQuery.isFetching,
+    error: filesQuery.error,
     isMutating: createDirMutation.isPending || moveFilesMutation.isPending,
     pageSize,
     setSearch: setSearchTerm,
@@ -292,6 +294,6 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
       await filesQuery.refetch();
     },
     columns,
-    currentPath: filesQuery.data?.currentPath ?? path,
+    currentPath: filesQuery.isPlaceholderData ? path : filesQuery.data?.currentPath ?? path,
   };
 }

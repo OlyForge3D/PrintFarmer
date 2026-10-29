@@ -31,11 +31,16 @@ test.describe('monolith smoke: admin workspace', () => {
     await page.goto('/admin/settings?scope=system');
     await expect(page.getByRole('heading', { level: 1, name: 'Farm & Admin Settings' })).toHaveCount(1);
     await expect(page.getByRole('combobox', { name: 'Search all settings' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Search settings/i })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Search all settings' })).toHaveAttribute(
+      'placeholder',
+      /Search all settings \((Ctrl K|⌘K)\)/,
+    );
+    await expect(page.getByRole('button', { name: /Search settings/i })).toHaveCount(0);
 
     await page.goto('/settings?scope=system&tab=general&sub=system');
     await expect(page.getByRole('heading', { level: 1, name: 'User Settings' })).toHaveCount(1);
     await expect(page.getByRole('combobox', { name: 'Search all settings' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Search settings/i })).toBeVisible();
     await expect(page).toHaveURL(/scope=user/);
   });
 });

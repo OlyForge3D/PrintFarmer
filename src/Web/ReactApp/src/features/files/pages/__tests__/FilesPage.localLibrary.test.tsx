@@ -126,23 +126,23 @@ describe('FilesPage local library', () => {
     apiMocks.downloadModel3dFile.mockResolvedValue(undefined);
   });
 
-  it('uses the compact table: thumbnail before the name, no Details column, date-only uploads', async () => {
+  it('uses the compact table without Type or Details columns and keeps date-only uploads', async () => {
     renderPage();
     const table = screen.getByRole('table', { name: 'Mock table' });
     const row = (await within(table).findByRole('button', { name: 'z-last.gcode, show details' })).closest('tr')!;
     expect(screen.getByLabelText('compact')).toHaveTextContent('true');
     expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent))
-      .toEqual(['Preview', 'Name', 'Type', 'Size', 'Uploaded', 'Actions']);
+      .toEqual(['Preview', 'Name', 'Size', 'Uploaded', 'Actions']);
     const cells = within(row).getAllByRole('cell');
     // Decorative thumbnail (the adjacent filename names the row).
     expect(cells[0].querySelector('img')).toHaveAttribute('src', '/thumbs/gcode-1.png');
-    expect(cells[2]).toHaveTextContent(/^GCODE$/);
+    expect(cells[2]).toHaveTextContent('2 KB');
     const uploaded = new Date(gcodeUploadedAt);
-    const time = within(cells[4]).getByText(uploaded.toLocaleDateString());
+    const time = within(cells[3]).getByText(uploaded.toLocaleDateString());
     expect(time.tagName).toBe('TIME');
     expect(time).toHaveAttribute('dateTime', uploaded.toISOString());
     expect(time).toHaveAttribute('title', uploaded.toLocaleString());
-    expect(within(cells[5]).getAllByRole('button').map((button) => button.getAttribute('aria-label')))
+    expect(within(cells[4]).getAllByRole('button').map((button) => button.getAttribute('aria-label')))
       .toEqual(['Queue for printing', 'Tag file', 'Download file', 'Add to project', 'Delete file']);
   });
 

@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Gcode.PrinterFiles;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.Data.Sqlite;
@@ -59,7 +60,7 @@ public sealed class PrinterFileCatalogTests
     }
 
     [Fact]
-    public async Task PublishAsync_ChangedMetadataAdvancesRevisionAndTracksPerToolValues()
+    public async Task PublishAsync_ChangedMetadataKeepsPinnedRevisionAndTracksPerToolValues()
     {
         await using Fixture fixture = await Fixture.CreateAsync();
         PrinterFileInventoryEntry entry = new("usb", "PART.BGC", 123, ModifiedValue: "1700000000",
@@ -70,7 +71,9 @@ public sealed class PrinterFileCatalogTests
         await using (AppDbContext saved = fixture.Factory.CreateDbContext())
         {
             PrinterFileLocation location = await saved.PrinterFileLocations.SingleAsync();
-            Assert.Equal(2, location.ObservationRevision);
+
+            // Presentation detail must not invalidate operations pinned to the observation revision.
+            Assert.Equal(1, location.ObservationRevision);
             Assert.Equal(new double[] { 12, 0 }, location.Metadata!.FilamentUsedPerToolG!);
             location.Metadata.FilamentUsedPerToolG![1] = 4;
             await saved.SaveChangesAsync();
@@ -82,23 +85,12 @@ public sealed class PrinterFileCatalogTests
     }
 
     [Fact]
-    public async Task ScanAsync_OnlyReusesCurrentAvailableFetchedDetails_ForceNeverReusesThem()
+    public async Task ScanAsync_ListingNeverRequestsPerFileDetails()
     {
         await using Fixture fixture = await Fixture.CreateAsync();
-        string[] paths = ["current", "old-config", "old-mutation", "missing", "not-fetched"];
         await fixture.Service.PublishAsync(fixture.Lease.Object, Result(
-            [.. paths.Select(path => new PrinterFileInventoryEntry("usb", path, 123,
-                ModifiedValue: "1700000000", DetailsFetchedAtUtc: DateTime.UtcNow.AddDays(-30)))], []));
-        await using (AppDbContext db = fixture.Factory.CreateDbContext())
-        {
-            var rows = await db.PrinterFileLocations.ToDictionaryAsync(x => x.RelativePath);
-            rows["old-config"].ConfigurationGeneration = 0;
-            rows["old-mutation"].MutationGeneration = 9;
-            rows["missing"].Availability = PrinterFileAvailability.Missing;
-            rows["not-fetched"].DetailsFetchedAtUtc = null;
-            await db.SaveChangesAsync();
-        }
-
+            [new PrinterFileInventoryEntry("usb", "current", 123,
+                ModifiedValue: "1700000000", DetailsFetchedAtUtc: DateTime.UtcNow.AddDays(-30))], []));
         fixture.ArrangeForceRefresh("ready", Result([], []));
         fixture.Leases.Setup(x => x.TryAcquireAsync(fixture.PrinterId, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(fixture.Lease.Object);
@@ -113,12 +105,162 @@ public sealed class PrinterFileCatalogTests
         Assert.Equal(PrinterFileForceRefreshStatus.Completed,
             (await fixture.Service.ForceRefreshAsync(fixture.PrinterId)).Status);
 
+        // Rich detail is acquired only by the bounded per-file enrichment slice.
         Assert.Equal(2, options.Count);
-        Assert.All(options, value => Assert.True(value.IncludeFileDetails));
-        PrinterFileInventoryEntry cached = Assert.Single(options[0].CachedEntries).Value;
-        Assert.Equal("current", cached.RelativePath);
-        Assert.NotNull(cached.DetailsFetchedAtUtc);
-        Assert.Empty(options[1].CachedEntries);
+        Assert.All(options, value =>
+        {
+            Assert.False(value.IncludeFileDetails);
+            Assert.Empty(value.CachedEntries);
+        });
+    }
+
+    [Fact]
+    public async Task PublishAsync_NewFilesGetPendingEnrichmentDueNow()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        DateTime before = DateTime.UtcNow.AddSeconds(-1);
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result(
+            [new("gcodes", "a.gcode", 10, ModifiedValue: "1"), new("gcodes", "b.gcode", 20, ModifiedValue: "1")], [])));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        List<PrinterFileLocation> locations = await db.PrinterFileLocations.ToListAsync();
+        List<PrinterFileEnrichment> rows = await db.PrinterFileEnrichments.ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal(PrinterFileEnrichmentIdentity.For(locations.Single(x => x.Id == row.LocationId)), row.SourceIdentity);
+            Assert.Equal(PrinterFileEnrichmentState.Pending, row.MetadataState);
+            Assert.Equal(PrinterFileEnrichmentState.Pending, row.ThumbnailState);
+            Assert.InRange(row.NextAttemptAtUtc, before, DateTime.UtcNow);
+            Assert.Null(row.ArtifactId);
+        });
+    }
+
+    [Fact]
+    public async Task PublishAsync_ChangedSourceResetsEnrichmentAndDetachesImage()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        await fixture.Service.PublishAsync(fixture.Lease.Object, Result([new("gcodes", "a.gcode", 10, ModifiedValue: "1")], []));
+        await fixture.SettleEnrichmentAsync("a.gcode");
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object,
+            Result([new("gcodes", "a.gcode", 11, ModifiedValue: "2")], [])));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileLocation location = await db.PrinterFileLocations.SingleAsync();
+        PrinterFileEnrichment row = await db.PrinterFileEnrichments.SingleAsync();
+        Assert.Equal(2, location.ObservationRevision);
+        Assert.Equal(PrinterFileEnrichmentIdentity.For(location), row.SourceIdentity);
+        Assert.Equal(PrinterFileEnrichmentState.Pending, row.MetadataState);
+        Assert.Equal(PrinterFileEnrichmentState.Pending, row.ThumbnailState);
+        Assert.Null(row.MetadataSource);
+        Assert.Null(row.ArtifactId);
+        Assert.Equal(0, row.ConsecutiveFailures);
+        Assert.True(row.NextAttemptAtUtc <= DateTime.UtcNow);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublishAsync_UnchangedSourceKeepsEnrichment_ForceOnlyMarksItDue(bool force)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterFileInventoryEntry entry = new("gcodes", "a.gcode", 10, ModifiedValue: "1");
+        await fixture.Service.PublishAsync(fixture.Lease.Object, Result([entry], []));
+        Guid artifactId = await fixture.SettleEnrichmentAsync("a.gcode");
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result([entry], []), force));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileEnrichment row = await db.PrinterFileEnrichments.SingleAsync();
+        Assert.Equal(PrinterFileEnrichmentState.Ready, row.MetadataState);
+        Assert.Equal(PrinterFileEnrichmentState.Ready, row.ThumbnailState);
+        Assert.Equal(artifactId, row.ArtifactId);
+        Assert.Equal(force, row.NextAttemptAtUtc <= DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task PublishAsync_UnrelatedMutationKeepsDetailsAndImageOnceListingProvesSameFile()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterFileInventoryEntry detailed = new("usb", "PART.BGC", 123, ModifiedValue: "1700000000",
+            Metadata: new() { LayerHeightMm = 0.2 }, DetailsFetchedAtUtc: DateTime.UtcNow.AddDays(-3));
+        await fixture.Service.PublishAsync(fixture.Lease.Object, Result([detailed], []));
+        Guid artifactId = await fixture.SettleEnrichmentAsync("PART.BGC");
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            (await db.PrinterFileLocations.SingleAsync()).MutationGeneration = 9;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object,
+            Result([new("usb", "PART.BGC", 123, ModifiedValue: "1700000000")], [])));
+
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        PrinterFileLocation location = await current.PrinterFileLocations.SingleAsync();
+        Assert.Equal(0, location.MutationGeneration);
+        Assert.Equal(0.2d, location.Metadata!.LayerHeightMm);
+        Assert.Equal(artifactId, (await current.PrinterFileEnrichments.SingleAsync()).ArtifactId);
+    }
+
+    [Fact]
+    public async Task PublishAsync_MissingFileDetachesImageForCleanup()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        PrinterFileInventoryCoverage coverage = new("gcodes", "", true, PrinterFileInventoryEvidence.NativeRecursiveListing);
+        await fixture.Service.PublishAsync(fixture.Lease.Object,
+            Result([new("gcodes", "a.gcode", 10, ModifiedValue: "1")], [coverage]));
+        await fixture.SettleEnrichmentAsync("a.gcode");
+
+        Assert.True(await fixture.Service.PublishAsync(fixture.Lease.Object, Result([], [coverage])));
+
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        Assert.Equal(PrinterFileAvailability.Missing, (await db.PrinterFileLocations.SingleAsync()).Availability);
+        Assert.Null((await db.PrinterFileEnrichments.SingleAsync()).ArtifactId);
+    }
+
+    [Fact]
+    public async Task ScanAsync_DueInventoryPublishesThenRunsEnrichmentUnderSameLease()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync(enrich: true);
+        fixture.ArrangeForceRefresh("ready", Result([new("gcodes", "a.gcode", 10, ModifiedValue: "1")], []));
+        fixture.Leases.Setup(x => x.TryAcquireAsync(fixture.PrinterId, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.Lease.Object);
+
+        await fixture.Service.ScanAsync(fixture.PrinterId);
+
+        fixture.Leases.Verify(x => x.TryAcquireAsync(fixture.PrinterId, false, It.IsAny<CancellationToken>()), Times.Once);
+        await using AppDbContext db = fixture.Factory.CreateDbContext();
+        PrinterFileEnrichment row = await db.PrinterFileEnrichments.SingleAsync();
+
+        // The test backend has no enrichment capability, so the slice settles the new file as unsupported.
+        Assert.Equal(PrinterFileEnrichmentState.Unsupported, row.MetadataState);
+        Assert.Equal("enrichment_unsupported", row.ThumbnailReason);
+    }
+
+    [Fact]
+    public async Task ScanAsync_InventoryNotDue_RunsOnlyDueEnrichment()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync(enrich: true);
+        await fixture.AddAsync("gcodes", "a.gcode");
+        fixture.ArrangeForceRefresh("ready", Result([], []));
+        fixture.Leases.Setup(x => x.TryAcquireAsync(fixture.PrinterId, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fixture.Lease.Object);
+        await using (AppDbContext db = fixture.Factory.CreateDbContext())
+        {
+            (await db.PrinterFileScanStates.SingleAsync()).NextScanAtUtc = DateTime.UtcNow.AddHours(1);
+            (await db.PrinterFileLocations.SingleAsync()).ConfigurationGeneration = 1;
+            await db.SaveChangesAsync();
+        }
+
+        await fixture.Service.ScanAsync(fixture.PrinterId);
+
+        fixture.Inventory.Verify(x => x.GetFileInventoryAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(),
+            It.IsAny<PrinterFileInventoryOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+        await using AppDbContext current = fixture.Factory.CreateDbContext();
+        Assert.Equal(PrinterFileEnrichmentState.Unsupported, (await current.PrinterFileEnrichments.SingleAsync()).MetadataState);
+        Assert.True((await current.PrinterFileScanStates.SingleAsync()).NextScanAtUtc > DateTime.UtcNow);
     }
 
     [Fact]
@@ -544,7 +686,6 @@ public sealed class PrinterFileCatalogTests
     [InlineData("provider-version")]
     [InlineData("provider-hash")]
     [InlineData("config")]
-    [InlineData("mutation")]
     [InlineData("availability")]
     [InlineData("fresh-empty")]
     public async Task PublishAsync_ListingWithoutDetails_ClearsSavedDetailsWhenEvidenceChanged(string change)
@@ -613,7 +754,7 @@ public sealed class PrinterFileCatalogTests
     {
         private readonly SqliteConnection _connection;
 
-        private Fixture(SqliteConnection connection, IDbContextFactory<AppDbContext> factory)
+        private Fixture(SqliteConnection connection, IDbContextFactory<AppDbContext> factory, bool enrich)
         {
             _connection = connection;
             Factory = factory;
@@ -621,9 +762,23 @@ public sealed class PrinterFileCatalogTests
             Lease.SetupGet(x => x.ConfigurationGeneration).Returns(1);
             Lease.Setup(x => x.FencePublicationAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
+            PrinterFileEnrichmentService? enrichment = null;
+            if (enrich)
+            {
+                Mock<IStoragePathService> paths = new();
+                string unused = Path.Join(Path.GetTempPath(), "printer-catalog-unused");
+                paths.Setup(x => x.GetPrinterFileThumbnailDirectory()).Returns(Path.Join(unused, "thumbnails"));
+                paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(unused, "gcode-library"));
+                paths.Setup(x => x.GetModelUploadDirectory()).Returns(Path.Join(unused, "uploads"));
+                enrichment = new PrinterFileEnrichmentService(
+                    factory,
+                    new PrinterFileThumbnailStore(factory, paths.Object, NullLogger<PrinterFileThumbnailStore>.Instance),
+                    Capabilities.Object, Printers.Object, Status.Object, NullLogger<PrinterFileEnrichmentService>.Instance);
+            }
+
             Service = new PrinterFileCatalogService(
                 factory, Printers.Object, Capabilities.Object, Leases.Object, Status.Object,
-                NullLogger<PrinterFileCatalogService>.Instance);
+                NullLogger<PrinterFileCatalogService>.Instance, enrichment);
         }
 
         public Guid PrinterId { get; } = Guid.NewGuid();
@@ -662,7 +817,7 @@ public sealed class PrinterFileCatalogTests
                 .ReturnsAsync(result);
         }
 
-        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null)
+        public static async Task<Fixture> CreateAsync(IInterceptor? interceptor = null, bool enrich = false)
         {
             var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
             await connection.OpenAsync();
@@ -677,7 +832,7 @@ public sealed class PrinterFileCatalogTests
             factory.Setup(x => x.CreateDbContext()).Returns(() => new AppDbContext(options));
             factory.Setup(x => x.CreateDbContextAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new AppDbContext(options));
-            var fixture = new Fixture(connection, factory.Object);
+            var fixture = new Fixture(connection, factory.Object, enrich);
             await using AppDbContext db = fixture.Factory.CreateDbContext();
             await db.Database.EnsureCreatedAsync();
             var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Catalog test" };
@@ -718,6 +873,34 @@ public sealed class PrinterFileCatalogTests
                 Availability = availability,
             });
             await db.SaveChangesAsync();
+        }
+
+        /// <summary>Records a completed same-source enrichment with a published image pointer.</summary>
+        public async Task<Guid> SettleEnrichmentAsync(string path)
+        {
+            await using AppDbContext db = Factory.CreateDbContext();
+            Guid locationId = await db.PrinterFileLocations.Where(x => x.RelativePath == path).Select(x => x.Id).SingleAsync();
+            PrinterFileEnrichment row = await db.PrinterFileEnrichments.SingleAsync(x => x.LocationId == locationId);
+            PrinterFileThumbnailArtifact artifact = new()
+            {
+                Id = Guid.NewGuid(),
+                ContentSha256 = new string('A', 64),
+                ContentType = "image/png",
+                Width = 1,
+                Height = 1,
+                SizeBytes = 8,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            db.PrinterFileThumbnailArtifacts.Add(artifact);
+            row.ExtractorVersion = PrinterFileEnrichmentLimits.ExtractorVersion;
+            row.MetadataState = PrinterFileEnrichmentState.Ready;
+            row.ThumbnailState = PrinterFileEnrichmentState.Ready;
+            row.MetadataSource = "native";
+            row.AcquiredAtUtc = DateTime.UtcNow;
+            row.NextAttemptAtUtc = DateTime.UtcNow.AddHours(24);
+            row.ArtifactId = artifact.Id;
+            await db.SaveChangesAsync();
+            return artifact.Id;
         }
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();

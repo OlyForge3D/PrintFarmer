@@ -25,6 +25,14 @@ public sealed record BinaryGcodeContent(
     IReadOnlyList<KeyValuePair<string, string>> Metadata,
     IReadOnlyList<BinaryGcodeThumbnail> Thumbnails);
 
+/// <summary>Validated blocks and explicit outcomes from a bounded background-only prefix.</summary>
+public sealed record BinaryGcodeBoundedContent(
+    BinaryGcodeContent Content,
+    PrinterFileEnrichmentState MetadataState,
+    PrinterFileEnrichmentState ThumbnailState,
+    string? MetadataReason,
+    string? ThumbnailReason);
+
 /// <summary>
 /// Thrown when a binary G-code file is malformed, oversized, or uses an unsupported feature.
 /// The message never contains file content.
@@ -114,6 +122,55 @@ public static class BinaryGcodeReader
     /// <exception cref="BinaryGcodeFormatException">The file is malformed, oversized, or unsupported.</exception>
     public static async Task<BinaryGcodeContent> ReadAsync(Stream stream, CancellationToken ct = default)
     {
+        ReadContext context = new();
+        await ReadCoreAsync(stream, context, ct);
+        return context.Content;
+    }
+
+    /// <summary>
+    /// Reads only the supplied bounded prefix. Unsupported or incomplete blocks are reported,
+    /// and facts from earlier validated blocks remain usable without claiming a complete parse.
+    /// </summary>
+    public static async Task<BinaryGcodeBoundedContent> ReadBoundedAsync(
+        byte[] prefix, bool completeFile, bool captureThumbnail, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prefix);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(prefix.Length, PrinterFileEnrichmentLimits.BinaryPrefixBytes);
+        ReadContext context = new() { Bounded = true, CompleteFile = completeFile, CaptureThumbnail = captureThumbnail };
+        using MemoryStream stream = new(prefix, writable: false);
+        try
+        {
+            await ReadCoreAsync(stream, context, ct);
+        }
+        catch (BinaryGcodeFormatException ex)
+        {
+            string reason = ex.Reason == "truncated" && !completeFile ? "region_limit" : ex.Reason;
+            context.MetadataReason ??= reason;
+            context.ThumbnailReason ??= reason;
+        }
+
+        ct.ThrowIfCancellationRequested();
+        PrinterFileEnrichmentState imageState = captureThumbnail
+            ? context.Thumbnails.Count > 0 ? PrinterFileEnrichmentState.Ready : Outcome(false, context.ThumbnailReason)
+            : PrinterFileEnrichmentState.Deferred;
+        string? imageReason = captureThumbnail
+            ? context.Thumbnails.Count > 0 ? null : context.ThumbnailReason : "capture_paused";
+        return new(
+            context.Content, Outcome(context.Metadata.Count > 0, context.MetadataReason),
+            imageState, context.MetadataReason, imageReason);
+
+        static PrinterFileEnrichmentState Outcome(bool hasValue, string? reason) => reason switch
+        {
+            null => hasValue ? PrinterFileEnrichmentState.Ready : PrinterFileEnrichmentState.Absent,
+            "region_limit" or "header_too_large" or "too_many_blocks" => PrinterFileEnrichmentState.Partial,
+            _ when hasValue => PrinterFileEnrichmentState.Partial,
+            _ when reason.StartsWith("unsupported_", StringComparison.Ordinal) => PrinterFileEnrichmentState.Unsupported,
+            _ => PrinterFileEnrichmentState.Failed,
+        };
+    }
+
+    private static async Task ReadCoreAsync(Stream stream, ReadContext context, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(stream);
 
         byte[] fileHeader = await ReadExactAsync(stream, 10, ct);
@@ -134,8 +191,8 @@ public static class BinaryGcodeReader
             throw new BinaryGcodeFormatException("unsupported_checksum");
         }
 
-        List<KeyValuePair<string, string>> metadata = [];
-        List<BinaryGcodeThumbnail> thumbnails = [];
+        List<KeyValuePair<string, string>> metadata = context.Metadata;
+        List<BinaryGcodeThumbnail> thumbnails = context.Thumbnails;
         long totalBytes = 0;
 
         // One extra iteration lets a 65th header be a GCode block/EOF, or reject it as too many blocks.
@@ -144,6 +201,12 @@ public static class BinaryGcodeReader
             byte[] header = await ReadExactAsync(stream, 8, ct, allowEndOfStream: blockIndex > 0);
             if (header.Length == 0)
             {
+                if (context.Bounded && !context.CompleteFile)
+                {
+                    context.MetadataReason ??= "region_limit";
+                    context.ThumbnailReason ??= "region_limit";
+                }
+
                 break;
             }
 
@@ -178,7 +241,7 @@ public static class BinaryGcodeReader
             }
 
             totalBytes += Math.Max(uncompressedSize, storedSize);
-            if (totalBytes > MaximumTotalBytes)
+            if (totalBytes > (context.Bounded ? PrinterFileEnrichmentLimits.MaximumDecodedBytes : MaximumTotalBytes))
             {
                 throw new BinaryGcodeFormatException("header_too_large");
             }
@@ -196,10 +259,23 @@ public static class BinaryGcodeReader
                 }
             }
 
+            if (type == BlockThumbnail && !context.CaptureThumbnail)
+            {
+                continue;
+            }
+
             byte[]? data = Decompress(stored, compression, (int)uncompressedSize);
             if (data == null)
             {
-                // Unsupported compression (e.g. Heatshrink): skip the block, keep reading.
+                if (type == BlockThumbnail)
+                {
+                    context.ThumbnailReason ??= "unsupported_compression";
+                }
+                else
+                {
+                    context.MetadataReason ??= "unsupported_compression";
+                }
+
                 continue;
             }
 
@@ -215,6 +291,18 @@ public static class BinaryGcodeReader
                     (ushort)BinaryGcodeThumbnailFormat.Qoi => data.AsSpan().StartsWith("qoif"u8),
                     _ => false,
                 };
+                if (context.Bounded)
+                {
+                    validImage = format is (ushort)BinaryGcodeThumbnailFormat.Png or (ushort)BinaryGcodeThumbnailFormat.Jpg &&
+                        PrinterFileImageValidator.TryValidate(data, out _, out int actualWidth, out int actualHeight) &&
+                        actualWidth == width && actualHeight == height;
+                    if (!validImage)
+                    {
+                        context.ThumbnailReason ??= format > (ushort)BinaryGcodeThumbnailFormat.Jpg
+                            ? "unsupported_image_format" : "invalid_image";
+                    }
+                }
+
                 if (validImage && width > 0 && height > 0 && thumbnails.Count < MaximumThumbnails)
                 {
                     thumbnails.Add(new BinaryGcodeThumbnail((BinaryGcodeThumbnailFormat)format, width, height, data));
@@ -228,9 +316,30 @@ public static class BinaryGcodeReader
             {
                 ParseIni(data, metadata);
             }
+            else
+            {
+                context.MetadataReason ??= "unsupported_metadata_encoding";
+            }
         }
+    }
 
-        return new BinaryGcodeContent(metadata, thumbnails);
+    private sealed class ReadContext
+    {
+        public bool Bounded { get; init; }
+
+        public bool CompleteFile { get; init; }
+
+        public bool CaptureThumbnail { get; init; } = true;
+
+        public List<KeyValuePair<string, string>> Metadata { get; } = [];
+
+        public List<BinaryGcodeThumbnail> Thumbnails { get; } = [];
+
+        public string? MetadataReason { get; set; }
+
+        public string? ThumbnailReason { get; set; }
+
+        public BinaryGcodeContent Content => new(Metadata, Thumbnails);
     }
 
     /// <summary>

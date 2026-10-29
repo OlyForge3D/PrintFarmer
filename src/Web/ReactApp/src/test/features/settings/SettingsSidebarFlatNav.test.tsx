@@ -107,6 +107,15 @@ describe('SettingsSidebar is a flat grouped nav', () => {
     expect(nav.className).toMatch(/(^|\s)(h-fit|self-start)(\s|$)/);
   });
 
+  it('bounds a long list to the settings frame so its inner navigation can scroll', () => {
+    renderSidebar({ activeScope: 'system', activeCategory: 'general' });
+    const nav = desktopNav();
+
+    expect(nav).toHaveClass('max-h-full', 'min-h-0', 'overflow-hidden');
+    expect(nav.firstElementChild).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+    expect(within(nav).getByRole('button', { name: 'System Config' })).toBeInTheDocument();
+  });
+
   it('walks the whole list with arrow keys, across group boundaries', () => {
     renderSidebar();
     const nav = within(desktopNav());

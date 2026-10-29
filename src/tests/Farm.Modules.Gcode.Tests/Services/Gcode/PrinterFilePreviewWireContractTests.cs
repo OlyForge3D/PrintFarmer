@@ -7,6 +7,12 @@ namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 
 public sealed class PrinterFilePreviewWireContractTests
 {
+    private static readonly string[] EnrichmentProperties =
+    [
+        "metadataState", "thumbnailState", "metadataReason", "thumbnailReason",
+        "extractorVersion", "nextAttemptAtUtc", "thumbnailVersion", "isStale",
+    ];
+
     [Theory]
     [InlineData(PrinterFilePreviewState.Available, "Available")]
     [InlineData(PrinterFilePreviewState.Unavailable, "Unavailable")]
@@ -29,6 +35,7 @@ public sealed class PrinterFilePreviewWireContractTests
             [
                 "locationId", "observationRevision", "capturedAtUtc", "hasImage", "thumbnailUrl",
                 "printTimeSeconds", "layerHeightMm", "reasonCode", "state", "sizeBytes",
+                .. EnrichmentProperties,
             ],
             json.EnumerateObject().Select(property => property.Name));
         Assert.Equal(locationId, json.GetProperty("locationId").GetGuid());
@@ -55,6 +62,7 @@ public sealed class PrinterFilePreviewWireContractTests
             [
                 "locationId", "observationRevision", "capturedAtUtc", "hasImage",
                 "printTimeSeconds", "layerHeightMm", "state", "sizeBytes",
+                .. EnrichmentProperties,
             ],
             json.EnumerateObject().Select(property => property.Name));
         Assert.Equal(JsonValueKind.Null, json.GetProperty("capturedAtUtc").ValueKind);
@@ -63,6 +71,46 @@ public sealed class PrinterFilePreviewWireContractTests
         Assert.Equal(JsonValueKind.Null, json.GetProperty("sizeBytes").ValueKind);
         Assert.False(json.GetProperty("hasImage").GetBoolean());
         Assert.Equal("Unavailable", json.GetProperty("state").GetString());
+        foreach (string name in EnrichmentProperties[..^1])
+        {
+            Assert.Equal(JsonValueKind.Null, json.GetProperty(name).ValueKind);
+        }
+
+        Assert.Equal(JsonValueKind.False, json.GetProperty("isStale").ValueKind);
+    }
+
+    [Fact]
+    public void Serialize_EnrichmentStatus_UsesStringStatesVersionAndStaleFlag()
+    {
+        Guid version = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        PrinterFilePreviewDto dto = new(
+            Guid.Empty, 7, null, true, $"/api/printer-files/locations/{Guid.Empty}/thumbnail?observationRevision=7&version={version}",
+            null, null, null, PrinterFilePreviewState.Available)
+        {
+            MetadataState = PrinterFileEnrichmentState.Failed,
+            ThumbnailState = PrinterFileEnrichmentState.Deferred,
+            MetadataReason = "transfer_failed",
+            ThumbnailReason = "cache_full",
+            ExtractorVersion = PrinterFileEnrichmentLimits.ExtractorVersion,
+            NextAttemptAtUtc = new DateTime(2026, 10, 26, 18, 5, 0, DateTimeKind.Utc),
+            ThumbnailVersion = version,
+            IsStale = true,
+        };
+        JsonSerializerOptions options = CreateWireOptions();
+
+        string serialized = JsonSerializer.Serialize(dto, options);
+        using JsonDocument document = JsonDocument.Parse(serialized);
+        JsonElement json = document.RootElement;
+
+        Assert.Equal("Failed", json.GetProperty("metadataState").GetString());
+        Assert.Equal("Deferred", json.GetProperty("thumbnailState").GetString());
+        Assert.Equal("transfer_failed", json.GetProperty("metadataReason").GetString());
+        Assert.Equal("cache_full", json.GetProperty("thumbnailReason").GetString());
+        Assert.Equal(PrinterFileEnrichmentLimits.ExtractorVersion, json.GetProperty("extractorVersion").GetInt32());
+        Assert.Equal("2026-10-26T18:05:00Z", json.GetProperty("nextAttemptAtUtc").GetString());
+        Assert.Equal(version, json.GetProperty("thumbnailVersion").GetGuid());
+        Assert.True(json.GetProperty("isStale").GetBoolean());
+        Assert.Equal(dto, JsonSerializer.Deserialize<PrinterFilePreviewDto>(serialized, options));
     }
 
     [Fact]
@@ -101,6 +149,46 @@ public sealed class PrinterFilePreviewWireContractTests
         Assert.False(wire.TryGetProperty("hasValues", out _));
         Assert.Equal(serialized, JsonSerializer.Serialize(
             JsonSerializer.Deserialize<PrinterFilePreviewDto>(serialized, options), options));
+    }
+
+    [Fact]
+    public void Serialize_EnrichmentMetadata_PreservesUnknownToolSlotsAndStringStates()
+    {
+        PrinterPrintMetadata metadata = new()
+        {
+            LayerCount = 381,
+            InfillPercentage = 15,
+            InfillPattern = "grid",
+            SupportEnabled = false,
+            SlicerName = "Snapmaker Orca",
+            SlicerVersion = "2.4.0-alpha",
+            Tools =
+            [
+                new() { Index = 0, Material = "PLA", Color = "#000000", FilamentUsedG = 138.2 },
+                new() { Index = 1 },
+                new() { Index = 2, SourceId = "tool2", Material = "PETG", FilamentUsedG = 0 },
+            ],
+        };
+        JsonSerializerOptions options = CreateWireOptions();
+        string serialized = JsonSerializer.Serialize(metadata, options);
+        using JsonDocument document = JsonDocument.Parse(serialized);
+        JsonElement json = document.RootElement;
+        Assert.Equal(381, json.GetProperty("layerCount").GetInt32());
+        Assert.Equal("2.4.0-alpha", json.GetProperty("slicerVersion").GetString());
+        Assert.Equal(JsonValueKind.False, json.GetProperty("supportEnabled").ValueKind);
+        JsonElement tools = json.GetProperty("tools");
+        Assert.Equal(3, tools.GetArrayLength());
+        Assert.Equal("#000000", tools[0].GetProperty("color").GetString());
+        Assert.Equal(["index"], tools[1].EnumerateObject().Select(property => property.Name));
+        Assert.Equal(1, tools[1].GetProperty("index").GetInt32());
+        Assert.Equal("tool2", tools[2].GetProperty("sourceId").GetString());
+        Assert.Equal(0, tools[2].GetProperty("filamentUsedG").GetDouble());
+        Assert.Equal(serialized, JsonSerializer.Serialize(
+            JsonSerializer.Deserialize<PrinterPrintMetadata>(serialized, options), options));
+        foreach (PrinterFileEnrichmentState state in Enum.GetValues<PrinterFileEnrichmentState>())
+        {
+            Assert.Equal($"\"{state}\"", JsonSerializer.Serialize(state, options));
+        }
     }
 
     [Fact]

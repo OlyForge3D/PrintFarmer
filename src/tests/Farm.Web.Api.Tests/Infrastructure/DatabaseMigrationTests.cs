@@ -78,7 +78,8 @@ public sealed class DatabaseMigrationTests
             "20261013023326_AddDismissedPrinterCameras",
             "20261025192142_AddPrinterFileCatalog",
             "20261026153717_RetireGcodeHarvest",
-            "20261027134803_PersistPrinterFileDetails");
+            "20261027134803_PersistPrinterFileDetails",
+            "20261027212835_AddPrinterFileEnrichment");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -805,7 +806,8 @@ public sealed class DatabaseMigrationTests
             "20261013023326_AddDismissedPrinterCameras",
             "20261025192142_AddPrinterFileCatalog",
             "20261026153717_RetireGcodeHarvest",
-            "20261027134803_PersistPrinterFileDetails");
+            "20261027134803_PersistPrinterFileDetails",
+            "20261027212835_AddPrinterFileEnrichment");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1365,6 +1367,7 @@ public sealed class DatabaseMigrationTests
                 "20261025192207_AddPrinterFileCatalog",
                 "20261026153721_RetireGcodeHarvest",
                 "20261027134806_PersistPrinterFileDetails",
+                "20261027212852_AddPrinterFileEnrichment",
             ]
             :
             [
@@ -1408,6 +1411,7 @@ public sealed class DatabaseMigrationTests
                 "20261025192231_AddPrinterFileCatalog",
                 "20261026153726_RetireGcodeHarvest",
                 "20261027134809_PersistPrinterFileDetails",
+                "20261027212909_AddPrinterFileEnrichment",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

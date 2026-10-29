@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -78,6 +78,8 @@ describe('PrinterFileDiscoverySection', () => {
   });
 
   it('applies the automatic-discovery toggle immediately without submitting the printer form', async () => {
+    let complete!: () => void;
+    mocks.enabled.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
     const user = userEvent.setup();
     const { onSubmit } = renderSection();
     const toggle = await screen.findByRole('checkbox', { name: 'Automatic file discovery' });
@@ -87,31 +89,81 @@ describe('PrinterFileDiscoverySection', () => {
     expect(mocks.enabled).toHaveBeenCalledTimes(1);
     expect(mocks.refresh).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+    const refresh = screen.getByRole('button', { name: 'Force refresh' });
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    await act(async () => complete());
     // The catalog (and this status) is refreshed from the server after the change.
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
   });
 
-  it('force refreshes with a non-submitting button and claims success only after the scan completes', async () => {
+  it('keeps its icon-only button disabled through the scan and cache reload without submitting the form', async () => {
+    let complete!: () => void;
+    let reload!: (page: PrinterFileCatalogPage) => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    mocks.catalog.mockResolvedValueOnce(page())
+      .mockImplementationOnce(() => new Promise<PrinterFileCatalogPage>(resolve => { reload = resolve; }));
     const user = userEvent.setup();
     const { onSubmit, queryClient } = renderSection();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-    let complete!: () => void;
-    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
     const refresh = await screen.findByRole('button', { name: 'Force refresh' });
     expect(refresh).toHaveAttribute('type', 'button');
     expect(refresh).toHaveAttribute('title', expect.stringMatching(/Requires an idle printer and a free I\/O slot/));
+    expect(refresh.textContent).toBe('');
     await user.click(refresh);
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('printer-1', true));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('checkbox', { name: 'Automatic file discovery' })).toBeDisabled();
     expect(toast.success).not.toHaveBeenCalled();
     expect(invalidate).not.toHaveBeenCalled();
 
-    complete();
+    await act(async () => complete());
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.'));
+    await waitFor(() => expect(mocks.catalog).toHaveBeenCalledTimes(2));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    await act(async () => reload(page()));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-thumbnail'] }));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-catalog'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['printer-file-preview'] });
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(mocks.enabled).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('allows refresh during background I/O without mistaking the lease for a pending user request', async () => {
+    let complete!: () => void;
+    mocks.refresh.mockReturnValue(new Promise<void>(resolve => { complete = resolve; }));
+    mocks.catalog.mockResolvedValue(page({ scans: [{ ...completeScan, isScanning: true }] }));
+    const user = userEvent.setup();
+    const { onSubmit } = renderSection();
+    const refresh = await screen.findByRole('button', { name: 'Force refresh' });
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(refresh).not.toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    await user.click(refresh);
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith('printer-1', true));
+    expect(refresh).toHaveAttribute('aria-disabled', 'true');
+    expect(refresh).toHaveAttribute('aria-busy', 'true');
+    await user.click(refresh);
+    await user.keyboard('{Enter} ');
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => complete());
+    await waitFor(() => expect(refresh).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(refresh).toHaveAttribute('aria-busy', 'false');
+    expect(mocks.catalog).toHaveBeenCalledTimes(2);
+    expect(statusValue('Status')).toHaveTextContent(/^Scanning \(file I\/O active\)$/);
+    expect(toast.success).toHaveBeenCalledWith('Force refresh completed. Previews reload on demand.');
     expect(mocks.enabled).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
   });

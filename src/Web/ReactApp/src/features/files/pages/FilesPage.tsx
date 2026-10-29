@@ -27,6 +27,7 @@ import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
 import { FileNameButton } from '@/features/files/components/FileNameButton';
 import { FileThumbnail } from '@/features/files/components/FileThumbnail';
 import { LocalFileDetails } from '@/features/files/components/LocalFileDetails';
+import { LocalLibraryFolders } from '@/features/files/components/LocalLibraryFolders';
 import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
 import {
   fileExtension,
@@ -54,7 +55,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button } from '@/common/components/ui';
+import { Button, FormField, Select, Tabs } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -108,6 +109,7 @@ interface TaggingTarget {
 }
 
 interface UnifiedQueryParams {
+  path: string;
   page: number;
   pageSize: number;
   search: string;
@@ -435,6 +437,7 @@ export function FilesPage() {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search || undefined,
+      path: query.path || undefined,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
       filter: query.filter,
@@ -448,7 +451,7 @@ export function FilesPage() {
       totalSize: response.totalSize,
       page: response.page,
       folders: [],
-      currentPath: '/',
+      currentPath: query.path,
     };
   }, [printerId]);
 
@@ -456,6 +459,7 @@ export function FilesPage() {
     fetcher,
     mapDomainToFileItem: toFileItem,
     mapQueryParams: (query: FileQueryState): UnifiedQueryParams => ({
+      path: query.path,
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -466,7 +470,7 @@ export function FilesPage() {
     defaultSort: { sortBy: 'date', sortOrder: 'desc' },
     selectedIds,
     onSelectionChange: setSelectedIds,
-    initialPath: '/',
+    initialPath: '',
     viewMode,
     onViewModeChange: (mode) => setViewMode(mode),
   }), [fetcher, selectedFilter, selectedIds, setViewMode, viewMode]);
@@ -560,8 +564,7 @@ export function FilesPage() {
     ];
   }, [handleDownloadGcode, handleDownloadModel]);
 
-  // Same columns and glyphs as the On printers table; the thumbnail sits between the
-  // selection checkbox and the name. Extended metadata lives in the detail panel.
+  // The thumbnail sits between selection and name; type and extended metadata live in details.
   const modelColumns = useMemo<ColumnDef[]>(() => [
     {
       key: 'thumbnail',
@@ -574,16 +577,6 @@ export function FilesPage() {
       sortable: true,
       render: (file) => (
         <FileNameButton name={file.fileName} className="max-w-xs" onOpen={(invoker) => openDetails(file, invoker)} />
-      ),
-    },
-    {
-      key: 'category',
-      label: 'Type',
-      render: (file) => (
-        <span className="inline-flex items-center gap-1.5 font-medium uppercase text-pf-text-secondary">
-          <FileTypeGlyph kind={getFileKind(file)} decorative />
-          {getFileExtension(file) || '—'}
-        </span>
       ),
     },
     {
@@ -730,25 +723,18 @@ export function FilesPage() {
     </>
   );
 
-  const filterButtons = (
-    <>
-      {FILE_TYPE_OPTIONS.map((option) => {
-        const isActive = selectedFilter === option.value;
-        return (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={isActive ? 'primary' : 'secondary'}
-            aria-pressed={isActive}
-            onClick={() => handleFilterChange(option.value)}
-            title={option.hint}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </>
+  const fileTypeFilter = (
+    <FormField label="Type" htmlFor="local-library-type">
+      <Select id="local-library-type" value={selectedFilter} className="min-w-32"
+        onChange={event => {
+          const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
+          if (option) handleFilterChange(option.value);
+        }}>
+        {FILE_TYPE_OPTIONS.map(option => (
+          <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
+        ))}
+      </Select>
+    </FormField>
   );
 
   return (
@@ -759,57 +745,67 @@ export function FilesPage() {
         icon={FileIcon}
         actions={headerActions}
       >
-        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="File source">
-          {(['local', 'printers'] as const).map(source => (
-            <Button key={source} size="sm"
-              variant={onPrinters === (source === 'printers') ? 'primary' : 'secondary'}
-              aria-pressed={onPrinters === (source === 'printers')}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                if (source === 'printers') next.set('source', 'printers');
-                else next.delete('source');
-                next.delete('printer');
-                next.delete('file');
-                navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
-                setSelectedIds([]);
-                closeDetails();
-              }}>
-              {source === 'local' ? 'Local library' : 'On printers'}
-            </Button>
-          ))}
-        </div>
-        {/* overflow-clip (not hidden) keeps the docked detail panel sticky while clipping overflow. */}
-        <div className="min-h-[65vh] min-w-0 overflow-clip">
-          {onPrinters ? <PrinterFileCatalog /> : (
-            <div className="flex items-start gap-4">
-              <div className="min-w-0 flex-1">
-                <FileBrowser
-                  ref={fileBrowserRef}
-                  config={config}
-                  sortOptions={FILE_BROWSER_SORT_OPTIONS}
-                  columns={modelColumns}
-                  renderItemActions={renderItemActions}
-                  renderCard={renderCard}
-                  filterActions={filterButtons}
-                  extraToolbarActions={toolbarActions}
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                  compact
-                />
+        <Tabs activeTab={onPrinters ? 'printers' : 'local'} onTabChange={source => {
+          const next = new URLSearchParams(searchParams);
+          if (source === 'printers') next.set('source', 'printers');
+          else next.delete('source');
+          next.delete('printer');
+          next.delete('file');
+          navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
+          setSelectedIds([]);
+          closeDetails();
+        }}>
+          <Tabs.List aria-label="File source">
+            <Tabs.Tab id="local">Local library</Tabs.Tab>
+            <Tabs.Tab id="printers">On printers</Tabs.Tab>
+          </Tabs.List>
+          {/* overflow-clip keeps the docked detail panel sticky while clipping overflow. */}
+          <Tabs.Panels className="min-h-[65vh] min-w-0 overflow-clip">
+            <Tabs.Panel id="printers"><PrinterFileCatalog /></Tabs.Panel>
+            <Tabs.Panel id="local">
+              <div className="flex items-start gap-4">
+                <div className="min-w-0 flex-1">
+                  <FileBrowser
+                    ref={fileBrowserRef}
+                    config={config}
+                    sortOptions={FILE_BROWSER_SORT_OPTIONS}
+                    columns={modelColumns}
+                    renderItemActions={renderItemActions}
+                    renderCard={renderCard}
+                    filterActions={fileTypeFilter}
+                    extraToolbarActions={toolbarActions}
+                    renderFolderNavigation={(path, onNavigate, controls) => (
+                      <LocalLibraryFolders
+                        controls={controls}
+                        path={path}
+                        onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
+                        modelIds={selectedModelIds}
+                        gcodeIds={selectedGcodeIds}
+                        canCreate={hasPermission('3d_models', 'create') && hasPermission('gcode_library', 'create')}
+                        canMove={(selectedModelIds.length === 0 || hasPermission('3d_models', 'create'))
+                          && (selectedGcodeIds.length === 0 || hasPermission('gcode_library', 'create'))}
+                        onMoved={() => { setSelectedIds([]); closeDetails(); }}
+                      />
+                    )}
+                    viewMode={viewMode}
+                    onViewModeChange={setViewMode}
+                    compact
+                  />
+                </div>
+                {details.selected && (
+                  <LocalFileDetails
+                    key={details.selected.id}
+                    file={details.selected}
+                    kind={getFileKind(details.selected)}
+                    extension={getFileExtension(details.selected)}
+                    actions={localActions(details.selected)}
+                    onClose={closeDetails}
+                  />
+                )}
               </div>
-              {details.selected && (
-                <LocalFileDetails
-                  key={details.selected.id}
-                  file={details.selected}
-                  kind={getFileKind(details.selected)}
-                  extension={getFileExtension(details.selected)}
-                  actions={localActions(details.selected)}
-                  onClose={closeDetails}
-                />
-              )}
-            </div>
-          )}
-        </div>
+            </Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
       </PageTemplate>
 
       <Modal isOpen={!!linkedFileId} title="Owned local G-code" onClose={() => {

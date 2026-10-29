@@ -97,6 +97,7 @@ public sealed class RevisionConcurrencyProviderTests
         typeof(PrintProjectTemplate),
         typeof(Printer),
         typeof(PrinterFileLocation),
+        typeof(PrinterFileEnrichment),
         typeof(PrinterFileScanState),
         typeof(PrinterFileRootScan),
         typeof(PrinterFileOperation),

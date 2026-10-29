@@ -308,6 +308,9 @@ RUN printf '%s\n' \
     '# The appuser may not own these directories if they are bind mounts from the host' \
     'mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
     'chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    'thumbs="${PRINTER_FILE_THUMBNAIL_PATH:-/app/printer-file-thumbnails}"' \
+    'mkdir -p "$thumbs" 2>/dev/null || true' \
+    'chown -R appuser:appuser "$thumbs" 2>/dev/null || true' \
     '# Drop to appuser and run application' \
     'exec gosu appuser dotnet Farm.Web.Api.dll' \
     > /app/entrypoint.sh

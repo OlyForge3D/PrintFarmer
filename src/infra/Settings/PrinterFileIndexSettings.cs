@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Infrastructure.Settings;
 
@@ -37,13 +38,18 @@ public sealed class PrinterFileIndexSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(Name = "Directory depth budget", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 16)]
     public int MaxDepth { get; set; } = 16;
 
+    [JsonPropertyName("thumbnailCacheMaxBytes")]
+    [SettingDisplay(Name = "Thumbnail cache capacity", Description = "Shared deployment byte limit including reservations and retired images. Healthy previews are never evicted.", Unit = "bytes", InputType = SettingInputType.Number, MinValue = PrinterFileEnrichmentLimits.MaximumImageBytes, MaxValue = 1099511627776)]
+    public long ThumbnailCacheMaxBytes { get; set; } = 512L * 1024 * 1024;
+
     public void Validate()
     {
         if (ScanIntervalMinutes is < 1 or > 1440 ||
             MaxConcurrentIo is < 1 or > 16 ||
             ScanTimeoutSeconds is < 1 or > 120 ||
             MaxEntries is < 1 or > 10_000 ||
-            MaxDepth is < 0 or > 16)
+            MaxDepth is < 0 or > 16 ||
+            ThumbnailCacheMaxBytes is < PrinterFileEnrichmentLimits.MaximumImageBytes or > 1099511627776)
         {
             throw new ValidationException("Printer file index limits are outside their supported bounds.");
         }

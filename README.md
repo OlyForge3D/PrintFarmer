@@ -394,10 +394,10 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 **What works on ARM64:**
 - ✅ Full printer fleet management (add, remove, monitor, control)
 - ✅ G-code file upload and print job queuing
-- ✅ Metadata-only printer-file discovery in Files, with explicit local Copy and
-  stage-before-Queue actions, plus durable PrusaLink display names, sizes, and
-  native print metadata independent of thumbnail caching
-  ([catalog API and safety policy](docs/PRINTER_FILE_CATALOG_API.md#durable-printer-file-catalog))
+- ✅ Printer-file inventory in Files, with explicit local Copy and stage-before-Queue
+  actions, native-first rich print settings and aligned filament tools, plus
+  durable shared-storage thumbnails acquired in bounded idle-only background work
+  ([catalog API, safety policy, and storage setup](docs/PRINTER_FILE_CATALOG_API.md#durable-printer-file-catalog))
 - ✅ Real-time printer status via SignalR
 - ✅ Auto-dispatch and bed-clear confirmation
 - ✅ Network discovery and Spoolman integration

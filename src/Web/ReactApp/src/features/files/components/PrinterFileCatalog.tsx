@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import clsx from 'clsx';
 import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
@@ -12,7 +12,7 @@ import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { apiClient } from '@/services/api';
 import { generateUUID } from '@/utils/uuid';
-import type { PrinterFileAvailability, PrinterFileCatalogEntry } from '@/types/api';
+import type { PrinterFileCatalogEntry } from '@/types/api';
 import { PrinterFileDeleteControl, type PrinterFileDeleteIntent } from '@/features/files/components/PrinterFileDeleteControl';
 import { PrinterFileBulkActions } from '@/features/files/components/PrinterFileBulkActions';
 import { CompactFileCard } from '@/features/files/components/CompactFileCard';
@@ -33,7 +33,11 @@ import {
   COMPACT_FILE_GRID_CLASS,
   COMPACT_FILE_TABLE_CELL_CLASS,
   COMPACT_FILE_TABLE_CLASS,
+  COMPACT_FILE_TABLE_FRAME_CLASS,
+  FILE_TABLE_HEAD_CLASS,
+  FILE_TABLE_ROW_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
 
 const CATALOG_POLL_MS = 30_000;
@@ -58,7 +62,7 @@ interface Selection {
 const NO_IDS: ReadonlySet<string> = new Set();
 const NO_BULK_ACTION_TITLE = 'No bulk action is available for this file';
 const REFRESH_ALL_LABEL = 'Force refresh all online printers';
-const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers and free I/O slots; may take up to two minutes per printer.';
+const REFRESH_ALL_TITLE = 'Scan online printers you manage now, bypassing schedule and preview caches. Requires idle printers; waits up to two minutes for I/O capacity, then up to two minutes per scan.';
 const REFRESH_ALL_UNAVAILABLE_TITLE = 'No online printers you can manage';
 
 interface RefreshTarget {
@@ -74,6 +78,11 @@ export function PrinterFileCatalog() {
   const { hasPermission } = useAuth();
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
+  // Shared across mounts so a remounted control stays disabled while any force refresh is still running.
+  const discoveryPending = useIsMutating({
+    mutationKey: ['printer-file-discovery'],
+    predicate: mutation => (mutation.state.variables as { kind?: string } | undefined)?.kind !== 'enabled',
+  }) > 0;
   const [intent, setIntent] = useState<Intent | null>(null);
   const [deleteIntent, setDeleteIntent] = useState<PrinterFileDeleteIntent | null>(null);
   const [destination, setDestination] = useState('');
@@ -83,11 +92,6 @@ export function PrinterFileCatalog() {
   const search = params.get('remoteSearch') ?? '';
   const requestedPage = Number(params.get('remotePage') ?? '1');
   const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const rawAvailability = params.get('availability');
-  const availability: PrinterFileAvailability | undefined =
-    rawAvailability === 'Available' || rawAvailability === 'Missing' || rawAvailability === 'Deleted'
-      ? rawAvailability : undefined;
-  const freshness = params.get('freshness') ?? '';
   const operationId = params.get('operation') ?? '';
   const canRead = hasPermission('printer_files', 'read');
   const { data: destinations = [] } = usePrinters({ enabled: canRead });
@@ -96,7 +100,7 @@ export function PrinterFileCatalog() {
   const { viewMode, setViewMode } = useViewModePreference(VIEW_MODE_STORAGE_KEY);
   const details = useFileDetailSelection<string>();
   // Filters and paging change what is listed, so any change starts a fresh selection.
-  const selectionScope = JSON.stringify([printerId, search, availability ?? '', freshness, page]);
+  const selectionScope = JSON.stringify([printerId, search, page]);
   const [selection, setSelection] = useState<Selection>(() => ({ scope: selectionScope, ids: NO_IDS }));
   if (selection.scope !== selectionScope) setSelection({ scope: selectionScope, ids: NO_IDS });
 
@@ -110,13 +114,13 @@ export function PrinterFileCatalog() {
     });
   };
   const catalog = useQuery({
-    queryKey: ['printer-file-catalog', printerId, search, availability, freshness, page],
+    queryKey: ['printer-file-catalog', printerId, search, page],
     queryFn: ({ signal }) => apiClient.getPrinterFileCatalog({
-      printerId: printerId || undefined, search: search || undefined, availability,
-      stale: freshness ? freshness === 'stale' : undefined, page, pageSize: PAGE_SIZE,
+      printerId: printerId || undefined, search: search || undefined, page, pageSize: PAGE_SIZE,
     }, signal),
     enabled: canRead,
-    refetchInterval: CATALOG_POLL_MS,
+    refetchInterval: query => query.state.data?.scans.some(scan => scan.isScanning)
+      ? OPERATION_POLL_MS : CATALOG_POLL_MS,
   });
   const history = useQuery({
     queryKey: ['printer-file-operations'],
@@ -198,18 +202,27 @@ export function PrinterFileCatalog() {
       }
     },
   });
-  // Sequential requests avoid consuming all deployment I/O slots with this batch.
   const refreshAll = useMutation({
+    mutationKey: ['printer-file-discovery'],
     mutationFn: async (targets: RefreshTarget[]) => {
-      const failures: string[] = [];
-      for (const target of targets) {
-        try {
-          await apiClient.refreshPrinterFileIndex(target.id, true);
-        } catch (error) {
-          failures.push(`${target.name}: ${describePrinterFileFailure(error).message}`);
-        }
+      const concurrency = catalog.data?.maxConcurrentIo ?? 2;
+      if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+        throw new Error('The server returned an invalid printer-file I/O budget. Reload the catalog before retrying.');
       }
-      return failures;
+      const failures: (string | undefined)[] = new Array(targets.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+        while (next < targets.length) {
+          const index = next++;
+          const target = targets[index];
+          try {
+            await apiClient.refreshPrinterFileIndex(target.id, true);
+          } catch (error) {
+            failures[index] = `${target.name}: ${describePrinterFileFailure(error).message}`;
+          }
+        }
+      }));
+      return failures.filter((failure): failure is string => failure !== undefined);
     },
     onSuccess: async (failures, targets) => {
       const completed = targets.length - failures.length;
@@ -224,6 +237,7 @@ export function PrinterFileCatalog() {
         queryClient.invalidateQueries({ queryKey: ['printer-file-thumbnail'] }),
       ]);
     },
+    onError: (error: Error) => toast.error(`Failed to force refresh: ${error.message}`),
   });
   const selectIntent = (entry: PrinterFileCatalogEntry, action: Intent['action']) => {
     setIntent({ entry, action, key: generateUUID() });
@@ -241,6 +255,8 @@ export function PrinterFileCatalog() {
   const refreshTargets: RefreshTarget[] = manageableSources
     .filter(printer => onlinePrinterIds.has(printer.id))
     .map(({ id, name }) => ({ id, name }));
+  // Background leases do not block requests; the API waits for exclusive I/O capacity.
+  const refreshBusy = refreshAll.isPending || discoveryPending;
   const entryActions = (entry: PrinterFileCatalogEntry): FileAction[] => {
     const source = sourceFor(entry);
     if (!source) return [];
@@ -314,38 +330,39 @@ export function PrinterFileCatalog() {
   });
 
   return (
-    <section aria-labelledby="printer-catalog-heading" className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-pf-border pb-3">
-        <div>
-          <h2 id="printer-catalog-heading" className="text-lg font-semibold text-pf-text-primary">On printers</h2>
-          <p className="text-sm text-pf-text-secondary">Metadata observations, not owned library files. Browsing never downloads G-code.</p>
-        </div>
-        {hasPermission('settings', 'read') && <Link to="/admin/settings?q=printer%20file" className="text-sm text-pf-accent underline">Discovery settings</Link>}
-      </div>
+    <section aria-label="On printers" className="space-y-4">
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <FormField label="Printer" htmlFor="catalog-printer">
+      <div role="group" aria-label="Printer file controls" className={clsx('flex flex-wrap items-end gap-3', FILE_TOOLBAR_CONTROL_CLASS)}>
+        <FormField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1 basis-48">
+          <Input id="catalog-search" type="search" placeholder="Search filenames or paths" value={search} maxLength={200} onChange={event => changeFilter('remoteSearch', event.target.value)} />
+        </FormField>
+        <FormField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
           <Select id="catalog-printer" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
-            <option value="">All authorized printers</option>
+            <option value="">All</option>
             {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
           </Select>
         </FormField>
-        <FormField label="Path search" htmlFor="catalog-search">
-          <Input id="catalog-search" value={search} maxLength={200} onChange={event => changeFilter('remoteSearch', event.target.value)} />
-        </FormField>
-        <FormField label="Availability" htmlFor="catalog-availability">
-          <Select id="catalog-availability" value={availability ?? ''} onChange={event => changeFilter('availability', event.target.value)}>
-            <option value="">All observations</option><option value="Available">Available</option>
-            <option value="Missing">Missing</option><option value="Deleted">Deleted</option>
-          </Select>
-        </FormField>
-        <FormField label="Freshness" htmlFor="catalog-freshness">
-          <Select id="catalog-freshness" value={freshness} onChange={event => changeFilter('freshness', event.target.value)}>
-            <option value="">Any freshness</option><option value="fresh">Recently seen</option><option value="stale">Stale</option>
-          </Select>
-        </FormField>
+        <div className="ml-auto flex items-center gap-1">
+          {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
+          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} flush />
+          {manageableSources.length > 0 && (
+            <Button
+              type="button"
+              size="md"
+              variant="secondary"
+              aria-label={REFRESH_ALL_LABEL}
+              title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+              explainedDisabled
+              disabled={refreshTargets.length === 0 || refreshBusy}
+              aria-busy={refreshBusy}
+              className="px-3"
+              iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
+              onClick={() => refreshAll.mutate(refreshTargets)}
+            />
+          )}
+        </div>
       </div>
       {catalog.isLoading && <div role="status"><Spinner /> Loading observations</div>}
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}
@@ -357,31 +374,6 @@ export function PrinterFileCatalog() {
       />
       {catalog.data && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              {viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-              <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-              {manageableSources.length > 0 && (
-                <Button
-                  type="button"
-                  size="md"
-                  variant="secondary"
-                  aria-label={REFRESH_ALL_LABEL}
-                  title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
-                  explainedDisabled
-                  disabled={refreshTargets.length === 0}
-                  loading={refreshAll.isPending}
-                  iconLeft={<RefreshIcon className={ACTION_ICON_CLASS} />}
-                  onClick={() => refreshAll.mutate(refreshTargets)}
-                >
-                  Force refresh
-                </Button>
-              )}
-            </div>
-          </div>
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
               {catalog.data.items.length === 0 ? (
@@ -407,15 +399,14 @@ export function PrinterFileCatalog() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-pf-border">
+                <div className={COMPACT_FILE_TABLE_FRAME_CLASS}>
                   <table className={COMPACT_FILE_TABLE_CLASS} aria-label="Files on printers">
                     <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
-                    <thead className="border-b border-pf-border bg-pf-bg-1"><tr>
-                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-8')}>{selectAllCheckbox()}</th>
+                    <thead className={FILE_TABLE_HEAD_CLASS}><tr>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-10')}>{selectAllCheckbox()}</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Preview</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Name</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Printer</th>
-                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Status</th>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Size</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Modified</th>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Actions</th>
@@ -426,8 +417,8 @@ export function PrinterFileCatalog() {
                         const isActive = details.selected === entry.id;
                         const rowSelection = selectionFor(entry);
                         return (
-                          <tr key={entry.id} className={clsx('border-b border-pf-border last:border-b-0', isActive || rowSelection.checked ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                          <tr key={entry.id} className={clsx(FILE_TABLE_ROW_CLASS, isActive || rowSelection.checked ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'w-10')}>
                               <Checkbox
                                 aria-label={`Select ${entry.displayName}`}
                                 checked={rowSelection.checked}
@@ -436,7 +427,14 @@ export function PrinterFileCatalog() {
                                 onChange={rowSelection.onToggle}
                               />
                             </td>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                            {/* Mouse shortcut matching the card view; keyboard users open details from the name button. */}
+                            <td
+                              className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'cursor-pointer')}
+                              onClick={event => details.open(
+                                entry.id,
+                                event.currentTarget.closest('tr')?.querySelector<HTMLElement>('[data-file-details-trigger]') ?? null,
+                              )}
+                            >
                               <PrinterFileThumbnail entry={entry} source={sourceFor(entry)} size="row" />
                             </td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'max-w-xs')}>
@@ -444,11 +442,10 @@ export function PrinterFileCatalog() {
                               <div className="truncate font-mono text-pf-text-secondary" title={path}>{path}</div>
                             </td>
                             <td className={COMPACT_FILE_TABLE_CELL_CLASS}>{entry.printerName}</td>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}><PrinterFileStatusGlyphs entry={entry} showLabels /></td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap text-right')}>{formatSizeLabel(entry.sizeBytes)}</td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap')}><PrinterFileModified value={entry.modifiedValue} /></td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'text-right')}>
-                              <div className="flex justify-end gap-1"><FileActionIconButtons actions={entryActions(entry)} /></div>
+                              <div className="flex justify-end gap-1"><FileActionIconButtons actions={entryActions(entry)} dense /></div>
                             </td>
                           </tr>
                         );

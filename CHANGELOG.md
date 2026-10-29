@@ -2,6 +2,22 @@
 
 ### Features
 
+- Add rich printer-file settings and durable thumbnails through one bounded,
+  confirmed-idle background pipeline for Moonraker, OctoPrint, and PrusaLink
+  (#3570, #3571). Native metadata takes precedence over bounded G-code/BGCode
+  fallback; tool colors, materials, and weights retain their source slots and
+  unknown values. Browsing and preview/image GETs perform no printer I/O.
+  The shared store defaults to 512 MiB and never evicts healthy previews to
+  admit another file. Upgrade with the `AddPrinterFileEnrichment` migration
+  for SQLite, PostgreSQL, or SQL Server; API replicas must share the database
+  and persistent Gcode volume.
+
+- Measure bounded printer-file fallback frequency and elapsed time by backend
+  through the existing OpenTelemetry/Prometheus pipeline (#3571). Acquisition,
+  fallback-start and skipped counters plus a duration histogram distinguish
+  metadata/image triggers, timeouts, cancellations and failures without
+  exporting file paths, printer IDs or credentials.
+
 - Persist PrusaLink native file details in the database, including full display
   names, sizes, and all 41 supported print-metadata fields. Show saved details
   independently of thumbnail availability; reuse unchanged observations during
@@ -53,6 +69,24 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Align the Prometheus exporter with the OpenTelemetry 1.18 SDK so `/metrics`
+  exports samples instead of returning an empty HTTP 200 response after a
+  serializer type-load failure (#3571).
+
+- Preserve acquired printer-file metadata and thumbnails when optional G-code
+  fallback times out. Native thumbnail acquisition now precedes fallback, and
+  the service lets the adapter report partial results before its safety timeout
+  (#3571).
+
+- Retry printer-file lease allocation conflicts as whole transactions instead
+  of failing scans on wrapped PostgreSQL serialization errors. Bulk Force
+  Refresh now uses the configured I/O capacity rather than scanning printers
+  serially, with bounded retries only when no scan started. Both refresh
+  controls are icon-only and remain inactive through refresh, cache reload,
+  and navigation between control surfaces. Background enrichment no longer
+  disables Force Refresh; requests wait safely for exclusive I/O capacity
+  instead of being blocked by a polled lease status (#3571).
 
 - Update System.Security.Cryptography.Xml and its transitive Pkcs dependency
   from 10.0.10 to 10.0.14 across .NET projects, resolving high- and
