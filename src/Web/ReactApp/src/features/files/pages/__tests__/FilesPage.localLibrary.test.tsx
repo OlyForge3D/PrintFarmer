@@ -209,6 +209,22 @@ describe('FilesPage local library', () => {
     await waitFor(() => expect(name).toHaveFocus());
   });
 
+  it.each([
+    [0.2, '20%'],
+    [15, '15%'],
+    [100, '100%'],
+  ])('shows extracted infill %s as %s, reading legacy Slic3r fractions as percentages', async (extractedInfill, expected) => {
+    const page = unifiedPage();
+    page.items[0] = { ...page.items[0], extractedInfill };
+    apiMocks.getUnifiedFiles.mockResolvedValue(page);
+    const user = userEvent.setup();
+    renderPage();
+    const table = screen.getByRole('table', { name: 'Mock table' });
+    await user.click(await within(table).findByRole('button', { name: 'z-last.gcode, show details' }));
+    const settings = within(screen.getByRole('dialog', { name: 'z-last.gcode' })).getByRole('region', { name: 'Print settings' });
+    expect(detailValue(settings, 'Infill')).toHaveTextContent(new RegExp(`^${expected}$`));
+  });
+
   it('opens details from the table preview by click and keyboard, restoring focus to the preview', async () => {
     const user = userEvent.setup();
     renderPage();

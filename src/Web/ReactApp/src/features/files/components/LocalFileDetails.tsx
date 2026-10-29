@@ -25,6 +25,15 @@ interface LocalFileDetailsProps {
 }
 
 /** Detail panel content for an owned local-library asset. */
+/**
+ * Legacy Slic3r writes `fill_density = 0.2` (a fraction) where newer slicers write `20%`, and the
+ * extractor stores the bare number. Values strictly between 0 and 1 are read as fractions; exactly 1
+ * stays 1% because it is ambiguous and modern slicers emit it far more often than a solid 1.0.
+ */
+function normalizeInfillPercentage(value: number | null | undefined): number | null | undefined {
+  return value != null && value > 0 && value < 1 ? value * 100 : value;
+}
+
 export function LocalFileDetails({ file, kind, extension, actions, onClose }: LocalFileDetailsProps) {
   const gcode = file.meta?.gcode as GcodeFile | undefined;
   // Map the library's extracted G-code fields onto the on-printer settings shape so both panels
@@ -36,7 +45,7 @@ export function LocalFileDetails({ file, kind, extension, actions, onClose }: Lo
     nozzleDiameterMm: gcode.extractedNozzleDiameter,
     nozzleTemperatureC: gcode.extractedHotendTemp,
     bedTemperatureC: gcode.extractedBedTemp,
-    infillPercentage: gcode.extractedInfill,
+    infillPercentage: normalizeInfillPercentage(gcode.extractedInfill),
     filamentType: gcode.extractedMaterial,
     filamentUsedMm: gcode.extractedFilamentLength,
   } : null;
