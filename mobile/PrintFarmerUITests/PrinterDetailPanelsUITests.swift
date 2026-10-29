@@ -112,7 +112,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         /// #3509 sorts the Farm by state group, then name, so at large text sizes
         /// the card can sit below the fold or under the Scan dock. tap() targets its
         /// centre, so filter the Farm by name and tap the card's top edge clear of the dock.
-        func openFarmCard(_ printerID: String) {
+        /// `captureRoot` receives a step name for full-screen Farm root captures (#3561 diagnostics).
+        func openFarmCard(_ printerID: String, captureRoot: ((String) -> Void)? = nil) {
             let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
             XCTAssertTrue(farm.waitForExistence(timeout: 8))
             farm.tap()
@@ -136,6 +137,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
                 return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
             }
+            captureRoot?("farm-root-before-navigation")
             // Search by name rather than scrolling through the full grid to locate a target card.
             if tapPoint() == nil, let name = Self.fixturePrinterNames[printerID] {
                 searchFarm(name)
@@ -145,6 +147,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
                 XCTFail("The top of the printer card must be on screen before tapping")
                 return
             }
+            captureRoot?("farm-root-before-card-tap")
             app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: point.x, dy: point.y))
                 .tap()
@@ -1241,7 +1244,10 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
     }
 
     func testIdleStatusIgnoresStaleFileNameAndShowsNoActivePrint() {
-        openFarmCard("10000000-0001-0000-0000-000000000001")
+        attachDiagnosticProvenance()
+        openFarmCard("10000000-0001-0000-0000-000000000001") { [unowned self] step in
+            attachScreen(step)
+        }
 
         let status = app.descendants(matching: .any)["printer.detail.panel.status"]
         XCTAssertTrue(status.waitForExistence(timeout: 8))
@@ -1254,6 +1260,26 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
             app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Layer")).firstMatch.exists
         )
         attachScreen("status-idle-no-active-print")
+    }
+
+    /// Records the run state for the N3552-01 header-band diagnostic (#3561).
+    private func attachDiagnosticProvenance() {
+        let environment = ProcessInfo.processInfo.environment
+        let screen = XCUIScreen.main.screenshot().image
+        let lines = [
+            "test=\(name)",
+            "simulatorDevice=\(environment["SIMULATOR_DEVICE_NAME"] ?? "unknown")",
+            "simulatorModel=\(environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown")",
+            "simulatorRuntime=\(environment["SIMULATOR_RUNTIME_VERSION"] ?? "unknown")",
+            "systemVersion=\(UIDevice.current.systemVersion)",
+            "screenPoints=\(screen.size.width)x\(screen.size.height) scale=\(screen.scale)",
+            "contentSizeCategory=\(contentSizeCategory)",
+            "launchArguments=\(app.launchArguments.joined(separator: " "))",
+        ]
+        let attachment = XCTAttachment(string: lines.joined(separator: "\n"))
+        attachment.name = "Issue 3561 diagnostic provenance"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func assertTuneSegmentDisabledWhileIdle() {
