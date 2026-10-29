@@ -18,9 +18,21 @@ final class PrinterDetailHeaderUITests: PrintFarmerUITestCase {
 
         let compactTitle = app.staticTexts["navigation.title"]
         let rootBar = app.navigationBars["Farm"]
-        let isCompact = compactTitle.waitForExistence(timeout: 8)
-        if !isCompact {
-            XCTAssertTrue(rootBar.waitForExistence(timeout: 8), "The regular-width Farm root must show its bar")
+        // Poll both shapes so neither size class pays the other's timeout.
+        var isCompact: Bool?
+        let deadline = Date().addingTimeInterval(8)
+        while isCompact == nil && Date() < deadline {
+            if compactTitle.exists {
+                isCompact = true
+            } else if rootBar.exists {
+                isCompact = false
+            } else {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+        }
+        guard let isCompact else {
+            XCTFail("The Farm root must show its compact header or navigation bar")
+            return
         }
         attach("root")
         // Compact header: 52pt, title centered. Regular: the root nav bar's top.

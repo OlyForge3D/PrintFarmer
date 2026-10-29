@@ -65,11 +65,19 @@ final class PrinterFilamentSectionTests: XCTestCase {
                 XCTAssertFalse(visible.localizedCaseInsensitiveContains(fragment), "\(width)pt: \(fragment) in \(disabledLines)")
             }
 
+            // Compare only the 44pt pill body beside the label, so the borderless
+            // button's own disabled label tint and drift elsewhere in the card cannot pass.
+            let scale = enabled.scale
             let label = try XCTUnwrap(textBox(of: "Scan spool", in: enabled), "\(width)pt: Scan spool label not found")
-            let changed = try changedPixels(enabled, disabled, excluding: label.insetBy(dx: -4 * enabled.scale, dy: -4 * enabled.scale))
+            let pill = CGRect(
+                x: label.minX - 16 * scale, y: label.midY - 18 * scale,
+                width: label.width + 32 * scale, height: 36 * scale
+            )
+            let (changed, total) = try changedPixels(enabled, disabled, in: pill, excluding: label.insetBy(dx: -4 * scale, dy: -4 * scale))
+            XCTAssertGreaterThan(total, 0, "\(width)pt: pill sample region is empty")
             XCTAssertGreaterThanOrEqual(
-                changed, 1_000,
-                "\(width)pt: disabling Scan spool must restyle the pill fill/border, not only the label (\(changed) px)"
+                Double(changed) / Double(max(total, 1)), 0.5,
+                "\(width)pt: disabling Scan spool must restyle the pill fill, not only the label (\(changed)/\(total) px)"
             )
         }
     }
@@ -88,22 +96,27 @@ final class PrinterFilamentSectionTests: XCTestCase {
         return CGRect(x: box.minX * width, y: (1 - box.maxY) * height, width: box.width * width, height: box.height * height)
     }
 
-    /// Counts pixels outside `excluded` whose RGB differs by at least 2 levels.
-    private func changedPixels(_ lhs: UIImage, _ rhs: UIImage, excluding excluded: CGRect) throws -> Int {
+    /// Counts pixels in `region` but outside `excluded` whose RGB differs by at least 2 levels.
+    private func changedPixels(
+        _ lhs: UIImage, _ rhs: UIImage, in region: CGRect, excluding excluded: CGRect
+    ) throws -> (changed: Int, total: Int) {
         let left = try rgba(lhs), right = try rgba(rhs)
         XCTAssertEqual(left.width, right.width)
         XCTAssertEqual(left.height, right.height)
-        guard left.width == right.width, left.height == right.height else { return 0 }
-        var count = 0
-        for y in 0..<left.height {
-            for x in 0..<left.width where !excluded.contains(CGPoint(x: x, y: y)) {
+        guard left.width == right.width, left.height == right.height else { return (0, 0) }
+        let bounds = region.intersection(CGRect(x: 0, y: 0, width: left.width, height: left.height)).integral
+        guard !bounds.isNull, !bounds.isEmpty else { return (0, 0) }
+        var changed = 0, total = 0
+        for y in Int(bounds.minY)..<Int(bounds.maxY) {
+            for x in Int(bounds.minX)..<Int(bounds.maxX) where !excluded.contains(CGPoint(x: x, y: y)) {
+                total += 1
                 let index = (y * left.width + x) * 4
                 if (0..<3).contains(where: { abs(Int(left.bytes[index + $0]) - Int(right.bytes[index + $0])) >= 2 }) {
-                    count += 1
+                    changed += 1
                 }
             }
         }
-        return count
+        return (changed, total)
     }
 
     private func rgba(_ image: UIImage) throws -> (bytes: [UInt8], width: Int, height: Int) {
