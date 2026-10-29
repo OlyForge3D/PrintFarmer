@@ -1141,7 +1141,9 @@ private enum QueueReorderUITestObservation {
 
 /// R3457-D01 diagnostic only: event-driven, read-only view of the List's backing collection
 /// view. Logging targets are added to its existing gesture recognizers (adding a target never
-/// changes recognition), and drag/drop session state is read only at their state transitions;
+/// changes recognition), including recognizers in visible cells (the reorder accessory). Drag/drop
+/// state is sampled, deduplicated, at recognizer transitions/changes and contentOffset/contentSize
+/// KVO, and the List's existing drag/drop delegates are wrapped by a forwarding logging proxy;
 /// there is no timer. The accessibility label returns the trail published by
 /// `QueueReorderUITestDiagnostics` once a gesture resolves, never a live in-gesture copy.
 private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
@@ -1200,6 +1202,101 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
                 recognizer.addTarget(self, action: #selector(recognizerChanged(_:)))
                 QueueReorderUITestDiagnostics.shared.log("probe hooked \(type(of: recognizer))")
             }
+            attachSessionObservers(to: view)
+            hookCellRecognizers(in: view)
+        }
+
+        // Session-callback layer (R3457-D01, log-only). UIDrag/UIDropInteraction delegates are
+        // read-only, so the observable session callbacks are the collection view's drag/drop
+        // delegates. A proxy is installed only over a delegate SwiftUI already set; it forwards
+        // every message unchanged and mirrors `responds(to:)`, adding only void notifications.
+        private var dragProxy: QueueReorderSessionLogProxy?
+        private var dropProxy: QueueReorderSessionLogProxy?
+        private var scrollObservations: [NSKeyValueObservation] = []
+        private var lastSample = ""
+        private var loggedAbsentDelegates: Set<String> = []
+
+        private func attachSessionObservers(to view: UICollectionView) {
+            if scrollObservations.isEmpty {
+                QueueReorderUITestDiagnostics.shared.log(
+                    "probe cv dragEnabled=\(view.dragInteractionEnabled)"
+                        + " reorderCadence=\(view.reorderingCadence.rawValue)"
+                        + " interactions=\(view.interactions.map { "\(type(of: $0))" })"
+                )
+                scrollObservations = [
+                    view.observe(\.contentOffset) { [weak self] _, _ in
+                        MainActor.assumeIsolated { self?.sample("scroll") }
+                    },
+                    view.observe(\.contentSize) { [weak self] _, _ in
+                        MainActor.assumeIsolated {
+                            guard let self, let cv = self.collectionView else { return }
+                            self.hookCellRecognizers(in: cv)
+                            self.sample("layout")
+                        }
+                    },
+                ]
+            }
+            if let current = view.dragDelegate, !(current is QueueReorderSessionLogProxy) {
+                let proxy = QueueReorderSessionLogProxy(role: .drag, original: current) { [weak self] in
+                    self?.sessionState() ?? "probe=nil"
+                }
+                dragProxy = proxy
+                view.dragDelegate = proxy
+                QueueReorderUITestDiagnostics.shared.log("probe wrapped dragDelegate \(type(of: current))")
+            } else if view.dragDelegate == nil, !loggedAbsentDelegates.contains("drag") {
+                loggedAbsentDelegates.insert("drag")
+                QueueReorderUITestDiagnostics.shared.log("probe dragDelegate=nil (not wrapped)")
+            }
+            if let current = view.dropDelegate, !(current is QueueReorderSessionLogProxy) {
+                let proxy = QueueReorderSessionLogProxy(role: .drop, original: current) { [weak self] in
+                    self?.sessionState() ?? "probe=nil"
+                }
+                dropProxy = proxy
+                view.dropDelegate = proxy
+                QueueReorderUITestDiagnostics.shared.log("probe wrapped dropDelegate \(type(of: current))")
+            } else if view.dropDelegate == nil, !loggedAbsentDelegates.contains("drop") {
+                loggedAbsentDelegates.insert("drop")
+                QueueReorderUITestDiagnostics.shared.log("probe dropDelegate=nil (not wrapped)")
+            }
+        }
+
+        /// Hooks every recognizer in visible cells' subtrees, including the reorder accessory's.
+        private func hookCellRecognizers(in view: UICollectionView) {
+            for cell in view.visibleCells {
+                var pending: [UIView] = [cell]
+                while !pending.isEmpty {
+                    let candidate = pending.removeFirst()
+                    for recognizer in candidate.gestureRecognizers ?? []
+                    where hookedRecognizers.insert(ObjectIdentifier(recognizer)).inserted {
+                        recognizer.addTarget(self, action: #selector(recognizerChanged(_:)))
+                        let row = view.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                        QueueReorderUITestDiagnostics.shared.log(
+                            "probe hooked cell[\(row)] \(type(of: candidate)) \(type(of: recognizer))"
+                        )
+                    }
+                    pending.append(contentsOf: candidate.subviews)
+                }
+            }
+        }
+
+        /// Deduplicated state sample: logs only when drag/drop/scroll/visible-row layout changed.
+        private func sample(_ source: String) {
+            let state = sessionState() + " rows=" + visibleRowLayout()
+            guard state != lastSample else { return }
+            lastSample = state
+            QueueReorderUITestDiagnostics.shared.log("sample \(source) \(state)")
+        }
+
+        private func visibleRowLayout() -> String {
+            guard let view = collectionView else { return "nil" }
+            return view.visibleCells
+                .map { cell -> (CGFloat, String) in
+                    let row = view.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                    return (cell.frame.minY, "\(row)@\(Int(cell.frame.minY.rounded()))")
+                }
+                .sorted { $0.0 < $1.0 }
+                .map(\.1)
+                .joined(separator: ",")
         }
 
         @objc private func recognizerChanged(_ recognizer: UIGestureRecognizer) {
@@ -1216,10 +1313,14 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
                 phase = "cancelled"
             case .failed:
                 phase = "failed"
+            case .changed:
+                sample("gr-changed \(type(of: recognizer))")
+                return
             default:
                 return
             }
             QueueReorderUITestDiagnostics.shared.log("gr \(type(of: recognizer)) \(phase) \(sessionState())")
+            sample("gr-\(phase)")
             guard phase != "began" else { return }
             inFlightRecognizers.remove(id)
             guard inFlightRecognizers.isEmpty else { return }
@@ -1254,6 +1355,127 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
             }
             return nil
         }
+    }
+}
+
+/// R3457-D01 diagnostic only: transparent logging proxy over the List collection view's existing
+/// drag or drop delegate. Every selector the original implements is forwarded unchanged
+/// (`responds(to:)` mirrors the original); the only additions are void session notifications,
+/// which log and then forward when the original also implements them.
+private final class QueueReorderSessionLogProxy: NSObject, UICollectionViewDragDelegate,
+    UICollectionViewDropDelegate {
+    enum Role { case drag, drop }
+
+    private nonisolated static let dragNotifications: Set<Selector> = [
+        #selector(UICollectionViewDragDelegate.collectionView(_:dragSessionWillBegin:)),
+        #selector(UICollectionViewDragDelegate.collectionView(_:dragSessionDidEnd:)),
+    ]
+    private nonisolated static let dropNotifications: Set<Selector> = [
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidEnter:)),
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidExit:)),
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidEnd:)),
+    ]
+
+    private nonisolated let role: Role
+    // Read by Objective-C runtime forwarding hooks; only ever set in init.
+    private nonisolated(unsafe) weak var original: NSObjectProtocol?
+    private let state: () -> String
+    private var lastUpdate = ""
+
+    init(role: Role, original: NSObjectProtocol, state: @escaping () -> String) {
+        self.role = role
+        self.original = original
+        self.state = state
+    }
+
+    private nonisolated var addedNotifications: Set<Selector> {
+        role == .drag ? Self.dragNotifications : Self.dropNotifications
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        if addedNotifications.contains(selector) { return true }
+        return original?.responds(to: selector) ?? false
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        original
+    }
+
+    private var drag: UICollectionViewDragDelegate? { original as? UICollectionViewDragDelegate }
+    private var drop: UICollectionViewDropDelegate? { original as? UICollectionViewDropDelegate }
+
+    private func log(_ event: String) {
+        QueueReorderUITestDiagnostics.shared.log("session \(event) \(state())")
+    }
+
+    // MARK: Drag (required + intercepted)
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        itemsForBeginning session: UIDragSession,
+        at indexPath: IndexPath
+    ) -> [UIDragItem] {
+        let items = drag?.collectionView(collectionView, itemsForBeginning: session, at: indexPath) ?? []
+        log("drag itemsForBeginning \(indexPath.section).\(indexPath.item) count=\(items.count)")
+        return items
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionWillBegin session: UIDragSession) {
+        log("drag willBegin items=\(session.items.count)")
+        drag?.collectionView?(collectionView, dragSessionWillBegin: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {
+        log("drag didEnd")
+        drag?.collectionView?(collectionView, dragSessionDidEnd: session)
+    }
+
+    // MARK: Drop (required + intercepted)
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        performDropWith coordinator: UICollectionViewDropCoordinator
+    ) {
+        let destination = coordinator.destinationIndexPath.map { "\($0.section).\($0.item)" } ?? "nil"
+        log("drop perform op=\(coordinator.proposal.operation.rawValue)"
+            + " intent=\(coordinator.proposal.intent.rawValue) dest=\(destination)")
+        drop?.collectionView(collectionView, performDropWith: coordinator)
+    }
+
+    /// Reached only when the original implements it (`responds(to:)` mirrors the original).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        dropSessionDidUpdate session: UIDropSession,
+        withDestinationIndexPath destinationIndexPath: IndexPath?
+    ) -> UICollectionViewDropProposal {
+        let proposal = drop?.collectionView?(
+            collectionView,
+            dropSessionDidUpdate: session,
+            withDestinationIndexPath: destinationIndexPath
+        ) ?? UICollectionViewDropProposal(operation: .forbidden)
+        let destination = destinationIndexPath.map { "\($0.section).\($0.item)" } ?? "nil"
+        let update = "op=\(proposal.operation.rawValue) intent=\(proposal.intent.rawValue) dest=\(destination)"
+        if update != lastUpdate {
+            lastUpdate = update
+            log("drop didUpdate \(update)")
+        }
+        return proposal
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidEnter session: UIDropSession) {
+        log("drop didEnter")
+        drop?.collectionView?(collectionView, dropSessionDidEnter: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidExit session: UIDropSession) {
+        log("drop didExit")
+        drop?.collectionView?(collectionView, dropSessionDidExit: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
+        lastUpdate = ""
+        log("drop didEnd")
+        drop?.collectionView?(collectionView, dropSessionDidEnd: session)
     }
 }
 #endif
