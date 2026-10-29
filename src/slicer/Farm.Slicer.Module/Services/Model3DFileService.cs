@@ -129,6 +129,21 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         return result;
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<Model3DPickerDto>> ListPickerModelsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<Model3DPickerProjection> models = await _model3dFiles.ListValidPickerAsync(ct);
+
+        return models
+            .Select(model => new Model3DPickerDto(
+                model.Id,
+                model.Name,
+                model.FileName,
+                _fileManagementService.GetModelFileFormatString(model.FileFormat),
+                model.UploadedAt))
+            .ToList();
+    }
+
     /// <summary>
     /// Lists all 3D model folders recursively for building a folder tree structure.
     /// </summary>

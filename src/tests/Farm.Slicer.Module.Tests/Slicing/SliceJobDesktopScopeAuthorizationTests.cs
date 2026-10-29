@@ -253,6 +253,32 @@ public sealed class SliceJobDesktopScopeAuthorizationTests : IAsyncLifetime, IDi
         _ = (await ReadCodeAsync(response)).Should().Be("resource_forbidden");
     }
 
+    [Fact(DisplayName = "A Desktop token holding LibrarySync can list model picker entries")]
+    public async Task LibrarySyncToken_CanListModelPicker()
+    {
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.LibrarySync);
+
+        using HttpResponseMessage response = await client.GetAsync("/api/3d-models/picker");
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "model picker listing requires the existing LibrarySync permission");
+    }
+
+    [Theory]
+    [InlineData(ApiKeyScope.ModelRead)]
+    [InlineData(ApiKeyScope.ModelWrite)]
+    public async Task ModelScopeWithoutLibrarySync_CannotListModelPicker(ApiKeyScope scope)
+    {
+        using HttpClient client = await ExchangeClientAsync(scope);
+
+        using HttpResponseMessage response = await client.GetAsync("/api/3d-models/picker");
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "individual model access does not grant shared-library listing permission");
+    }
+
     [Fact(DisplayName = "A Desktop token holding slicing:submit + ModelRead can reference a library model")]
     public async Task SlicingSubmitTokenWithModelRead_CanReferenceLibraryModel()
     {
