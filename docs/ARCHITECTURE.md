@@ -113,6 +113,10 @@ and `PFARM_TEST_SQLSERVER_CONN`, respectively, plus permission to create a
 uniquely named disposable database. They migrate and remove only that database,
 never the database named in the supplied connection string. Missing connections
 fail explicitly rather than imply provider verification.
+The provisioned CI provider lane explicitly selects both Docker-category
+analytics cases from the infrastructure assembly and archives
+`maintenance-provider-tests.trx`. It verifies both exact fixture/method names
+passed, so an unrelated green provider suite cannot substitute for execution.
 
 #### Services
 Business logic layer:
