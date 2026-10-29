@@ -211,6 +211,7 @@ struct JobListView: View {
         List {
             #if DEBUG
             let _ = QueueReorderUITestDiagnostics.logBody("jobList")
+            let _ = QueueReorderUITestEventLogProbe.requestAttach()
             #endif
             if let message = viewModel.errorMessage {
                 Section {
@@ -385,7 +386,7 @@ struct JobListView: View {
                     .accessibilityLabel(queueReorderDiagnostics)
                     .accessibilityIdentifier("jobList.reorderDiagnostics")
             }
-            // R3457-D01 diagnostic only: on-demand event trail and drag/drop session sampling.
+            // R3457-D01 diagnostic only: deferred event trail; drag/drop state read at gesture transitions.
             if QueueReorderUITestDiagnostics.isActive {
                 QueueReorderUITestEventLogProbe()
                     .frame(width: 1, height: 1)
@@ -1138,17 +1139,27 @@ private enum QueueReorderUITestObservation {
     }
 }
 
-/// R3457-D01 diagnostic only: read-only sampling of the List's backing collection view
-/// drag/drop session state, logged on change. Its accessibility label is computed on
-/// demand from the event trail, so XCUI can attach the log without any SwiftUI update.
+/// R3457-D01 diagnostic only: event-driven, read-only view of the List's backing collection
+/// view. Logging targets are added to its existing gesture recognizers (adding a target never
+/// changes recognition), and drag/drop session state is read only at their state transitions;
+/// there is no timer. The accessibility label returns the trail published by
+/// `QueueReorderUITestDiagnostics` once a gesture resolves, never a live in-gesture copy.
 private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
     func makeUIView(context: Context) -> ProbeView { ProbeView() }
     func updateUIView(_ uiView: ProbeView, context: Context) {}
 
+    /// Called from List body evaluation; defers recognizer discovery to the next main-queue turn.
+    @MainActor static func requestAttach() -> Bool {
+        guard QueueReorderUITestDiagnostics.isActive, let probe = ProbeView.current else { return true }
+        DispatchQueue.main.async { probe.attachRecognizers() }
+        return true
+    }
+
     final class ProbeView: UIView {
-        private var timer: Timer?
+        @MainActor fileprivate static weak var current: ProbeView?
         private weak var collectionView: UICollectionView?
-        private var lastState = ""
+        private var hookedRecognizers: Set<ObjectIdentifier> = []
+        private var inFlightRecognizers: Set<ObjectIdentifier> = []
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -1166,21 +1177,17 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            timer?.invalidate()
-            timer = nil
             guard window != nil else {
+                if Self.current === self { Self.current = nil }
                 QueueReorderUITestDiagnostics.shared.log("probe detached")
                 return
             }
+            Self.current = self
             QueueReorderUITestDiagnostics.shared.log("probe attached")
-            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sample() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
+            attachRecognizers()
         }
 
-        private func sample() {
+        fileprivate func attachRecognizers() {
             if collectionView == nil, let found = locateCollectionView() {
                 collectionView = found
                 QueueReorderUITestDiagnostics.shared.log(
@@ -1188,14 +1195,49 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
                 )
             }
             guard let view = collectionView else { return }
-            let state = "drag=\(view.hasActiveDrag) drop=\(view.hasActiveDrop)"
+            for recognizer in view.gestureRecognizers ?? []
+            where hookedRecognizers.insert(ObjectIdentifier(recognizer)).inserted {
+                recognizer.addTarget(self, action: #selector(recognizerChanged(_:)))
+                QueueReorderUITestDiagnostics.shared.log("probe hooked \(type(of: recognizer))")
+            }
+        }
+
+        @objc private func recognizerChanged(_ recognizer: UIGestureRecognizer) {
+            let id = ObjectIdentifier(recognizer)
+            let phase: String
+            switch recognizer.state {
+            case .began:
+                phase = "began"
+                inFlightRecognizers.insert(id)
+                QueueReorderUITestDiagnostics.shared.suspendPublication()
+            case .ended:
+                phase = "ended"
+            case .cancelled:
+                phase = "cancelled"
+            case .failed:
+                phase = "failed"
+            default:
+                return
+            }
+            QueueReorderUITestDiagnostics.shared.log("gr \(type(of: recognizer)) \(phase) \(sessionState())")
+            guard phase != "began" else { return }
+            inFlightRecognizers.remove(id)
+            guard inFlightRecognizers.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                QueueReorderUITestDiagnostics.shared.log("gr resolved+1 \(self.sessionState())")
+                if self.inFlightRecognizers.isEmpty {
+                    QueueReorderUITestDiagnostics.shared.resumePublication()
+                }
+            }
+        }
+
+        private func sessionState() -> String {
+            guard let view = collectionView else { return "cv=nil" }
+            return "drag=\(view.hasActiveDrag) drop=\(view.hasActiveDrop)"
                 + " uncommitted=\(view.hasUncommittedUpdates) editing=\(view.isEditing)"
                 + " tracking=\(view.isTracking) dragging=\(view.isDragging)"
-                + " decelerating=\(view.isDecelerating)"
                 + " offsetY=\(Int(view.contentOffset.y.rounded())) cells=\(view.visibleCells.count)"
-            guard state != lastState else { return }
-            lastState = state
-            QueueReorderUITestDiagnostics.shared.log("cv \(state)")
         }
 
         /// The nearest collection view sharing an ancestor with this overlay is the List's.

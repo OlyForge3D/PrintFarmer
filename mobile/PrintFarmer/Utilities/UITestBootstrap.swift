@@ -2988,9 +2988,13 @@ final class QueueReorderUITestDiagnostics: @unchecked Sendable {
 
     // R3457-D01 diagnostic trail (revertible; see `QueueReorderUITestEventLogProbe`). Log-only:
     // appending never touches SwiftUI state, so recording cannot invalidate the List mid-drag.
+    // Deferred publication: the accessible copy stays a short placeholder until a collection-view
+    // gesture resolves, so pre-gesture and in-gesture XCTest snapshots never carry the trail.
     private static let eventCapacity = 400
     private var events: [String] = []
     private var droppedEvents = 0
+    private var publishesTrail = false
+    private var publishedEventLog = "pending: no collection-view gesture has resolved"
 
     func log(_ event: String) {
         let line = String(format: "%.3f ", Date().timeIntervalSince1970) + event
@@ -3000,8 +3004,29 @@ final class QueueReorderUITestDiagnostics: @unchecked Sendable {
                 droppedEvents += 1
             }
             events.append(line)
+            if publishesTrail { publishedEventLog = renderedTrail() }
         }
         NSLog("[R3457-D01] %@", line)
+    }
+
+    /// Withholds the trail while a collection-view gesture is in flight.
+    func suspendPublication() {
+        lock.withLock {
+            publishesTrail = false
+            publishedEventLog = "pending: collection-view gesture in flight"
+        }
+    }
+
+    /// Publishes the trail once the gesture resolves; later post-gesture events stay included.
+    func resumePublication() {
+        lock.withLock {
+            publishesTrail = true
+            publishedEventLog = renderedTrail()
+        }
+    }
+
+    private func renderedTrail() -> String {
+        ((droppedEvents > 0 ? ["dropped=\(droppedEvents)"] : []) + events).joined(separator: "\n")
     }
 
     @MainActor static func logIfActive(_ event: @autoclosure () -> String) {
@@ -3016,9 +3041,7 @@ final class QueueReorderUITestDiagnostics: @unchecked Sendable {
     }
 
     var eventLog: String {
-        lock.withLock {
-            (droppedEvents > 0 ? ["dropped=\(droppedEvents)"] : []) + events
-        }.joined(separator: "\n")
+        lock.withLock { publishedEventLog }
     }
 
     var summary: String {
