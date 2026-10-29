@@ -20,13 +20,38 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 MOBILE = REPO / "mobile"
 SRC = REPO / "src"
-DEVELOPER_DIR = Path("/Applications/Xcode-26.6.0.app/Contents/Developer")
+# CI runners install the same approved Xcode under a different bundle name;
+# main() still rejects anything other than Xcode 26.6 build 17F113.
+DEVELOPER_DIR = Path(os.environ.get(
+    "PRINTFARM_SENSOR_E2E_DEVELOPER_DIR",
+    "/Applications/Xcode-26.6.0.app/Contents/Developer",
+))
 API_URL = "http://localhost:5245"
 MOONRAKER_URL = "http://127.0.0.1:7125"
 TEST_NAME = (
     "PrintFarmerUITests/PrinterSensorsLiveBackendUITests/"
     "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends"
 )
+
+EXPECTED_TEST_ID = "/".join(TEST_NAME.split("/")[1:]) + "()"
+
+
+def verify_named_test_succeeded(timing_path):
+    """Fail unless the bounded runner saw exactly the named test, once, as Success.
+
+    run-tests.py rejects zero-test and failed runs but not skipped ones, and a
+    skipped test would leave every live field readback unexecuted.
+    """
+    try:
+        tests = json.loads(Path(timing_path).read_text(encoding="utf-8"))["tests"]
+        observed = [(test["identifier"], test["status"]) for test in tests]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"No usable runner test results at {timing_path}: {error}") from error
+    if observed != [(EXPECTED_TEST_ID, "Success")]:
+        raise RuntimeError(
+            f"Expected exactly {EXPECTED_TEST_ID} with status Success; observed {observed}"
+        )
+    print(f"LIVE_SENSOR_E2E: verified {EXPECTED_TEST_ID} executed once with Success", flush=True)
 
 
 def ensure_port_free(port):
@@ -68,7 +93,7 @@ def wait_http(url, process, log_path, timeout=90):
     raise RuntimeError(f"Timed out waiting for {url}; last error: {last_error}; see {log_path}")
 
 
-def create_initial_admin(username, password):
+def create_initial_admin(username, password, bootstrap_secret):
     status, body = http_json(
         f"{API_URL}/api/setup/initial-admin",
         method="POST",
@@ -78,6 +103,7 @@ def create_initial_admin(username, password):
             "password": password,
             "firstName": "Sensor",
             "lastName": "E2E",
+            "bootstrapSecret": bootstrap_secret,
         },
     )
     if not 200 <= status < 300:
@@ -436,6 +462,7 @@ def main():
         "ConnectionStrings__Default": f"Data Source={run_dir / 'farm.sqlite'}",
         "Logging__LogLevel__Default": "Information",
         "WorkerAuth__SharedKey": secrets.token_urlsafe(32),
+        "PFARM__Setup__BootstrapSecret": secrets.token_urlsafe(32),
         "TestEmulator__Enabled": "true",
         "TestEmulator__Printers__0__Name": "Test Printer Alpha",
         "PRINTFARM_SENSOR_E2E_USERNAME": f"sensor-e2e-{secrets.token_hex(6)}",
@@ -507,6 +534,7 @@ def main():
         token = create_initial_admin(
             env["PRINTFARM_SENSOR_E2E_USERNAME"],
             env["PRINTFARM_SENSOR_E2E_PASSWORD"],
+            env["PFARM__Setup__BootstrapSecret"],
         )
         wait_for_printer_names(
             token,
@@ -555,6 +583,7 @@ def main():
             "-resultBundlePath", str(result_bundle),
         ]
         run_logged(command, MOBILE, env, run_dir / "test.log")
+        verify_named_test_succeeded(result_bundle.with_suffix(".timing.json"))
     finally:
         if server is not None:
             server.shutdown()

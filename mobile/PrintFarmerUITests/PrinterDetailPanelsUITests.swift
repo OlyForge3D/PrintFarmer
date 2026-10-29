@@ -2024,7 +2024,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         card.tap()
         // Status no longer renders sensors; writable ones are read back from
         // the Control tab's Heat segment (idle-only; Tune has no sensors, #3540).
-        // Read-only sensors are verified via SignalR only.
+        // Read-only sensors and fans (no app controls, #3552) are verified via SignalR only.
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         guard selector.waitForExistence(timeout: 8) else {
             throw NSError(
@@ -2117,13 +2117,21 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
 
         let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])
         let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
-        let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
-        XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
-        attachScreenshot(named: "\(printer.name) live fan control")
+        // Fans have no app controls (#3552), so drive the fan through the same
+        // backend sensor endpoint the removed stepper used.
+        let expectedFanValue = Self.nextFanSpeed(after: fanValue)
+        XCTAssertTrue((0...100).contains(expectedFanValue), "FanSpeed request \(expectedFanValue) must stay within 0–100.")
+        XCTAssertNotEqual(expectedFanValue, fanValue, "FanSpeed request must change the reported fan value.")
         let fanUpdateCount = observer.updateCount
-        increase.tap()
+        try await setSensorValue(
+            credentials,
+            token: token,
+            printerID: printer.id,
+            sensorID: fanID,
+            quantity: "FanSpeed",
+            value: expectedFanValue
+        )
 
-        let expectedFanValue = fanValue + 1
         let fanEvent = try XCTUnwrap(observer.waitForUpdate(after: fanUpdateCount, timeout: 30) { event in
             guard let payload = try? Self.jsonObject(event.payload),
                   let sensors = payload["sensors"] as? [[String: Any]] else { return false }
@@ -2136,8 +2144,20 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(fanPayload)),
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
-        let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
-        assertFieldValueContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
+        // Prove the Heat panel content is loaded before asserting fan controls are absent,
+        // so absence cannot pass on an unloaded or read-only panel.
+        let heatGroup = app.descendants(matching: .any)["printer.controls.heat-group"]
+        XCTAssertTrue(heatGroup.waitForExistence(timeout: 12), "\(printer.name) must show the loaded Heat panel.")
+        XCTAssertTrue(
+            heatGroup.descendants(matching: .any)["printer.controls.hotend.target"].waitForExistence(timeout: 12),
+            "\(printer.name) Heat panel must render its nozzle target before checking fan controls."
+        )
+        let fanControls = app.descendants(matching: .any)
+        for suffix in ["value", "increase", "decrease"] {
+            let id = "printer.controls.sensor.\(fanID).FanSpeed.\(suffix)"
+            XCTAssertFalse(fanControls[id].exists, "\(id) must not render: fans have no app controls (#3552)")
+        }
+        attachScreenshot(named: "\(printer.name) live fan update without fan controls")
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"
@@ -2206,6 +2226,11 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    /// Next whole-percent FanSpeed (step 1, 0–100) that differs from `current`, even when fractional.
+    static func nextFanSpeed(after current: Double) -> Double {
+        current >= 100 ? 99 : min(100, max(0, current.rounded(.down) + 1))
+    }
+
     private func setSensorValue(
         _ credentials: Credentials,
         token: String,
@@ -2215,7 +2240,8 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         value: Double
     ) async throws {
         let body: [String: Any] = ["quantity": quantity, "value": value]
-        let path = "/api/printers/\(printerID)/sensors/\(sensorID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sensorID)"
+        // apiRequest uses URL.appending(path:), which percent-encodes this raw path once.
+        let path = "/api/printers/\(printerID)/sensors/\(sensorID)"
         _ = try await apiRequest(credentials, token: token, path: path, method: "POST", body: body)
     }
 
