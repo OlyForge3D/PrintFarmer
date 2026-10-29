@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Catalog;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Catalog;
@@ -16,6 +17,26 @@ namespace Farm.Infrastructure.Repositories.Catalog;
 public class EfCatalogRepository(AppDbContext db) : ICatalogRepository
 {
     private readonly AppDbContext _db = db;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ProfileTaskModelDto>> GetProfileTaskModelsAsync(IEnumerable<Guid> modelIds, CancellationToken ct = default)
+    {
+        List<ProfileTaskModelDto> result = [];
+        foreach (Guid[] batch in modelIds.Distinct().Chunk(100))
+        {
+            result.AddRange(await (
+                from model in _db.PrinterModels.AsNoTracking()
+                join manufacturer in _db.Manufacturers.AsNoTracking()
+                    on model.ManufacturerId equals manufacturer.Id into manufacturers
+                from manufacturer in manufacturers.DefaultIfEmpty()
+                where batch.Contains(model.Id)
+                select new ProfileTaskModelDto(model.Id, model.Name,
+                    manufacturer == null ? "Unknown" : manufacturer.Name))
+                .ToListAsync(ct));
+        }
+
+        return result;
+    }
 
     public async Task<IReadOnlyList<(Guid Id, string Name, string? Url, string? Description)>> GetManufacturersAsync(CancellationToken ct = default)
     {

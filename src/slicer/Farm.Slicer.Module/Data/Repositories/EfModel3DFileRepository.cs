@@ -13,6 +13,7 @@ namespace Farm.Slicer.Module.Data.Repositories;
 /// </remarks>
 public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepository
 {
+    private const int BulkIdChunkSize = 500;
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc/>
@@ -48,6 +49,19 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<List<Model3D>> GetValidByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        List<Model3D> models = [];
+        foreach (Guid[] chunk in ids.Distinct().Chunk(BulkIdChunkSize))
+        {
+            models.AddRange(await _db.Models3D.Where(m => m.IsValid && chunk.Contains(m.Id)).ToListAsync(ct));
+        }
+
+        return models;
+    }
+
+    /// <inheritdoc/>
     public async Task<Model3D?> GetByIdForReconciliationAsync(Guid id, CancellationToken ct)
     {
         _db.ChangeTracker.Clear();
@@ -60,6 +74,22 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
         return await _db.Models3D
             .Where(m => m.IsValid)
             .OrderByDescending(m => m.UploadedAt)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<Model3DPickerProjection>> ListValidPickerAsync(CancellationToken ct)
+    {
+        return await _db.Models3D
+            .AsNoTracking()
+            .Where(m => m.IsValid)
+            .OrderByDescending(m => m.UploadedAt)
+            .Select(m => new Model3DPickerProjection(
+                m.Id,
+                m.Name,
+                m.FileName,
+                m.FileFormat,
+                m.UploadedAt))
             .ToListAsync(ct);
     }
 

@@ -25,6 +25,11 @@ public interface IModel3DFileRepository
     /// <remarks>Used for file download operations where physical file access is needed regardless of validation status.</remarks>
     Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Retrieves the valid models among <paramref name="ids"/> with chunked set-based queries.</summary>
+    /// <param name="ids">The model identifiers to load. Missing or invalid models are omitted.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<List<Model3D>> GetValidByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct);
+
     /// <summary>
     /// Clears pending tracking state and reloads a model by stable identity after an unknown save outcome.
     /// </summary>
@@ -46,6 +51,10 @@ public interface IModel3DFileRepository
     /// <summary>Retrieves all valid models ordered by upload date descending.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct);
+
+    /// <summary>Retrieves the picker fields for all valid models ordered by upload date descending.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Model3DPickerProjection>> ListValidPickerAsync(CancellationToken ct);
 
     /// <summary>Retrieves all valid models in a specific folder.</summary>
     /// <param name="folderId">The folder identifier (soft reference to core FolderNode).</param>

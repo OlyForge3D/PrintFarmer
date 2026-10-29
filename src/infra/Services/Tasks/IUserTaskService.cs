@@ -12,6 +12,13 @@ public record CreateProfileImportTaskDto(
     string ManufacturerName,
     Guid PrinterId);
 
+/// <summary>One model's complete incoming printer group for a profile-import upsert.</summary>
+public record CreateProfileImportTaskBatchDto(
+    Guid PrinterModelId,
+    string PrinterModelName,
+    string ManufacturerName,
+    IReadOnlyCollection<Guid> PrinterIds);
+
 /// <summary>
 /// DTO for creating a manual user task.
 /// </summary>
@@ -163,6 +170,9 @@ public interface IUserTaskService
     /// If a task already exists for the model, adds the printer to the related entities.
     /// </summary>
     Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskDto dto, CancellationToken ct = default);
+
+    /// <summary>Unions a model's printer group in one guarded logical mutation; unchanged unions do not write or broadcast.</summary>
+    Task<UserTaskDto> CreateOrUpdateProfileImportTaskAsync(CreateProfileImportTaskBatchDto dto, CancellationToken ct = default);
 
     /// <summary>
     /// Marks a task as completed.

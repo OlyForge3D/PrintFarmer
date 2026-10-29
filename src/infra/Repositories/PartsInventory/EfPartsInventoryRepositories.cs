@@ -261,6 +261,17 @@ public class EfPartOutputMappingRepository(AppDbContext context) : IPartOutputMa
             .ExecuteDeleteAsync(ct);
     }
 
+    public async Task DeleteDirectMappingsForGcodeFilesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeFileIds);
+        foreach (Guid[] chunk in gcodeFileIds.Distinct().Chunk(500))
+        {
+            _ = await _context.PartOutputMappings
+                .Where(m => m.GcodeFileId != null && chunk.Contains(m.GcodeFileId.Value))
+                .ExecuteDeleteAsync(ct);
+        }
+    }
+
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
         return await _context.SaveChangesAsync(ct);

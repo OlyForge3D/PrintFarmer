@@ -9,21 +9,33 @@ public sealed class PrinterFileInventorySession : IDisposable
 {
     private const int MaxResponseBytes = 8 * 1024 * 1024;
     private readonly CancellationToken _callerToken;
+    private readonly TimeProvider _timeProvider;
+    private readonly long _startedAt;
+    private readonly CancellationTokenSource _deadlineTimer;
     private readonly CancellationTokenSource _deadline;
     private readonly List<PrinterFileInventoryEntry> _entries = [];
     private readonly List<PrinterFileInventoryCoverage> _coverage = [];
     private readonly HashSet<string> _identities = new(StringComparer.Ordinal);
-    private readonly System.Diagnostics.Stopwatch _elapsed = System.Diagnostics.Stopwatch.StartNew();
     private CancellationToken? _requestToken;
     private int _visitedEntries;
 
     public PrinterFileInventorySession(PrinterFileInventoryOptions? options, CancellationToken callerToken)
+        : this(options, TimeProvider.System, callerToken)
     {
+    }
+
+    /// <summary>Measures the scan deadline and detail budget on <paramref name="timeProvider"/>.</summary>
+    public PrinterFileInventorySession(
+        PrinterFileInventoryOptions? options, TimeProvider timeProvider, CancellationToken callerToken)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         Options = options ?? new();
         Options.Validate();
         _callerToken = callerToken;
-        _deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
-        _deadline.CancelAfter(Options.Deadline);
+        _timeProvider = timeProvider;
+        _startedAt = timeProvider.GetTimestamp();
+        _deadlineTimer = new CancellationTokenSource(Options.Deadline, timeProvider);
+        _deadline = CancellationTokenSource.CreateLinkedTokenSource(callerToken, _deadlineTimer.Token);
     }
 
     public PrinterFileInventoryOptions Options { get; }
@@ -70,15 +82,16 @@ public sealed class PrinterFileInventorySession : IDisposable
     public async Task EnrichAsync(
         Func<PrinterFileInventoryEntry, Task<PrinterFileInventoryEntry>> enrich, ILogger logger)
     {
-        TimeSpan remaining = (Options.Deadline * 0.75) - _elapsed.Elapsed;
+        TimeSpan remaining = (Options.Deadline * 0.75) - _timeProvider.GetElapsedTime(_startedAt);
         if (remaining <= TimeSpan.Zero)
         {
             logger.LogWarning("Printer file detail enrichment skipped because its time budget was exhausted");
             return;
         }
 
-        using CancellationTokenSource detail = CancellationTokenSource.CreateLinkedTokenSource(Token);
-        detail.CancelAfter(remaining);
+        using CancellationTokenSource detailTimer = new(remaining, _timeProvider);
+        using CancellationTokenSource detail =
+            CancellationTokenSource.CreateLinkedTokenSource(Token, detailTimer.Token);
         _requestToken = detail.Token;
         try
         {
@@ -260,7 +273,11 @@ public sealed class PrinterFileInventorySession : IDisposable
         }
     }
 
-    public void Dispose() => _deadline.Dispose();
+    public void Dispose()
+    {
+        _deadline.Dispose();
+        _deadlineTimer.Dispose();
+    }
 }
 
 /// <summary>Internal protocol failures represented by a stable safe inventory reason.</summary>

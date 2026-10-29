@@ -196,6 +196,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
     {
         // Get all logs grouped by component
         IQueryable<MaintenanceLog> source = _context.MaintenanceLogs
+            .AsNoTracking()
             .Where(l => l.Component != null && l.Component != string.Empty);
 
         // Finding H5 (issue #711): exclude per-toolhead logs when the feature is off.
@@ -210,7 +211,9 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             {
                 Component = g.Key,
                 Replacements = g.Count(),
-                Logs = g.OrderBy(l => l.PerformedAt).ToList()
+                Logs = g.OrderBy(l => l.PerformedAt)
+                    .Select(l => new { l.PerformedAt, l.PrinterHoursAtMaintenance })
+                    .ToList()
             })
             .ToListAsync(cancellationToken);
 
@@ -220,49 +223,48 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         {
             double avgLifespanHours = 0;
 
-            // Calculate average lifespan between replacements using printer hours
-            var logsWithHours = componentGroup.Logs
-                .Where(l => l.PrinterHoursAtMaintenance.HasValue)
-                .OrderBy(l => l.PerformedAt)
-                .ToList();
+            double hoursSum = 0;
+            int hoursCount = 0;
+            double daysSum = 0;
+            int daysCount = 0;
+            double? previousHours = null;
+            DateTime? previousDate = null;
 
-            if (logsWithHours.Count >= 2)
+            foreach (var log in componentGroup.Logs)
             {
-                var lifespans = new List<double>();
-                for (int i = 1; i < logsWithHours.Count; i++)
+                if (log.PrinterHoursAtMaintenance is double hours)
                 {
-                    double diff = logsWithHours[i].PrinterHoursAtMaintenance!.Value - logsWithHours[i - 1].PrinterHoursAtMaintenance!.Value;
-                    if (diff > 0)
+                    if (previousHours.HasValue && hours - previousHours.Value > 0)
                     {
-                        lifespans.Add(diff);
+                        hoursSum += hours - previousHours.Value;
+                        hoursCount++;
                     }
+
+                    previousHours = hours;
                 }
 
-                if (lifespans.Count > 0)
+                if (previousDate.HasValue)
                 {
-                    avgLifespanHours = lifespans.Average();
-                }
-            }
-
-            // If no printer hours data, estimate from time between maintenances (assuming 8 hours printing per day)
-            if (avgLifespanHours <= 0.001 && componentGroup.Logs.Count >= 2)
-            {
-                var sortedLogs = componentGroup.Logs.OrderBy(l => l.PerformedAt).ToList();
-                var daysBetween = new List<double>();
-                for (int i = 1; i < sortedLogs.Count; i++)
-                {
-                    double days = (sortedLogs[i].PerformedAt - sortedLogs[i - 1].PerformedAt).TotalDays;
+                    double days = (log.PerformedAt - previousDate.Value).TotalDays;
                     if (days > 0)
                     {
-                        daysBetween.Add(days);
+                        daysSum += days;
+                        daysCount++;
                     }
                 }
 
-                if (daysBetween.Count > 0)
-                {
-                    // Estimate 8 print hours per day average
-                    avgLifespanHours = daysBetween.Average() * 8;
-                }
+                previousDate = log.PerformedAt;
+            }
+
+            if (hoursCount > 0)
+            {
+                avgLifespanHours = hoursSum / hoursCount;
+            }
+
+            // Preserve the eight-hours-per-day fallback across all records.
+            if (avgLifespanHours <= 0.001 && daysCount > 0)
+            {
+                avgLifespanHours = daysSum / daysCount * 8;
             }
 
             result.Add(new ComponentLifespanEntry(
@@ -279,6 +281,7 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
         var startDate = DateTime.UtcNow.AddMonths(-months);
 
         IQueryable<MaintenanceLog> query = _context.MaintenanceLogs
+            .AsNoTracking()
             .Where(l => l.PerformedAt >= startDate && l.Cost.HasValue && l.Cost > 0);
 
         // Finding H5 (issue #711): exclude per-toolhead logs when the feature is off.
@@ -287,47 +290,51 @@ public class EfMaintenanceLogRepository(AppDbContext context) : IMaintenanceLogR
             query = query.Where(l => l.ToolheadId == null);
         }
 
-        var logs = await query.ToListAsync(cancellationToken);
-
-        // Group by year-month and sum costs
-        var grouped = logs
+        var buckets = await query
             .GroupBy(l => new { l.PerformedAt.Year, l.PerformedAt.Month })
+            .Select(g => new
+            {
+                g.Key.Year,
+                g.Key.Month,
+                TotalCost = g.Sum(l => l.Cost ?? 0m)
+            })
+            .ToListAsync(cancellationToken);
+
+        return buckets
             .Select(g => new MaintenanceCostEntry(
-                $"{g.Key.Year}-{g.Key.Month:D2}",
-                g.Sum(l => l.Cost ?? 0m)))
+                $"{g.Year}-{g.Month:D2}",
+                g.TotalCost))
             .OrderBy(e => e.Month)
             .ToList();
-
-        return grouped;
     }
 
     public async Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(bool includeToolheadScope = true, CancellationToken cancellationToken = default)
     {
-        // Get all printers with their maintenance logs and statistics
         var printers = await _context.Printers
-            .Include(p => p.MaintenanceLogs)
-            .Include(p => p.Statistics)
+            .AsNoTracking()
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                TotalPrintHours = p.Statistics == null ? 0 : p.Statistics.TotalPrintHours,
+                MaintenanceCount = p.MaintenanceLogs
+                    .Count(l => includeToolheadScope || l.ToolheadId == null),
+                TotalDowntimeMinutes = p.MaintenanceLogs
+                    .Where(l => includeToolheadScope || l.ToolheadId == null)
+                    .Sum(l => l.DurationMinutes) ?? 0
+            })
             .ToListAsync(cancellationToken);
 
         var result = new List<PrinterUptimeEntry>();
 
         foreach (var printer in printers)
         {
-            // Finding H5 (issue #711): exclude per-toolhead logs from maintenance
-            // counts and downtime when the multi-slot fallback feature is off.
-            IEnumerable<MaintenanceLog> logs = includeToolheadScope
-                ? printer.MaintenanceLogs
-                : printer.MaintenanceLogs.Where(l => l.ToolheadId == null);
-            var scopedLogs = logs.ToList();
-
-            int maintenanceCount = scopedLogs.Count;
-            int totalDowntimeMinutes = scopedLogs
-                .Where(l => l.DurationMinutes.HasValue)
-                .Sum(l => l.DurationMinutes!.Value);
+            int maintenanceCount = printer.MaintenanceCount;
+            int totalDowntimeMinutes = printer.TotalDowntimeMinutes;
 
             // Calculate uptime percentage based on total print hours vs maintenance downtime
             double uptimePercent = 100.0;
-            double totalPrintHours = printer.Statistics?.TotalPrintHours ?? 0;
+            double totalPrintHours = printer.TotalPrintHours;
 
             if (totalPrintHours > 0 && totalDowntimeMinutes > 0)
             {

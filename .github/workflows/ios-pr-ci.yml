@@ -132,10 +132,29 @@ jobs:
             build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
 
   test:
-    name: Unit Tests (iOS)
+    name: ${{ matrix.name }}
     runs-on: macos-26
     timeout-minutes: 120
     needs: [select, build]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: Unit Tests (iOS)
+            family: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selector: PrintFarmerTests
+            artifact: ios-test-results
+          - name: Filament accessibility (iPad)
+            family: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selector: PrintFarmerTests/PrinterFilamentSectionTests
+            artifact: ios-filament-ipad-results
+    env:
+      IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+      IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+      UNIT_TEST_SELECTOR: ${{ matrix.selector }}
     # Skip ONLY when the selector explicitly said `false`. If `select` itself
     # failed, `should_run` is empty — and a skipped job reports "Success" to
     # branch protection, so a bare `== 'true'` would turn a selector crash into
@@ -170,8 +189,6 @@ jobs:
 
       - name: Install approved iOS 26.5 simulator runtime
         timeout-minutes: 30
-        env:
-          IOS_SIMULATOR_DEVICE_FAMILY: iPhone
         run: |
           RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
           DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
@@ -256,20 +273,36 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             test-without-building \
-            -only-testing:PrintFarmerTests \
+            "-only-testing:$UNIT_TEST_SELECTOR" \
             -resultBundlePath build/TestResults.xcresult \
             2>&1 | tee build/TestResults.log
+
+      - name: Export iPad filament accessibility attachments
+        if: matrix.family == 'iPad'
+        run: |
+          xcrun xcresulttool export attachments \
+            --test-id 'PrinterFilamentSectionTests/testFilamentCardKeepsWholeWordsAndControlsAtEveryAccessibilitySize()' \
+            --path build/TestResults.xcresult \
+            --output-path build/FilamentAttachments
+          test "$(find build/FilamentAttachments -name '*.png' -type f | wc -l | tr -d ' ')" = 10
+          {
+            git rev-parse HEAD
+            xcodebuild -version
+            printf 'family=%s\nname=%s\nruntime=%s\nudid=%s\n' \
+              "$SIMULATOR_FAMILY" "$SIMULATOR_NAME" "$SIMULATOR_RUNTIME" "$SIMULATOR_UDID"
+          } > build/FilamentAttachments/destination.txt
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ios-test-results
+          name: ${{ matrix.artifact }}
           path: |
             mobile/build/TestResults.xcresult
             mobile/build/TestResults.log
             mobile/build/TestResults.events.jsonl
             mobile/build/TestResults.timing.json
+            mobile/build/FilamentAttachments/
           retention-days: 7
 
   xcui-shards:
@@ -310,6 +343,8 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: iphone-4
             family: iPhone
@@ -343,6 +378,8 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: ipad-4
             family: iPad

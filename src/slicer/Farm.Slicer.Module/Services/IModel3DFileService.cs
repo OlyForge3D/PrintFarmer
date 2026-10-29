@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Dtos;
+﻿using Farm.Infrastructure.Contracts.FileManagement;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
 
 namespace Farm.Slicer.Module.Services;
@@ -11,6 +12,10 @@ public interface IModel3DFileService
     /// <summary>Retrieves all valid 3D models in a flat list.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct);
+
+    /// <summary>Retrieves only the fields needed by the 3D model picker.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Model3DPickerDto>> ListPickerModelsAsync(CancellationToken ct);
 
     /// <summary>Lists all 3D model folders recursively for building a folder tree structure.</summary>
     /// <param name="ct">Cancellation token.</param>
@@ -56,6 +61,12 @@ public interface IModel3DFileService
     /// <param name="id">The model's unique identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     Task DeleteModelAsync(Guid id, CancellationToken ct);
+
+    /// <summary>Deletes several models and reports one outcome per distinct requested ID.</summary>
+    /// <param name="ids">Model identifiers. Duplicates are collapsed, preserving first-seen order.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>One result per distinct requested ID, in request order.</returns>
+    Task<IReadOnlyList<BulkDeleteItemResult>> DeleteModelsAsync(IEnumerable<Guid> ids, CancellationToken ct);
 
     /// <summary>Validates a model file without uploading it.</summary>
     /// <param name="modelFile">The model file to validate.</param>

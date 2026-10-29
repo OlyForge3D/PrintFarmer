@@ -210,6 +210,8 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/HarvestUITests",
             "PrintFarmerUITests/PartsInventoryUITests",
             "PrintFarmerUITests/PrinterListUITests",
+            "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset",
+            "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType",
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
             "PrintFarmerUITests/UIWaitBudgetTests",
@@ -252,18 +254,38 @@ class EventTests(unittest.TestCase):
 
         declarations = set()
         sources_by_suite = {}
+        superclasses_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
             contents = source.read_text()
-            suite_declarations = list(re.finditer(r"\bclass\s+(\w+)\s*:", contents))
+            suite_declarations = list(re.finditer(
+                r"\bclass\s+(\w+)\s*:\s*([\w.]+)",
+                contents,
+            ))
             for index, declaration in enumerate(suite_declarations):
                 suite = declaration.group(1)
                 declarations.add(suite)
+                superclasses_by_suite[suite] = declaration.group(2).rsplit(".", 1)[-1]
                 next_declaration = (
                     suite_declarations[index + 1].start()
                     if index + 1 < len(suite_declarations)
                     else len(contents)
                 )
                 sources_by_suite[suite] = contents[declaration.start():next_declaration]
+
+        def test_methods_for_suite(suite):
+            methods = set()
+            visited = set()
+            while suite in sources_by_suite and suite not in visited:
+                visited.add(suite)
+                methods.update(re.findall(
+                    r"\bfunc\s+(test\w+)\s*\(",
+                    sources_by_suite[suite],
+                ))
+                suite = superclasses_by_suite.get(suite)
+                if suite is None:
+                    break
+            return methods
+
         for selectors in selectors_by_family.values():
             for selector in selectors:
                 selector_parts = selector.split("/")
@@ -278,9 +300,9 @@ class EventTests(unittest.TestCase):
                         )
                 if len(selector_parts) == 3:
                     with self.subTest(selector=selector):
-                        self.assertRegex(
-                            sources_by_suite[suite],
-                            rf"\bfunc\s+{selector_parts[2]}\s*\(",
+                        self.assertIn(
+                            selector_parts[2],
+                            test_methods_for_suite(suite),
                             "A stale method selector executes zero XCTest cases",
                         )
         for family, selectors in selectors_by_family.items():
@@ -297,10 +319,7 @@ class EventTests(unittest.TestCase):
                     len(selector.split("/")) == 3
                     for selector in suite_selectors_by_suite[suite]
                 ):
-                    source_methods = set(re.findall(
-                        r"\bfunc\s+(test\w+)\s*\(",
-                        sources_by_suite[suite],
-                    ))
+                    source_methods = test_methods_for_suite(suite)
                     with self.subTest(family=family, suite=suite):
                         self.assertEqual(
                             selected_methods,
@@ -660,6 +679,85 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(summary["finalization_budget_seconds"], 2.5)
         self.assertLess(summary["post_last_test_seconds"], 3)
 
+    def test_hard_stop_uses_configured_deadline_deterministically(self):
+        clock = type("Clock", (), {})()
+        clock.nanoseconds = 0
+        deadline_ns = int(self.TIGHT_FINALIZATION_TIMEOUT * 1_000_000_000)
+        poll_ns = 10_000_000
+
+        def monotonic():
+            return clock.nanoseconds / 1_000_000_000
+
+        def sleep(seconds):
+            clock.nanoseconds += round(seconds * 1_000_000_000)
+            self.assertLessEqual(
+                clock.nanoseconds, deadline_ns + poll_ns,
+                "The runner did not hard-stop at its configured deadline",
+            )
+
+        class Process:
+            pid = 12345
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self):
+                return self.returncode
+
+        process = Process()
+        signals = []
+
+        def popen(command, start_new_session):
+            self.assertTrue(start_new_session)
+            stream_path = Path(command[command.index("-resultStreamPath") + 1])
+            stream_path.write_text("".join((
+                event("invocationStarted"),
+                event("actionStarted"),
+                event("testStarted"),
+                event("testFinished"),
+                event("actionFinished"),
+                event("invocationFinished"),
+            )))
+            return process
+
+        def killpg(pid, sig):
+            self.assertEqual(pid, process.pid)
+            signals.append((clock.nanoseconds, sig))
+            if sig == signal.SIGKILL:
+                process.returncode = -signal.SIGKILL
+
+        with patch.object(runner.time, "monotonic", side_effect=monotonic), \
+                patch.object(runner.time, "sleep", side_effect=sleep), \
+                patch.object(runner.subprocess, "Popen", side_effect=popen), \
+                patch.object(runner.os, "killpg", side_effect=killpg), \
+                patch("sys.stdout", new=io.StringIO()):
+            code = runner.run(
+                self.arguments,
+                invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+                finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+                flush_seconds=0.1,
+                poll_seconds=0.01,
+            )
+
+        self.assertEqual(code, 124)
+        self.assertEqual(
+            signals,
+            [
+                (deadline_ns - 100_000_000, signal.SIGINT),
+                (deadline_ns, signal.SIGKILL),
+                (deadline_ns + poll_ns, signal.SIGKILL),
+            ],
+        )
+        summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
+        self.assertEqual(summary["termination_reason"], "post-test-timeout")
+        self.assertEqual(
+            summary["finalization_budget_seconds"], self.TIGHT_FINALIZATION_TIMEOUT,
+        )
+        self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
+        self.assertEqual(summary["tests"][0]["identifier"], "Probe/test()")
+        self.assertTrue(self.bundle.with_suffix(".events.jsonl").read_text())
+
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
         code, summary = self.invoke(
             "ignore-interrupt", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
@@ -667,7 +765,11 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
-        self.assertLess(summary["post_last_test_seconds"], 0.5)
+        self.assertEqual(summary["termination_reason"], "post-test-timeout")
+        self.assertEqual(
+            summary["finalization_budget_seconds"], self.TIGHT_FINALIZATION_TIMEOUT,
+        )
+        self.assertEqual(summary["tests"][0]["identifier"], "Probe/test()")
         child = (self.bundle / "child.pid").read_text()
         # Reaping is OS-owned; a zombie has exited and no longer holds stdout.
         for _ in range(50):
@@ -718,16 +820,20 @@ class RunnerTests(unittest.TestCase):
     def test_ci_shell_commands_keep_selectors_artifacts_and_pipeline_exit(self):
         mobile = SCRIPT.parents[1]
         workflow = (mobile.parent / ".github/workflows/ios-pr-ci.yml").read_text()
-        (self.directory / "scripts").symlink_to(mobile / "scripts", target_is_directory=True)
-        (self.directory / "PrintFarmerUITests").symlink_to(
-            mobile / "PrintFarmerUITests", target_is_directory=True,
-        )
         cases = (
             (
                 "Run unit tests",
                 None,
                 "build/TestResults",
                 "-only-testing:PrintFarmerTests",
+                "other-failure",
+                42,
+            ),
+            (
+                "Run unit tests",
+                None,
+                "build/TestResults",
+                "-only-testing:PrintFarmerTests/PrinterFilamentSectionTests",
                 "other-failure",
                 42,
             ),
@@ -768,8 +874,16 @@ class RunnerTests(unittest.TestCase):
                 65,
             ),
         )
-        for step, key, stem, selectors, mode, expected in cases:
-            with self.subTest(step=step, key=key):
+        for index, (step, key, stem, selectors, mode, expected) in enumerate(cases):
+            with self.subTest(step=step, key=key, selectors=selectors):
+                directory = self.directory / f"workflow-case-{index}"
+                directory.mkdir()
+                (directory / "scripts").symlink_to(
+                    mobile / "scripts", target_is_directory=True,
+                )
+                (directory / "PrintFarmerUITests").symlink_to(
+                    mobile / "PrintFarmerUITests", target_is_directory=True,
+                )
                 block = workflow.split(f"      - name: {step}\n", 1)[1]
                 block = block.split("\n      - name:", 1)[0]
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
@@ -777,13 +891,14 @@ class RunnerTests(unittest.TestCase):
                     shell = shell.replace("${{ matrix.key }}", key)
                     shell = shell.replace("${{ matrix.shard }}", key.rsplit("-", 1)[1])
                     shell = shell.replace("$SELECTORS", selectors)
-                (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
+                (directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {
                     **os.environ,
+                    "UNIT_TEST_SELECTOR": selectors.removeprefix("-only-testing:"),
                     "PATH": str(self.stub.parent.resolve()) + os.pathsep + os.environ["PATH"],
                     "SIMULATOR_UDID": "test-device",
                     "RUNNER_TEST_MARKER": str(
-                        (self.directory / "workflow-attempt-count").resolve()
+                        (directory / "workflow-attempt-count").resolve()
                     ),
                     "RUNNER_TEST_MODE": mode,
                     "RUNNER_TEST_STATUS": "Failure" if mode == "failed" else "Success",
@@ -798,15 +913,20 @@ class RunnerTests(unittest.TestCase):
                     "RUNNER_TEST_END": event("invocationFinished"),
                 }
                 result = subprocess.run(
-                    ["bash", "-c", shell], cwd=self.directory, env=environment,
+                    ["bash", "-c", shell], cwd=directory, env=environment,
                     capture_output=True, text=True, timeout=10,
                 )
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                bundle = self.directory / f"{stem}.xcresult"
+                bundle = directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
                 self.assertNotIn("-retry-tests-on-failure", args)
                 self.assertIn("test-without-building", args)
                 expected_selectors = selectors.split()
+                if step == "Run unit tests":
+                    self.assertEqual(
+                        [arg for arg in args if arg.startswith("-only-testing:")],
+                        expected_selectors,
+                    )
                 if key is not None and key.endswith("-1") and step == "Run XCUI shard":
                     self.assertNotIn(
                         "-only-testing:PrintFarmerUITests/LoginFlowUITests",
@@ -816,7 +936,7 @@ class RunnerTests(unittest.TestCase):
                 for selector in expected_selectors:
                     self.assertIn(selector, args)
                 for suffix in (".log", ".events.jsonl", ".timing.json"):
-                    self.assertTrue((self.directory / f"{stem}{suffix}").exists())
+                    self.assertTrue((directory / f"{stem}{suffix}").exists())
                 upload = workflow.split(f"      - name: {step}\n", 1)[1]
                 upload = upload.split("uses: actions/upload-artifact@v7", 1)[1]
                 upload = upload.split("retention-days:", 1)[0]
@@ -826,7 +946,7 @@ class RunnerTests(unittest.TestCase):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
                 if key is not None:
                     self.assertTrue(
-                        (self.directory / f"{stem}-first.timing.json").exists()
+                        (directory / f"{stem}-first.timing.json").exists()
                     )
                     self.assertIn(f"mobile/{stem}-first.timing.json", upload)
                     for suffix in (
