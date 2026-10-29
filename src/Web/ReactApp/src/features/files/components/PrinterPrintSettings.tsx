@@ -15,6 +15,8 @@ interface PrinterPrintSettingsProps {
   status: PrintSettingsStatus;
   /** When the durable details were saved in the catalog, if known. */
   savedAtUtc?: string | null;
+  /** Omit settings the source did not report instead of listing them as unknown. */
+  hideUnknown?: boolean;
 }
 
 /** Unknown values: a visual dash, announced as "Unknown" instead of "em dash". */
@@ -45,9 +47,10 @@ function statusNote(status: PrintSettingsStatus, hasValues: boolean): string | n
  * for one printer file. Every value comes from the server snapshot; unknown is shown as "—" and is
  * never replaced by a default.
  */
-export function PrinterPrintSettings({ metadata, status, savedAtUtc }: PrinterPrintSettingsProps) {
+export function PrinterPrintSettings({ metadata, status, savedAtUtc, hideUnknown = false }: PrinterPrintSettingsProps) {
   const headingId = useId();
-  const settings = printSettingRows(metadata);
+  const allSettings = printSettingRows(metadata);
+  const settings = hideUnknown ? allSettings.filter((row) => row.value != null) : allSettings;
   const tools = filamentToolRows(metadata);
   const otherRows = printerMetadataRows(metadata);
   const hasValues = settings.some((row) => row.value != null) || tools.length > 0 || otherRows.length > 0;

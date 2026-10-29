@@ -90,6 +90,9 @@ function unifiedPage() {
         source: 'Gcode', id: 'gcode-1', path: '/gcode', name: 'z-last.gcode', fileName: 'stored.gcode',
         fileSize: 2048, fileType: 'gcode', uploadedAt: gcodeUploadedAt, url: '/api/gcode-files/file/gcode-1',
         thumbnailUrl: '/thumbs/gcode-1.png', extractedPrintTime: 90, extractedLayerHeight: 0.2, requiredMaterial: 'PLA',
+        extractedSlicerName: 'OrcaSlicer', extractedSlicerVersion: '2.3.0', extractedPrinterModelName: 'Bambu Lab X1C',
+        extractedNozzleDiameter: 0.4, extractedHotendTemp: 220, extractedBedTemp: 0, extractedInfill: 15,
+        extractedMaterial: 'PETG', extractedFilamentLength: 1234.5, extractedPerimeters: 3,
       },
       {
         source: 'Model', id: 'model-1', path: '/models', name: 'a-first.stl', fileName: 'stored.stl',
@@ -183,6 +186,16 @@ describe('FilesPage local library', () => {
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
     expect(detailValue(panel, 'Material')).toHaveTextContent(/^PLA$/);
+    // Extracted settings use the on-printer "Print settings" layout; settings the library does
+    // not extract are omitted rather than listed as unknown.
+    const settings = within(panel).getByRole('region', { name: 'Print settings' });
+    expect(within(settings).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+      .toEqual([
+        ['Slicer', 'OrcaSlicer 2.3.0'], ['Sliced for', 'Bambu Lab X1C'], ['Nozzle diameter', '0.4 mm'],
+        ['Nozzle temperature', '220 °C'], ['Bed temperature', '0 °C'], ['Infill', '15%'],
+        ['Filament type', 'PETG'], ['Filament length', '1234.5 mm'],
+      ]);
+    expect(within(settings).queryByText('Unknown')).not.toBeInTheDocument();
     expect(detailValue(panel, 'Uploaded').querySelector('time')).toHaveTextContent(new Date(gcodeUploadedAt).toLocaleDateString());
     const panelActions = within(within(panel).getByRole('group', { name: 'File actions' })).getAllByRole('button');
     expect(panelActions.map((button) => button.getAttribute('aria-label')))
@@ -229,6 +242,7 @@ describe('FilesPage local library', () => {
     const panel = screen.getByRole('dialog', { name: 'a-first.stl' });
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unavailable$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unavailable$/);
+    expect(within(panel).queryByRole('region', { name: 'Print settings' })).not.toBeInTheDocument();
     expect(within(panel).getByText('Functional')).toBeInTheDocument();
     await user.click(within(panel).getByRole('button', { name: 'Download file' }));
     await waitFor(() => expect(apiMocks.downloadModel3dFile).toHaveBeenCalledWith('model-1', 'a-first.stl'));
