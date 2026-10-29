@@ -2240,7 +2240,8 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         value: Double
     ) async throws {
         let body: [String: Any] = ["quantity": quantity, "value": value]
-        let path = "/api/printers/\(printerID)/sensors/\(sensorID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sensorID)"
+        // apiRequest uses URL.appending(path:), which percent-encodes this raw path once.
+        let path = "/api/printers/\(printerID)/sensors/\(sensorID)"
         _ = try await apiRequest(credentials, token: token, path: path, method: "POST", body: body)
     }
 
