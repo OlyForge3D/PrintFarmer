@@ -160,6 +160,8 @@ final class Issue3561HeaderBandComparisonUITests: PrintFarmerUITestCase {
             XCTFail("The top of the \(printerName) card must be on screen before tapping")
             return
         }
+        // Farm elements leave the hierarchy once detail is pushed; record them as scalars now.
+        let cardFrameAtTap = card.frame
         app.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: point.x, dy: point.y))
             .tap()
@@ -174,7 +176,7 @@ final class Issue3561HeaderBandComparisonUITests: PrintFarmerUITestCase {
         attachGeometry(path, [
             "window=\(app.windows.firstMatch.frame)",
             "rootAnchor=\(rootAnchor)",
-            "cardFrameAtTap=\(card.frame) tapPoint=\(point)",
+            "cardFrameAtTap=\(cardFrameAtTap) tapPoint=\(point)",
             "searchFieldAtTap=\(searchAtTapDescription)",
             "searchFieldAtDetail=\(searchAtDetail.exists ? "present \(searchAtDetail.frame)" : "absent")",
             "navigationBarsAtDetail=\(navigationBars)",
