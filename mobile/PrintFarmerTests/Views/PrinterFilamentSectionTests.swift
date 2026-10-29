@@ -48,10 +48,84 @@ final class PrinterFilamentSectionTests: XCTestCase {
         }
     }
 
-    private func filamentCardImage(width: CGFloat, size: DynamicTypeSize, spoolName: String) async throws -> UIImage {
+    /// N3552-02 (#3561): a disabled Scan spool pill must look disabled through
+    /// its chrome, not only a recolored label, and must still show no reason.
+    func testDisabledScanSpoolPillUsesSharedDisabledChromeWithoutReasonText() async throws {
+        let reason = "Printer is offline"
+        for width: CGFloat in [320, 700] {
+            let enabled = try await filamentCardImage(width: width, size: .large, spoolName: "Prusament")
+            let disabled = try await filamentCardImage(
+                width: width, size: .large, spoolName: "Prusament", scanDisabledReason: reason
+            )
+            let disabledLines = try recognizedText(in: disabled)
+            XCTAssertTrue(disabledLines.contains { $0.contains("Scan spool") }, "\(width)pt: \(disabledLines)")
+            let visible = disabledLines.joined(separator: " ")
+            XCTAssertFalse(visible.contains(reason), "\(width)pt: disabled reason must stay out of view: \(disabledLines)")
+            for fragment in VisibleText.forbiddenFragments {
+                XCTAssertFalse(visible.localizedCaseInsensitiveContains(fragment), "\(width)pt: \(fragment) in \(disabledLines)")
+            }
+
+            let label = try XCTUnwrap(textBox(of: "Scan spool", in: enabled), "\(width)pt: Scan spool label not found")
+            let changed = try changedPixels(enabled, disabled, excluding: label.insetBy(dx: -4 * enabled.scale, dy: -4 * enabled.scale))
+            XCTAssertGreaterThanOrEqual(
+                changed, 1_000,
+                "\(width)pt: disabling Scan spool must restyle the pill fill/border, not only the label (\(changed) px)"
+            )
+        }
+    }
+
+    /// Pixel rect (top-left origin) of the first OCR observation containing `text`.
+    private func textBox(of text: String, in image: UIImage) throws -> CGRect? {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: cgImage).perform([request])
+        guard let match = (request.results ?? []).first(where: { $0.topCandidates(1).first?.string.contains(text) == true })
+        else { return nil }
+        let box = match.boundingBox
+        let width = CGFloat(cgImage.width), height = CGFloat(cgImage.height)
+        return CGRect(x: box.minX * width, y: (1 - box.maxY) * height, width: box.width * width, height: box.height * height)
+    }
+
+    /// Counts pixels outside `excluded` whose RGB differs by at least 2 levels.
+    private func changedPixels(_ lhs: UIImage, _ rhs: UIImage, excluding excluded: CGRect) throws -> Int {
+        let left = try rgba(lhs), right = try rgba(rhs)
+        XCTAssertEqual(left.width, right.width)
+        XCTAssertEqual(left.height, right.height)
+        guard left.width == right.width, left.height == right.height else { return 0 }
+        var count = 0
+        for y in 0..<left.height {
+            for x in 0..<left.width where !excluded.contains(CGPoint(x: x, y: y)) {
+                let index = (y * left.width + x) * 4
+                if (0..<3).contains(where: { abs(Int(left.bytes[index + $0]) - Int(right.bytes[index + $0])) >= 2 }) {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
+    private func rgba(_ image: UIImage) throws -> (bytes: [UInt8], width: Int, height: Int) {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width, height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return (bytes, width, height)
+    }
+
+    private func filamentCardImage(
+        width: CGFloat, size: DynamicTypeSize, spoolName: String, scanDisabledReason: String? = nil
+    ) async throws -> UIImage {
         let printer = try TestData.decodePrinter()
         let actions = [PrinterFilamentAction.Kind.change, .scanNFC].map {
-            PrinterFilamentAction(kind: $0, target: .printer(printer.id), disabledReason: nil)
+            PrinterFilamentAction(
+                kind: $0, target: .printer(printer.id), disabledReason: $0 == .scanNFC ? scanDisabledReason : nil
+            )
         }
         let model = PrinterFilamentPresentation(
             printer: printer, toolheads: [],
@@ -83,7 +157,7 @@ final class PrinterFilamentSectionTests: XCTestCase {
             XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "filament-\(Int(width))-\(size)-\(UIDevice.current.userInterfaceIdiom)-\(spoolName)"
+        attachment.name = "filament-\(Int(width))-\(size)-\(UIDevice.current.userInterfaceIdiom)-\(spoolName)\(scanDisabledReason == nil ? "" : "-scan-disabled")"
         attachment.lifetime = .keepAlways
         add(attachment)
         return image
