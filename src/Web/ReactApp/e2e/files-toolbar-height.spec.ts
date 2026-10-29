@@ -57,13 +57,18 @@ for (const width of [390, 1440]) {
           const toolbar = page.getByRole('group', { name: 'Printer file controls' });
           await expect(toolbar.getByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
           await expectUniformControls(toolbar, width === 1440);
-          await toolbar.getByRole('textbox', { name: 'Path search' }).focus();
+          const search = toolbar.getByRole('searchbox', { name: 'Search files' });
+          await expect(toolbar.locator('input, select, button').first()).toHaveAttribute('id', 'catalog-search');
+          await search.focus();
+          await page.keyboard.press('Tab');
+          await expect(toolbar.getByRole('combobox', { name: 'Printer' })).toBeFocused();
           await page.keyboard.press('Tab');
           await expect(toolbar.getByTitle('Explorer view')).toBeFocused();
         } else {
           await expect(page.getByRole('checkbox', { name: 'Select part.stl' })).toBeVisible();
           await page.getByRole('checkbox', { name: 'Select part.stl' }).check();
           const toolbar = page.locator('[data-tour="gcode-toolbar"]');
+          await expect(toolbar.locator('input, select, button').first()).toHaveAttribute('aria-label', 'Search files');
           await expectUniformControls(toolbar, width === 1440);
           const folders = toolbar.getByRole('button', { name: 'Folders', exact: true });
           await folders.focus();

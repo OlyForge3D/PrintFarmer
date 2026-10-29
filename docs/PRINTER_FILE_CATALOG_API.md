@@ -266,8 +266,12 @@ restricted local asset ID or authorizes reuse of its bytes.
 ### Explicit local Copy and staged Queue
 
 The canonical `/files` page separates **Local library** from **On printers**.
-The latter offers Printer and Path search filters, a view toggle, Refresh,
-and single-location actions. Both sources use matching 40px-high toolbar inputs,
+Both toolbars start with **Search files**. Local library matches display names
+and stored filenames; On printers matches relative paths, including filenames
+and folder segments. Both use case-insensitive substring matching, subject to
+database-provider Unicode casing differences. On printers also offers a Printer
+filter, a view toggle, Refresh, and single-location actions.
+Both sources use matching 40px-high toolbar inputs,
 dropdowns, buttons, and view toggles, including expanded local folder controls.
 Catalog browsing reads only local state. Automatic
 indexing can acquire metadata and thumbnails in a bounded background enrichment

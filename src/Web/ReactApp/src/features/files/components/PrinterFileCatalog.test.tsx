@@ -469,11 +469,11 @@ describe('Printer file catalog', () => {
     const user = userEvent.setup();
     renderCatalog();
     await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
-    if (change === 'filter') await user.type(screen.getByRole('textbox', { name: 'Path search' }), 'part');
+    if (change === 'filter') await user.type(screen.getByRole('searchbox', { name: 'Search files' }), 'part');
     else await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
     expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
-    if (change === 'filter') await user.clear(screen.getByRole('textbox', { name: 'Path search' }));
+    if (change === 'filter') await user.clear(screen.getByRole('searchbox', { name: 'Search files' }));
     else await user.click(screen.getByRole('button', { name: 'Previous' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
   });
@@ -688,8 +688,13 @@ describe('Printer file catalog', () => {
     renderCatalog();
     const toolbar = screen.getByRole('group', { name: 'Printer file controls' });
     expect(toolbar).toHaveClass('flex', 'flex-wrap', 'items-end');
-    expect(within(toolbar).getByRole('combobox', { name: 'Printer' })).toBeVisible();
-    expect(within(toolbar).getByRole('textbox', { name: 'Path search' })).toBeVisible();
+    const search = within(toolbar).getByRole('searchbox', { name: 'Search files' });
+    const printer = within(toolbar).getByRole('combobox', { name: 'Printer' });
+    expect(printer).toBeVisible();
+    expect(search).toBeVisible();
+    expect(search).toHaveAttribute('placeholder', 'Search filenames or paths');
+    expect(toolbar.firstElementChild).toContainElement(search);
+    expect(toolbar.children[1]).toContainElement(printer);
     expect(within(toolbar).getByRole('button', { name: 'Explorer view' })).toBeVisible();
     expect(within(toolbar).getByRole('button', { name: 'Grid view' })).toBeVisible();
     expect(await within(toolbar).findByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
@@ -701,6 +706,20 @@ describe('Printer file catalog', () => {
     if (mode === 'grid') {
       expect(within(toolbar).getByRole('checkbox', { name: 'Select all files on this page' })).toBeVisible();
     }
+  });
+
+  it('keeps path search scoped to the selected printer and resets paging', async () => {
+    const user = userEvent.setup();
+    renderCatalog('/files?source=printers&printer=source&remotePage=2');
+    const search = screen.getByRole('searchbox', { name: 'Search files' });
+    await user.type(search, 'Parts/part');
+    await waitFor(() => expect(mocks.catalog).toHaveBeenLastCalledWith({
+      printerId: 'source', search: 'Parts/part', page: 1, pageSize: 25,
+    }, expect.any(AbortSignal)));
+    await user.clear(search);
+    await waitFor(() => expect(mocks.catalog).toHaveBeenLastCalledWith({
+      printerId: 'source', search: undefined, page: 1, pageSize: 25,
+    }, expect.any(AbortSignal)));
   });
 
   it('Copy posts one explicit durable intent and never queues', async () => {
