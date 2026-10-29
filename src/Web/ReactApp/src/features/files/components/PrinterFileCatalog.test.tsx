@@ -6,6 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrinterFileCatalogEntry, PrinterFileCatalogPage, PrinterFileDeleteOperation, PrinterFileOperation, PrinterPrintMetadata } from '@/types/api';
 import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
 import { PrinterFileDiscoverySection } from '@/features/printers/components/PrinterFileDiscoverySection';
+import {
+  COMPACT_FILE_TABLE_CELL_CLASS,
+  COMPACT_FILE_TABLE_CLASS,
+  COMPACT_FILE_TABLE_FRAME_CLASS,
+  FILE_TABLE_HEAD_CLASS,
+  FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TABLE_ROW_CLASS,
+} from '@/features/fileBrowser/fileBrowserStyles';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(), operations: vi.fn(), operation: vi.fn(), copy: vi.fn(), queue: vi.fn(),
@@ -181,15 +189,26 @@ describe('Printer file catalog', () => {
     renderCatalog();
     const row = await findRow('part.gcode');
     const table = row.closest('table');
-    expect(table).toHaveClass('text-xs');
+    expect(table).toHaveClass(COMPACT_FILE_TABLE_CLASS);
+    expect(table?.parentElement).toHaveClass(COMPACT_FILE_TABLE_FRAME_CLASS);
+    expect(table?.querySelector('thead')).toHaveClass(FILE_TABLE_HEAD_CLASS);
+    expect(row).toHaveClass(FILE_TABLE_ROW_CLASS);
+    for (const header of within(table!).getAllByRole('columnheader')) {
+      expect(header).toHaveClass(FILE_TABLE_HEADER_CELL_CLASS);
+    }
+    for (const cell of within(row).getAllByRole('cell')) {
+      expect(cell).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS);
+    }
     expect(within(table!).getAllByRole('columnheader').map(cell => cell.textContent))
-      .toEqual(['', 'Preview', 'Name', 'Printer', 'Status', 'Size', 'Modified', 'Actions']);
+      .toEqual(['', 'Preview', 'Name', 'Printer', 'Size', 'Modified', 'Actions']);
     expect(within(table!).getByRole('checkbox', { name: 'Select all files on this page' })).toBeInTheDocument();
     expect(within(row).getByText('gcodes/Parts/part.gcode')).toBeInTheDocument();
     expect(cellUnder('Size', row)).toHaveTextContent(/^Unknown$/);
     expect(cellUnder('Modified', row)).toHaveTextContent(/^Unknown$/);
-    expect(within(cellUnder('Status', row)).getAllByRole('listitem').map(item => item.textContent))
-      .toEqual(['Available', 'Stale']);
+    expect(within(table!).queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+    for (const button of within(cellUnder('Actions', row)).getAllByRole('button')) {
+      expect(button).toHaveClass('p-1!');
+    }
     expect(screen.getByText(/Automatic discovery is globally disabled/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Discovery settings' })).toHaveAttribute(
       'href',
@@ -736,6 +755,8 @@ describe('Printer file catalog', () => {
     expect(detailValue(panel, 'Path')).toHaveTextContent('gcodes/Parts/part.gcode');
     expect(detailValue(panel, 'Source')).toHaveTextContent('Source printer');
     expect(detailValue(panel, 'Type')).toHaveTextContent('G-code file (GCODE)');
+    expect(within(detailValue(panel, 'Status')).getAllByRole('listitem').map(item => item.textContent))
+      .toEqual(['Available', 'Stale']);
     // This source does not offer previews, so nothing is invented.
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^Unavailable$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^Unavailable$/);

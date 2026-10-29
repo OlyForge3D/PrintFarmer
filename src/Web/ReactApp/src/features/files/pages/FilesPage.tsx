@@ -54,7 +54,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button, FormField, Select } from '@/common/components/ui';
+import { Button, FormField, Select, Tabs } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -563,8 +563,7 @@ export function FilesPage() {
     ];
   }, [handleDownloadGcode, handleDownloadModel]);
 
-  // Same columns and glyphs as the On printers table; the thumbnail sits between the
-  // selection checkbox and the name. Extended metadata lives in the detail panel.
+  // The thumbnail sits between selection and name; type and extended metadata live in details.
   const modelColumns = useMemo<ColumnDef[]>(() => [
     {
       key: 'thumbnail',
@@ -577,16 +576,6 @@ export function FilesPage() {
       sortable: true,
       render: (file) => (
         <FileNameButton name={file.fileName} className="max-w-xs" onOpen={(invoker) => openDetails(file, invoker)} />
-      ),
-    },
-    {
-      key: 'category',
-      label: 'Type',
-      render: (file) => (
-        <span className="inline-flex items-center gap-1.5 font-medium uppercase text-pf-text-secondary">
-          <FileTypeGlyph kind={getFileKind(file)} decorative />
-          {getFileExtension(file) || '—'}
-        </span>
       ),
     },
     {
@@ -782,70 +771,67 @@ export function FilesPage() {
         icon={FileIcon}
         actions={headerActions}
       >
-        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="File source">
-          {(['local', 'printers'] as const).map(source => (
-            <Button key={source} size="sm"
-              variant={onPrinters === (source === 'printers') ? 'primary' : 'secondary'}
-              aria-pressed={onPrinters === (source === 'printers')}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                if (source === 'printers') next.set('source', 'printers');
-                else next.delete('source');
-                next.delete('printer');
-                next.delete('file');
-                navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
-                setSelectedIds([]);
-                closeDetails();
-              }}>
-              {source === 'local' ? 'Local library' : 'On printers'}
-            </Button>
-          ))}
-        </div>
-        {/* overflow-clip (not hidden) keeps the docked detail panel sticky while clipping overflow. */}
-        <div className="min-h-[65vh] min-w-0 overflow-clip">
-          {onPrinters ? <PrinterFileCatalog /> : (
-            <div className="flex items-start gap-4">
-              <div className="min-w-0 flex-1">
-                <FileBrowser
-                  ref={fileBrowserRef}
-                  config={config}
-                  sortOptions={FILE_BROWSER_SORT_OPTIONS}
-                  columns={modelColumns}
-                  renderItemActions={renderItemActions}
-                  renderCard={renderCard}
-                  filterActions={fileTypeFilter}
-                  extraToolbarActions={toolbarActions}
-                  renderFolderNavigation={(path, onNavigate, controls) => (
-                    <LocalLibraryFolders
-                      controls={controls}
-                      path={path}
-                      onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
-                      modelIds={selectedModelIds}
-                      gcodeIds={selectedGcodeIds}
-                      canCreate={hasPermission('3d_models', 'create') && hasPermission('gcode_library', 'create')}
-                      canMove={(selectedModelIds.length === 0 || hasPermission('3d_models', 'create'))
-                        && (selectedGcodeIds.length === 0 || hasPermission('gcode_library', 'create'))}
-                      onMoved={() => { setSelectedIds([]); closeDetails(); }}
-                    />
-                  )}
-                  viewMode={viewMode}
-                  onViewModeChange={setViewMode}
-                  compact
-                />
+        <Tabs activeTab={onPrinters ? 'printers' : 'local'} onTabChange={source => {
+          const next = new URLSearchParams(searchParams);
+          if (source === 'printers') next.set('source', 'printers');
+          else next.delete('source');
+          next.delete('printer');
+          next.delete('file');
+          navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
+          setSelectedIds([]);
+          closeDetails();
+        }}>
+          <Tabs.List aria-label="File source">
+            <Tabs.Tab id="local">Local library</Tabs.Tab>
+            <Tabs.Tab id="printers">On printers</Tabs.Tab>
+          </Tabs.List>
+          {/* overflow-clip keeps the docked detail panel sticky while clipping overflow. */}
+          <Tabs.Panels className="min-h-[65vh] min-w-0 overflow-clip">
+            <Tabs.Panel id="printers"><PrinterFileCatalog /></Tabs.Panel>
+            <Tabs.Panel id="local">
+              <div className="flex items-start gap-4">
+                <div className="min-w-0 flex-1">
+                  <FileBrowser
+                    ref={fileBrowserRef}
+                    config={config}
+                    sortOptions={FILE_BROWSER_SORT_OPTIONS}
+                    columns={modelColumns}
+                    renderItemActions={renderItemActions}
+                    renderCard={renderCard}
+                    filterActions={fileTypeFilter}
+                    extraToolbarActions={toolbarActions}
+                    renderFolderNavigation={(path, onNavigate, controls) => (
+                      <LocalLibraryFolders
+                        controls={controls}
+                        path={path}
+                        onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
+                        modelIds={selectedModelIds}
+                        gcodeIds={selectedGcodeIds}
+                        canCreate={hasPermission('3d_models', 'create') && hasPermission('gcode_library', 'create')}
+                        canMove={(selectedModelIds.length === 0 || hasPermission('3d_models', 'create'))
+                          && (selectedGcodeIds.length === 0 || hasPermission('gcode_library', 'create'))}
+                        onMoved={() => { setSelectedIds([]); closeDetails(); }}
+                      />
+                    )}
+                    viewMode={viewMode}
+                    onViewModeChange={setViewMode}
+                    compact
+                  />
+                </div>
+                {details.selected && (
+                  <LocalFileDetails
+                    key={details.selected.id}
+                    file={details.selected}
+                    kind={getFileKind(details.selected)}
+                    extension={getFileExtension(details.selected)}
+                    actions={localActions(details.selected)}
+                    onClose={closeDetails}
+                  />
+                )}
               </div>
-              {details.selected && (
-                <LocalFileDetails
-                  key={details.selected.id}
-                  file={details.selected}
-                  kind={getFileKind(details.selected)}
-                  extension={getFileExtension(details.selected)}
-                  actions={localActions(details.selected)}
-                  onClose={closeDetails}
-                />
-              )}
-            </div>
-          )}
-        </div>
+            </Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
       </PageTemplate>
 
       <Modal isOpen={!!linkedFileId} title="Owned local G-code" onClose={() => {

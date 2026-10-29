@@ -2,7 +2,14 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
-import { COMPACT_FILE_TABLE_CELL_CLASS, COMPACT_FILE_TABLE_CLASS } from '../fileBrowserStyles';
+import {
+  COMPACT_FILE_TABLE_CELL_CLASS,
+  COMPACT_FILE_TABLE_CLASS,
+  COMPACT_FILE_TABLE_FRAME_CLASS,
+  FILE_TABLE_HEAD_CLASS,
+  FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TABLE_ROW_CLASS,
+} from '../fileBrowserStyles';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -519,11 +526,11 @@ export const ExplorerView = ({
          * folder tree's `max-h-[40vh]` pattern above) keeps the scrollbar within a
          * predictable, reachable area regardless of row count.
          */}
-        <div className={`flex-1 overflow-x-auto ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
+        <div className={`flex-1 ${compact ? COMPACT_FILE_TABLE_FRAME_CLASS : 'overflow-x-auto'} ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
           <table className={compact ? COMPACT_FILE_TABLE_CLASS : 'w-full text-sm border-collapse'} role="table" aria-label="Files list">
-            <thead className="sticky top-0 bg-pf-bg-1 border-b border-pf-border">
+            <thead className={FILE_TABLE_HEAD_CLASS}>
               <tr>
-                <th scope="col" className="w-10 px-3 py-2 text-left font-semibold text-pf-text-secondary text-xs uppercase tracking-wider">
+                <th scope="col" className={`w-10 ${FILE_TABLE_HEADER_CELL_CLASS}`}>
                   <Checkbox
                     aria-label="Select all files"
                     checked={isAllSelected}
@@ -539,15 +546,17 @@ export const ExplorerView = ({
                     <th
                       key={column.key}
                       scope="col"
-                      className={`px-3 py-2 text-left font-semibold text-pf-text-secondary text-xs uppercase tracking-wider ${column.align === 'right' ? 'text-right' : ''}`}
+                      className={`${FILE_TABLE_HEADER_CELL_CLASS} ${column.align === 'right' ? 'text-right' : ''}`}
                       aria-sort={sortable ? ariaSort : undefined}
                     >
                       {sortable ? (
                         <Button
                           type="button"
-                          variant="subtle"
+                          variant={compact ? 'unstyled' : 'subtle'}
                           size="sm"
-                          className="inline-flex items-center gap-1 px-0 py-0 cursor-pointer hover:bg-pf-bg-2 transition-colors"
+                          className={compact
+                            ? 'inline-flex items-center gap-1 cursor-pointer font-semibold uppercase tracking-wider hover:bg-pf-bg-2 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
+                            : 'inline-flex items-center gap-1 px-0 py-0 cursor-pointer hover:bg-pf-bg-2 transition-colors'}
                           onClick={() => onSort(column.key)}
                           aria-label={`Sort by ${column.label}`}
                         >
@@ -560,7 +569,7 @@ export const ExplorerView = ({
                     </th>
                   );
                 })}
-                <th scope="col" className="px-3 py-2 text-right font-semibold text-pf-text-secondary text-xs uppercase tracking-wider">
+                <th scope="col" className={`${FILE_TABLE_HEADER_CELL_CLASS} text-right`}>
                   Actions
                 </th>
               </tr>
@@ -592,14 +601,14 @@ export const ExplorerView = ({
                     key={file.id}
                     draggable={isDraggable}
                     onDragStart={handleDragStart}
-                    className={`border-b border-pf-border transition-colors ${
+                    className={`${compact ? FILE_TABLE_ROW_CLASS : 'border-b border-pf-border transition-colors'} ${
                       // Hover is withheld while selected: `hover:bg-*` scores (0,1,1)
                       // against the selected class's (0,1,0) in the same utilities
                       // layer, so an unconditional hover erased the highlight. #1088
                       isSelected ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2'
                     } ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   >
-                    <td className="px-3 py-2 w-10">
+                    <td className={`w-10 ${compact ? COMPACT_FILE_TABLE_CELL_CLASS : 'px-3 py-2'}`}>
                       <Checkbox
                         aria-label={`Select ${file.fileName}`}
                         checked={isSelected}
@@ -626,7 +635,7 @@ export const ExplorerView = ({
                               : '—'}
                       </td>
                     ))}
-                    <td className={compact ? 'px-3 py-1.5 text-right align-middle' : 'px-3 py-2 text-right'}>
+                    <td className={compact ? `${COMPACT_FILE_TABLE_CELL_CLASS} text-right` : 'px-3 py-2 text-right'}>
                       {renderActions && (
                         <div className={compact ? 'flex justify-end gap-1' : 'flex justify-end gap-2'}>
                           {renderActions(file)}

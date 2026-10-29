@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const moduleLoads = vi.hoisted(() => ({
@@ -135,6 +135,15 @@ vi.mock('@/services/api', () => ({
 
 import { FilesPage } from '../FilesPage';
 
+function NavigationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <>
+    <output aria-label="Current URL">{location.pathname}{location.search}</output>
+    <button type="button" onClick={() => navigate(-1)}>Back</button>
+  </>;
+}
+
 describe('FilesPage lazy interactions', () => {
   afterEach(() => { vi.useRealTimers(); });
 
@@ -151,8 +160,8 @@ describe('FilesPage lazy interactions', () => {
       );
 
       expect(screen.getByText('Owned local browser')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Local library' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'On printers' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Local library' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'On printers' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /harvest/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     },
@@ -171,13 +180,23 @@ describe('FilesPage lazy interactions', () => {
     );
     expect(screen.getByText('Owned local browser')).toBeInTheDocument();
     expect(moduleLoads.remoteCatalog).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'On printers' }));
+    const user = userEvent.setup();
+    const localTab = screen.getByRole('tab', { name: 'Local library' });
+    expect(localTab).toHaveAttribute('aria-selected', 'true');
+    localTab.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'On printers' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'On printers' })).toHaveFocus();
     expect(await screen.findByRole('region', { name: 'On printers' })).toBeInTheDocument();
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('tabpanel', { name: 'On printers' })).toHaveAttribute(
+      'id', screen.getByRole('tab', { name: 'On printers' }).getAttribute('aria-controls'),
+    );
     expect(screen.queryByRole('heading', { name: 'On printers' })).not.toBeInTheDocument();
     expect(screen.queryByText('Metadata observations, not owned library files. Browsing never downloads G-code.')).not.toBeInTheDocument();
     expect(screen.queryByText('Owned local browser')).not.toBeInTheDocument();
     await waitFor(() => expect(moduleLoads.remoteOperations).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Local library' }));
+    fireEvent.click(localTab);
     expect(screen.getByText('Owned local browser')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'On printers' })).not.toBeInTheDocument();
     expect(queryClient.getQueryCache().find({ queryKey: ['printer-file-catalog'], exact: false })?.getObserversCount()).toBe(0);
@@ -185,6 +204,30 @@ describe('FilesPage lazy interactions', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(moduleLoads.remoteCatalog).toHaveBeenCalledTimes(1);
     expect(moduleLoads.remoteOperations).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects the URL tab on direct entry and browser Back without mounting both sources', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/files?source=printers&printer=source&remoteSearch=usb']}>
+          <FilesPage /><NavigationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('tablist', { name: 'File source' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'On printers' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText('Owned local browser')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Local library' }));
+    expect(screen.getByRole('tab', { name: 'Local library' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('status', { name: 'Current URL' })).toHaveTextContent('/files?remoteSearch=usb');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByText('Owned local browser')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'On printers' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByRole('status', { name: 'Current URL' })).toHaveTextContent('/files?source=printers&printer=source&remoteSearch=usb');
+    expect(screen.queryByText('Owned local browser')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
   });
 
   it('loads each large modal only after direct user intent', async () => {

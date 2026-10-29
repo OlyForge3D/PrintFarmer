@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GridView } from "../components/GridView";
 import { ExplorerView } from "../components/ExplorerView";
 import type { ColumnDef, FileItem, FolderNode } from "../types";
+import {
+  COMPACT_FILE_TABLE_CELL_CLASS,
+  COMPACT_FILE_TABLE_CLASS,
+  COMPACT_FILE_TABLE_FRAME_CLASS,
+  FILE_TABLE_HEAD_CLASS,
+  FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TABLE_ROW_CLASS,
+} from "../fileBrowserStyles";
 
 /** Installs a `window.matchMedia` mock reporting `matches` for every query, mirroring
  * the media-query listener contract `ExplorerView` relies on to detect the mobile layout. */
@@ -196,7 +204,19 @@ describe("compact presentation (opt-in, used by /files)", () => {
   it("renders the file table at 12px with tight cells when compact", () => {
     renderTable(true);
     const table = screen.getByRole("table", { name: "Files list" });
-    expect(table).toHaveClass("text-xs");
+    expect(table).toHaveClass(COMPACT_FILE_TABLE_CLASS);
+    expect(table.parentElement).toHaveClass(COMPACT_FILE_TABLE_FRAME_CLASS);
+    expect(table.querySelector("thead")).toHaveClass(FILE_TABLE_HEAD_CLASS);
+    for (const header of within(table).getAllByRole("columnheader")) {
+      expect(header).toHaveClass(FILE_TABLE_HEADER_CELL_CLASS);
+    }
+    const row = within(table).getAllByRole("row")[1];
+    expect(row).toHaveClass(FILE_TABLE_ROW_CLASS);
+    for (const cell of within(row).getAllByRole("cell")) {
+      expect(cell).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS);
+    }
+    expect(within(table).getByRole("button", { name: "Sort by Name" })).toHaveAttribute("data-pf-variant", "unstyled");
+    expect(within(table).getByRole("button", { name: "Sort by Name" })).toHaveClass("uppercase", "font-semibold");
     expect(table).not.toHaveClass("text-sm");
     expect(screen.getByText("file.gcode").closest("td")).toHaveClass("py-1.5");
   });

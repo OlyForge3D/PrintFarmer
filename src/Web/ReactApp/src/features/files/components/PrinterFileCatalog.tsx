@@ -34,6 +34,9 @@ import {
   COMPACT_FILE_GRID_CLASS,
   COMPACT_FILE_TABLE_CELL_CLASS,
   COMPACT_FILE_TABLE_CLASS,
+  COMPACT_FILE_TABLE_FRAME_CLASS,
+  FILE_TABLE_HEAD_CLASS,
+  FILE_TABLE_ROW_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
 
@@ -429,15 +432,14 @@ export function PrinterFileCatalog() {
                   })}
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-pf-border">
+                <div className={COMPACT_FILE_TABLE_FRAME_CLASS}>
                   <table className={COMPACT_FILE_TABLE_CLASS} aria-label="Files on printers">
                     <caption className="sr-only">Printer-resident file observations. Missing metadata does not establish owned content.</caption>
-                    <thead className="border-b border-pf-border bg-pf-bg-1"><tr>
-                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-8')}>{selectAllCheckbox()}</th>
+                    <thead className={FILE_TABLE_HEAD_CLASS}><tr>
+                      <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'w-10')}>{selectAllCheckbox()}</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Preview</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Name</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Printer</th>
-                      <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Status</th>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Size</th>
                       <th scope="col" className={FILE_TABLE_HEADER_CELL_CLASS}>Modified</th>
                       <th scope="col" className={clsx(FILE_TABLE_HEADER_CELL_CLASS, 'text-right')}>Actions</th>
@@ -448,8 +450,8 @@ export function PrinterFileCatalog() {
                         const isActive = details.selected === entry.id;
                         const rowSelection = selectionFor(entry);
                         return (
-                          <tr key={entry.id} className={clsx('border-b border-pf-border last:border-b-0', isActive || rowSelection.checked ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}>
+                          <tr key={entry.id} className={clsx(FILE_TABLE_ROW_CLASS, isActive || rowSelection.checked ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2')}>
+                            <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'w-10')}>
                               <Checkbox
                                 aria-label={`Select ${entry.displayName}`}
                                 checked={rowSelection.checked}
@@ -473,11 +475,10 @@ export function PrinterFileCatalog() {
                               <div className="truncate font-mono text-pf-text-secondary" title={path}>{path}</div>
                             </td>
                             <td className={COMPACT_FILE_TABLE_CELL_CLASS}>{entry.printerName}</td>
-                            <td className={COMPACT_FILE_TABLE_CELL_CLASS}><PrinterFileStatusGlyphs entry={entry} showLabels /></td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap text-right')}>{formatSizeLabel(entry.sizeBytes)}</td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'whitespace-nowrap')}><PrinterFileModified value={entry.modifiedValue} /></td>
                             <td className={clsx(COMPACT_FILE_TABLE_CELL_CLASS, 'text-right')}>
-                              <div className="flex justify-end gap-1"><FileActionIconButtons actions={entryActions(entry)} /></div>
+                              <div className="flex justify-end gap-1"><FileActionIconButtons actions={entryActions(entry)} dense /></div>
                             </td>
                           </tr>
                         );

@@ -52,6 +52,8 @@ Main overview page showing all printers with real-time status.
   `&printer=<printerId>` to scope the catalog to one printer. Filters appear
   directly without a duplicate source heading and description.
 
+**Local library** and **On printers** use the shared themed tabs. The selected
+source stays URL-driven, and only its content is mounted.
 Both sources share the same compact card grid and 12px table, with the same
 file, status, and action glyphs. Selecting a card or file name opens a details
 panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
@@ -60,6 +62,10 @@ source, print time, and layer height. Values the source cannot provide are shown
 as **Unknown** (or an accessible dash). File dates display as dates only; hover for the full
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
+
+Tables share their border, header, row spacing, selection styling, and dense
+action buttons. Local library omits **Type** and On printers omits **Status**
+from the table; these values remain in file details (and on cards).
 
 #### Local-library folders
 
