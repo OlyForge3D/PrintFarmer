@@ -90,6 +90,18 @@ function hasSensorTemperature(
   );
 }
 
+function sensorsFromStatus(status: unknown): JsonRecord[] {
+  return isRecord(status) && Array.isArray(status.sensors)
+    ? status.sensors.filter(isRecord)
+    : [];
+}
+
+function hasCachedFanAvailability(status: unknown): boolean {
+  const sensors = sensorsFromStatus(status);
+  return sensors.some(sensor => sensor.kind === 'Fan') &&
+    sensors.every(sensor => typeof sensor.available === 'boolean');
+}
+
 test.use({ serviceWorkers: 'block' });
 
 test.describe('Printer Sensor Delivery — Moonraker', () => {
@@ -174,7 +186,19 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
     });
 
     await createMoonrakerControl(request).reset('ready');
+    await page.addInitScript(() => {
+      window.PrintFarmerDebug = { printerSignalRVerbose: true };
+    });
     await page.goto('/printers');
+
+    const readCachedStatus = () => page.evaluate((id) => {
+      const debug = window.PrintFarmerDebug;
+      const signalRState = debug ? Reflect.get(debug, 'printerSignalR') : null;
+      if (typeof signalRState !== 'object' || signalRState === null) return null;
+      const statuses = Reflect.get(signalRState, 'lastStatuses');
+      if (typeof statuses !== 'object' || statuses === null) return null;
+      return Reflect.get(statuses, id) ?? null;
+    }, printerId);
 
     const details = await getInlinePrinterDetails(page, printerName);
     const sensorRow = details.getByTestId(`sensor-${sensorId}`);
@@ -182,6 +206,11 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
     await expect.poll(() => signalRStatuses.some(({ status }) =>
       hasSensorTemperature(status, printerId, sensorId, 23.4)
     )).toBe(true);
+    const initialClientStatus = await readCachedStatus();
+    expect(isRecord(initialClientStatus) &&
+      hasSensorTemperature(initialClientStatus, printerId, sensorId, 23.4)
+    ).toBe(true);
+    expect(hasCachedFanAvailability(initialClientStatus)).toBe(true);
 
     const printerApiRequestsBeforeLiveChange = printerApiRequests.length;
     const printerStatusInvocationsBeforeLiveChange = printerStatusInvocations.length;
@@ -193,6 +222,10 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       hasSensorTemperature(status, printerId, sensorId, 31.5)
     )).toBe(true);
     await expect(sensorRow.getByText('31.5°C', { exact: true })).toBeVisible();
+    const liveClientStatus = await readCachedStatus();
+    expect(isRecord(liveClientStatus) &&
+      hasSensorTemperature(liveClientStatus, printerId, sensorId, 31.5)
+    ).toBe(true);
     expect(printerApiRequests).toHaveLength(printerApiRequestsBeforeLiveChange);
     expect(printerStatusInvocations).toHaveLength(printerStatusInvocationsBeforeLiveChange);
 
@@ -238,6 +271,10 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       result: { status: { [sensorId]: { temperature: 42.6 } } },
     });
     await expect(sensorRow.getByText('31.5°C', { exact: true })).toBeVisible();
+    const disconnectedClientStatus = await readCachedStatus();
+    expect(isRecord(disconnectedClientStatus) &&
+      hasSensorTemperature(disconnectedClientStatus, printerId, sensorId, 31.5)
+    ).toBe(true);
     expect(signalRStatuses.some(({ status }) =>
       hasSensorTemperature(status, printerId, sensorId, 42.6)
     )).toBe(false);
@@ -261,6 +298,11 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       { timeout: 20_000 },
     ).toBe(true);
     await expect(sensorRow.getByText('42.6°C', { exact: true })).toBeVisible();
+    const reconnectedClientStatus = await readCachedStatus();
+    expect(isRecord(reconnectedClientStatus) &&
+      hasSensorTemperature(reconnectedClientStatus, printerId, sensorId, 42.6)
+    ).toBe(true);
+    expect(hasCachedFanAvailability(reconnectedClientStatus)).toBe(true);
     expect(blockedPrinterApiRequests).toEqual(printerApiRequests.slice(printerApiRequestsBeforeReconnect));
     expect(printerStatusApiRequests).toHaveLength(printerStatusApiRequestsBeforeReconnect);
     expect(printerStatusInvocations).toHaveLength(printerStatusInvocationsBeforeReconnect);
