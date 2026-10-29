@@ -3826,6 +3826,37 @@ export interface SpoolmanBulkUpdateResult {
   errors: string[];
 }
 
+/** Per-ID outcome of a local-library bulk delete (`DELETE /api/gcode-files` or `DELETE /api/3d-models`). */
+export type BulkDeleteItemStatus =
+  | 'Deleted'
+  | 'DeletedCleanupIncomplete'
+  | 'NotFound'
+  | 'Blocked'
+  | 'Failed'
+  | 'Unknown';
+
+export interface BulkDeleteItemResult {
+  id: string;
+  status: BulkDeleteItemStatus;
+  /** Stable reason code such as `ActiveJobs` or `StorageFailed`; never a path or exception text. */
+  reason?: string;
+}
+
+/** Response of `DELETE /api/gcode-files`; counts are over distinct requested IDs. */
+export interface DeleteGcodeFilesResponse {
+  deleted: number;
+  totalRequested: number;
+  results: BulkDeleteItemResult[];
+}
+
+/** Response of `DELETE /api/3d-models`; counts are over distinct requested IDs. */
+export interface DeleteModel3dFilesResponse {
+  deleted: number;
+  errors: number;
+  total: number;
+  results: BulkDeleteItemResult[];
+}
+
 /**
  * Request to bulk-delete filaments from Spoolman.
  */

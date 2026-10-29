@@ -3,7 +3,12 @@
 import { getAuthenticatedCameraProxyRoute } from "@/common/auth/authenticatedCameraRoutes";
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import type { PrinterSensorSetRequest, PrinterStatus } from "@/types/api";
+import type {
+  DeleteGcodeFilesResponse,
+  DeleteModel3dFilesResponse,
+  PrinterSensorSetRequest,
+  PrinterStatus,
+} from "@/types/api";
 import {
   PrintJobStatusDto,
   BedType,
@@ -2558,16 +2563,18 @@ export class ApiClient {
     return ApiClient.normalizePrintablesHistoryPage(response.data);
   }
 
-  async deleteGcodeFiles(fileIds: string[]): Promise<void> {
-    await this.client.delete("/gcode-files", { data: { fileIds } });
+  async deleteGcodeFiles(fileIds: string[]): Promise<DeleteGcodeFilesResponse> {
+    const response = await this.client.delete<DeleteGcodeFilesResponse>("/gcode-files", { data: { fileIds } });
+    return response.data;
   }
 
   async deleteModel3dFile(id: string): Promise<void> {
     await this.client.delete(`/3d-models/${id}`);
   }
 
-  async deleteModel3dFiles(modelIds: string[]): Promise<void> {
-    await this.client.delete("/3d-models", { data: { modelIds } });
+  async deleteModel3dFiles(ids: string[]): Promise<DeleteModel3dFilesResponse> {
+    const response = await this.client.delete<DeleteModel3dFilesResponse>("/3d-models", { data: { ids } });
+    return response.data;
   }
 
   async downloadGcodeFile(filePath: string, originalName?: string): Promise<void> {

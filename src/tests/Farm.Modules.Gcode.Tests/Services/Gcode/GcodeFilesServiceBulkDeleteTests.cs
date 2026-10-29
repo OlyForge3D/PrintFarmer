@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -23,6 +24,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Xunit.Abstractions;
 
 namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 
@@ -35,12 +37,14 @@ namespace Farm.Modules.Gcode.Tests.Services.Gcode;
 public sealed class GcodeFilesServiceBulkDeleteTests : IDisposable
 {
     private readonly SqliteConnection _connection;
+    private readonly ITestOutputHelper _output;
     private readonly string _storageRoot;
     private readonly Guid _folderId = Guid.NewGuid();
     private readonly Guid _printerId = Guid.NewGuid();
 
-    public GcodeFilesServiceBulkDeleteTests()
+    public GcodeFilesServiceBulkDeleteTests(ITestOutputHelper output)
     {
+        _output = output;
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
         TestSqlitePragmaEnforcer.EnsureForeignKeysEnabled(_connection);
@@ -105,21 +109,31 @@ public sealed class GcodeFilesServiceBulkDeleteTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteFilesAsync_UsesSetBasedQueriesAndSingleTransaction()
+    public async Task DeleteFilesAsync_QueryCountDoesNotGrowWithSelectionSize()
     {
-        List<GcodeFile> files = [];
-        for (int i = 0; i < 25; i++)
+        var selectsBySize = new Dictionary<int, int>();
+        foreach (int size in new[] { 1, 10, 100 })
         {
-            files.Add(await SeedFileAsync($"f{i}.gcode"));
+            List<Guid> ids = [];
+            for (int i = 0; i < size; i++)
+            {
+                ids.Add((await SeedFileAsync($"s{size}-{i}.gcode", withThumbnail: true)).Id);
+            }
+
+            var counter = new CommandCounter();
+            var stopwatch = Stopwatch.StartNew();
+            IReadOnlyList<BulkDeleteItemResult> results = await DeleteAsync(ids, counter);
+            stopwatch.Stop();
+
+            results.Should().OnlyContain(r => r.Status == BulkDeleteItemStatus.Deleted).And.HaveCount(size);
+            counter.Commits.Should().Be(1, "all eligible records are removed in one owned transaction");
+            selectsBySize[size] = counter.Selects;
+            // Local SQLite in-memory evidence only; not a production-provider latency claim.
+            _output.WriteLine($"files={size} selects={counter.Selects} commits={counter.Commits} elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F1}");
         }
 
-        var counter = new CommandCounter();
-        IReadOnlyList<BulkDeleteItemResult> results = await DeleteAsync(files.ConvertAll(f => f.Id), counter);
-
-        results.Should().OnlyContain(r => r.Status == BulkDeleteItemStatus.Deleted).And.HaveCount(25);
-        counter.Commits.Should().Be(1, "all eligible records are removed in one owned transaction");
-        counter.Selects.Should().BeLessThan(10,
-            "file lookup, active-job count, and reference clearing are set-based rather than per file (25 files)");
+        selectsBySize.Values.Distinct().Should().ContainSingle(
+            "file lookup, active-job count, and reference clearing are set-based rather than per file");
     }
 
     [Fact]
