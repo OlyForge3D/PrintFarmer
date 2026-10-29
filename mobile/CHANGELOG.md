@@ -8,7 +8,7 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 - **Disabled Scan spool pill (#3561, N3552-02)** — A disabled "Scan spool" pill
   now uses the same dimmed, striped disabled chrome as other printer controls,
-  without adding lockout text.
+  with its label still readable and without adding lockout text.
 
 - **Filament Dynamic Type (#3535, #3536)** — Remaining amount and job demand
   stack without a separator when space is limited. Spool names scale through

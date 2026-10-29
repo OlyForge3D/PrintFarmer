@@ -336,6 +336,9 @@ struct PrinterFilamentSection: View {
                 if showsAllActions {
                     Text(actionTitle(action))
                         .multilineTextAlignment(.center)
+                        // Like Home/Jog, the shared disabled chrome is the only dimming;
+                        // the borderless disabled grey under it left the label unreadable.
+                        .foregroundStyle(.tint)
                         .frame(maxWidth: .infinity, minHeight: 44, maxHeight: fillsHeight ? .infinity : nil)
                         .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
