@@ -1644,6 +1644,7 @@ final class Issue3496SnapshotCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // Same header in every mode: the badge is gone (#3496 N08).
         XCTAssertFalse(app.staticTexts["SNAPSHOT"].exists)
         XCTAssertFalse(app.staticTexts["LIVE"].exists)
+        XCTAssertFalse(app.staticTexts["printer.detail.camera.livepaused"].exists)
         let named = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         named.name = "status-camera-header-full-width-media"
         named.lifetime = .keepAlways
@@ -1671,6 +1672,8 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         let media = app.descendants(matching: .any)["printer.detail.camera.media"]
         let toggle = app.buttons["printer.detail.camera.livetoggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        let liveViewPaused = app.staticTexts["printer.detail.camera.livepaused"]
+        XCTAssertFalse(liveViewPaused.exists, "Live mode does not show the paused message")
         XCTAssertGreaterThanOrEqual(toggle.frame.minY, media.frame.minY - 1, "The mode toggle sits on the media, not in the header")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
@@ -1682,9 +1685,12 @@ final class Issue3496MjpegCameraLayoutUITests: Issue3496CameraLayoutUITests {
         // R3514-B12: a stream-only camera must stay switchable after choosing snapshot.
         toggle.tap()
         XCTAssertTrue(app.buttons["Switch to livestream"].waitForExistence(timeout: 5), "Toggle stays reachable in snapshot mode")
+        XCTAssertTrue(liveViewPaused.waitForExistence(timeout: 5))
+        XCTAssertEqual(liveViewPaused.label, "Live view paused")
         XCTAssertEqual(app.staticTexts["printer.detail.camera.title"].label, "Camera")
         app.buttons["Switch to livestream"].tap()
         XCTAssertTrue(app.buttons["Switch to snapshot"].waitForExistence(timeout: 5))
+        XCTAssertFalse(liveViewPaused.exists, "Live mode hides the paused message")
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.camera.stream.placeholder"].waitForExistence(timeout: 5),
             "Livestream returns after switching back"
