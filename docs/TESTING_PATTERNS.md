@@ -589,6 +589,20 @@ for hours. If the guard ever fires again, the blame sequence/dump files under th
 project's `TestResults/` directory identify the exact hung test, which should replace
 this rationale with a targeted fix once known.
 
+### Profile-import concurrency signal diagnostics
+
+The inverse-interleaving test in `UserTaskServiceTests` races each required
+signal against its owning service operation. A fault before the signal is
+observed as the original exception, rather than a misleading signal timeout.
+A genuine timeout reports the expected stage, task statuses, insert/reload
+progress, and a thread-pool snapshot without extending the existing deadline.
+Failure cleanup cancels the fixture operations and releases its gates.
+
+These diagnostics support investigation of #3599, not a root-cause fix.
+Neither a passing focused run nor available-worker counts prove or disprove
+scheduler starvation. Preserve the failing run/attempt/job and artifact IDs
+alongside same-head recovery evidence; artifact names can repeat across attempts.
+
 ### Known environment-only local failures (macOS)
 
 These `Farm.Web.Api.Tests` failure categories are environment/platform limitations, not
