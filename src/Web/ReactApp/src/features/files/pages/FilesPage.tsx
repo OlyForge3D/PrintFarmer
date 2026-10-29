@@ -27,6 +27,7 @@ import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
 import { FileNameButton } from '@/features/files/components/FileNameButton';
 import { FileThumbnail } from '@/features/files/components/FileThumbnail';
 import { LocalFileDetails } from '@/features/files/components/LocalFileDetails';
+import { LocalLibraryFolders } from '@/features/files/components/LocalLibraryFolders';
 import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
 import {
   fileExtension,
@@ -107,6 +108,7 @@ interface TaggingTarget {
 }
 
 interface UnifiedQueryParams {
+  path: string;
   page: number;
   pageSize: number;
   search: string;
@@ -434,6 +436,7 @@ export function FilesPage() {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search || undefined,
+      path: query.path || undefined,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
       filter: query.filter,
@@ -447,7 +450,7 @@ export function FilesPage() {
       totalSize: response.totalSize,
       page: response.page,
       folders: [],
-      currentPath: '/',
+      currentPath: query.path,
     };
   }, [printerId]);
 
@@ -455,6 +458,7 @@ export function FilesPage() {
     fetcher,
     mapDomainToFileItem: toFileItem,
     mapQueryParams: (query: FileQueryState): UnifiedQueryParams => ({
+      path: query.path,
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -465,7 +469,7 @@ export function FilesPage() {
     defaultSort: { sortBy: 'date', sortOrder: 'desc' },
     selectedIds,
     onSelectionChange: setSelectedIds,
-    initialPath: '/',
+    initialPath: '',
     viewMode,
     onViewModeChange: (mode) => setViewMode(mode),
   }), [fetcher, selectedFilter, selectedIds, setViewMode, viewMode]);
@@ -818,6 +822,18 @@ export function FilesPage() {
                   renderCard={renderCard}
                   filterActions={filterButtons}
                   extraToolbarActions={toolbarActions}
+                  renderFolderNavigation={(path, onNavigate) => (
+                    <LocalLibraryFolders
+                      path={path}
+                      onNavigate={(nextPath) => { closeDetails(); onNavigate(nextPath); }}
+                      modelIds={selectedModelIds}
+                      gcodeIds={selectedGcodeIds}
+                      canCreate={hasPermission('3d_models', 'create') && hasPermission('gcode_library', 'create')}
+                      canMove={(selectedModelIds.length === 0 || hasPermission('3d_models', 'create'))
+                        && (selectedGcodeIds.length === 0 || hasPermission('gcode_library', 'create'))}
+                      onMoved={() => { setSelectedIds([]); closeDetails(); }}
+                    />
+                  )}
                   viewMode={viewMode}
                   onViewModeChange={setViewMode}
                   compact

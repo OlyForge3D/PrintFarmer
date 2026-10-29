@@ -60,6 +60,24 @@ as **Unknown** (or an accessible dash). File dates display as dates only; hover 
 timestamp. Details-panel actions are icon-only buttons; hover or focus them to
 see their names.
 
+#### Local-library folders
+
+The **Folder** dropdown replaces the local library's folder tree in both list and
+grid views. **All folders** shows the whole library; **Root** shows only files
+assigned to `/`. Choosing another folder shows its direct files, not descendants,
+with filtering applied before server pagination and totals. The dropdown combines
+model and G-code folders; the breadcrumb links back to ancestors or All folders.
+Changing folder resets the page and clears the selection and details panel.
+
+**New folder** creates a child of the current folder (Root when All folders is
+selected) in both libraries. Select files and use **Move to folder...** to choose
+their destination. These controls require create permission for the affected
+libraries. Model and G-code operations are separate requests: partial failures are
+reported, not rolled back. After an incomplete move, review the refreshed library
+and reselect remaining files before retrying. Folder-load errors also offer retry.
+
+#### Print settings
+
 The **Print settings** section presents time, layer height/count, nozzle size,
 temperatures, infill, supports, filament weight, and slicer identity. A
 **Filament by tool** table keeps each reported tool's color, material, and weight

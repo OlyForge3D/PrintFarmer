@@ -40,6 +40,7 @@ interface ExplorerViewProps {
   isBusy?: boolean;
   /** Dense 12px table (shared with the printer catalog). */
   compact?: boolean;
+  showFolderNavigation?: boolean;
 }
 
 const FolderTree = ({
@@ -330,6 +331,7 @@ export const ExplorerView = ({
   columns,
   isBusy,
   compact = false,
+  showFolderNavigation = true,
 }: ExplorerViewProps) => {
   const isAllSelected = selectedIds.length > 0 && selectedIds.length === files.length;
   const isIndeterminate = selectedIds.length > 0 && selectedIds.length !== files.length;
@@ -391,7 +393,7 @@ export const ExplorerView = ({
       ref={containerRef}
     >
       {/* Left Pane: Folder Tree or Collapsed Bar */}
-      {isPanelCollapsed ? (
+      {showFolderNavigation && (isPanelCollapsed ? (
         <div
           className={
             isMobile
@@ -462,12 +464,12 @@ export const ExplorerView = ({
             />
           )}
         </>
-      )}
+      ))}
 
       {/* Right Pane: Files Table */}
       <div className="flex flex-col overflow-hidden bg-pf-bg-0 flex-1">
         {/* Breadcrumbs and Selection Count */}
-        <div className="border-b border-pf-border bg-pf-bg-1 px-3 py-1 flex items-center justify-between">
+        {showFolderNavigation && <div className="border-b border-pf-border bg-pf-bg-1 px-3 py-1 flex items-center justify-between">
           <nav className="flex items-center gap-1 text-xs flex-1" aria-label="File path">
             <Button
               type="button"
@@ -500,7 +502,7 @@ export const ExplorerView = ({
           <div className="ml-4 shrink-0 text-xs text-pf-text-secondary whitespace-nowrap">
             {selectedIds.length > 0 ? `${selectedIds.length} selected` : ''}
           </div>
-        </div>
+        </div>}
 
         {/* Table */}
         {/*

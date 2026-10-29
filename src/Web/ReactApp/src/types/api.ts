@@ -2298,6 +2298,7 @@ export interface UnifiedFilesQueryRequest {
   page: number;
   pageSize: number;
   search?: string;
+  path?: string;
   sortBy: UnifiedFileSortBy;
   sortOrder: UnifiedFileSortOrder;
   filter: UnifiedFileTypeFilter;

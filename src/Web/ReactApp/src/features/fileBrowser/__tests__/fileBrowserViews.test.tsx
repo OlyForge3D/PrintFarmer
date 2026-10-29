@@ -156,7 +156,7 @@ describe("ExplorerView", () => {
 });
 
 describe("compact presentation (opt-in, used by /files)", () => {
-  const renderTable = (compact?: boolean) =>
+  const renderTable = (compact?: boolean, showFolderNavigation?: boolean) =>
     render(
       <ExplorerView
         folders={folders}
@@ -175,6 +175,7 @@ describe("compact presentation (opt-in, used by /files)", () => {
         onPageChange={vi.fn()}
         columns={columns}
         compact={compact}
+        showFolderNavigation={showFolderNavigation}
       />,
     );
   const renderGrid = (compact?: boolean) =>
@@ -205,6 +206,17 @@ describe("compact presentation (opt-in, used by /files)", () => {
     const table = screen.getByRole("table", { name: "Files list" });
     expect(table).toHaveClass("text-sm");
     expect(table).not.toHaveClass("text-xs");
+    expect(screen.getByRole("list", { name: "Folder tree" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "File path" })).toBeInTheDocument();
+  });
+
+  it("removes the tree, divider and old breadcrumb when a caller supplies folder navigation", () => {
+    renderTable(true, false);
+    expect(screen.getByRole("table", { name: "Files list" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Folder tree" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "File path" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator", { name: "Resize tree and list views" })).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Collapse folder panel")).not.toBeInTheDocument();
   });
 
   it("lays custom cards out in the auto-fill compact grid only when compact", () => {

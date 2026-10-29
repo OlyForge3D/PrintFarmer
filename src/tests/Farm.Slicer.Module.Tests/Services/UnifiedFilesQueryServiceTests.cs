@@ -319,6 +319,137 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         response.Items[0].Name.Should().Be("completed-slice.gcode");
     }
 
+    [Theory]
+    [InlineData("/", "root.gcode", "root.stl")]
+    [InlineData("/parts", "parts.gcode", "parts.stl")]
+    [InlineData("/parts/", "parts.gcode", "parts.stl")]
+    [InlineData("/parts/child", "child.gcode", "child.stl")]
+    public async Task QueryAsync_Path_SelectsExactVirtualFolderAcrossSources(
+        string path, string firstName, string secondName)
+    {
+        foreach ((string folderPath, string name) in new[] { ("/", "root"), ("/parts", "parts"), ("/parts/child", "child") })
+        {
+            _slicerDb.Models3D.Add(CreateModelIn(AddFolder(folderPath, "models"), $"{name}.stl"));
+            _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder(folderPath, "gcode"), $"{name}.gcode"));
+        }
+
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto { Path = path, SortBy = UnifiedFileSortBy.Name, SortOrder = UnifiedFileSortOrder.Asc },
+            CancellationToken.None);
+
+        response.Items.Select(item => item.Name).Should().Equal(firstName, secondName);
+        response.TotalItems.Should().Be(2);
+        response.TotalSize.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task QueryAsync_Path_ComposesWithFileTypeFilter()
+    {
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/parts", "models"), "part.stl"));
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/", "models"), "root.stl"));
+        _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder("/parts", "gcode"), "part.gcode"));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto { Path = "/parts", Filter = UnifiedFileTypeFilter.Models },
+            CancellationToken.None);
+
+        response.Items.Should().ContainSingle().Which.Name.Should().Be("part.stl");
+        response.TotalItems.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task QueryAsync_Path_ExistsInOnlyOneRegistry()
+    {
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/", "models"), "root.stl"));
+        _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder("/jobs", "gcode"), "job.gcode"));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto { Path = "/jobs" }, CancellationToken.None);
+
+        response.Items.Should().ContainSingle().Which.Source.Should().Be(UnifiedFileSource.Gcode);
+        response.TotalItems.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("/missing")]
+    [InlineData("/archive")]
+    public async Task QueryAsync_Path_MissingOrDeleted_ReturnsEmptyWithoutCreatingFolders(string path)
+    {
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/archive", "models", deleted: true), "old.stl"));
+        _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder("/archive", "gcode", deleted: true), "old.gcode"));
+        await SaveChangesAsync();
+        int folderCount = await _appDb.Set<FolderNode>().CountAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto { Path = path }, CancellationToken.None);
+
+        response.Items.Should().BeEmpty();
+        response.TotalItems.Should().Be(0);
+        response.TotalSize.Should().Be(0);
+        response.TotalPages.Should().Be(1);
+        (await _appDb.Set<FolderNode>().CountAsync()).Should().Be(folderCount);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task QueryAsync_Path_OmittedOrBlank_PreservesAllFolders(string? path)
+    {
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/", "models"), "root.stl"));
+        _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder("/jobs", "gcode"), "job.gcode"));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto { Path = path }, CancellationToken.None);
+
+        response.Items.Select(item => item.Name).Should().BeEquivalentTo("root.stl", "job.gcode");
+        response.TotalItems.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task QueryAsync_Path_PaginatesAndTotalsOnlyTheSelectedFolder()
+    {
+        FolderNode models = AddFolder("/parts", "models");
+        FolderNode gcode = AddFolder("/parts", "gcode");
+        for (int rank = 1; rank <= 30; rank++)
+        {
+            if (rank % 2 == 0)
+            {
+                _slicerDb.Models3D.Add(CreateModelIn(models, $"{rank:D2}.stl", rank));
+            }
+            else
+            {
+                _appDb.GcodeFiles.Add(CreateGcodeIn(gcode, $"{rank:D2}.gcode", rank));
+            }
+        }
+
+        _slicerDb.Models3D.Add(CreateModelIn(AddFolder("/", "models"), "00-root.stl", 1000));
+        _appDb.GcodeFiles.Add(CreateGcodeIn(AddFolder("/", "gcode"), "00-root.gcode", 2000));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto
+            {
+                Path = "/parts",
+                Page = 2,
+                PageSize = 10,
+                SortBy = UnifiedFileSortBy.Name,
+                SortOrder = UnifiedFileSortOrder.Asc,
+            }, CancellationToken.None);
+
+        response.Items.Select(item => item.Name).Should().Equal(
+            Enumerable.Range(11, 10).Select(rank => $"{rank:D2}.{(rank % 2 == 0 ? "stl" : "gcode")}"));
+        response.TotalItems.Should().Be(30);
+        response.TotalSize.Should().Be(465);
+        response.Page.Should().Be(2);
+        response.TotalPages.Should().Be(3);
+    }
+
     [Fact]
     public async Task QueryAsync_CancelledRequest_StopsDatabaseWork()
     {
@@ -379,6 +510,33 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
     {
         await _slicerDb.SaveChangesAsync(CancellationToken.None);
         await _appDb.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private FolderNode AddFolder(string path, string type, bool deleted = false)
+    {
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = path,
+            FolderType = type,
+            DeletedAt = deleted ? DateTime.UtcNow : null,
+        };
+        _appDb.Set<FolderNode>().Add(folder);
+        return folder;
+    }
+
+    private static Model3D CreateModelIn(FolderNode folder, string name, long size = 1)
+    {
+        Model3D model = CreateModel(name, size);
+        model.FolderId = folder.Id;
+        return model;
+    }
+
+    private static GcodeFile CreateGcodeIn(FolderNode folder, string name, long size = 1)
+    {
+        GcodeFile file = CreateGcode(name, size);
+        file.FolderId = folder.Id;
+        return file;
     }
 
     private static Model3D CreateModel(string name, long size)

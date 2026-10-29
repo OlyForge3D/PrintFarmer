@@ -3,6 +3,8 @@ import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
 import { useFileBrowser } from '../useFileBrowser';
+import { Button } from '@/common/components/ui';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { type ColumnDef, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
 
 interface FileBrowserProps<TDomain> {
@@ -14,6 +16,7 @@ interface FileBrowserProps<TDomain> {
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
   filterActions?: ReactNode;
   extraToolbarActions?: ReactNode;
+  renderFolderNavigation?: (path: string, onNavigate: (path: string) => void) => ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   /** Opt-in dense presentation: auto-fill grid of small cards and a 12px table. */
@@ -38,6 +41,7 @@ export function FileBrowser<TDomain>({
     renderCard,
     filterActions,
     extraToolbarActions,
+    renderFolderNavigation,
     viewMode,
     onViewModeChange,
     compact = false,
@@ -72,6 +76,17 @@ export function FileBrowser<TDomain>({
           extraActions={extraToolbarActions}
         />
 
+        {renderFolderNavigation?.(browser.currentPath, (path) => {
+          browser.clearSelection();
+          browser.navigate(path);
+        })}
+        {browser.error && (
+          <div role="alert" className="flex items-center gap-2 text-sm text-pf-error">
+            {getErrorMessage(browser.error, 'Failed to load files')}
+            <Button size="sm" variant="secondary" onClick={() => void browser.refetch()}>Retry files</Button>
+          </div>
+        )}
+
         <div className="sr-only" aria-live="polite">
           {browser.selectedIds.length} item{browser.selectedIds.length === 1 ? '' : 's'} selected
         </div>
@@ -97,6 +112,7 @@ export function FileBrowser<TDomain>({
           />
         ) : (
           <ExplorerView
+            showFolderNavigation={!renderFolderNavigation}
             folders={browser.folders}
             files={browser.files}
             selectedIds={browser.selectedIds}

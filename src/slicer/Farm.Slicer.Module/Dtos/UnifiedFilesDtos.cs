@@ -73,6 +73,9 @@ public sealed class UnifiedFilesQueryRequestDto
     /// <summary>Gets or sets the optional display-name search term.</summary>
     public string? Search { get; set; }
 
+    /// <summary>Gets or sets an exact virtual folder path. Omit for all folders; "/" selects only the root.</summary>
+    public string? Path { get; set; }
+
     /// <summary>Gets or sets the primary global sort field.</summary>
     public UnifiedFileSortBy SortBy { get; set; } = UnifiedFileSortBy.Date;
 

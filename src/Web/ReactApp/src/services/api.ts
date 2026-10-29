@@ -2795,13 +2795,17 @@ export class ApiClient {
     return response.data;
   }
 
+  async createModelFolder(path: string): Promise<void> {
+    await this.client.post("/3d-models/folder", { path, folderType: "models" });
+  }
+
   async moveModel3dFiles(
     fileIds: string[],
     targetFolderPath: string
   ): Promise<{ success: boolean; message?: string }> {
     const resp = await this.client.post("/3d-models/move", {
-      modelIds: fileIds,
-      targetDirectoryId: targetFolderPath,
+      ids: fileIds,
+      targetFolderPath,
     });
     return resp.data as { success: boolean; message?: string };
   }
