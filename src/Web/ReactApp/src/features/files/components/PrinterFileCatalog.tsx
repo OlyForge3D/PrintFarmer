@@ -38,6 +38,7 @@ import {
   FILE_TABLE_HEAD_CLASS,
   FILE_TABLE_ROW_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
+  FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
 
 const CATALOG_POLL_MS = 30_000;
@@ -345,7 +346,7 @@ export function PrinterFileCatalog() {
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
-      <div role="group" aria-label="Printer file controls" className="flex flex-wrap items-end gap-3">
+      <div role="group" aria-label="Printer file controls" className={clsx('flex flex-wrap items-end gap-3', FILE_TOOLBAR_CONTROL_CLASS)}>
         <FormField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
           <Select id="catalog-printer" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
             <option value="">All authorized printers</option>
@@ -357,7 +358,7 @@ export function PrinterFileCatalog() {
         </FormField>
         <div className="ml-auto flex items-center gap-1">
           {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} flush />
           {manageableSources.length > 0 && (
             <Button
               type="button"

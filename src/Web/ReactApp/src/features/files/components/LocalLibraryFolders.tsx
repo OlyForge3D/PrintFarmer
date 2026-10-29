@@ -1,10 +1,12 @@
 import { Fragment, useId, useMemo, useState } from 'react';
+import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button, FormField, Input, Label, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
+import { FILE_TOOLBAR_CONTROL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 interface LocalLibraryFoldersProps {
   controls?: { id: string; expanded: boolean };
@@ -129,7 +131,7 @@ export function LocalLibraryFolders({
   return (
     <>
       <div id={controls?.id} hidden={controls ? !controls.expanded : false}>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className={clsx('flex flex-wrap items-end gap-2', FILE_TOOLBAR_CONTROL_CLASS)}>
           <FormField label="Folder" htmlFor={`${id}-folder`} className="min-w-0">
             <Select id={`${id}-folder`} containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
               <option value="">All folders</option>

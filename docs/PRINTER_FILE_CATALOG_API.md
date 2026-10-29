@@ -266,8 +266,10 @@ restricted local asset ID or authorizes reuse of its bytes.
 ### Explicit local Copy and staged Queue
 
 The canonical `/files` page separates **Local library** from **On printers**.
-The latter offers metadata search, availability/freshness filters, scan controls,
-and single-location actions. Catalog browsing reads only local state. Automatic
+The latter offers Printer and Path search filters, a view toggle, Refresh,
+and single-location actions. Both sources use matching 40px-high toolbar inputs,
+dropdowns, buttons, and view toggles, including expanded local folder controls.
+Catalog browsing reads only local state. Automatic
 indexing can acquire metadata and thumbnails in a bounded background enrichment
 slice; browsing, opening details, and loading images never contact a printer.
 Captured local versions are links, not a claim that current remote bytes match.

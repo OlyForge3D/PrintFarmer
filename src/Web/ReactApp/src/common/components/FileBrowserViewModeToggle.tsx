@@ -1,4 +1,5 @@
 import React from 'react';
+import clsx from 'clsx';
 import { mdiViewAgenda, mdiViewGrid } from '@mdi/js';
 import { Button } from '@/common/components/ui';
 
@@ -7,6 +8,7 @@ export type FileBrowserViewMode = 'explorer' | 'grid';
 interface FileBrowserViewModeToggleProps {
   viewMode: FileBrowserViewMode;
   onViewModeChange: (mode: FileBrowserViewMode) => void;
+  flush?: boolean;
 }
 
 function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
@@ -23,7 +25,8 @@ function MdiIcon({ path, size = 'w-4 h-4' }: { path: string; size?: string }) {
 
 export const FileBrowserViewModeToggle: React.FC<FileBrowserViewModeToggleProps> = ({
   viewMode,
-  onViewModeChange
+  onViewModeChange,
+  flush = false,
 }) => {
   const modes: Array<{ mode: FileBrowserViewMode; icon: string; title: string }> = [
     { mode: 'explorer', icon: mdiViewAgenda, title: 'Explorer view' },
@@ -31,7 +34,7 @@ export const FileBrowserViewModeToggle: React.FC<FileBrowserViewModeToggleProps>
   ];
 
   return (
-    <div className="inline-flex gap-0 p-1">
+    <div className={clsx('inline-flex gap-0', !flush && 'p-1')}>
       {modes.map((item) => (
         <Button
           key={item.mode}

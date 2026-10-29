@@ -1,7 +1,9 @@
 import { Fragment, ReactNode } from 'react';
+import clsx from 'clsx';
 import { Button, FormField, Input, Select } from '@/common/components/ui';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { type SortOrder, type ViewMode } from '../types';
+import { FILE_TOOLBAR_CONTROL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 interface FileBrowserToolbarProps {
   search: string;
@@ -31,7 +33,7 @@ export const FileBrowserToolbar = ({
   extraActions,
 }: FileBrowserToolbarProps) => {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-end" data-tour="gcode-toolbar">
+    <div className={clsx('flex flex-col gap-3 lg:flex-row lg:items-end', FILE_TOOLBAR_CONTROL_CLASS)} data-tour="gcode-toolbar">
       <FormField label="Search files" htmlFor="file-browser-search" className="flex-1 min-w-0">
         <Input
           id="file-browser-search"
@@ -79,7 +81,7 @@ export const FileBrowserToolbar = ({
 
         {extraActions && <Fragment>{extraActions}</Fragment>}
 
-        <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
+        <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} flush />
       </div>
     </div>
   );
