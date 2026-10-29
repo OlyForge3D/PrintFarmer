@@ -2958,8 +2958,9 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
 }
 
 #if DEBUG
-/// #3457 diagnostic only, not a product contract: records List `onMove` deliveries and
-/// fixture repository move calls so Harvest XCUI can tell a cancelled drop from a no-op.
+/// #3457 DEBUG test seam, active only in the queue-reorder UI-test fixture: records List
+/// `onMove` deliveries and fixture repository move calls. Harvest XCUI asserts these to
+/// prove legal drops persist once and cross-group drags are prevented natively.
 final class QueueReorderUITestDiagnostics: @unchecked Sendable {
     static let shared = QueueReorderUITestDiagnostics()
     @MainActor static var isActive: Bool {

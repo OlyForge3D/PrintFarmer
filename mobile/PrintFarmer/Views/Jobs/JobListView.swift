@@ -352,7 +352,7 @@ struct JobListView: View {
         .accessibilityIdentifier("jobList.combined.list")
         #if DEBUG
         .overlay(alignment: .topLeading) {
-            // #3457 diagnostic only: zero-geometry label read by Harvest XCUI, not a List row.
+            // #3457 DEBUG test seam: zero-geometry counters label asserted by Harvest XCUI, not a List row.
             if let queueReorderDiagnostics {
                 Text(queueReorderDiagnostics)
                     .font(.system(size: 1))

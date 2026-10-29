@@ -64,6 +64,7 @@ final class HarvestUITests: QueueUITestBase {
         try requireDraggable(alphaHandle, "alpha reorder handle")
         try requireDraggable(beta, "beta drop target")
         let originalAlphaY = alpha.frame.minY
+        let legalDiagnosticsBefore = try reorderCounts(in: app)
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         source.press(
@@ -72,14 +73,23 @@ final class HarvestUITests: QueueUITestBase {
             withVelocity: .slow,
             thenHoldForDuration: 0.5
         )
+        let movedBelowBeta = {
+            beta.frame.minY < alpha.frame.minY && alpha.frame.minY > originalAlphaY + 10
+        }
         let reordered = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                beta.frame.minY < alpha.frame.minY && alpha.frame.minY > originalAlphaY + 10
+                movedBelowBeta()
+                    && self.reorderDiagnosticsShow(repositoryMoves: legalDiagnosticsBefore.repositoryMoves + 1)
             },
             object: nil
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [reordered], timeout: 5), .completed,
-                       "Dragging alpha down within its group should move it below beta.")
+        _ = XCTWaiter.wait(for: [reordered], timeout: 5)
+        let legalDiagnosticsAfter = try reorderCounts(in: app)
+        attachReorderDiagnostics("legal move down", before: legalDiagnosticsBefore, after: legalDiagnosticsAfter)
+        XCTAssertTrue(movedBelowBeta(),
+                      "Dragging alpha down within its group should move it below beta.")
+        XCTAssertEqual(legalDiagnosticsAfter.repositoryMoves, legalDiagnosticsBefore.repositoryMoves + 1,
+                       "A legal in-group drop must persist exactly one move.")
 
         if app.frame.width > 600 {
             let priorityBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000005"]
@@ -101,34 +111,26 @@ final class HarvestUITests: QueueUITestBase {
             ).firstMatch
             XCTAssertFalse(crossGroupError.exists)
 
-            // #3457: the priority boundary's centre is also the legal end-of-group
-            // slot, so drop past its midpoint (between the two boundary rows).
+            // #3457 option A (issue comment 6493170669): on iPad the native List
+            // prevents a cross-group drop, so no onMove reaches the app. Prove that
+            // prevention: order, error state and both counters stay unchanged for the
+            // whole observation window. Drop past the boundary row's midpoint, because
+            // its centre is also the legal end-of-group slot.
             try requireDraggable(alphaHandle, "alpha reorder handle before priority drag")
             try requireDraggable(priorityBoundary, "priority-boundary row")
-            let priorityDiagnosticsBefore = reorderDiagnostics(in: app)
-            alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-                forDuration: 1,
-                thenDragTo: priorityBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)
-                ),
-                withVelocity: .slow,
-                thenHoldForDuration: 0.5
+            try assertCrossGroupDragIsNativelyPrevented(
+                "priority",
+                drag: alphaHandle,
+                to: priorityBoundary,
+                expectedOrder: reorderedGroup,
+                currentOrder: currentGroupOrder,
+                error: crossGroupError
             )
-            let priorityRejected = crossGroupError.waitForExistence(timeout: 5)
-            attachReorderDiagnostics(
-                "priority boundary",
-                before: priorityDiagnosticsBefore,
-                after: reorderDiagnostics(in: app)
-            )
-            XCTAssertTrue(priorityRejected,
-                          "A drop into another priority group must be rejected visibly.")
-            try requireDraggable(alphaHandle, "alpha reorder handle after priority drag")
-            XCTAssertEqual(currentGroupOrder(), reorderedGroup,
-                           "Dragging to another priority group must not reorder this group.")
 
-            // A valid move back refreshes the queue, which clears the previous
-            // rejection, so the printer-boundary drop must produce its own error.
+            // A valid move back must still be delivered and persisted after the
+            // prevented priority gesture.
             try requireDraggable(beta, "beta drop target before move back")
+            let moveBackDiagnosticsBefore = try reorderCounts(in: app)
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
@@ -139,46 +141,129 @@ final class HarvestUITests: QueueUITestBase {
             let movedBack = XCTNSPredicateExpectation(
                 predicate: NSPredicate { _, _ in
                     !crossGroupError.exists && currentGroupOrder() == restoredGroup
+                        && self.reorderDiagnosticsShow(
+                            repositoryMoves: moveBackDiagnosticsBefore.repositoryMoves + 1
+                        )
                 },
                 object: nil
             )
-            XCTAssertEqual(XCTWaiter.wait(for: [movedBack], timeout: 5), .completed,
-                           "Dragging alpha back above beta should reorder and clear the rejection.")
+            _ = XCTWaiter.wait(for: [movedBack], timeout: 5)
+            let moveBackDiagnosticsAfter = try reorderCounts(in: app)
+            attachReorderDiagnostics(
+                "legal move back", before: moveBackDiagnosticsBefore, after: moveBackDiagnosticsAfter
+            )
+            XCTAssertEqual(currentGroupOrder(), restoredGroup,
+                           "Dragging alpha back above beta should reorder it.")
+            XCTAssertFalse(crossGroupError.exists,
+                           "A legal in-group drop must not show a rejection.")
+            XCTAssertEqual(moveBackDiagnosticsAfter.repositoryMoves, moveBackDiagnosticsBefore.repositoryMoves + 1,
+                           "A legal in-group drop must persist exactly one move.")
 
             try requireDraggable(alphaHandle, "alpha reorder handle before printer drag")
             try requireDraggable(printerBoundary, "printer-boundary row")
-            let printerDiagnosticsBefore = reorderDiagnostics(in: app)
-            alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-                forDuration: 1,
-                thenDragTo: printerBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)
-                ),
-                withVelocity: .slow,
-                thenHoldForDuration: 0.5
+            try assertCrossGroupDragIsNativelyPrevented(
+                "printer",
+                drag: alphaHandle,
+                to: printerBoundary,
+                expectedOrder: restoredGroup,
+                currentOrder: currentGroupOrder,
+                error: crossGroupError
             )
-            let printerRejected = crossGroupError.waitForExistence(timeout: 5)
-            attachReorderDiagnostics(
-                "printer boundary",
-                before: printerDiagnosticsBefore,
-                after: reorderDiagnostics(in: app)
-            )
-            XCTAssertTrue(printerRejected,
-                          "A drop into another printer group must be rejected visibly.")
-            try requireDraggable(alphaHandle, "alpha reorder handle after printer drag")
-            XCTAssertEqual(currentGroupOrder(), restoredGroup,
-                           "Dragging to another printer group must not reorder this group.")
         }
     }
 
-    /// #3457 diagnostic only: reads the DEBUG queue-reorder fixture's onMove and
-    /// repository move counters. It never gates the test's own assertions.
-    private func reorderDiagnostics(in app: XCUIApplication) -> String {
-        let label = app.descendants(matching: .any)["jobList.reorderDiagnostics"]
-        return label.exists ? label.label : "<unavailable>"
+    /// #3457: drags `handle` past `boundary`'s midpoint into another reorder group
+    /// and asserts the native List prevented it. Any `onMove` or repository move,
+    /// visible error, or order change during the 5s window fails the test.
+    private func assertCrossGroupDragIsNativelyPrevented(
+        _ name: String,
+        drag handle: XCUIElement,
+        to boundary: XCUIElement,
+        expectedOrder: [String],
+        currentOrder: @escaping () -> [String],
+        error: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let before = try reorderCounts(in: app, file: file, line: line)
+        XCTAssertEqual(currentOrder(), expectedOrder, file: file, line: line)
+        handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 1,
+            thenDragTo: boundary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)),
+            withVelocity: .slow,
+            thenHoldForDuration: 0.5
+        )
+        let diagnostics = app.descendants(matching: .any)["jobList.reorderDiagnostics"]
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                error.exists || currentOrder() != expectedOrder
+                    || !diagnostics.exists || diagnostics.label != before.summary
+            },
+            object: nil
+        )
+        changed.isInverted = true
+        let observed = XCTWaiter.wait(for: [changed], timeout: 5)
+        let after = try reorderCounts(in: app, file: file, line: line)
+        attachReorderDiagnostics("\(name) boundary", before: before, after: after)
+        XCTAssertEqual(observed, .completed,
+                       "The \(name)-boundary drag must leave the queue untouched.", file: file, line: line)
+        XCTAssertEqual(after.onMove, before.onMove,
+                       "The native List must prevent a drop into another \(name) group.", file: file, line: line)
+        XCTAssertEqual(after.repositoryMoves, before.repositoryMoves,
+                       "A \(name)-boundary drag must never call the repository.", file: file, line: line)
+        XCTAssertFalse(error.exists,
+                       "A natively prevented \(name)-boundary drag has no rejection to show.", file: file, line: line)
+        XCTAssertEqual(currentOrder(), expectedOrder,
+                       "Dragging to another \(name) group must not reorder this group.", file: file, line: line)
     }
 
-    private func attachReorderDiagnostics(_ name: String, before: String, after: String) {
-        let attachment = XCTAttachment(string: "before: \(before)\nafter: \(after)")
+    private struct ReorderCounts {
+        let summary: String
+        let onMove: Int
+        let repositoryMoves: Int
+    }
+
+    /// Reads the DEBUG queue-reorder fixture's `onMove` and repository-move counters
+    /// (`QueueReorderUITestDiagnostics`). Fails if the label is missing or malformed.
+    private func reorderCounts(
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> ReorderCounts {
+        let label = app.descendants(matching: .any)["jobList.reorderDiagnostics"]
+        guard label.waitForExistence(timeout: 5) else {
+            XCTFail("The queue-reorder diagnostics label must be present.", file: file, line: line)
+            throw DragPreconditionFailure()
+        }
+        guard let counts = Self.parseReorderCounts(label.label) else {
+            XCTFail("Unreadable queue-reorder diagnostics: \(label.label)", file: file, line: line)
+            throw DragPreconditionFailure()
+        }
+        return counts
+    }
+
+    /// The label refreshes only after `moveQueuedRows` returns, so a legal drop waits
+    /// for its persisted repository move rather than just the optimistic reorder.
+    private func reorderDiagnosticsShow(repositoryMoves expected: Int) -> Bool {
+        let label = app.descendants(matching: .any)["jobList.reorderDiagnostics"]
+        guard label.exists else { return false }
+        return Self.parseReorderCounts(label.label)?.repositoryMoves == expected
+    }
+
+    private static func parseReorderCounts(_ summary: String) -> ReorderCounts? {
+        func count(_ key: String) -> Int? {
+            summary.split(separator: " ")
+                .first { $0.hasPrefix("\(key)=") }
+                .flatMap { Int($0.dropFirst(key.count + 1)) }
+        }
+        guard let onMove = count("onMove"), let repositoryMoves = count("repositoryMoves") else {
+            return nil
+        }
+        return ReorderCounts(summary: summary, onMove: onMove, repositoryMoves: repositoryMoves)
+    }
+
+    private func attachReorderDiagnostics(_ name: String, before: ReorderCounts, after: ReorderCounts) {
+        let attachment = XCTAttachment(string: "before: \(before.summary)\nafter: \(after.summary)")
         attachment.name = "Queue reorder diagnostics (\(name))"
         attachment.lifetime = .deleteOnSuccess
         add(attachment)

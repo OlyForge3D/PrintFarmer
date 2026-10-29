@@ -890,6 +890,73 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.jobs.map(\.id), serverOrder.map(\.id))
     }
 
+    /// #3457 option A: on iPad the native List prevents these drops, so XCUI can only
+    /// prove no `onMove` arrives. These pin the app's own rejection should one arrive.
+    func testMoveQueuedRowsRejectsHarvestPriorityBoundaryDestination() async throws {
+        let rows = try makeHarvestReorderRows(alphaBelowBeta: true)
+        await viewModel.loadJobs()
+        let before = viewModel.jobs.map(\.id)
+        XCTAssertEqual(viewModel.queuedJobs.map(\.id), rows.map(\.id))
+
+        // alpha (offset 2) dropped between the priority and printer boundary rows.
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 2), toOffset: 5)
+
+        XCTAssertEqual(viewModel.errorMessage,
+                       "Jobs can only be reordered within the same printer and priority group.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertEqual(viewModel.jobs.map(\.id), before)
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+    }
+
+    func testMoveQueuedRowsRejectsHarvestPrinterBoundaryDestination() async throws {
+        let rows = try makeHarvestReorderRows(alphaBelowBeta: false)
+        await viewModel.loadJobs()
+        let before = viewModel.jobs.map(\.id)
+        XCTAssertEqual(viewModel.queuedJobs.map(\.id), rows.map(\.id))
+
+        // alpha (offset 1) dropped below the printer boundary row, at the list end.
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 1), toOffset: 6)
+
+        XCTAssertEqual(viewModel.errorMessage,
+                       "Jobs can only be reordered within the same printer and priority group.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertEqual(viewModel.jobs.map(\.id), before)
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+    }
+
+    /// Mirrors the queue-reorder XCUI fixture's visible queued rows: assigned, the
+    /// high-priority alpha/beta/gamma group, a normal-priority row on the same
+    /// printer, then a high-priority row on another printer.
+    private func makeHarvestReorderRows(alphaBelowBeta: Bool) throws -> [QueuedPrintJobResponse] {
+        let printerID = UUID()
+        let assigned = try makeQueueJob(
+            scope: printerID, status: .assigned, priority: .high, queuePosition: 0, name: "assigned"
+        )
+        let alpha = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 1, revision: "AQIDAw==", name: "alpha"
+        )
+        let beta = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 2, revision: "AQIDBA==", name: "beta"
+        )
+        let gamma = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 3, revision: "AQIDBw==", name: "gamma"
+        )
+        let priorityBoundary = try makeQueueJob(
+            scope: printerID, priority: .normal, queuePosition: 4, revision: "AQIDBQ==",
+            name: "priority boundary"
+        )
+        let printerBoundary = try makeQueueJob(
+            scope: UUID(), priority: .high, queuePosition: 1, revision: "AQIDBg==",
+            name: "printer boundary"
+        )
+        let group = alphaBelowBeta ? [beta, alpha, gamma] : [alpha, beta, gamma]
+        let rows = [assigned] + group + [priorityBoundary, printerBoundary]
+        mockJobService.queuedJobResponsesToReturn = rows
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        return rows
+    }
+
     func testVoiceOverMovesRespectGroupBoundaries() async throws {
         let printerID = UUID()
         let highFirst = try makeQueueJob(scope: printerID, priority: .high, name: "high first")
