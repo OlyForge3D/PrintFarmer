@@ -1,18 +1,29 @@
 name: iOS live sensor E2E
 
 # Opt-in only (#3563). Runs mobile/scripts/run-live-sensor-e2e.py against its
-# disposable local API + Moonraker emulator and a per-run isolated simulator,
-# so the strict sensor field readbacks and SignalR fan readbacks in
-# PrinterSensorsLiveBackendUITests execute against a live backend. Kept out of ios-pr-ci.yml so it never posts
-# skipped copies of required checks such as "Build (iOS)".
+# disposable local API + Moonraker emulator and a per-run isolated simulator.
+# The default backend-ui proof preserves the strict sensor field readbacks and
+# SignalR fan readbacks in PrinterSensorsLiveBackendUITests. Dispatch may
+# explicitly choose retained-state to run the production app-state proof.
+# Kept out of ios-pr-ci.yml so it never posts skipped copies of required
+# checks such as "Build (iOS)".
 #
-# Trigger: add the `ios-live-sensor-e2e` label to a PR (tests its merge ref), or
-# `gh workflow run ios-live-sensor-e2e.yml --ref <branch>` once on the default
-# branch.
+# Trigger: add the `ios-live-sensor-e2e` label to a PR to run the default
+# backend-ui proof against its merge ref, or dispatch this workflow from a
+# branch with `proof: retained-state` to run only the app-state proof.
 on:
   pull_request:
     types: [labeled]
   workflow_dispatch:
+    inputs:
+      proof:
+        description: Live sensor proof to run
+        required: true
+        type: choice
+        default: backend-ui
+        options:
+          - backend-ui
+          - retained-state
 
 concurrency:
   # Keyed on the label so adding an unrelated label never cancels a live run.
@@ -119,7 +130,9 @@ jobs:
         # Bounded runner ceiling (1440s) plus API/emulator/app builds.
         timeout-minutes: 50
         working-directory: mobile
-        run: python3 scripts/run-live-sensor-e2e.py
+        env:
+          SENSOR_E2E_PROOF: ${{ github.event.inputs.proof || 'backend-ui' }}
+        run: python3 scripts/run-live-sensor-e2e.py --proof "$SENSOR_E2E_PROOF"
 
       - name: Export field readback evidence
         # Best-effort evidence only; pass/fail is decided by the harness step,

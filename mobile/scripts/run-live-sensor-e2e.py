@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run production-mode iOS sensor E2E against isolated local backends."""
 
+import argparse
 import json
 import os
 import secrets
@@ -15,6 +16,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -26,17 +28,47 @@ DEVELOPER_DIR = Path(os.environ.get(
     "PRINTFARM_SENSOR_E2E_DEVELOPER_DIR",
     "/Applications/Xcode-26.6.0.app/Contents/Developer",
 ))
-API_URL = "http://localhost:5245"
-MOONRAKER_URL = "http://127.0.0.1:7125"
-TEST_NAME = (
-    "PrintFarmerUITests/PrinterSensorsLiveBackendUITests/"
-    "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends"
-)
+API_URL = os.environ.get("PRINTFARM_SENSOR_E2E_API_URL", "http://localhost:5245")
+MOONRAKER_URL = os.environ.get("PRINTFARM_SENSOR_E2E_MOONRAKER_URL", "http://127.0.0.1:7125")
+DEFAULT_PROOF = "backend-ui"
+PROOFS = {
+    "backend-ui": {
+        "test_plan": "PrintFarmerLiveSensorE2E",
+        "test_name": (
+            "PrintFarmerUITests/PrinterSensorsLiveBackendUITests/"
+            "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends"
+        ),
+        "expected_test_id": (
+            "PrinterSensorsLiveBackendUITests/"
+            "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends()"
+        ),
+    },
+    "retained-state": {
+        "test_plan": "PrintFarmerLiveSensorStateE2E",
+        "test_name": (
+            "PrintFarmerTests/PrinterSensorLiveStateTests/"
+            "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect"
+        ),
+        "expected_test_id": (
+            "PrinterSensorLiveStateTests/"
+            "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect()"
+        ),
+    },
+}
 
-EXPECTED_TEST_ID = "/".join(TEST_NAME.split("/")[1:]) + "()"
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--proof",
+        choices=PROOFS,
+        default=DEFAULT_PROOF,
+        help="Live proof to run (default: backend-ui; retained-state is opt-in).",
+    )
+    return parser.parse_args(argv)
 
 
-def verify_named_test_succeeded(timing_path):
+def verify_named_test_succeeded(timing_path, expected_test_id):
     """Fail unless the bounded runner saw exactly the named test, once, as Success.
 
     run-tests.py rejects zero-test and failed runs but not skipped ones, and a
@@ -47,11 +79,27 @@ def verify_named_test_succeeded(timing_path):
         observed = [(test["identifier"], test["status"]) for test in tests]
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise RuntimeError(f"No usable runner test results at {timing_path}: {error}") from error
-    if observed != [(EXPECTED_TEST_ID, "Success")]:
+    if observed != [(expected_test_id, "Success")]:
         raise RuntimeError(
-            f"Expected exactly {EXPECTED_TEST_ID} with status Success; observed {observed}"
+            f"Expected exactly {expected_test_id} with status Success; observed {observed}"
         )
-    print(f"LIVE_SENSOR_E2E: verified {EXPECTED_TEST_ID} executed once with Success", flush=True)
+    print(
+        f"LIVE_SENSOR_E2E: verified {expected_test_id} executed once with Success",
+        flush=True,
+    )
+
+
+def build_test_command(proof_name, simulator_id, result_bundle):
+    proof = PROOFS[proof_name]
+    return [
+        sys.executable, "scripts/run-tests.py", "--",
+        "test", "-project", "PrintFarmer.xcodeproj", "-scheme", "PrintFarmer",
+        "-testPlan", proof["test_plan"],
+        "-destination", f"platform=iOS Simulator,id={simulator_id}",
+        "-only-testing:" + proof["test_name"],
+        "-parallel-testing-enabled", "NO",
+        "-resultBundlePath", str(result_bundle),
+    ]
 
 
 def ensure_port_free(port):
@@ -61,6 +109,27 @@ def ensure_port_free(port):
             raise RuntimeError(
                 f"127.0.0.1:{port} is occupied; refusing to use or stop an existing service."
             )
+
+
+def loopback_port(name, url):
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as error:
+        raise RuntimeError(f"{name} must be a loopback HTTP URL with an explicit port.") from error
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"localhost", "127.0.0.1"}
+        or port is None
+        or port == 0
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise RuntimeError(f"{name} must be a loopback HTTP URL with an explicit port.")
+    return port
 
 
 def http_json(url, method="GET", payload=None, timeout=5):
@@ -283,7 +352,7 @@ def delete_isolated_simulator(simulator_udid, run_dir):
                 )
 
 
-def create_moonraker_printer(token, database_path):
+def create_moonraker_printer(token, database_path, moonraker_port):
     with sqlite3.connect(database_path) as database:
         manufacturer = database.execute(
             'SELECT "Id" FROM "Manufacturers" WHERE "Name" = ?',
@@ -300,8 +369,8 @@ def create_moonraker_printer(token, database_path):
         "name": "Moonraker Sensor E2E",
         "serverUrl": MOONRAKER_URL,
         "backend": "Moonraker",
-        "backendPort": 7125,
-        "frontendPort": 7125,
+        "backendPort": moonraker_port,
+        "frontendPort": moonraker_port,
         "manufacturerId": manufacturer[0],
         "modelId": model[0],
         "manufacturer": "Unknown",
@@ -390,15 +459,35 @@ class BackendControl:
         self.lock = threading.Lock()
 
     def mutate_moonraker(self, mutation):
+        fields = mutation.get("fields")
+        if fields is None:
+            fields = {"temperature": mutation["temperature"]}
         status, _ = http_json(
             f"{MOONRAKER_URL}/__emulator/printer/sensor",
             method="POST",
             payload={
                 "objectName": mutation["objectName"],
-                "fields": {"temperature": mutation["temperature"]},
+                "fields": fields,
             },
         )
         return 200 <= status < 300
+
+    def set_moonraker_scenario(self, scenario):
+        status, _ = http_json(
+            f"{MOONRAKER_URL}/__emulator/printer/scenario",
+            method="POST",
+            payload={"scenario": scenario},
+        )
+        return 200 <= status < 300
+
+    def stop_api(self):
+        with self.lock:
+            self.api.stop()
+
+    def start_api(self):
+        with self.lock:
+            self.api.start()
+            wait_http(f"{API_URL}/healthz", self.api.process, self.api.log_path, timeout=90)
 
     def restart_api(self, mutation=None):
         with self.lock:
@@ -419,6 +508,18 @@ class ControlHandler(BaseHTTPRequestHandler):
             if self.path == "/moonraker-sensor":
                 updated = self.control.mutate_moonraker(payload)
                 self.respond(200, {"updated": updated})
+                return
+            if self.path == "/moonraker-scenario":
+                updated = self.control.set_moonraker_scenario(payload["scenario"])
+                self.respond(200, {"updated": updated})
+                return
+            if self.path == "/stop-api":
+                self.control.stop_api()
+                self.respond(200, {"stopped": True})
+                return
+            if self.path == "/start-api":
+                self.control.start_api()
+                self.respond(200, {"started": True})
                 return
             if self.path == "/restart-api":
                 mutation = payload.get("moonrakerSensor")
@@ -444,12 +545,17 @@ class ControlHandler(BaseHTTPRequestHandler):
         return
 
 
-def main():
+def main(argv=None):
+    proof_name = parse_args(argv).proof
     if not DEVELOPER_DIR.is_dir():
         raise RuntimeError(f"Required Xcode installation not found: {DEVELOPER_DIR}")
     os.environ["DEVELOPER_DIR"] = str(DEVELOPER_DIR)
-    ensure_port_free(5245)
-    ensure_port_free(7125)
+    api_port = loopback_port("PRINTFARM_SENSOR_E2E_API_URL", API_URL)
+    moonraker_port = loopback_port("PRINTFARM_SENSOR_E2E_MOONRAKER_URL", MOONRAKER_URL)
+    if api_port == moonraker_port:
+        raise RuntimeError("The isolated API and Moonraker emulator must use distinct ports.")
+    ensure_port_free(api_port)
+    ensure_port_free(moonraker_port)
 
     (MOBILE / "build").mkdir(parents=True, exist_ok=True)
     run_dir = Path(tempfile.mkdtemp(prefix="sensor-e2e-3419.", dir=MOBILE / "build"))
@@ -542,7 +648,7 @@ def main():
             api.process,
             api.log_path,
         )
-        create_moonraker_printer(token, run_dir / "farm.sqlite")
+        create_moonraker_printer(token, run_dir / "farm.sqlite", moonraker_port)
         wait_for_printer_names(
             token,
             {"Test Printer Alpha", "Moonraker Sensor E2E"},
@@ -573,17 +679,12 @@ def main():
             }, configuration)
 
         result_bundle = run_dir / "SensorsLive.xcresult"
-        command = [
-            sys.executable, "scripts/run-tests.py", "--",
-            "test", "-project", "PrintFarmer.xcodeproj", "-scheme", "PrintFarmer",
-            "-testPlan", "PrintFarmerLiveSensorE2E",
-            "-destination", f"platform=iOS Simulator,id={test_simulator_id}",
-            "-only-testing:" + TEST_NAME,
-            "-parallel-testing-enabled", "NO",
-            "-resultBundlePath", str(result_bundle),
-        ]
+        command = build_test_command(proof_name, test_simulator_id, result_bundle)
         run_logged(command, MOBILE, env, run_dir / "test.log")
-        verify_named_test_succeeded(result_bundle.with_suffix(".timing.json"))
+        verify_named_test_succeeded(
+            result_bundle.with_suffix(".timing.json"),
+            PROOFS[proof_name]["expected_test_id"],
+        )
     finally:
         if server is not None:
             server.shutdown()

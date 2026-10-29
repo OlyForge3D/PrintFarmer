@@ -1,0 +1,28 @@
+{
+  "configurations" : [
+    {
+      "id" : "34190000-0000-0000-0000-000000000002",
+      "name" : "Live sensor retained state",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {
+    "defaultTestExecutionTimeAllowance" : 600,
+    "maximumTestExecutionTimeAllowance" : 600,
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "selectedTests" : [
+        "PrinterSensorLiveStateTests/testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect"
+      ],
+      "target" : {
+        "containerPath" : "container:PrintFarmer.xcodeproj",
+        "identifier" : "AFC2BA1C050C049765D60160",
+        "name" : "PrintFarmerTests"
+      }
+    }
+  ],
+  "version" : 1
+}
