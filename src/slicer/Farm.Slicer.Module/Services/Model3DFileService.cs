@@ -387,6 +387,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <see cref="BulkDeleteItemReasons.FilesRemovedRecordRetained"/>. After a save failure the record is
     /// re-read to report what actually happened; if that is not possible the outcome is
     /// <see cref="BulkDeleteItemStatus.Unknown"/>.</para>
+    /// <para>Caller cancellation propagates: a cancelled save is not reconciled into an outcome, and no further
+    /// model's stored files are touched.</para>
     /// </remarks>
     public async Task<IReadOnlyList<BulkDeleteItemResult>> DeleteModelsAsync(IEnumerable<Guid> ids, CancellationToken ct)
     {
@@ -427,6 +429,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     {
         Guid id = model.Id;
         bool storedFileRemoved = false;
+        ct.ThrowIfCancellationRequested();
         try
         {
             string fullModelPath = Path.Join(_modelsPath, model.FileName);
@@ -463,7 +466,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             _logger.LogInformation("Model deleted: {Id}", id);
             return new BulkDeleteItemResult(id, BulkDeleteItemStatus.Deleted);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError("Failed to delete model record {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return await ReconcileFailedModelRemovalAsync(id, storedFileRemoved);
@@ -491,6 +494,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
         catch (Exception ex)
         {
+            // Deliberately broad: this read runs with CancellationToken.None after the save already failed, so any
+            // failure here (provider, timeout, disposed context) leaves the outcome unknown rather than failed.
             _logger.LogError("Could not determine deletion outcome for model {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return new BulkDeleteItemResult(id, BulkDeleteItemStatus.Unknown, BulkDeleteItemReasons.CommitOutcomeUnknown);
         }

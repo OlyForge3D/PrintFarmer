@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -174,6 +175,60 @@ public sealed class Model3DBulkDeleteEndpointTests : IAsyncLifetime, IDisposable
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task DeleteModelsAsync_CancelledDuringRecordSave_PropagatesWithoutTouchingLaterModels()
+    {
+        Model3D cancelled = await SeedModelAsync();
+        Model3D later = await SeedModelAsync();
+        using CancellationTokenSource cts = new();
+        _interceptor.FailDeleteFor = cancelled.Id;
+        _interceptor.CancelInsteadOfFail = cts;
+        Exception? thrown = null;
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+            try
+            {
+                _ = await service.DeleteModelsAsync([cancelled.Id, later.Id], cts.Token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                thrown = ex;
+            }
+        }
+
+        thrown.Should().NotBeNull("caller cancellation must propagate rather than be reconciled into a result");
+        (await ModelExistsAsync(cancelled.Id)).Should().BeTrue("the cancelled save was not committed");
+        (await ModelExistsAsync(later.Id)).Should().BeTrue();
+        File.Exists(Path.Join(_modelsPath, later.FileName)).Should().BeTrue("cancellation stops before the next model's files");
+    }
+
+    [Fact]
+    public async Task DeleteModelsAsync_CancelledDuringLastRecordSave_PropagatesInsteadOfReconciling()
+    {
+        Model3D cancelled = await SeedModelAsync();
+        using CancellationTokenSource cts = new();
+        _interceptor.FailDeleteFor = cancelled.Id;
+        _interceptor.CancelInsteadOfFail = cts;
+
+        Exception? thrown = null;
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
+            try
+            {
+                _ = await service.DeleteModelsAsync([cancelled.Id], cts.Token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                thrown = ex;
+            }
+        }
+
+        thrown.Should().NotBeNull("a cancelled save must not be reconciled into a per-item result");
+        (await ModelExistsAsync(cancelled.Id)).Should().BeTrue();
+    }
+
     private static Task<HttpResponseMessage> SendDeleteAsync(HttpClient client, object body) =>
         client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/api/3d-models")
         {
@@ -239,6 +294,8 @@ public sealed class Model3DBulkDeleteEndpointTests : IAsyncLifetime, IDisposable
     {
         public Guid? FailDeleteFor { get; set; }
 
+        public CancellationTokenSource? CancelInsteadOfFail { get; set; }
+
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
             DbCommand command,
             CommandEventData eventData,
@@ -265,6 +322,12 @@ public sealed class Model3DBulkDeleteEndpointTests : IAsyncLifetime, IDisposable
                 command.CommandText.Contains("DELETE FROM \"Models3D\"", StringComparison.Ordinal) &&
                 command.Parameters.Cast<DbParameter>().Any(p => p.Value is Guid g ? g == target : string.Equals(p.Value?.ToString(), target.ToString(), StringComparison.OrdinalIgnoreCase)))
             {
+                if (CancelInsteadOfFail is CancellationTokenSource cts)
+                {
+                    cts.Cancel();
+                    throw new OperationCanceledException(cts.Token);
+                }
+
                 throw new InvalidOperationException("Simulated model record delete failure");
             }
         }

@@ -1095,7 +1095,7 @@ public partial class GcodeFilesService(
                     File.Delete(fullPath);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
                 _logger.LogWarning("[DeleteFilesAsync] Record removed but stored file for {FileId} could not be deleted: {Name}", file.Id, ex.GetType().Name);
                 cleanupReason = BulkDeleteItemReasons.FileCleanupFailed;
