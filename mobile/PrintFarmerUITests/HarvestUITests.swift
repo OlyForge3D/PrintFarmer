@@ -325,15 +325,20 @@ final class HarvestUITests: QueueUITestBase {
         launchQueueReorderScenario()
         openQueueDestination()
 
-        let alphaHandle = reorderHandle(for: "Queue reorder alpha.gcode")
-        let betaHandle = reorderHandle(for: "Queue reorder beta.gcode")
+        // R3457-D03: resolve the unique Queue root with `.element`, not a nested
+        // `descendants(.any)…firstMatch` chain. On iPhone (run 40864533438, pid 31896)
+        // that lazy in-app AX walk stalled the main thread 20s and the UI-test
+        // watchdog aborted the app; same pattern and fix as #2573.
+        let queueRoot = app.descendants(matching: .any).matching(identifier: "jobList.root").element
+        let alphaHandle = reorderHandle(for: "Queue reorder alpha.gcode", in: queueRoot)
+        let betaHandle = reorderHandle(for: "Queue reorder beta.gcode", in: queueRoot)
         XCTAssertTrue(alphaHandle.waitForExistence(timeout: 8))
         XCTAssertTrue(betaHandle.exists)
-        XCTAssertFalse(reorderHandle(for: "Queue pinned assigned.gcode").exists,
+        XCTAssertFalse(reorderHandle(for: "Queue pinned assigned.gcode", in: queueRoot).exists,
                        "Assigned jobs must not expose drag-to-reorder controls.")
 
-        let priorityBoundaryHandle = reorderHandle(for: "Queue priority boundary.gcode")
-        let printerBoundaryHandle = reorderHandle(for: "Queue printer boundary.gcode")
+        let priorityBoundaryHandle = reorderHandle(for: "Queue priority boundary.gcode", in: queueRoot)
+        let printerBoundaryHandle = reorderHandle(for: "Queue printer boundary.gcode", in: queueRoot)
         let priorityBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000005"]
         let printerBoundary = app.buttons["job.row.32340000-0000-0000-0000-000000000006"]
         for _ in 0..<3 where !priorityBoundary.isHittable || !printerBoundary.isHittable {
@@ -360,7 +365,7 @@ final class HarvestUITests: QueueUITestBase {
         }
         XCTAssertTrue(printing.waitForExistence(timeout: 5))
         XCTAssertTrue(printing.isHittable, "The Printing row must remain reachable in the combined Queue.")
-        XCTAssertFalse(reorderHandle(for: "Queue pinned printing.gcode").exists,
+        XCTAssertFalse(reorderHandle(for: "Queue pinned printing.gcode", in: queueRoot).exists,
                        "Printing jobs must not expose native reorder controls.")
     }
 
@@ -371,6 +376,12 @@ final class HarvestUITests: QueueUITestBase {
     private func reorderHandle(for jobName: String) -> XCUIElement {
         // In split view SwiftUI promotes the root identifier onto the List itself.
         app.descendants(matching: .any)["jobList.root"].buttons.matching(
+            NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
+        ).firstMatch
+    }
+
+    private func reorderHandle(for jobName: String, in queueRoot: XCUIElement) -> XCUIElement {
+        queueRoot.buttons.matching(
             NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Reorder", jobName)
         ).firstMatch
     }
