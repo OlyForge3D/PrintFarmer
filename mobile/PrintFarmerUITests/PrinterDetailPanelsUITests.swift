@@ -2024,7 +2024,7 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         card.tap()
         // Status no longer renders sensors; writable ones are read back from
         // the Control tab's Heat segment (idle-only; Tune has no sensors, #3540).
-        // Read-only sensors are verified via SignalR only.
+        // Read-only sensors and fans (no app controls, #3552) are verified via SignalR only.
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
         guard selector.waitForExistence(timeout: 8) else {
             throw NSError(
@@ -2117,13 +2117,19 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
 
         let updatedSensors = try XCTUnwrap(updatedPayload["sensors"] as? [[String: Any]])
         let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
-        let increase = app.buttons["printer.controls.sensor.\(fanID).FanSpeed.increase"]
-        XCTAssertTrue(increase.waitForExistence(timeout: 12), "\(printer.name) must expose the writable fan control.")
-        attachScreenshot(named: "\(printer.name) live fan control")
+        // Fans have no app controls (#3552), so drive the fan through the same
+        // backend sensor endpoint the removed stepper used.
+        let expectedFanValue = fanValue >= 100 ? fanValue - 1 : fanValue + 1
         let fanUpdateCount = observer.updateCount
-        increase.tap()
+        try await setSensorValue(
+            credentials,
+            token: token,
+            printerID: printer.id,
+            sensorID: fanID,
+            quantity: "FanSpeed",
+            value: expectedFanValue
+        )
 
-        let expectedFanValue = fanValue + 1
         let fanEvent = try XCTUnwrap(observer.waitForUpdate(after: fanUpdateCount, timeout: 30) { event in
             guard let payload = try? Self.jsonObject(event.payload),
                   let sensors = payload["sensors"] as? [[String: Any]] else { return false }
@@ -2136,8 +2142,12 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(fanPayload)),
             "A fan-only printerupdated must not alter non-sensor printer fields."
         )
-        let fanReadback = app.descendants(matching: .any)["printer.controls.sensor.\(fanID).FanSpeed.value"]
-        assertFieldValueContains(fanReadback, text: expectedFanValue.formatted(), timeout: 20)
+        let fanControls = app.descendants(matching: .any)
+        for suffix in ["value", "increase", "decrease"] {
+            let id = "printer.controls.sensor.\(fanID).FanSpeed.\(suffix)"
+            XCTAssertFalse(fanControls[id].exists, "\(id) must not render: fans have no app controls (#3552)")
+        }
+        attachScreenshot(named: "\(printer.name) live fan update without fan controls")
 
         var controlRequest = URLRequest(url: credentials.controlURL.appending(path: "/restart-api"))
         controlRequest.httpMethod = "POST"

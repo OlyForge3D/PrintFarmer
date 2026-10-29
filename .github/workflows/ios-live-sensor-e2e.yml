@@ -2,8 +2,8 @@ name: iOS live sensor E2E
 
 # Opt-in only (#3563). Runs mobile/scripts/run-live-sensor-e2e.py against its
 # disposable local API + Moonraker emulator and a per-run isolated simulator,
-# so the strict sensor/fan field readbacks in PrinterSensorsLiveBackendUITests
-# execute against a live backend. Kept out of ios-pr-ci.yml so it never posts
+# so the strict sensor field readbacks and SignalR fan readbacks in
+# PrinterSensorsLiveBackendUITests execute against a live backend. Kept out of ios-pr-ci.yml so it never posts
 # skipped copies of required checks such as "Build (iOS)".
 #
 # Trigger: add the `ios-live-sensor-e2e` label to a PR (tests its merge ref), or
