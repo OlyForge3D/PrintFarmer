@@ -677,7 +677,9 @@ public sealed class PrinterFileContentServiceTests
         private PrinterFileThumbnailStore CreateStore()
         {
             Mock<IStoragePathService> paths = new();
-            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(StorageRoot);
+            paths.Setup(x => x.GetPrinterFileThumbnailDirectory()).Returns(StorageRoot);
+            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(_directory, "gcode-library"));
+            paths.Setup(x => x.GetModelUploadDirectory()).Returns(Path.Join(_directory, "uploads"));
             return new(CreateFactory(), paths.Object, NullLogger<PrinterFileThumbnailStore>.Instance);
         }
 

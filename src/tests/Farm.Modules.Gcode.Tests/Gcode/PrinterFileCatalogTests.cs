@@ -766,7 +766,10 @@ public sealed class PrinterFileCatalogTests
             if (enrich)
             {
                 Mock<IStoragePathService> paths = new();
-                paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(Path.GetTempPath(), "printer-catalog-unused"));
+                string unused = Path.Join(Path.GetTempPath(), "printer-catalog-unused");
+                paths.Setup(x => x.GetPrinterFileThumbnailDirectory()).Returns(Path.Join(unused, "thumbnails"));
+                paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(unused, "gcode-library"));
+                paths.Setup(x => x.GetModelUploadDirectory()).Returns(Path.Join(unused, "uploads"));
                 enrichment = new PrinterFileEnrichmentService(
                     factory,
                     new PrinterFileThumbnailStore(factory, paths.Object, NullLogger<PrinterFileThumbnailStore>.Instance),

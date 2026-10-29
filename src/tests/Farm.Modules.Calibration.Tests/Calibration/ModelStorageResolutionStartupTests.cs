@@ -374,6 +374,8 @@ public sealed class ModelStorageResolutionStartupTests
 
         public string GetSnapshotStorageDirectory() => modelUploadDirectory;
 
+        public string GetPrinterFileThumbnailDirectory() => modelUploadDirectory;
+
         public Task EnsureDirectoriesExistAsync() => Task.CompletedTask;
     }
 }

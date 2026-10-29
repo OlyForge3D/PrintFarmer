@@ -489,13 +489,23 @@ provider (SQLite, PostgreSQL, or SQL Server). Existing catalog rows are enriched
 on their next eligible background pass; there is no whole-catalog download.
 No slicer-context migration is required.
 
-The private store is `<Gcode storage directory>/.printer-file-thumbnails`,
-outside the web root and library. The configured Gcode root must already exist;
-an unavailable root reports `storage_unavailable`, not a replica-local fallback.
-**Every API replica must use the same database and the same persistent Gcode
-volume**, with working exclusive file creation and same-directory atomic
-rename. Matching path strings on different disks do not constitute shared
-storage. Provision and verify the mount before enabling acquisition on replicas.
+The private store is `<thumbnail root>/.printer-file-thumbnails`. The thumbnail
+root comes from `PRINTER_FILE_THUMBNAIL_PATH`, then
+`STORAGE_PATHS:PRINTER_FILE_THUMBNAILS`, then `<content root>/printer-file-thumbnails`.
+The bundled Docker deployments set it under the persistent app-data volume
+(`/data/printer-file-thumbnails`, or `/app/data/printer-file-thumbnails` for the
+monolith compose file). It must not be inside, equal to, or a parent of the
+Gcode library or model upload roots, so library file APIs can never read or
+write cached thumbnails; an overlapping, missing, or unavailable root reports
+`storage_unavailable`, not a replica-local fallback. The root is created at
+startup, but the store never recreates it afterwards.
+**Every API replica must use the same database and the same persistent
+thumbnail volume**, with working exclusive file creation and same-directory
+atomic rename. Matching path strings on different disks do not constitute
+shared storage. Provision and verify the mount before enabling acquisition on
+replicas. Builds that stored thumbnails in `<Gcode storage
+directory>/.printer-file-thumbnails` can delete that folder after upgrading;
+missing images are re-acquired on the next enrichment pass.
 
 `PrinterFileIndex.thumbnailCacheMaxBytes` defaults to **512 MiB** and accepts
 2 MiB through 1 TiB. Database-coordinated reservations include in-flight,

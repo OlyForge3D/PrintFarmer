@@ -334,6 +334,32 @@ public sealed class PrinterFileThumbnailStoreTests
         Assert.Equal(Png.Length, await fixture.ChargedBytesAsync());
     }
 
+    [Theory]
+    [InlineData("parent")]
+    [InlineData("same")]
+    [InlineData("child")]
+    public async Task Reserve_RootOverlappingGcodeLibrary_FailsClosedWithoutWritingIntoLibrary(string overlap)
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        string gcodeRoot = overlap switch
+        {
+            "parent" => Path.GetDirectoryName(fixture.StorageRoot)!,
+            "same" => fixture.StorageRoot + Path.DirectorySeparatorChar,
+            _ => Path.Join(fixture.StorageRoot, "library"),
+        };
+
+        Assert.Equal("storage_unavailable", (await fixture.Store(gcodeRoot).ReserveAsync(Ct)).Reason);
+        Assert.False(Directory.Exists(fixture.CacheDirectory));
+        Assert.Equal(0, await fixture.ChargedBytesAsync());
+    }
+
+    [Fact]
+    public async Task Reserve_SiblingWithSharedNamePrefix_IsNotTreatedAsOverlap()
+    {
+        await using Fixture fixture = await Fixture.CreateAsync();
+        Assert.NotNull((await fixture.Store(fixture.StorageRoot + "-library").ReserveAsync(Ct)).ReservationId);
+    }
+
     private sealed class RejectArtifactCommit : SaveChangesInterceptor
     {
         public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -411,10 +437,15 @@ public sealed class PrinterFileThumbnailStoreTests
             return fixture;
         }
 
-        public PrinterFileThumbnailStore Store(IInterceptor? interceptor = null)
+        public PrinterFileThumbnailStore Store(IInterceptor? interceptor = null) =>
+            Store(Path.Join(_directory, "gcode-library"), interceptor);
+
+        public PrinterFileThumbnailStore Store(string gcodeRoot, IInterceptor? interceptor = null)
         {
             Mock<IStoragePathService> paths = new(MockBehavior.Strict);
-            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(StorageRoot);
+            paths.Setup(x => x.GetPrinterFileThumbnailDirectory()).Returns(StorageRoot);
+            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(gcodeRoot);
+            paths.Setup(x => x.GetModelUploadDirectory()).Returns(Path.Join(_directory, "uploads"));
             return new(CreateFactory(interceptor), paths.Object, NullLogger<PrinterFileThumbnailStore>.Instance, Clock);
         }
 

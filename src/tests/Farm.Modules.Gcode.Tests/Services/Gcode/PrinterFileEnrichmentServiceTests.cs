@@ -575,7 +575,9 @@ public sealed class PrinterFileEnrichmentServiceTests
                 .UseSqlite($"Data Source={Path.Join(_directory, "test.db")};Pooling=False;Default Timeout=30;Foreign Keys=True")
                 .Options);
             Mock<IStoragePathService> paths = new();
-            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(_directory, "storage"));
+            paths.Setup(x => x.GetPrinterFileThumbnailDirectory()).Returns(Path.Join(_directory, "storage"));
+            paths.Setup(x => x.GetGcodeStorageDirectory()).Returns(Path.Join(_directory, "gcode-library"));
+            paths.Setup(x => x.GetModelUploadDirectory()).Returns(Path.Join(_directory, "uploads"));
             Store = new(factory, paths.Object, NullLogger<PrinterFileThumbnailStore>.Instance);
             Lease.SetupGet(x => x.PrinterId).Returns(_printer.Id);
             Lease.SetupGet(x => x.ConfigurationGeneration).Returns(1);

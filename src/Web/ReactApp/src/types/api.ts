@@ -98,10 +98,16 @@ export interface PrinterFileCatalogEntry {
   metadataState?: PrinterFileEnrichmentState | null;
   /** Background thumbnail outcome, independent of the metadata outcome. */
   thumbnailState?: PrinterFileEnrichmentState | null;
+  /** Stable reason code for the metadata outcome, such as `transfer_failed`. */
+  metadataReason?: string | null;
+  /** Stable reason code for the thumbnail outcome, such as `cache_full`. */
+  thumbnailReason?: string | null;
   /** Opaque stored-image version; changes whenever the local thumbnail bytes change. */
   thumbnailVersion?: string | null;
   /** Versioned local-only thumbnail route; present only when a validated image exists. */
   thumbnailUrl?: string | null;
+  /** True when a stored image exists but is due for refresh or no longer current. */
+  thumbnailIsStale?: boolean;
 }
 
 export interface PrinterFileScanStatus {

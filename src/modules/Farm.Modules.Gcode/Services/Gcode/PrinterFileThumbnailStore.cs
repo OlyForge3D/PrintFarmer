@@ -15,7 +15,9 @@ public sealed record PrinterFileThumbnailReservationResult(Guid? ReservationId, 
 
 /// <summary>
 /// Deployment-shared, local-only immutable images. All replicas must share both the database and
-/// the configured G-code filesystem. No printer I/O or location publication belongs in this store.
+/// the dedicated thumbnail filesystem, which must stay outside the G-code library and model
+/// uploads so library file APIs can never read or write it. No printer I/O or location
+/// publication belongs in this store.
 /// </summary>
 public sealed class PrinterFileThumbnailStore(
     IDbContextFactory<AppDbContext> dbFactory,
@@ -28,7 +30,14 @@ public sealed class PrinterFileThumbnailStore(
     public static readonly TimeSpan ReservationLifetime = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan RetirementGrace = TimeSpan.FromHours(1);
 
-    private readonly string _root = Path.GetFullPath(storagePaths.GetGcodeStorageDirectory());
+    private readonly string _root = Path.GetFullPath(storagePaths.GetPrinterFileThumbnailDirectory());
+
+    private readonly string[] _libraryRoots =
+    [
+        Path.GetFullPath(storagePaths.GetGcodeStorageDirectory()),
+        Path.GetFullPath(storagePaths.GetModelUploadDirectory()),
+    ];
+
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     /// <summary>Charges the maximum image size before a caller starts remote capture.</summary>
@@ -65,7 +74,7 @@ public sealed class PrinterFileThumbnailStore(
         }
         catch (Exception ex) when (IsStorageFailure(ex))
         {
-            logger.LogWarning(ex, "Printer thumbnail storage is unavailable; check the shared G-code mount and permissions.");
+            logger.LogWarning(ex, "Printer thumbnail storage is unavailable; check the shared thumbnail mount and permissions.");
             return new(null, "storage_unavailable");
         }
     }
@@ -456,10 +465,16 @@ public sealed class PrinterFileThumbnailStore(
 
     private void CheckDirectory(bool create)
     {
+        // Library file APIs only reject "." and ".." segments, so any overlap would expose or corrupt the cache.
+        if (_libraryRoots.Any(library => Overlaps(_root, library)))
+        {
+            throw new IOException("The printer thumbnail storage root must not overlap the G-code library or model upload roots.");
+        }
+
         // Never recreate a missing configured root: that can hide a lost mount behind local disk.
         if (!File.GetAttributes(_root).HasFlag(FileAttributes.Directory))
         {
-            throw new IOException("The configured G-code storage root is not a directory.");
+            throw new IOException("The configured printer thumbnail storage root is not a directory.");
         }
 
         string directory = Path.Join(_root, DirectoryName);
@@ -510,4 +525,14 @@ public sealed class PrinterFileThumbnailStore(
     }
 
     private static bool IsStorageFailure(Exception ex) => ex is IOException or UnauthorizedAccessException;
+
+    private static bool Overlaps(string first, string second)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        string a = Path.TrimEndingDirectorySeparator(first) + Path.DirectorySeparatorChar;
+        string b = Path.TrimEndingDirectorySeparator(second) + Path.DirectorySeparatorChar;
+        return a.StartsWith(b, comparison) || b.StartsWith(a, comparison);
+    }
 }
