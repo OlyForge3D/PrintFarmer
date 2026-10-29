@@ -9,9 +9,6 @@ on:
     # BLOCKED). The `select` job below decides whether the Xcode toolchain
     # actually needs to run; PRs that don't touch iOS-relevant paths still see
     # "Build (iOS)" turn green quickly instead of never posting.
-  # Manual dispatch runs ONLY the opt-in live sensor E2E job below (#3563);
-  # the PR build/unit/XCUI jobs stay pull_request-only.
-  workflow_dispatch:
 
 concurrency:
   group: ios-pr-${{ github.head_ref || github.ref }}
@@ -35,7 +32,6 @@ jobs:
   # ---------------------------------------------------------------------------
   select:
     name: Select iOS build
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.selector.outputs.should_run }}
@@ -66,7 +62,7 @@ jobs:
     # when `select` didn't succeed, and the step-level conditions below treat
     # a non-successful `select` the same as `should_run == 'true'`: fail safe
     # toward running the real build rather than silently passing unvalidated.
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: ${{ !cancelled() }}
     runs-on: macos-26
     defaults:
       run:
@@ -534,126 +530,4 @@ jobs:
             mobile/build-${{ matrix.key }}/XCUIShard-retry.xcresult
             mobile/build-${{ matrix.key }}/XCUIShard-retry.events.jsonl
             mobile/build-${{ matrix.key }}/XCUIShard-retry.timing.json
-          retention-days: 7
-
-  live-sensor-e2e:
-    # Opt-in only (#3563): `gh workflow run ios-pr-ci.yml --ref <branch>`.
-    # Runs mobile/scripts/run-live-sensor-e2e.py against its disposable local
-    # API + Moonraker emulator and a per-run isolated simulator.
-    name: Live sensor E2E (iOS)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-26
-    timeout-minutes: 90
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-
-      - name: Select Xcode 26.6
-        run: |
-          XCODE_PATH="/Applications/Xcode_26.6.app"
-          if [ ! -d "$XCODE_PATH" ]; then
-            echo "::error::Xcode 26.6 is missing from the macos-26 runner at $XCODE_PATH."
-            exit 1
-          fi
-          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          XCODE_VERSION="$(xcodebuild -version)"
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | head -n 1)" != "Xcode 26.6" ]; then
-            echo "::error::Expected Xcode 26.6 at $XCODE_PATH, found: $XCODE_VERSION"
-            exit 1
-          fi
-          if [ "$(printf '%s\n' "$XCODE_VERSION" | sed -n '2s/^Build version //p')" != "17F113" ]; then
-            echo "::error::Expected Xcode build 17F113 at $XCODE_PATH, found: $XCODE_VERSION"
-            exit 1
-          fi
-          printf '%s\n' "$XCODE_VERSION"
-          echo "PRINTFARM_SENSOR_E2E_DEVELOPER_DIR=$XCODE_PATH/Contents/Developer" >> "$GITHUB_ENV"
-
-      - name: Install approved iOS 26.5 simulator runtime
-        timeout-minutes: 30
-        env:
-          IOS_SIMULATOR_DEVICE_FAMILY: iPhone
-        run: |
-          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
-          DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-${IOS_SIMULATOR_DEVICE_FAMILY} }"
-          has_approved_runtime() {
-            xcrun simctl list runtimes -j | jq -e \
-              --arg runtime "$RUNTIME_ID" \
-              '.runtimes[] | select(.identifier == $runtime and .buildversion == "23F77" and .isAvailable)' \
-              >/dev/null
-          }
-          if ! has_approved_runtime; then
-            sudo xcodebuild -downloadPlatform iOS \
-              -buildVersion 23F77 \
-              -architectureVariant arm64
-            if ! has_approved_runtime; then
-              echo "::error::iOS 26.5 runtime build 23F77 remained unavailable after download; inspect the download output and install the exact approved runtime."
-              exit 1
-            fi
-          fi
-          if ! xcrun simctl list devices available -j | jq -e \
-            --arg runtime "$RUNTIME_ID" --arg prefix "$DEVICE_PREFIX" \
-            '.devices[$runtime][]? | select(.isAvailable == true and (.name | startswith($prefix)))' >/dev/null; then
-            if ! DEVICE_TYPE="$(xcrun simctl list devicetypes -j | jq -e \
-              --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
-              --arg preferences "$IOS_SIMULATOR_DEVICE_PREFERENCE" \
-              '[($preferences | split(","))[] as $name
-                | .devicetypes[]
-                | select(.name == $name and .productFamily == $family)] | first')"; then
-              echo "::error::No installed $IOS_SIMULATOR_DEVICE_FAMILY simulator type matches its preference list."
-              exit 1
-            fi
-            DEVICE_NAME="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.name')"
-            DEVICE_TYPE_ID="$(printf '%s\n' "$DEVICE_TYPE" | jq -r '.identifier')"
-            xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
-          fi
-
-      - name: Restore API and Moonraker emulator
-        timeout-minutes: 15
-        working-directory: src
-        run: |
-          dotnet restore ./api/Farm.Web.Api.csproj
-          dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj
-
-      - name: Run live sensor E2E harness
-        # Bounded runner ceiling (1440s) plus API/emulator/app builds.
-        timeout-minutes: 50
-        run: python3 scripts/run-live-sensor-e2e.py
-
-      - name: Export field readback evidence
-        if: always()
-        run: |
-          for bundle in build/sensor-e2e-3419.*/SensorsLive.xcresult; do
-            [ -d "$bundle" ] || continue
-            dir="$(dirname "$bundle")"
-            xcrun xcresulttool get test-results summary --path "$bundle" > "$dir/summary.json" || true
-            xcrun xcresulttool get test-results tests --path "$bundle" > "$dir/tests.json" || true
-            jq -r '.. | objects | select(.nodeType? == "Test Case") | .nodeIdentifier' "$dir/tests.json" 2>/dev/null |
-              while read -r test_id; do
-                xcrun xcresulttool get test-results activities --path "$bundle" --test-id "$test_id" \
-                  > "$dir/activities.json" || true
-              done
-            jq '{result, totalTestCount, passedTests, failedTests, skippedTests, expectedFailures, testFailures}' \
-              "$dir/summary.json" || true
-            jq -r '.. | objects | .title? // empty | select(test("CONTAINS"))' "$dir/activities.json" 2>/dev/null |
-              sort | uniq -c || true
-          done
-
-      - name: Upload live sensor E2E evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-live-sensor-e2e
-          # Disposable per-run database is excluded; credentials are random,
-          # per-run, and the harness deletes its config file on exit.
-          path: |
-            mobile/build/sensor-e2e-3419.*/
-            !mobile/build/sensor-e2e-3419.*/farm.sqlite*
           retention-days: 7

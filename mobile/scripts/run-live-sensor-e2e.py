@@ -33,6 +33,26 @@ TEST_NAME = (
     "testLiveSensorsSignalRControlsAndReconnectAgainstBothBackends"
 )
 
+EXPECTED_TEST_ID = "/".join(TEST_NAME.split("/")[1:]) + "()"
+
+
+def verify_named_test_succeeded(timing_path):
+    """Fail unless the bounded runner saw exactly the named test, once, as Success.
+
+    run-tests.py rejects zero-test and failed runs but not skipped ones, and a
+    skipped test would leave every live field readback unexecuted.
+    """
+    try:
+        tests = json.loads(Path(timing_path).read_text(encoding="utf-8"))["tests"]
+        observed = [(test["identifier"], test["status"]) for test in tests]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f"No usable runner test results at {timing_path}: {error}") from error
+    if observed != [(EXPECTED_TEST_ID, "Success")]:
+        raise RuntimeError(
+            f"Expected exactly {EXPECTED_TEST_ID} with status Success; observed {observed}"
+        )
+    print(f"LIVE_SENSOR_E2E: verified {EXPECTED_TEST_ID} executed once with Success", flush=True)
+
 
 def ensure_port_free(port):
     with socket.socket() as sock:
@@ -563,6 +583,7 @@ def main():
             "-resultBundlePath", str(result_bundle),
         ]
         run_logged(command, MOBILE, env, run_dir / "test.log")
+        verify_named_test_succeeded(result_bundle.with_suffix(".timing.json"))
     finally:
         if server is not None:
             server.shutdown()
