@@ -6,7 +6,7 @@ name: iOS live sensor E2E
 # execute against a live backend. Kept out of ios-pr-ci.yml so it never posts
 # skipped copies of required checks such as "Build (iOS)".
 #
-# Trigger: add the `ios-live-sensor-e2e` label to a PR (runs at its head), or
+# Trigger: add the `ios-live-sensor-e2e` label to a PR (tests its merge ref), or
 # `gh workflow run ios-live-sensor-e2e.yml --ref <branch>` once on the default
 # branch.
 on:
@@ -15,7 +15,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ios-live-sensor-e2e-${{ github.head_ref || github.ref }}
+  # Keyed on the label so adding an unrelated label never cancels a live run.
+  group: ios-live-sensor-e2e-${{ github.head_ref || github.ref }}-${{ github.event.label.name || 'dispatch' }}
   cancel-in-progress: true
 
 permissions:
@@ -32,9 +33,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ios-live-sensor-e2e'
     runs-on: macos-26
     timeout-minutes: 90
-    defaults:
-      run:
-        working-directory: mobile
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -43,6 +41,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Select Xcode 26.6
         run: |
@@ -104,6 +105,7 @@ jobs:
           fi
 
       - name: Harness contract tests
+        working-directory: mobile
         run: python3 -m unittest discover -s scripts/tests -p 'test_run_live_sensor_e2e.py' -v
 
       - name: Restore API and Moonraker emulator
@@ -116,6 +118,7 @@ jobs:
       - name: Run live sensor E2E harness
         # Bounded runner ceiling (1440s) plus API/emulator/app builds.
         timeout-minutes: 50
+        working-directory: mobile
         run: python3 scripts/run-live-sensor-e2e.py
 
       - name: Export field readback evidence
@@ -123,6 +126,7 @@ jobs:
         # which requires exactly the named test to report Success.
         if: always()
         continue-on-error: true
+        working-directory: mobile
         run: |
           for bundle in build/sensor-e2e-3419.*/SensorsLive.xcresult; do
             [ -d "$bundle" ] || continue
