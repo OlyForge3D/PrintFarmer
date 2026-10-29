@@ -377,6 +377,9 @@ enum UITestBootstrap {
         #if DEBUG
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
+            // #3457: keep drag fixtures hermetic; simulated 30s queue invalidations
+            // otherwise race the gesture. Revalidation behavior is unit tested.
+            services.signalRService = DemoSignalRService(simulatesProgress: false)
         }
         #endif
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`

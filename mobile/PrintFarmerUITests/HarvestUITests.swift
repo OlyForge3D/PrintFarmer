@@ -61,6 +61,7 @@ final class HarvestUITests: QueueUITestBase {
                       "Eligible queued rows should expose the drag-to-reorder control.")
         XCTAssertTrue(gammaHandle.exists)
         XCTAssertTrue(gammaHandle.isHittable)
+        try requireDraggable(alphaHandle, "alpha reorder handle")
         let originalAlphaY = alpha.frame.minY
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -93,34 +94,75 @@ final class HarvestUITests: QueueUITestBase {
                     .map(\.identifier)
             }
             let reorderedGroup = currentGroupOrder()
-            let alphaCoordinate = alphaHandle.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
-            )
-            alphaCoordinate.press(
+            XCTAssertEqual(reorderedGroup, [beta.identifier, alpha.identifier, gamma.identifier])
+            let crossGroupError = app.descendants(matching: .any).matching(
+                NSPredicate(format: "label CONTAINS %@", "same printer and priority group")
+            ).firstMatch
+            XCTAssertFalse(crossGroupError.exists)
+
+            // #3457: the priority boundary's centre is also the legal end-of-group
+            // slot, so drop past its midpoint (between the two boundary rows).
+            try requireDraggable(alphaHandle, "alpha reorder handle before priority drag")
+            alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: priorityBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)
                 ),
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
             )
+            XCTAssertTrue(crossGroupError.waitForExistence(timeout: 5),
+                          "A drop into another priority group must be rejected visibly.")
+            try requireDraggable(alphaHandle, "alpha reorder handle after priority drag")
             XCTAssertEqual(currentGroupOrder(), reorderedGroup,
                            "Dragging to another priority group must not reorder this group.")
 
-            alphaHandle.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
-            ).press(
+            try requireDraggable(printerBoundary, "printer-boundary row")
+            alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: printerBoundary.coordinate(
-                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)
                 ),
                 withVelocity: .slow,
                 thenHoldForDuration: 0.5
             )
+            try requireDraggable(alphaHandle, "alpha reorder handle after printer drag")
+            XCTAssertTrue(crossGroupError.exists,
+                          "A drop into another printer group must stay rejected.")
             XCTAssertEqual(currentGroupOrder(), reorderedGroup,
                            "Dragging to another printer group must not reorder this group.")
         }
     }
+
+    /// Fails with a diagnosable message instead of letting XCTest synthesise a
+    /// touch at an infinite point when a row has not settled into the hierarchy.
+    private func requireDraggable(
+        _ element: XCUIElement,
+        _ name: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                guard element.exists, element.isHittable else { return false }
+                let frame = element.frame
+                return frame.minX.isFinite && frame.minY.isFinite
+                    && frame.width.isFinite && frame.height.isFinite
+                    && !frame.isEmpty
+            },
+            object: nil
+        )
+        guard XCTWaiter.wait(for: [settled], timeout: 5) == .completed else {
+            XCTFail(
+                "The \(name) must be hittable with a finite frame before dragging; exists=\(element.exists).",
+                file: file,
+                line: line
+            )
+            throw DragPreconditionFailure()
+        }
+    }
+
+    private struct DragPreconditionFailure: Error {}
 
     func testQueueAccessibilityReorderControlsRespectEligibility() {
         launchQueueReorderScenario()

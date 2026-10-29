@@ -584,7 +584,7 @@ final class JobListViewModelTests: XCTestCase {
     }
 
     func testLoadJobsHandlesServerError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.errorToThrow = NetworkError.invalidResponse
 
         await viewModel.loadJobs()
 
@@ -1040,6 +1040,76 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.jobs.map(\.id), signalROrder.map(\.id))
         XCTAssertEqual(viewModel.jobs.map(\.job.rowVersion), ["AQIDBA==", "AQIDAw=="])
         XCTAssertEqual(viewModel.errorMessage, "Queue changed — refreshed.")
+    }
+
+    func testQueueInvalidationKeepsDragAffordancesStableWhileRevalidating() async throws {
+        // #3457: a SignalR queue update mid-drag must not flip edit mode or
+        // `moveDisabled`, or UIKit silently cancels the user's drop.
+        let printerID = UUID()
+        let first = try makeQueueJob(scope: printerID, name: "first")
+        let second = try makeQueueJob(scope: printerID, name: "second")
+        mockJobService.queuedJobResponsesToReturn = [first, second]
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        let firstID = try XCTUnwrap(first.job.jobUUID)
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+        XCTAssertTrue(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
+
+        let gate = QueueMoveGate()
+        mockJobService.beforeListAllJobs = { await gate.suspend() }
+        signalR.simulateJobQueueUpdate(JobQueueUpdate(printerId: printerID, jobs: []))
+        await gate.waitUntilEntered()
+
+        XCTAssertTrue(viewModel.isRevalidatingQueue)
+        XCTAssertFalse(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.canReorderQueue, "Mutations still require a fresh snapshot.")
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+        XCTAssertTrue(viewModel.presentsQueueReorder)
+        XCTAssertTrue(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
+        XCTAssertFalse(viewModel.canMoveQueuedJob(id: firstID, direction: .down, inGroup: groupID))
+
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        XCTAssertEqual(viewModel.errorMessage, "Refresh the queue before reordering to load current revisions.",
+                       "A drop during revalidation must be rejected visibly, not silently cancelled.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+
+        await gate.release()
+        for _ in 0..<500 where viewModel.isRevalidatingQueue || !viewModel.hasFreshQueueSnapshot {
+            await Task.yield()
+        }
+        XCTAssertFalse(viewModel.isRevalidatingQueue)
+        XCTAssertTrue(viewModel.canReorderQueue)
+        XCTAssertEqual(viewModel.keepsQueueEditingActive, viewModel.canReorderQueue)
+        XCTAssertTrue(viewModel.canMoveQueuedJob(id: firstID, direction: .down, inGroup: groupID))
+    }
+
+    func testFailedQueueRevalidationEndsDragAffordances() async throws {
+        let printerID = UUID()
+        let first = try makeQueueJob(scope: printerID, name: "first")
+        let second = try makeQueueJob(scope: printerID, name: "second")
+        mockJobService.queuedJobResponsesToReturn = [first, second]
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        let firstID = try XCTUnwrap(first.job.jobUUID)
+
+        mockJobService.errorToThrow = NetworkError.invalidResponse
+        signalR.simulateJobQueueUpdate(JobQueueUpdate(printerId: printerID, jobs: []))
+        for _ in 0..<500 where viewModel.errorMessage == nil || viewModel.isRevalidatingQueue {
+            await Task.yield()
+        }
+
+        XCTAssertFalse(viewModel.isRevalidatingQueue)
+        XCTAssertFalse(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.keepsQueueEditingActive)
+        XCTAssertFalse(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
     }
 
     // MARK: - Grouped Jobs: Recent

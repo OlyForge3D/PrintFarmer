@@ -225,8 +225,7 @@ struct JobListView: View {
                             : nil
                         let canMove = groupID.flatMap { groupID in
                             item.job.jobUUID.map { id in
-                                viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID)
-                                    || viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                                viewModel.presentsMoveControl(id: id, inGroup: groupID)
                             }
                         } ?? false
                         queueCard { queuedJobRow(item, groupID: groupID) }
@@ -253,7 +252,7 @@ struct JobListView: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.pfTextTertiary)
                             }
-                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                            if viewModel.presentsQueueReorder && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
                                     .font(.caption)
                                     .foregroundStyle(Color.pfTextSecondary)
@@ -264,7 +263,7 @@ struct JobListView: View {
                             Label("Queued", systemImage: "tray.full")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                            if viewModel.presentsQueueReorder && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
                                     .font(.caption)
                                     .foregroundStyle(Color.pfTextSecondary)

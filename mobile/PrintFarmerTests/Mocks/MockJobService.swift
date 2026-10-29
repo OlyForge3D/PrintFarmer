@@ -32,6 +32,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     )?
     var moveQueuedJobResponseToReturn: MoveQueuedJobResponse?
     var beforeMoveQueuedJob: (@Sendable () async -> Void)?
+    var beforeListAllJobs: (@Sendable () async -> Void)?
     private(set) var listAllJobsCallCount = 0
 
     // Dispatch (issue #712)
@@ -48,6 +49,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     func listAllJobs() async throws -> QueuedPrintJobPage {
         listAllJobsCalled = true
         listAllJobsCallCount += 1
+        if let beforeListAllJobs { await beforeListAllJobs() }
         if let error = errorToThrow { throw error }
         let jobs = queuedJobResponsesByLoad.isEmpty
             ? queuedJobResponsesToReturn
@@ -212,6 +214,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         moveQueuedJobCalledWith = nil
         moveQueuedJobResponseToReturn = nil
         beforeMoveQueuedJob = nil
+        beforeListAllJobs = nil
         listAllJobsCallCount = 0
         candidatesToReturn = []
         getCandidatesCalledWith = nil

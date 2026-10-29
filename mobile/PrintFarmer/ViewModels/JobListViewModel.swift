@@ -24,6 +24,8 @@ final class JobListViewModel {
     private(set) var isNetworkReachable = false
     private(set) var hasFreshQueueSnapshot = false
     private(set) var isReorderingQueue = false
+    /// True while an invalidation-driven refresh replaces a previously fresh snapshot.
+    private(set) var isRevalidatingQueue = false
     private(set) var rerunningFailedJobIDs: Set<UUID> = []
     private(set) var jobListMayHaveMore = false
     private(set) var activePrinterStatuses: [UUID: PrinterStatusDetail] = [:]
@@ -41,6 +43,7 @@ final class JobListViewModel {
     @ObservationIgnored private var loadGeneration: UInt64 = 0
     @ObservationIgnored private var activeLoadCount = 0
     @ObservationIgnored private var statusPollGeneration: UInt64 = 0
+    @ObservationIgnored private var activeRevalidationCount = 0
 
     func configure(jobService: any JobServiceProtocol) {
         self.jobService = jobService
@@ -148,7 +151,23 @@ final class JobListViewModel {
     /// Keep the native List's editing session alive while an accepted move is
     /// persisted. Mutation admission still uses canReorderQueue and fresh revisions.
     var keepsQueueEditingActive: Bool {
-        isReorderingQueue || canReorderQueue
+        isReorderingQueue || canReorderQueue || presentsReorderDuringRevalidation
+    }
+
+    /// Native drag affordances stay stable while a SignalR/reconnect invalidation
+    /// re-fetches the queue (#3457): flipping edit mode or `moveDisabled` mid-drag
+    /// makes UIKit silently cancel the user's drop. Admission still requires a
+    /// fresh snapshot, so a drop that lands in this window is rejected visibly.
+    var presentsQueueReorder: Bool {
+        canReorderQueue || presentsReorderDuringRevalidation
+    }
+
+    private var presentsReorderDuringRevalidation: Bool {
+        isRevalidatingQueue
+            && !isReorderingQueue
+            && queueWriteAuthorized
+            && isNetworkReachable
+            && isViewActive
     }
 
     func setQueueWriteAuthorization(_ isAuthorized: Bool) {
@@ -324,8 +343,19 @@ final class JobListViewModel {
 
     private func handleQueueInvalidation() async {
         guard isViewActive else { return }
+        let wasPresentingReorder = presentsQueueReorder
         queueStateEpoch &+= 1
+        if wasPresentingReorder {
+            activeRevalidationCount += 1
+            isRevalidatingQueue = true
+        }
         hasFreshQueueSnapshot = false
+        defer {
+            if wasPresentingReorder {
+                activeRevalidationCount -= 1
+                isRevalidatingQueue = activeRevalidationCount > 0
+            }
+        }
         _ = await refreshQueue()
     }
 
@@ -484,8 +514,22 @@ final class JobListViewModel {
         direction: QueueReorderDirection,
         inGroup groupID: String
     ) -> Bool {
-        guard canReorderQueue,
-              let group = reorderableQueueGroups.first(where: { $0.id == groupID }),
+        canReorderQueue && hasMovableNeighbor(id: id, direction: direction, inGroup: groupID)
+    }
+
+    /// Whether the row should keep its native drag handle; see `presentsQueueReorder`.
+    func presentsMoveControl(id: UUID, inGroup groupID: String) -> Bool {
+        presentsQueueReorder
+            && (hasMovableNeighbor(id: id, direction: .up, inGroup: groupID)
+                || hasMovableNeighbor(id: id, direction: .down, inGroup: groupID))
+    }
+
+    private func hasMovableNeighbor(
+        id: UUID,
+        direction: QueueReorderDirection,
+        inGroup groupID: String
+    ) -> Bool {
+        guard let group = reorderableQueueGroups.first(where: { $0.id == groupID }),
               let index = group.jobs.firstIndex(where: { $0.job.jobUUID == id }) else {
             return false
         }
