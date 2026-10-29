@@ -2973,14 +2973,52 @@ final class QueueReorderUITestDiagnostics: @unchecked Sendable {
     private var repositoryMoveCount = 0
 
     func recordOnMove(offsets: IndexSet, destination: Int) {
+        let move = "\(offsets.map { String($0) }.joined(separator: ","))->\(destination)"
         lock.withLock {
             onMoveCount += 1
-            lastOnMove = "\(offsets.map { String($0) }.joined(separator: ","))->\(destination)"
+            lastOnMove = move
         }
+        log("onMove \(move)")
     }
 
     func recordRepositoryMove() {
         lock.withLock { repositoryMoveCount += 1 }
+        log("repositoryMove")
+    }
+
+    // R3457-D01 diagnostic trail (revertible; see `QueueReorderUITestEventLogProbe`). Log-only:
+    // appending never touches SwiftUI state, so recording cannot invalidate the List mid-drag.
+    private static let eventCapacity = 400
+    private var events: [String] = []
+    private var droppedEvents = 0
+
+    func log(_ event: String) {
+        let line = String(format: "%.3f ", Date().timeIntervalSince1970) + event
+        lock.withLock {
+            if events.count >= Self.eventCapacity {
+                events.removeFirst()
+                droppedEvents += 1
+            }
+            events.append(line)
+        }
+        NSLog("[R3457-D01] %@", line)
+    }
+
+    @MainActor static func logIfActive(_ event: @autoclosure () -> String) {
+        guard isActive else { return }
+        shared.log(event())
+    }
+
+    /// Records a SwiftUI body evaluation without reading any observable state.
+    @MainActor static func logBody(_ name: String) -> Bool {
+        logIfActive("body \(name)")
+        return true
+    }
+
+    var eventLog: String {
+        lock.withLock {
+            (droppedEvents > 0 ? ["dropped=\(droppedEvents)"] : []) + events
+        }.joined(separator: "\n")
     }
 
     var summary: String {

@@ -1,5 +1,8 @@
 import SwiftUI
 import OSLog
+#if DEBUG
+import UIKit
+#endif
 
 struct JobListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -56,6 +59,7 @@ struct JobListView: View {
             if QueueReorderUITestDiagnostics.isActive {
                 queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
             }
+            QueueReorderUITestDiagnostics.logIfActive("loadTask start")
             #endif
             viewModel.activate()
             viewModel.configure(jobService: services.jobService)
@@ -63,10 +67,22 @@ struct JobListView: View {
             viewModel.configureSignalR(services.signalRService)
             viewModel.setQueueWriteAuthorization(canWriteQueue)
             viewModel.startObservingNetworkPath()
+            #if DEBUG
+            QueueReorderUITestObservation.start(viewModel)
+            #endif
             await viewModel.loadJobs()
             queueEditMode = viewModel.keepsQueueEditingActive ? .active : .inactive
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive(
+                "loadTask end cancelled=\(Task.isCancelled) editMode=\(queueEditMode == .active)"
+            )
+            #endif
         }
         .task(id: activePrinterStatusRequestKey) {
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive("statusTask start key=\(activePrinterStatusRequestKey)")
+            defer { QueueReorderUITestDiagnostics.logIfActive("statusTask end cancelled=\(Task.isCancelled)") }
+            #endif
             await refreshActivePrinterStatuses()
         }
         .onChange(of: canWriteQueue) { _, isAuthorized in
@@ -74,6 +90,9 @@ struct JobListView: View {
         }
         .onChange(of: viewModel.keepsQueueEditingActive, initial: true) { _, isActive in
             queueEditMode = isActive ? .active : .inactive
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive("editMode=\(isActive)")
+            #endif
         }
         .onDisappear {
             retryTask?.cancel()
@@ -190,6 +209,9 @@ struct JobListView: View {
 
     private var jobList: some View {
         List {
+            #if DEBUG
+            let _ = QueueReorderUITestDiagnostics.logBody("jobList")
+            #endif
             if let message = viewModel.errorMessage {
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle")
@@ -255,6 +277,7 @@ struct JobListView: View {
                                 toOffset: destination
                             )
                             #if DEBUG
+                            QueueReorderUITestDiagnostics.logIfActive("moveQueuedRows returned")
                             if QueueReorderUITestDiagnostics.isActive {
                                 queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
                             }
@@ -361,6 +384,12 @@ struct JobListView: View {
                     .allowsHitTesting(false)
                     .accessibilityLabel(queueReorderDiagnostics)
                     .accessibilityIdentifier("jobList.reorderDiagnostics")
+            }
+            // R3457-D01 diagnostic only: on-demand event trail and drag/drop session sampling.
+            if QueueReorderUITestDiagnostics.isActive {
+                QueueReorderUITestEventLogProbe()
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
             }
         }
         #endif
@@ -1053,3 +1082,136 @@ struct AuthenticatedJobThumbnail: View {
         return UUID(uuidString: String(fileID)) != nil
     }
 }
+
+#if DEBUG
+/// R3457-D01 diagnostic only (one revertible commit; active only in the queue-reorder
+/// UI-test fixture). Logs every view-model property invalidation through Observation
+/// without touching SwiftUI state or adding view dependencies.
+@MainActor
+private enum QueueReorderUITestObservation {
+    private static var observed: Set<ObjectIdentifier> = []
+
+    static func start(_ viewModel: JobListViewModel) {
+        guard QueueReorderUITestDiagnostics.isActive,
+              observed.insert(ObjectIdentifier(viewModel)).inserted else { return }
+        let probes: [(String, @MainActor @Sendable (JobListViewModel) -> String)] = [
+            ("queuedOrder", { model in
+                model.queuedJobs.map { String(($0.job.jobUUID?.uuidString ?? "?").suffix(2)) }
+                    .joined(separator: ",")
+            }),
+            ("jobs", { "\($0.jobs.count)" }),
+            ("isLoading", { "\($0.isLoading)" }),
+            ("errorMessage", { $0.errorMessage == nil ? "nil" : "set" }),
+            ("isReorderingQueue", { "\($0.isReorderingQueue)" }),
+            ("isRevalidatingQueue", { "\($0.isRevalidatingQueue)" }),
+            ("hasFreshQueueSnapshot", { "\($0.hasFreshQueueSnapshot)" }),
+            ("queueWriteAuthorized", { "\($0.queueWriteAuthorized)" }),
+            ("isNetworkReachable", { "\($0.isNetworkReachable)" }),
+            ("isViewActive", { "\($0.isViewActive)" }),
+            ("keepsQueueEditingActive", { "\($0.keepsQueueEditingActive)" }),
+            ("presentsQueueReorder", { "\($0.presentsQueueReorder)" }),
+            ("activePrinterStatuses", { "\($0.activePrinterStatuses.count)" }),
+            ("unavailableActivePrinterStatuses", { "\($0.unavailableActivePrinterStatuses.count)" }),
+            ("recentFailures", { "\($0.recentFailures.count)" }),
+            ("jobListMayHaveMore", { "\($0.jobListMayHaveMore)" }),
+        ]
+        for (name, read) in probes {
+            track(name, viewModel, read)
+        }
+    }
+
+    private static func track(
+        _ name: String,
+        _ viewModel: JobListViewModel,
+        _ read: @escaping @MainActor @Sendable (JobListViewModel) -> String
+    ) {
+        let value = withObservationTracking {
+            read(viewModel)
+        } onChange: { [weak viewModel] in
+            QueueReorderUITestDiagnostics.shared.log("vm.\(name) willSet")
+            Task { @MainActor in
+                guard let viewModel else { return }
+                track(name, viewModel, read)
+            }
+        }
+        QueueReorderUITestDiagnostics.shared.log("vm.\(name)=\(value)")
+    }
+}
+
+/// R3457-D01 diagnostic only: read-only sampling of the List's backing collection view
+/// drag/drop session state, logged on change. Its accessibility label is computed on
+/// demand from the event trail, so XCUI can attach the log without any SwiftUI update.
+private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ProbeView { ProbeView() }
+    func updateUIView(_ uiView: ProbeView, context: Context) {}
+
+    final class ProbeView: UIView {
+        private var timer: Timer?
+        private weak var collectionView: UICollectionView?
+        private var lastState = ""
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isAccessibilityElement = true
+            accessibilityIdentifier = "jobList.reorderEventLog"
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override var accessibilityLabel: String? {
+            get { QueueReorderUITestDiagnostics.shared.eventLog }
+            set {}
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            timer?.invalidate()
+            timer = nil
+            guard window != nil else {
+                QueueReorderUITestDiagnostics.shared.log("probe detached")
+                return
+            }
+            QueueReorderUITestDiagnostics.shared.log("probe attached")
+            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sample() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        }
+
+        private func sample() {
+            if collectionView == nil, let found = locateCollectionView() {
+                collectionView = found
+                QueueReorderUITestDiagnostics.shared.log(
+                    "probe cv frame=\(found.frame) id=\(found.accessibilityIdentifier ?? "nil")"
+                )
+            }
+            guard let view = collectionView else { return }
+            let state = "drag=\(view.hasActiveDrag) drop=\(view.hasActiveDrop)"
+                + " uncommitted=\(view.hasUncommittedUpdates) editing=\(view.isEditing)"
+                + " tracking=\(view.isTracking) dragging=\(view.isDragging)"
+                + " decelerating=\(view.isDecelerating)"
+                + " offsetY=\(Int(view.contentOffset.y.rounded())) cells=\(view.visibleCells.count)"
+            guard state != lastState else { return }
+            lastState = state
+            QueueReorderUITestDiagnostics.shared.log("cv \(state)")
+        }
+
+        /// The nearest collection view sharing an ancestor with this overlay is the List's.
+        private func locateCollectionView() -> UICollectionView? {
+            var ancestor = superview
+            while let container = ancestor {
+                var pending = container.subviews
+                while !pending.isEmpty {
+                    let view = pending.removeFirst()
+                    if let collectionView = view as? UICollectionView { return collectionView }
+                    pending.append(contentsOf: view.subviews)
+                }
+                ancestor = container.superview
+            }
+            return nil
+        }
+    }
+}
+#endif

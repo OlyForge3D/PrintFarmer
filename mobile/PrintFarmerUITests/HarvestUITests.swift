@@ -270,6 +270,13 @@ final class HarvestUITests: QueueUITestBase {
         attachment.name = "Queue reorder diagnostics (\(name))"
         attachment.lifetime = .keepAlways
         add(attachment)
+
+        // R3457-D01 diagnostic only: timestamped invalidation/drop-session trail; no waiting.
+        let eventLog = app.descendants(matching: .any)["jobList.reorderEventLog"]
+        let trail = XCTAttachment(string: eventLog.exists ? eventLog.label : "(event log element absent)")
+        trail.name = "Queue reorder event log (\(name))"
+        trail.lifetime = .keepAlways
+        add(trail)
     }
 
     /// #3457 R3457-D01 diagnostic retention only. Video, synthesized events and
