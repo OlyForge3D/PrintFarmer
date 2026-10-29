@@ -37,16 +37,19 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(15);
 
+    private static readonly DateTimeOffset _start = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+
     private readonly string _databasePath = Path.Join(
         Path.GetTempPath(),
         $"autodispatch-contention-{Guid.NewGuid():N}.db");
     private readonly AutoDispatchTrigger _trigger = new();
     private readonly DispatchConcurrencyCoordinator _concurrencyCoordinator = new();
-    private readonly ManualTimeProvider _clock = new(new DateTimeOffset(2031, 4, 5, 6, 7, 8, TimeSpan.Zero));
+    private readonly ManualTimeProvider _clock = new(_start);
     private readonly Mock<IHubContext<PrinterHub>> _hubMock = new();
     private readonly Mock<IDispatchScorer> _scorerMock = new();
     private readonly ConcurrentQueue<LogEntry> _logs = new();
     private readonly SemaphoreSlim _scanContentionLogged = new(0);
+    private readonly SemaphoreSlim _workerFailed = new(0);
     private readonly ThrowingReaderInterceptor _interceptor = new();
     private readonly TaskCompletionSource<Guid> _scored = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private ServiceProvider _provider = null!;
@@ -110,6 +113,7 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
         _provider?.Dispose();
         _concurrencyCoordinator.Dispose();
         _scanContentionLogged.Dispose();
+        _workerFailed.Dispose();
     }
 
     [Fact]
@@ -252,9 +256,68 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
 
         Func<Task> scan = async () => await service.RunDurableScanAsync(cts.Token);
 
-        await scan.Should().ThrowAsync<SqliteException>(
-            "contention observed after shutdown was requested must not be reported as recovered work");
-        _logs.Should().BeEmpty();
+        (await scan.Should().ThrowAsync<OperationCanceledException>(
+                "contention observed after shutdown was requested is cancellation, not a service fault"))
+            .Which.Should().Match<OperationCanceledException>(ex =>
+                ex.CancellationToken == cts.Token
+                && ex.InnerException is SqliteException
+                && ((SqliteException)ex.InnerException).SqliteErrorCode == 5);
+        _logs.Should().BeEmpty("cancelled contention must not be reported as a retryable scan failure");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ExecuteAsync_StopRequestedWhileScanHitsContention_CompletesWithoutFault()
+    {
+        await SeedEligiblePrinterWithQueuedJobAsync();
+        _interceptor.Failure = new SqliteException("database is locked", 5);
+        using AutoDispatchBackgroundService service = CreateService();
+        await service.StartAsync(CancellationToken.None);
+
+        // A contended startup scan queues no workers, so the periodic scan is the only query.
+        (await WaitForScanContentionLogAsync()).Level.Should().Be(LogLevel.Warning);
+        await _clock.WaitForActiveTimersAsync(1, WaitTimeout);
+
+        // The periodic scan's query observes the stop request, then hits contention.
+        Task stop = Task.CompletedTask;
+        _interceptor.OnExecuting = () => stop = service.StopAsync(CancellationToken.None);
+        _clock.Advance(ScanInterval);
+
+        await Task.WhenAny(service.ExecuteTask!).WaitAsync(WaitTimeout);
+        await stop.WaitAsync(WaitTimeout);
+        service.ExecuteTask!.Status.Should().Be(TaskStatus.RanToCompletion,
+            "contention after the stop request is shutdown, not a host-stopping fault");
+        _logs.Count(entry => entry.Message.Contains("Durable reconciliation scan"))
+            .Should().Be(1, "only the startup failure is reported; the cancelled scan is not");
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task ExecuteAsync_ContinuousTriggerTraffic_DoesNotPostponeContentionRetry()
+    {
+        await SeedEligiblePrinterWithQueuedJobAsync();
+        _interceptor.Failure = new SqliteException("database is locked", 5);
+        using AutoDispatchBackgroundService service = CreateService();
+        await service.StartAsync(CancellationToken.None);
+        (await WaitForScanContentionLogAsync()).Level.Should().Be(LogLevel.Warning);
+
+        // Each trigger is consumed (its worker logs the injected failure) before virtual time
+        // moves, so a loop that restarted the scan delay per event would push the retry past 30s.
+        TimeSpan step = ScanInterval / 3;
+        for (int i = 0; i < 3; i++)
+        {
+            _trigger.NotifyJobQueued(Guid.NewGuid());
+            (await _workerFailed.WaitAsync(WaitTimeout))
+                .Should().BeTrue("the trigger must be consumed before time advances");
+            _clock.Advance(step);
+        }
+
+        LogEntry retry = await WaitForScanContentionLogAsync();
+        retry.Message.Should().Contain("consecutive failure 2");
+        _clock.GetUtcNow().Should().Be(_start + ScanInterval, "the retry must run at the original scan deadline");
+
+        await service.StopAsync(CancellationToken.None).WaitAsync(WaitTimeout);
+        service.ExecuteTask!.Status.Should().Be(TaskStatus.RanToCompletion);
     }
 
     [Theory]
@@ -282,14 +345,36 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
             .Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData(1205, true)]
+    [InlineData(1222, true)]
+    [InlineData(2627, false)]
+    [InlineData(208, false)]
+    [InlineData(547, false)]
+    public void IsTransientContention_ClassifiesSqlServerByErrorNumber(int number, bool expected)
+    {
+        DispatchTransientDatabaseFailure.IsTransientContention(
+                Farm.Infrastructure.Tests.Services.Notifications.PreferenceConcurrencyRetryTests.CreateSqlException(number, "sqlserver"))
+            .Should().Be(expected);
+    }
+
     [Fact]
     public void IsTransientContention_RejectsWrappedAndUnrelatedExceptions()
     {
         var locked = new SqliteException("database is locked", 5);
+        var deadlock = new PostgresException("postgres", "ERROR", "ERROR", PostgresErrorCodes.DeadlockDetected);
+        var sqlDeadlock = Farm.Infrastructure.Tests.Services.Notifications.PreferenceConcurrencyRetryTests
+            .CreateSqlException(1205, "deadlock victim");
 
         DispatchTransientDatabaseFailure.IsTransientContention(new InvalidOperationException("wrapped", locked))
             .Should().BeFalse();
         DispatchTransientDatabaseFailure.IsTransientContention(new DbUpdateException("wrapped", locked))
+            .Should().BeFalse();
+        DispatchTransientDatabaseFailure.IsTransientContention(new DbUpdateException("wrapped", deadlock))
+            .Should().BeFalse();
+        DispatchTransientDatabaseFailure.IsTransientContention(new DbUpdateException("wrapped", sqlDeadlock))
+            .Should().BeFalse();
+        DispatchTransientDatabaseFailure.IsTransientContention(new AggregateException(sqlDeadlock))
             .Should().BeFalse();
         DispatchTransientDatabaseFailure.IsTransientContention(new TimeoutException())
             .Should().BeFalse();
@@ -415,6 +500,10 @@ public sealed class AutoDispatchDurableScanContentionTests : IAsyncLifetime, IDi
             if (exception is not null && message.Contains("Durable reconciliation scan"))
             {
                 owner._scanContentionLogged.Release();
+            }
+            else if (exception is not null && message.Contains("Unhandled error for printer"))
+            {
+                owner._workerFailed.Release();
             }
         }
     }

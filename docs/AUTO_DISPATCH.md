@@ -179,7 +179,8 @@ public readonly record struct DispatchTriggerEvent(
 - Uses `SemaphoreSlim` to serialize job-to-printer assignment (prevents two printers from grabbing the same job)
 - Respects `MaxConcurrentDispatches` limit to prevent thundering herd
 - Tracks in-flight dispatch count with `Interlocked` operations
-- Runs a durable reconciliation scan at startup and every 30 seconds to re-notify eligible printers
+- Runs a durable reconciliation scan at startup and every 30 seconds to re-notify eligible printers;
+  trigger traffic does not postpone the 30-second scan deadline
 
 **Transient database contention:** The durable reconciliation scan only reads state and re-notifies
 printers, so skipping one scan is dispatch-safe. When a scan fails with transient lock contention,
@@ -187,7 +188,8 @@ the service logs it and retries on the next 30-second scan instead of letting th
 API host. Transient contention means SQLite `SQLITE_BUSY`/`SQLITE_LOCKED` (5/6), PostgreSQL
 serialization failure, deadlock or lock-not-available, or SQL Server deadlock/lock timeout
 (1205/1222). Each failure logs a `Warning`. From the third consecutive failure onward each failure
-logs an `Error`, and the first successful scan afterwards logs recovery at `Information`. Any other
+logs an `Error`, and the first successful scan afterwards logs recovery at `Information`.
+Contention seen after shutdown was requested ends the service as normal cancellation. Any other
 exception, including a wrapped one, still propagates and stops the host as before.
 
 **Thread Safety:**

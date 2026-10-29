@@ -53,6 +53,9 @@ public sealed class AutoDispatchBackgroundService(
         {
             await RunDurableScanAsync(stoppingToken);
 
+            // The scan deadline survives trigger traffic, so a steady stream of events cannot
+            // postpone the durable scan (or its contention retry) indefinitely.
+            Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 // In-memory events are wake-up hints; a periodic database scan is the durable
@@ -62,7 +65,6 @@ public sealed class AutoDispatchBackgroundService(
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
                     Task completed = await Task.WhenAny(readTask, scanDelay);
 
                     if (completed == scanDelay)
@@ -77,7 +79,9 @@ public sealed class AutoDispatchBackgroundService(
                             // Expected: the periodic durable scan won this wait.
                         }
 
+                        await scanDelay;
                         await RunDurableScanAsync(stoppingToken);
+                        scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
                         continue;
                     }
 
@@ -207,7 +211,8 @@ public sealed class AutoDispatchBackgroundService(
     /// logged and deferred to the next <see cref="DurableScanInterval"/>: the scan only reads
     /// and re-queues wake-up hints, so skipping one cannot violate dispatch ownership, and
     /// letting it escape would stop the host under the default
-    /// <c>BackgroundServiceExceptionBehavior.StopHost</c>. Every other failure still propagates.
+    /// <c>BackgroundServiceExceptionBehavior.StopHost</c>. Contention observed after shutdown was
+    /// requested surfaces as cancellation. Every other failure still propagates.
     /// </summary>
     internal async Task RunDurableScanAsync(CancellationToken ct)
     {
@@ -215,9 +220,16 @@ public sealed class AutoDispatchBackgroundService(
         {
             await ReconcileStartupEligiblePrintersAsync(ct);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested
-            && DispatchTransientDatabaseFailure.IsTransientContention(ex))
+        catch (Exception ex) when (DispatchTransientDatabaseFailure.IsTransientContention(ex))
         {
+            if (ct.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    "Durable reconciliation scan stopped during database lock contention.",
+                    ex,
+                    ct);
+            }
+
             int failures = ++_consecutiveScanContentionFailures;
             if (failures >= ConsecutiveContentionErrorThreshold)
             {
