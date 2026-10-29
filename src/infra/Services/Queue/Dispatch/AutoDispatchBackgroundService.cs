@@ -35,6 +35,8 @@ public sealed class AutoDispatchBackgroundService(
     private readonly HashSet<Guid> _claimedJobs = [];
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
+    internal const int ConsecutiveContentionErrorThreshold = 3;
+    private int _consecutiveScanContentionFailures;
 
     /// <inheritdoc />
     public override void Dispose()
@@ -49,50 +51,38 @@ public sealed class AutoDispatchBackgroundService(
 
         try
         {
-            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+            await RunDurableScanAsync(stoppingToken);
 
+            // The scan deadline survives trigger traffic, so a steady stream of events cannot
+            // postpone the durable scan (or its contention retry) indefinitely.
+            Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 // In-memory events are wake-up hints; a periodic database scan is the durable
                 // source of eligible work after dropped events or process restarts (#900).
-                DispatchTriggerEvent triggerEvent;
+                bool scanDue;
+                DispatchTriggerEvent? triggerEvent;
                 using (CancellationTokenSource readCts =
                     CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
                     Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                    Task scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
-                    Task completed = await Task.WhenAny(readTask, scanDelay);
-
-                    if (completed == scanDelay)
-                    {
-                        await readCts.CancelAsync();
-                        try
-                        {
-                            _ = await readTask;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            // Expected: the periodic durable scan won this wait.
-                        }
-
-                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
-                        continue;
-                    }
-
-                    try
-                    {
-                        triggerEvent = await readTask;
-                    }
-                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                    {
-                        break;
-                    }
+                    (scanDue, triggerEvent) = await AwaitNextWakeAsync(readTask, scanDelay, readCts);
                 }
 
                 // Dispatch via a tracked worker so idle printers run concurrently under the
                 // configured capacity limit, with rerun coalescing and graceful drain on
                 // shutdown. The cross-process database claim prevents duplicates.
-                StartTrackedWorker(triggerEvent, stoppingToken);
+                if (triggerEvent is { } owned)
+                {
+                    StartTrackedWorker(owned, stoppingToken);
+                }
+
+                if (scanDue)
+                {
+                    await scanDelay;
+                    await RunDurableScanAsync(stoppingToken);
+                    scanDelay = Task.Delay(DurableScanInterval, _timeProvider, stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -105,6 +95,41 @@ public sealed class AutoDispatchBackgroundService(
             await DrainWorkersAsync();
             logger.LogInformation("[AutoDispatch] Background service stopped");
         }
+    }
+
+    /// <summary>
+    /// Waits for the next trigger event or the durable scan deadline. An expired deadline
+    /// always reports the scan as due, even when a backlogged read completed synchronously and
+    /// would otherwise win every <see cref="Task.WhenAny(Task[])"/>. A trigger event already
+    /// taken from the reader owns its printer, so it is returned for dispatch rather than
+    /// dropped, including when it races the read cancellation.
+    /// </summary>
+    internal static async Task<(bool ScanDue, DispatchTriggerEvent? TriggerEvent)> AwaitNextWakeAsync(
+        Task<DispatchTriggerEvent> readTask,
+        Task scanDelay,
+        CancellationTokenSource readCts)
+    {
+#pragma warning disable VSTHRD003 // The loop owns both tasks; hosted services have no synchronization context.
+        await Task.WhenAny(readTask, scanDelay);
+        if (!scanDelay.IsCompleted)
+        {
+            return (false, await readTask);
+        }
+
+        if (!readTask.IsCompleted)
+        {
+            await readCts.CancelAsync();
+        }
+
+        try
+        {
+            return (true, await readTask);
+        }
+        catch (OperationCanceledException) when (readCts.IsCancellationRequested)
+        {
+            return (true, null);
+        }
+#pragma warning restore VSTHRD003
     }
 
     private void StartTrackedWorker(
@@ -197,6 +222,60 @@ public sealed class AutoDispatchBackgroundService(
             }
 
             await Task.WhenAll(activeWorkers);
+        }
+    }
+
+    /// <summary>
+    /// Runs one durable reconciliation scan. Classified provider lock contention (#3604) is
+    /// logged and deferred to the next <see cref="DurableScanInterval"/>: the scan only reads
+    /// and re-queues wake-up hints, so skipping one cannot violate dispatch ownership, and
+    /// letting it escape would stop the host under the default
+    /// <c>BackgroundServiceExceptionBehavior.StopHost</c>. Contention observed after shutdown was
+    /// requested surfaces as cancellation. Every other failure still propagates.
+    /// </summary>
+    internal async Task RunDurableScanAsync(CancellationToken ct)
+    {
+        try
+        {
+            await ReconcileStartupEligiblePrintersAsync(ct);
+        }
+        catch (Exception ex) when (DispatchTransientDatabaseFailure.IsTransientContention(ex))
+        {
+            if (ct.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    "Durable reconciliation scan stopped during database lock contention.",
+                    ex,
+                    ct);
+            }
+
+            int failures = ++_consecutiveScanContentionFailures;
+            if (failures >= ConsecutiveContentionErrorThreshold)
+            {
+                logger.LogError(
+                    ex,
+                    "[AutoDispatch] Durable reconciliation scan blocked by database lock contention for {ConsecutiveFailures} consecutive scans; retrying in {RetryInterval}",
+                    failures,
+                    DurableScanInterval);
+            }
+            else
+            {
+                logger.LogWarning(
+                    ex,
+                    "[AutoDispatch] Durable reconciliation scan hit transient database lock contention (consecutive failure {ConsecutiveFailures}); retrying in {RetryInterval}",
+                    failures,
+                    DurableScanInterval);
+            }
+
+            return;
+        }
+
+        if (_consecutiveScanContentionFailures > 0)
+        {
+            logger.LogInformation(
+                "[AutoDispatch] Durable reconciliation scan recovered after {ConsecutiveFailures} contention failure(s)",
+                _consecutiveScanContentionFailures);
+            _consecutiveScanContentionFailures = 0;
         }
     }
 
