@@ -155,6 +155,72 @@ describe("ExplorerView", () => {
   });
 });
 
+describe("compact presentation (opt-in, used by /files)", () => {
+  const renderTable = (compact?: boolean) =>
+    render(
+      <ExplorerView
+        folders={folders}
+        files={files.filter((file) => !file.isDirectory)}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        onNavigate={vi.fn()}
+        currentPath="/"
+        renderActions={() => null}
+        sortBy="fileName"
+        sortOrder="asc"
+        onSort={vi.fn()}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
+        columns={columns}
+        compact={compact}
+      />,
+    );
+  const renderGrid = (compact?: boolean) =>
+    render(
+      <GridView
+        files={files}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        renderCard={(file) => <span>{file.fileName}</span>}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
+        compact={compact}
+      />,
+    );
+
+  it("renders the file table at 12px with tight cells when compact", () => {
+    renderTable(true);
+    const table = screen.getByRole("table", { name: "Files list" });
+    expect(table).toHaveClass("text-xs");
+    expect(table).not.toHaveClass("text-sm");
+    expect(screen.getByText("file.gcode").closest("td")).toHaveClass("py-1.5");
+  });
+
+  it("keeps the default table unchanged for other file browsers", () => {
+    renderTable();
+    const table = screen.getByRole("table", { name: "Files list" });
+    expect(table).toHaveClass("text-sm");
+    expect(table).not.toHaveClass("text-xs");
+  });
+
+  it("lays custom cards out in the auto-fill compact grid only when compact", () => {
+    const { unmount } = renderGrid(true);
+    expect(screen.getByRole("group", { name: "file.gcode" }).parentElement).toHaveClass(
+      "grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]",
+    );
+    unmount();
+
+    renderGrid();
+    const grid = screen.getByRole("group", { name: "file.gcode" }).parentElement;
+    expect(grid).toHaveClass("sm:grid-cols-2");
+    expect(grid).not.toHaveClass("grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]");
+  });
+});
+
 describe("ExplorerView mobile layout (issue #1688)", () => {
   afterEach(() => {
     vi.restoreAllMocks();

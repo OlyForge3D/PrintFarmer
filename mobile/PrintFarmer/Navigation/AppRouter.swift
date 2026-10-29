@@ -89,20 +89,16 @@ final class AppRouter {
     }
 
     func invalidatePendingNavigation() {
-        revokeAdvancedPrinterControlsAccess()
+        navigationEpoch &+= 1
+        printersPath = NavigationPath()
+        jobsPath = NavigationPath()
+        inventoryPath = NavigationPath()
         isScanFlowDismissing = false
         pendingNFCReadyPrinterId = nil
         pendingSpoolHighlightId = nil
         pendingNeedsAttentionFilter = false
         pendingFilamentSwap = nil
         notificationRoutingError = nil
-    }
-
-    func revokeAdvancedPrinterControlsAccess() {
-        navigationEpoch &+= 1
-        printersPath = NavigationPath()
-        jobsPath = NavigationPath()
-        inventoryPath = NavigationPath()
     }
 
     func reconcileCapabilities(_ capabilities: ResolvedSystemCapabilities) {

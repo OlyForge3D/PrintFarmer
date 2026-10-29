@@ -2,6 +2,18 @@
 
 ### Features
 
+- Persist PrusaLink native file details in the database, including full display
+  names, sizes, and all 41 supported print-metadata fields. Show saved details
+  independently of thumbnail availability; reuse unchanged observations during
+  scheduled scans and refetch on Force Refresh. Remove the inventory HTTP
+  request-count cap while retaining time, entry, depth, and response bounds.
+  Slow or failed optional detail reads no longer discard completed listings;
+  saved details remain available when source evidence is unchanged.
+
+- Add independent Moonraker runtime speed/flow API controls with bounded
+  percentages, semantic capabilities and nullable authoritative status/SignalR
+  readback. Other backends explicitly reject unsupported writes (#3474).
+
 - Make cameras a first-class feature at `/cameras` with all, by-location and
   by-printer views. Cameras link to many printers (one primary per printer),
   are auto-discovered from printer backends on connect, create and every
@@ -20,6 +32,14 @@
 
 ### Breaking changes
 
+- Interactive printer controls now defer motion, homing, and temperature
+  readiness to native firmware/macros instead of PrintFarmer preflight.
+  Filament actions no longer automatically heat or wait. Relative jogging
+  reflects backend transport support independently of absolute movement;
+  missing telemetry does not revoke native API control support.
+  Permissions, typed inputs, no-replay handling and automated/calibration
+  protections remain (#3512).
+
 - Ralph shared host profiles no longer pin deployment workflow UUIDs. IDs remain
   in private configuration; filesystem preflight is non-authorizing and every
   round requires fresh current-execution native identity reconciliation. Existing
@@ -33,6 +53,38 @@
   genesis before its four general slots become operational.
 
 ### Fixes
+
+- Update System.Security.Cryptography.Xml and its transitive Pkcs dependency
+  from 10.0.10 to 10.0.14 across .NET projects, resolving high- and
+  moderate-severity NuGet security advisories (#3568).
+
+- iOS: remove the Heat **Go** button. Nozzle, Bed, Chamber, Heater Box and
+  other settable heaters now share one row: name, current reading, a tappable
+  target and ±. Steppers apply that heater after a short pause; typed targets
+  apply on **Set** and **Cancel** reverts. Pending commands no longer show
+  caption text on heater rows. Presets now sit above the rows, cool down is a
+  ❄ button, and queued targets that can no longer be sent (for example once a
+  print starts) are dropped with a Heat notice (#3547).
+
+- Align the detailed printer card and sidebar with working **Materials** and
+  **Tuning** disclosures. Group filament slots and single-spool details under
+  Materials and retain pending control state while collapsed (#3489).
+
+- Replace web speed/flow inputs with print-only **Tuning** sliders that send once
+  when an adjustment ends, without Apply buttons or redundant help text. Hide
+  all filament sensor rows and empty sensor messages while retaining live
+  readback and authentication no-replay safeguards (#3487).
+
+- Remove generated Sensor/Heater type subtitles from web sensor names and show
+  HeaterBox humidity as an indented child with a water-percent glyph and its
+  reading in the Current column (#3467).
+
+- Correct Moonraker active-tool temperature identity, individually bounded
+  extruder/bed targets, safe-off zero values and explicit all-heater cooldown.
+  Preserve sensor telemetry through authenticated fallback polling, clear invalid
+  readings without refreshing unrelated safety evidence, and expose filament
+  monitoring switches and gas resistance. Keep measured temperature extrema in
+  the API without cluttering the web sensor rows (#3462).
 
 - Fix the slicer 3D text tool producing empty geometry (and empty STLs) for
   every font family since #2901, and upgrade `three` to 0.186.1. The Droid

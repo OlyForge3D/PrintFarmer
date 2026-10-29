@@ -7,6 +7,9 @@ namespace Farm.Slicer.Module.Data.Repositories;
 /// </summary>
 public interface IMachineProfileRepository
 {
+    /// <summary>Returns requested model IDs having profiles, in sequential batches of at most 100 IDs.</summary>
+    Task<HashSet<Guid>> GetPrinterModelIdsWithProfilesAsync(IEnumerable<Guid> printerModelIds, CancellationToken ct = default);
+
     /// <summary>Gets a machine profile by its unique identifier.</summary>
     /// <param name="id">The profile identifier.</param>
     /// <param name="ct">Cancellation token.</param>

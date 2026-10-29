@@ -28,7 +28,8 @@ repository are intentionally omitted.
 - [DTO Reference](./DTO_REFERENCE.md) - Shared data-transfer contracts
 - [CSV Import Format](./CSV_IMPORT_FORMAT_DETAILED.md) - Printer CSV schema and
   examples
-- [G-code Harvesting API](./GCODE_HARVESTING_API.md) - Harvesting endpoints
+- [Printer File Catalog API](./PRINTER_FILE_CATALOG_API.md) - Printer-file catalog,
+  Copy, Queue, and Delete endpoints
 - [Obico ML API](./OBICO_ML_API.md) - Obico integration contract
 
 ## Deployment And Operations

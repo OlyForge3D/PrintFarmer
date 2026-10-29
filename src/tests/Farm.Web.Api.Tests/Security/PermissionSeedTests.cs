@@ -50,6 +50,7 @@ public sealed class PermissionSeedTests
             "acknowledge-bed-clear",
             "cancel",
             "create",
+            "copy",
             "delete",
             "generate",
             "manage",
@@ -70,6 +71,7 @@ public sealed class PermissionSeedTests
             PrintFarmerPermissions.Split(PrintFarmerPermissions.Queue.Read).Resource,
             PrintFarmerPermissions.Split(PrintFarmerPermissions.Slicing.Submit).Resource,
             PrintFarmerPermissions.Split(PrintFarmerPermissions.Integrations.ManageObico).Resource,
+            PrintFarmerPermissions.Split(PrintFarmerPermissions.PrinterFiles.Read).Resource,
         ];
 
         foreach (string action in expectedActions)
@@ -107,6 +109,9 @@ public sealed class PermissionSeedTests
             .Where(permission => permission.RoleId == farmUserRoleId && permission.Granted)
             .Select(permission => permission.Resource.Name + ":" + permission.Action.Name)
             .ToListAsync();
+        farmUserGrantedPermissions.Should().Contain(PrintFarmerPermissions.PrinterFiles.Read)
+            .And.Contain(PrintFarmerPermissions.PrinterFiles.Copy)
+            .And.NotContain(PrintFarmerPermissions.PrinterFiles.Delete);
 
         foreach (string permission in PrintFarmerPermissions.CalibrationFoundation)
         {
@@ -280,7 +285,7 @@ public sealed class PermissionSeedTests
             await secondInitializer.SeedAllAsync();
 
             (await secondContext.Resources.CountAsync()).Should().Be(37);
-            (await secondContext.UserActions.CountAsync()).Should().Be(17);
+            (await secondContext.UserActions.CountAsync()).Should().Be(18);
             (await secondContext.Roles.CountAsync()).Should().Be(2);
         }
     }

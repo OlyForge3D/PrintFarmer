@@ -132,13 +132,14 @@ curl -X POST http://localhost:5245/api/printers/discover \
   `SERVER_HOST`/`HTTPS_PORT` and a trusted certificate matching that host)
 - **Health:** `https://YOUR_SERVER_IP:8443/healthz`
 - **API Docs:** `https://YOUR_SERVER_IP:8443/swagger` (if Development mode)
-- **Local-only HTTP:** `http://localhost:8080` on the server; the direct API
-  at `http://localhost:5245` is also local-only.
+- **HTTP:** `http://YOUR_SERVER_IP:8080` (or your configured `HTTP_PORT`).
+  The direct API at `http://localhost:5245` remains local-only.
 
-LAN access requires HTTPS. `HTTPS_PORT=0` and `INSTALLER_LAB=true HTTP_ONLY=true`
-disable the TLS listener and leave HTTP accessible only on the deployment host.
-Opening firewall ports does not override the loopback binding. Enable HTTPS and
-trust the deployment CA on client devices before accessing the farm over the LAN.
+The deployment script publishes HTTP on all interfaces by default.
+Set `BIND_ADDRESS=127.0.0.1` for local-only HTTP. `HTTPS_PORT=0` disables only
+the TLS listener; `INSTALLER_LAB=true HTTP_ONLY=true` keeps lab HTTP local-only.
+Prefer HTTPS and trust the deployment CA on client devices: HTTP does not
+encrypt credentials.
 
 ---
 
@@ -150,6 +151,9 @@ sudo ufw allow 8443/tcp comment 'PrintFarmer HTTPS'
 
 # Or restrict to local network only
 sudo ufw allow from 192.168.0.0/16 to any port 8443 proto tcp
+
+# If using LAN HTTP, allow its configured port for intended clients
+sudo ufw allow from 192.168.0.0/16 to any port 8080 proto tcp
 
 # Enable firewall
 sudo ufw enable

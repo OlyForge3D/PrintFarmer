@@ -66,7 +66,6 @@ public sealed class HostNamespaceGuardrailArchitectureTests
         "Farm.Web.Api.Services.SlicerHost.SlicerPromotionAuthenticationHandler",
         "Farm.Web.Api.Services.StorageManagement.AspNetCorePathProvider",
         "Farm.Web.Api.Services.Startup.DatabaseInitializer",
-        "Farm.Web.Api.Services.Startup.GracefulShutdownService",
         "Farm.Web.Api.Services.Startup.MoonrakerEmulatorPrinterSeed",
         "Farm.Web.Api.Services.Startup.MoonrakerEmulatorSeedSettings",
         "Farm.Web.Api.Services.Startup.MoonrakerEmulatorSeeder",

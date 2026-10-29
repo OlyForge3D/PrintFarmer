@@ -47,6 +47,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // G-code Library & Job Queue
     public DbSet<GcodeFile> GcodeFiles => Set<GcodeFile>();
 
+    public DbSet<PrinterFileLocation> PrinterFileLocations => Set<PrinterFileLocation>();
+
+    public DbSet<PrinterFileScanState> PrinterFileScanStates => Set<PrinterFileScanState>();
+
+    public DbSet<PrinterFileRootScan> PrinterFileRootScans => Set<PrinterFileRootScan>();
+
+    public DbSet<PrinterFileOrigin> PrinterFileOrigins => Set<PrinterFileOrigin>();
+
+    public DbSet<PrinterFileOperation> PrinterFileOperations => Set<PrinterFileOperation>();
+
+    public DbSet<PrinterFileOperationJob> PrinterFileOperationJobs => Set<PrinterFileOperationJob>();
+
+    public DbSet<PrinterFileIoSlot> PrinterFileIoSlots => Set<PrinterFileIoSlot>();
+
     public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
 
     // Per-toolhead filament usage (multi-tool/MMU jobs)
@@ -83,14 +97,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PrinterDispatchState> PrinterDispatchStates => Set<PrinterDispatchState>();
 
     public DbSet<PrinterServiceState> PrinterServiceStates => Set<PrinterServiceState>();
-
-    public DbSet<GcodeHarvestOperation> GcodeHarvestOperations => Set<GcodeHarvestOperation>();
-
-    public DbSet<HarvestDiscoveredFile> HarvestDiscoveredFiles => Set<HarvestDiscoveredFile>();
-
-    public DbSet<HarvestFileGcodeFileMapping> HarvestFileGcodeFileMappings => Set<HarvestFileGcodeFileMapping>();
-
-    public DbSet<GcodeHarvestQueueItem> GcodeHarvestQueueItems => Set<GcodeHarvestQueueItem>();
 
     public DbSet<UserTask> UserTasks => Set<UserTask>();
 

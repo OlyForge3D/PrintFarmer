@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Button, Checkbox } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
+import { COMPACT_FILE_TABLE_CELL_CLASS, COMPACT_FILE_TABLE_CLASS } from '../fileBrowserStyles';
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -37,6 +38,8 @@ interface ExplorerViewProps {
   onPageChange: (page: number) => void;
   columns: ColumnDef[];
   isBusy?: boolean;
+  /** Dense 12px table (shared with the printer catalog). */
+  compact?: boolean;
 }
 
 const FolderTree = ({
@@ -326,6 +329,7 @@ export const ExplorerView = ({
   onPageChange,
   columns,
   isBusy,
+  compact = false,
 }: ExplorerViewProps) => {
   const isAllSelected = selectedIds.length > 0 && selectedIds.length === files.length;
   const isIndeterminate = selectedIds.length > 0 && selectedIds.length !== files.length;
@@ -514,7 +518,7 @@ export const ExplorerView = ({
          * predictable, reachable area regardless of row count.
          */}
         <div className={`flex-1 overflow-x-auto ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
-          <table className="w-full text-sm border-collapse" role="table" aria-label="Files list">
+          <table className={compact ? COMPACT_FILE_TABLE_CLASS : 'w-full text-sm border-collapse'} role="table" aria-label="Files list">
             <thead className="sticky top-0 bg-pf-bg-1 border-b border-pf-border">
               <tr>
                 <th scope="col" className="w-10 px-3 py-2 text-left font-semibold text-pf-text-secondary text-xs uppercase tracking-wider">
@@ -603,7 +607,7 @@ export const ExplorerView = ({
                     {columns.map((column) => (
                       <td
                         key={`${file.id}-${column.key}`}
-                        className={`px-3 py-2 text-pf-text-primary ${column.align === 'right' ? 'text-right' : ''}`}
+                        className={`${compact ? COMPACT_FILE_TABLE_CELL_CLASS : 'px-3 py-2 text-pf-text-primary'} ${column.align === 'right' ? 'text-right' : ''}`}
                       >
                         {column.render
                           ? column.render(file)
@@ -620,9 +624,9 @@ export const ExplorerView = ({
                               : '—'}
                       </td>
                     ))}
-                    <td className="px-3 py-2 text-right">
+                    <td className={compact ? 'px-3 py-1.5 text-right align-middle' : 'px-3 py-2 text-right'}>
                       {renderActions && (
-                        <div className="flex justify-end gap-2">
+                        <div className={compact ? 'flex justify-end gap-1' : 'flex justify-end gap-2'}>
                           {renderActions(file)}
                         </div>
                       )}

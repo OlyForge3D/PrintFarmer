@@ -19,15 +19,23 @@ import {
   PrinterBackend,
   type CommandResult,
   type Printer,
+  type PrinterDetails,
   type PrinterSensor,
   type PrinterBackendCapabilitiesDto,
   type PrintJobObjectListDto,
 } from "@/types/api";
 import { PrinterDetailsSidebar } from "../PrinterDetailsSidebar";
+import { PrintProgressBar } from "@/features/printers/components/PrintProgressBar";
 import type { PrinterStatistics } from "@/types/maintenance";
 import { AuthContext } from "@/common/contexts/auth-context";
 import type { AuthContextType } from "@/contexts/AuthContextValue";
 import type { PrinterMovement } from "@/features/printers/hooks/use-printer-movement";
+
+function chooseTemperaturePreset(value: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Apply temperature preset' }));
+  const label = value.includes(':') ? value.replace('hotend:', 'Extruder ').replace('bed:', 'Heater Bed ') : `Both heaters ${value}`;
+  fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${label},`) }));
+}
 
 const mockInvalidateQueries = vi.fn();
 const mockSetQueryData = vi.fn();
@@ -41,6 +49,9 @@ const mockMovePrinter = vi.fn();
 const mockToastError = vi.fn();
 const mockMovePrinterTo = vi.fn();
 const mockGetPrinterVersionInfo = vi.fn();
+const mockSetTemperatures = vi.fn();
+const mockTurnOffHeaters = vi.fn();
+let mockPrinterDetails: Partial<PrinterDetails> | undefined;
 vi.mock("@/features/printers/hooks/use-printer-movement", () => ({
   usePrinterMovement: (printer: Printer) => ({
     blocked: false,
@@ -137,7 +148,7 @@ vi.mock("@/common/hooks/useApi", () => ({
     isLoading: false,
     refetch: mockRefetch,
   }),
-  usePrinterDetails: () => ({ data: undefined }),
+  usePrinterDetails: () => ({ data: mockPrinterDetails }),
   usePrintJobObjects: () => ({
     data: mockPrintJobObjectsData,
     isLoading: false,
@@ -148,6 +159,8 @@ vi.mock("@/common/hooks/useApi", () => ({
 
 vi.mock("@/services/api", () => ({
   apiClient: {
+    turnOffHeaters: (printerId: string) => mockTurnOffHeaters(printerId),
+    setTemperatures: (printerId: string, targets: object) => mockSetTemperatures(printerId, targets),
     getPrinterVersionInfo: (printerId: string, options?: { forceRefresh?: boolean }) =>
       mockGetPrinterVersionInfo(printerId, options),
     excludePrintJobObject: (printerId: string, name: string) =>
@@ -221,6 +234,7 @@ function capabilities(
     supportsControlOperations: true,
     supportsFileMetadata: true,
     supportsMovement: true,
+    supportsAbsoluteMovement: true,
     supportsTemperatureControl: true,
     supportsPrinterInformation: true,
     supportsHistory: true,
@@ -238,6 +252,9 @@ describe("PrinterDetailsSidebar", () => {
     mockPrintJobObjectsData = undefined;
     mockVersionData = undefined;
     mockGetPrinterVersionInfo.mockReset();
+    mockPrinterDetails = undefined;
+    mockSetTemperatures.mockReset().mockResolvedValue({ success: true });
+    mockTurnOffHeaters.mockReset().mockResolvedValue({ success: true });
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -264,6 +281,71 @@ describe("PrinterDetailsSidebar", () => {
     }
   });
 
+  it.each(['Printing', 'Paused'])('keeps manual edits but disables presets and uses explicit heater shutdown while %s', async state => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, state, backend: PrinterBackend.Moonraker,
+      activeExtruderId: 'extruder', sensors: [{ id: 'extruder', displayName: 'Extruder', kind: 'Nozzle', available: true, readings: [],
+        writable: [{ quantity: 'TargetTemperature', unit: 'Celsius', min: 0, max: 300, step: null, allowZero: true }] }] }}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker, supportsHeaterShutdown: true })}
+      onClose={vi.fn()} />);
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Apply temperature preset' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(mockTurnOffHeaters).toHaveBeenCalledExactlyOnceWith(printer.id));
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('allows the native Moonraker hotend command when REST omits its identity', () => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, backend: PrinterBackend.Moonraker }}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />);
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
+  });
+
+  it("mutes heater glyphs like the compact card when hot telemetry disappears despite retained display values", () => {
+    const hot = { ...printer, hotendTemp: 205, bedTemp: 60 };
+    const contents = (current: Printer) => <>
+      <div data-testid="compact-temperature-reference">
+        <PrintProgressBar progress={0} jobName={null} isActive={false} showTemperatures
+          hotendTemp={current.hotendTemp} bedTemp={current.bedTemp} isOnline={current.isOnline} />
+      </div>
+      <PrinterDetailsSidebar printerId={printer.id} printer={current}
+        backendCapabilities={capabilities()} onClose={vi.fn()} />
+    </>;
+    const { container, rerender } = render(contents(hot));
+    const thermal = () => container.querySelector('[data-printer-sensor-section="Temperatures"]')!;
+    for (const svg of thermal().querySelectorAll('[data-sensor-glyph] svg')) {
+      expect(svg).toHaveClass("opacity-100");
+    }
+    rerender(contents({ ...hot, hotendTemp: undefined, bedTemp: undefined }));
+    expect(thermal()).toHaveTextContent("205.0°C");
+    expect(thermal()).toHaveTextContent("60.0°C");
+    for (const [kind, title] of [["Nozzle", "Extruder temperature"], ["Bed", "Heater Bed temperature"]]) {
+      const actual = thermal().querySelector(`[data-sensor-glyph="${kind}"] svg`)!;
+      const compact = within(screen.getByTestId("compact-temperature-reference")).getByTitle(title).querySelector("svg")!;
+      expect(actual).toHaveClass("opacity-40");
+      expect(actual.querySelector("path")).toHaveAttribute("d", compact.querySelector("path")!.getAttribute("d"));
+      for (const color of ["text-pf-error", "text-pf-accent"]) {
+        expect(actual.classList.contains(color)).toBe(compact.classList.contains(color));
+      }
+    }
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+  });
+
+  it('does not resurrect last-known numbers after an authoritative Moonraker snapshot clears them', () => {
+    const hot: Printer = { ...printer, backend: PrinterBackend.Moonraker, activeExtruderId: 'extruder3',
+      hotendTemp: 205, bedTemp: 60, sensors: [] };
+    const contents = (current: Printer) => <PrinterDetailsSidebar printerId={printer.id} printer={current}
+      backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />;
+    const { container, rerender } = render(contents(hot));
+    const thermal = () => container.querySelector('[data-printer-sensor-section="Temperatures"]')!;
+    expect(thermal()).toHaveTextContent('205.0°C');
+    expect(thermal()).toHaveTextContent('60.0°C');
+    rerender(contents({ ...hot, activeExtruderId: null, hotendTemp: undefined, bedTemp: undefined }));
+    expect(thermal()).not.toHaveTextContent('205.0°C');
+    expect(thermal()).not.toHaveTextContent('60.0°C');
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toBeEnabled();
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+  });
+
   it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])(
     "routes %s Home All/XY/Z, jog and edited-axis Enter through direct commands",
     async (backend) => {
@@ -284,7 +366,7 @@ describe("PrinterDetailsSidebar", () => {
           <PrinterDetailsSidebar
             printerId={moonraker.id}
             printer={moonraker}
-            backendCapabilities={capabilities({ backend })}
+            backendCapabilities={capabilities({ backend, supportsAbsoluteMovement: backend === PrinterBackend.Moonraker })}
             onClose={vi.fn()}
           />
         </AuthContext.Provider>,
@@ -311,6 +393,16 @@ describe("PrinterDetailsSidebar", () => {
           y: 10,
         }),
       );
+      if (backend !== PrinterBackend.Moonraker) {
+        expect(screen.getByRole('button', { name: 'Absolute' })).toBeDisabled();
+        const input = screen.getByLabelText('X movement amount');
+        await waitFor(() => expect(input).toBeEnabled());
+        fireEvent.change(input, { target: { value: '-5' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        await waitFor(() => expect(mockMovePrinter).toHaveBeenLastCalledWith(moonraker.id, { x: -5 }));
+        expect(mockMovePrinterTo).not.toHaveBeenCalled();
+        return;
+      }
       await waitFor(() =>
         expect(screen.getByLabelText("X absolute target")).toBeEnabled(),
       );
@@ -407,12 +499,126 @@ describe("PrinterDetailsSidebar", () => {
       />,
     );
 
-    const input = screen.getByLabelText(/^Set Part Fan/);
-    if (allowed && enabled && online && available && control) expect(input).toBeEnabled();
-    else expect(input).toBeDisabled();
+    for (const role of ['spinbutton', 'slider'] as const) {
+      const input = screen.getByRole(role, { name: /^Set Part Fan/ });
+      if (allowed && enabled && online && control) expect(input).toBeEnabled();
+      else expect(input).toBeDisabled();
+    }
     expect(screen.getByRole('spinbutton', { name: 'Set Heater Box1 Target' })).toHaveProperty(
-      'disabled', !(allowed && enabled && online && available && control),
+      'disabled', !(allowed && enabled && online && control),
     );
+  });
+
+  it.each([
+    ['Extruder', 250, 'hotend', '210.5', '220'],
+    ['Heater Bed', 100, 'bed', '60.5', '65'],
+  ] as const)('enforces persisted %s limits and integer precision without writable descriptors', async (name, max, heater, fractional, accepted) => {
+    mockPrinterDetails = { capabilities: {
+      id: 'caps', printerId: printer.id, printerName: printer.name, maxHotendTemp: 250, maxBedTemp: 100,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } };
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={{ ...printer, rowVersion: 'v1' }}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
+    expect(input).toHaveAttribute('max', String(max));
+    expect(input).toHaveAttribute('step', '1');
+    expect(input).toBeEnabled();
+    expect(input).not.toHaveAccessibleDescription(/maximum temperature unknown/);
+    for (const value of [String(max + 1), '2100', fractional]) {
+      fireEvent.change(input, { target: { value } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      fireEvent.blur(input);
+      expect(mockSetTemperatures).not.toHaveBeenCalled();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+    }
+    fireEvent.change(input, { target: { value: accepted } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: Number(accepted) }));
+  });
+
+  it.each([['Extruder', 'hotend'], ['Heater Bed', 'bed']] as const)('allows integer %s entry with an associated firmware-limit warning when limits are unknown', async (name, heater) => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const input = screen.getByRole('spinbutton', { name: `${name} target temperature` });
+    expect(input).toBeEnabled();
+    expect(input).not.toHaveAttribute('max');
+    expect(input).toHaveAccessibleDescription(new RegExp(`${name} maximum temperature unknown.*firmware limits.*does not enforce an upper bound`));
+    expect(screen.getByRole('button', { name: 'Cooldown' })).toBeEnabled();
+    fireEvent.change(input, { target: { value: '60.5' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '65' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledExactlyOnceWith(printer.id, { [heater]: 65 }));
+    expect(input).toHaveAccessibleDescription(/maximum temperature unknown/);
+  });
+
+  it.each(['persisted', 'descriptor'])('rejects combined and per-heater PC presets above %s maximums without changing valid presets or cooldown', async source => {
+    mockPrinterDetails = { capabilities: {
+      id: 'caps', printerId: printer.id, printerName: printer.name,
+      maxHotendTemp: source === 'persisted' ? 250 : 300, maxBedTemp: source === 'persisted' ? 100 : 120,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } };
+    render(<PrinterDetailsSidebar printerId={printer.id}
+      printer={{ ...printer, sensors: source === 'descriptor' ? [
+        { id: 'extruder', kind: 'Nozzle', displayName: 'Nozzle', available: true, readings: [],
+          writable: [{ quantity: 'TargetTemperature', min: 0, max: 250, step: 1, unit: 'Celsius' }] },
+        { id: 'heater_bed', kind: 'Bed', displayName: 'Bed', available: true, readings: [],
+          writable: [{ quantity: 'TargetTemperature', min: 0, max: 100, step: 1, unit: 'Celsius' }] },
+      ] : undefined }} backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
+    for (const preset of ['PC', 'hotend:PC', 'bed:PC']) {
+      chooseTemperaturePreset(preset);
+      expect(mockSetTemperatures).not.toHaveBeenCalled();
+      expect(mockToastError).toHaveBeenLastCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
+    }
+    expect(mockToastError).toHaveBeenCalledTimes(3);
+    let count = 0;
+    for (const [preset, targets] of [
+      ['PLA', { hotend: 210, bed: 60 }], ['hotend:PLA', { hotend: 210 }], ['bed:PLA', { bed: 60 }],
+    ] as const) {
+      chooseTemperaturePreset(preset);
+      await waitFor(() => expect(presets).toBeEnabled());
+      expect(mockSetTemperatures).toHaveBeenCalledTimes(++count);
+      expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, targets);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledTimes(4));
+    expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, { hotend: 0, bed: 0 });
+  });
+
+  it.each([[250, 120], [300, 100]])('does not partially apply a combined preset if only one heater exceeds %s/%s', (maxHotendTemp, maxBedTemp) => {
+    mockPrinterDetails = { capabilities: {
+      id: 'caps', printerId: printer.id, printerName: printer.name, maxHotendTemp, maxBedTemp,
+      hasHeatedBed: true, hasEnclosure: false, multiMaterial: false, isAvailable: true,
+      supportsAutoLeveling: false, lastUpdated: new Date(),
+    } };
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    chooseTemperaturePreset('PC');
+    expect(mockSetTemperatures).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/exceeds maximum.*Nothing sent/));
+  });
+
+  it('retains all PC preset scopes and cooldown with the user-selected unknown-limit warning', async () => {
+    render(<PrinterDetailsSidebar printerId={printer.id} printer={printer}
+      backendCapabilities={capabilities()} onClose={vi.fn()} />);
+    const presets = screen.getByRole('button', { name: 'Apply temperature preset' });
+    let count = 0;
+    for (const [preset, targets] of [
+      ['PC', { hotend: 280, bed: 110 }], ['hotend:PC', { hotend: 280 }], ['bed:PC', { bed: 110 }],
+    ] as const) {
+      chooseTemperaturePreset(preset);
+      await waitFor(() => expect(presets).toBeEnabled());
+      expect(mockSetTemperatures).toHaveBeenCalledTimes(++count);
+      expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, targets);
+    }
+    expect(screen.getByRole('spinbutton', { name: 'Extruder target temperature' })).toHaveAccessibleDescription(/maximum temperature unknown.*firmware limits/);
+    fireEvent.click(screen.getByRole('button', { name: 'Cooldown' }));
+    await waitFor(() => expect(mockSetTemperatures).toHaveBeenCalledTimes(4));
+    expect(mockSetTemperatures).toHaveBeenLastCalledWith(printer.id, { hotend: 0, bed: 0 });
   });
 
   it("deduplicates primary temperatures while retaining independent nozzle and chamber telemetry after Temps", () => {

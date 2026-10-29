@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Bootstrap script for macOS (Monterey/Big Sur/Apple Silicon/Intel)
-# Installs Homebrew (if missing), .NET 10.x (via dotnet-install or Homebrew), Node.js >=20.19 (recommended v20.19.0), git
+# Installs Homebrew (if missing), the SDK from global.json, Node.js >=20.19 (recommended v20.19.0), git
 # Designed to be idempotent.
 
 set -euo pipefail
 
-REQ_DOTNET_VERSION=${DOTNET_VERSION:-10.0.101}
 # Default to Node 20.x to match frontend toolchain (Vite requires Node >=20.19)
 NODE_VERSION=${NODE_VERSION:-20}
 
@@ -104,26 +103,8 @@ else
   print "ruamel.yaml already installed"
 fi
 
-# Try Homebrew dotnet first (may not have exact pinned versions). If not available
-# or if you prefer a pinned version, use the repo-local dotnet-install script.
-if ! command -v dotnet >/dev/null 2>&1; then
-  print "Attempting to install .NET SDK ${REQ_DOTNET_VERSION} using dotnet-install script"
-  if [ -f "${REPO_ROOT:-$(pwd)}/dotnet-install.sh" ]; then
-    bash "${REPO_ROOT:-$(pwd)}/dotnet-install.sh" --version ${REQ_DOTNET_VERSION}
-    export PATH="$HOME/.dotnet:$PATH"
-    print ".NET installed via dotnet-install.sh"
-  else
-    print "dotnet-install.sh not found in repo root. Trying Homebrew (may install latest dotnet)."
-  run_priv "brew install --cask dotnet-sdk || brew install dotnet-sdk || true"
-    if command -v dotnet >/dev/null 2>&1; then
-      print ".NET installed: $(dotnet --info | head -n1)"
-    else
-      print "Failed to install dotnet via Homebrew. Please install manually from https://dotnet.microsoft.com/download"
-    fi
-  fi
-else
-  print ".NET present: $(dotnet --info 2>/dev/null | head -n1 || true)"
-fi
+source "$REPO_ROOT/scripts/dotnet-sdk.sh"
+ensure_dotnet_sdk
 
 print "Bootstrap complete. Please run the following as your normal user (if PATH was modified by dotnet-install.sh):"
 cat <<'EOF'
@@ -145,9 +126,9 @@ print "Done."
 
 if [ "$VERIFY" = true ]; then
   print "Running verification (--verify) checks as non-root user"
-  run_as_user "export PATH=\"$HOME/.dotnet:$PATH\"; dotnet --info || true; node --version || true; npm --version || true; git --version || true"
+  run_as_user "export PATH='$PATH'; python3 '$REPO_ROOT/scripts/dotnet-sdk.py' verify && node --version && npm --version && git --version"
   if [ -f "$REPO_ROOT/src/api/Farm.Web.Api.csproj" ]; then
-    run_as_user "cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
+    run_as_user "export PATH='$PATH'; cd '$REPO_ROOT/src' && dotnet restore ./farm-web.sln && dotnet build ./api/Farm.Web.Api.csproj -c Debug --no-restore"
   else
     print "API project not found for smoke test; skipping build"
   fi

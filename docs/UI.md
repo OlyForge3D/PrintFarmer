@@ -38,47 +38,91 @@ Main overview page showing all printers with real-time status.
 - Auto-refresh on status changes
 
 ### Files Page
-Unified file management interface with tabbed organization for 3D models, G-code files, and print harvest data.
+`/files` separates owned local assets from files observed on printers.
 
-**Tabs:**
+- **Local library** (`/files`): upload and organize models and G-code, search,
+  tag, preview, slice models, and queue local G-code. Use `?type=models` or
+  `?type=gcode` to filter by file type. Prusa binary G-code (`.bgcode`) uploads
+  show slicer metadata and an embedded PNG or JPEG thumbnail. QOI-only
+  thumbnails and unsupported block compression are omitted; malformed or
+  oversized files (over 1 MiB per metadata block, 2 MiB per thumbnail block,
+  64 header blocks, or 16 MiB of header data) show no metadata.
+- **On printers** (`/files?source=printers`): browse remote file metadata,
+  availability and freshness, and act on one or several selected files. Add
+  `&printer=<printerId>` to scope the catalog to one printer.
 
-1. **3D Models** (`/files?tab=models`)
-   - `ModelsPage.tsx` - Model management interface
-   - Upload and organize 3D model files
-   - Tag models for categorization
-   - Model metadata and preview
-   - Search and filtering
-   - Bulk operations
+Both sources share the same compact card grid and 12px table, with the same
+file, status, and action glyphs. Selecting a card or file name opens a details
+panel (docked on wide screens, an overlay on narrow ones; <kbd>Esc</kbd> closes
+it and returns focus). The panel shows a larger preview, type, size, path,
+source, print time, and layer height. Values the source cannot provide are shown
+as **Unavailable**. File dates display as dates only; hover for the full
+timestamp. Details-panel actions are icon-only buttons; hover or focus them to
+see their names.
 
-2. **G-Code** (`/files?tab=gcode`)
-   - `GcodeLibraryPage.tsx` - G-code file browser
-   - View sliced G-code files
-   - File organization and search
-   - Queue G-code to printers
-   - File health and audit information
-   - Printer model associations
+For PrusaLink files, the panel also shows every supplied **Native print
+metadata** field, including filament use, temperatures, tool-specific values,
+and printer/profile information. Names, sizes, and these details are saved in
+the database during discovery, not held only in the expiring preview cache.
+They remain visible when thumbnail loading fails or the source is unavailable.
+The saved date identifies the observation; absent native values are **Unknown**,
+while explicit zero and false remain visible. Tool numbers follow provider
+order. Full display names do not replace the short filename used by file actions.
+Scheduled scans reuse unchanged details; **Force Refresh** refetches them.
 
-3. **Print Harvest** (`/files?tab=harvest`)
-   - `HarvestPage.tsx` - Print result data
-   - Track completed print results
-   - Harvest data analysis and statistics
-   - Print success/failure rates
-   - Model performance metrics
-   - Integration with printer history
+On-printer files offer two distinct actions:
 
-**Features:**
-- Tab navigation with icons
-- Persistent tab selection
-- Responsive layout (full-width on all devices)
-- Unified file operations across tabs
-- Real-time file updates via SignalR
-- Comprehensive search and filtering
+- **Copy to local library** (folder-arrow glyph) creates or reuses an owned
+  local asset. It never queues a print.
+- **Download** (tray-arrow glyph) saves the bytes to your browser only. It does
+  not create a library asset or a queue entry.
 
-**Tab Interface:**
-```tsx
-// User can switch between tabs with icon + label
-Models | G-Code | Print Harvest
-```
+#### Selecting multiple printer files
+
+Cards and table rows have checkboxes, and the table header selects every
+eligible file on the current page. Selection is limited to the current page and
+filters; changing either clears it. Files with no permitted action cannot be
+selected. The selection toolbar shows how many selected files each action
+applies to (for example, `Copy 2 of 3 selected`).
+
+- **Copy to local library** sends one request per file, each bound to the
+  observed revision with its own intent key. Retrying reuses the original key
+  for failed files only; stale files must be refreshed instead.
+- **Download** saves files one after another. Your browser may ask permission
+  to download multiple files.
+- **Delete from printer** shows every exact path in one confirmation, with the
+  irreversible-deletion and path-race acknowledgements asked once for the
+  batch. The server still checks each file. Results are reported per file; a
+  delete whose outcome is unknown is never resent automatically.
+
+Remote previews load lazily, only for visible items on printers whose backend
+supports them. They are fetched only when the printer is idle, cached per file
+version, and labelled with their capture date. Indexing itself remains
+metadata-only.
+
+Per-printer automatic discovery, scan status, and **Force refresh** live in the
+**Files** section of the printer's Edit dialog. Those changes apply immediately
+and are not part of the form save. Global discovery cadence and budgets remain
+under Admin Settings > Files.
+
+**Force refresh**, to the right of the table/card view toggle on **On printers**,
+scans every online printer you can manage, one at a time. Both refresh controls
+bypass the automatic-discovery switches, schedule, backoff, and cached previews.
+They still require a confirmed-idle printer and a free I/O slot; idle status is
+checked again during the scan and before publication. A scan can take up to two
+minutes per printer. Success means a complete listing was published, not merely
+scheduled; failures name the printer and reason so busy printers can be retried.
+
+Previews reload on demand after a successful force refresh, not eagerly as part
+of indexing. Files pinned by unfinished file operations retain their preview
+revision to preserve those operations; force refresh again after they finish.
+
+The printer-file dialog links to the printer-scoped catalog. The React G-code harvest
+wizard, management page, progress UI, and harvest-filtered library view are
+retired, and the legacy harvest backend, its history tables, and the
+`gcode_harvest` permission were permanently removed (#3531). Library files
+imported by earlier harvests remain. Printed-parts inventory harvesting is a
+separate workflow and is unchanged, as is the mobile app.
 
 ### Slice Page
 Standalone browser-based 3D slicer application for converting models to G-code.
@@ -787,7 +831,7 @@ All TypeScript types are organized in feature-based files in `src/types/`:
 | `api.ts` | Backend API DTOs | Printer, GcodeFile, QueueJob, PrinterBackend |
 | `models.ts` | 3D model management | Model, ModelTag, ModelListItem |
 | `queue.ts` | Print queue management | JobStatus, JobAction, HistoryJob, ModelStats |
-| `gcode.ts` | G-code file management | GCodeFile, FileEntry, HarvestDiscoveredFile |
+| `gcode.ts` | G-code file management | GCodeFile, FileEntry |
 | `slicer.ts` | Slicer configuration | MaterialType, SlicerSettingsDto, MaterialPreset |
 | `admin.ts` | Admin interface | User, Role, SystemLog, TagOption |
 | `components.ts` | Component props | 77+ component prop interfaces |

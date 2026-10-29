@@ -24,10 +24,14 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
 
     # Install additional tools
     echo "🛠️  Installing additional development tools..."
-    sudo apt-get install -y curl wget git jq
+    sudo apt-get install -y curl wget git jq python3
 else
     echo "⏭️  Skipping apt-get operations (SKIP_APT=${SKIP_APT})"
 fi
+
+# A cached image may predate global.json; provision the exact SDK before restore.
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/dotnet-sdk.sh"
+ensure_dotnet_sdk "$HOME/.dotnet"
 
 if [ "${SKIP_GLOBAL_NPM:-0}" != "1" ]; then
     # Ensure latest npm and install global packages

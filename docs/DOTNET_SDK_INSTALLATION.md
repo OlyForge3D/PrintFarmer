@@ -1,522 +1,117 @@
-# .NET SDK Detection and Installation
+## .NET SDK selection and installation
 
-**Feature:** Automatic .NET SDK detection with optional installation  
-**Script:** `scripts/deploy-docker.sh`  
-**Last Updated:** October 6, 2025
+Root [`global.json`](../global.json) is the only approved SDK version.
+`rollForward: disable` and `allowPrerelease: false` make a missing exact SDK
+an error, even when a newer SDK is installed. Run verification from this
+checkout, not a different working directory.
 
----
+The approved SDK must be .NET 10, feature band 200 or newer because the older
+formatter ignores diagnostic suppressors. SDK versions are not target-framework
+versions (`net10.0`) or runtime image versions (`ASPNET_TAG`); those have
+different release schedules and are intentionally not synchronized.
 
-## Overview
+### Linux and macOS
 
-The deployment script now **automatically checks for .NET SDK** and offers to install it if not found. While .NET SDK is **not required** for Docker deployment, having it installed enables:
+The platform bootstrap scripts read `sdk.version`, install that exact SDK if
+necessary, and verify it before restoring/building. They use the bundled
+Microsoft installer rather than floating apt/Homebrew SDK packages.
+Python 3 is required for JSON parsing; bootstrap provisions it first.
 
-- ✅ Local development and debugging
-- ✅ Running tests before deployment
-- ✅ Building custom modifications
-- ✅ Using development scripts
-
----
-
-## How It Works
-
-### Automatic Detection
-
-When you run the deployment script, it checks for .NET SDK:
-
-```
-🔍 Environment Detection
-✅ Docker found: 24.0.7
-✅ Docker Compose found: v2.23.0
-✅ Docker daemon is running
-
-ℹ️  Checking for .NET SDK...
-```
-
-### Scenario 1: .NET SDK Found
-
-```
-✅ .NET SDK found: 10.0.101
-✅ .NET SDK version is compatible
-```
-
-Script continues normally.
-
-### Scenario 2: .NET SDK Not Found (Interactive)
-
-```
-⚠️  .NET SDK not found
-ℹ️  While Docker deployment doesn't require .NET SDK on the host,
-ℹ️  having it installed allows for local development and debugging.
-
-Would you like to install .NET SDK now? [y/N]:
-```
-
-**If you answer yes:**
-```
-📦 Installing .NET SDK
-ℹ️  Downloading .NET installation script...
-✅ Installation script downloaded
-ℹ️  Installing .NET SDK 10.0...
-ℹ️  This may take a few minutes...
-✅ .NET SDK 10.0 installed successfully
-
-ℹ️  To make .NET available in future sessions, add to your shell profile:
-  echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc
-  echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> ~/.zshrc
-
-✅ Verified: .NET SDK 10.0.101 is now available
-```
-
-**If you answer no:**
-```
-ℹ️  Continuing without .NET SDK installation
-ℹ️  You can install it later from: https://dotnet.microsoft.com/download
-```
-
-### Scenario 3: Non-Interactive Mode
+For SDK-only installation, from the repository root:
 
 ```bash
-./scripts/deploy-docker.sh --non-interactive
+bash scripts/dotnet-install.sh \
+  --version "$(python3 scripts/dotnet-sdk.py version)" \
+  --install-dir "$HOME/.dotnet"
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$DOTNET_ROOT:$PATH"
+python3 scripts/dotnet-sdk.py verify
 ```
 
-```
-⚠️  .NET SDK not found
-ℹ️  Skipping .NET SDK installation in non-interactive mode
-ℹ️  To install manually, visit: https://dotnet.microsoft.com/download
-```
+Add the two exports to your shell profile for future terminals. When invoking
+bootstrap via sudo, the SDK is installed for the invoking user, not root.
+`DOTNET_VERSION` is no longer an override.
 
-Script continues with deployment.
+### Windows
 
----
+`scripts/bootstrap-windows.ps1` reads `global.json` through
+`scripts/dotnet-sdk.ps1`, checks the selected SDK rather than just the presence
+of `dotnet`, and uses Microsoft's installer with an exact `-Version`.
+It no longer installs an unrelated SDK via winget.
 
-## Installation Process
+Alternatively download the exact approved SDK from the
+[official .NET downloads](https://dotnet.microsoft.com/download/dotnet/10.0),
+then verify from the repository root:
 
-### What Gets Installed
-
-- **Version:** .NET SDK 10.0 (required by PrintFarmer)
-- **Location:** `$HOME/.dotnet` (user-specific, no sudo required)
-- **Components:** SDK, runtime, and development tools
-- **Size:** ~200-300 MB download
-
-### Installation Steps
-
-1. **Download** official Microsoft installation script
-2. **Execute** script with channel 10.0 parameter
-3. **Install** to `$HOME/.dotnet` directory
-4. **Verify** installation successful
-5. **Add** to PATH for current session
-6. **Show** instructions for permanent PATH setup
-7. **Clean up** installation script
-
-### Platform Support
-
-| Platform | Automatic Installation | Manual Installation |
-|----------|----------------------|---------------------|
-| **Linux** | ✅ Fully supported | ✅ Yes |
-| **macOS** | ✅ Fully supported | ✅ Yes |
-| **Windows** | ❌ Not supported | ✅ Required |
-
-**Windows users:** Download installer from https://dotnet.microsoft.com/download
-
----
-
-## Making .NET Permanent
-
-After installation, .NET is available in your **current terminal session** but not in future sessions.
-
-### Linux (bash)
-
-```bash
-# Add to ~/.bashrc
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.bashrc
-echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> ~/.bashrc
-
-# Reload
-source ~/.bashrc
-```
-
-### macOS (zsh)
-
-```bash
-# Add to ~/.zshrc
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc
-echo 'export DOTNET_ROOT="$HOME/.dotnet"' >> ~/.zshrc
-
-# Reload
-source ~/.zshrc
-```
-
-### Verify
-
-```bash
-# Check .NET is available
-dotnet --version
-# Should show: 10.0.101 (or similar)
-
-# Check location
-which dotnet
-# Should show: /home/username/.dotnet/dotnet
-```
-
----
-
-## Version Requirements
-
-### Minimum Version
-
-PrintFarmer requires **.NET SDK 10.0 or later**
-
-### Version Compatibility
-
-| Version | Status | Notes |
-|---------|--------|-------|
-| 10.0+ | ✅ Fully supported | Recommended |
-| 9.0 | ⚠️ May work | Not tested |
-| 8.0 or earlier | ❌ Not supported | Will fail to build |
-
-### Checking Your Version
-
-```bash
-dotnet --version
-# Example output: 10.0.101
-
-dotnet --list-sdks
-# Example output:
-# 10.0.101 [/home/user/.dotnet/sdk]
-```
-
----
-
-## Manual Installation
-
-If automatic installation fails or you prefer manual installation:
-
-### Option 1: Official Installer (Recommended)
-
-**Download from:** https://dotnet.microsoft.com/download
-
-1. Select **.NET 10.0**
-2. Choose **SDK** (not just Runtime)
-3. Download for your OS
-4. Run installer
-5. Follow prompts
-
-### Option 2: Package Manager
-
-**Ubuntu/Debian:**
-```bash
-wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
-rm packages-microsoft-prod.deb
-
-sudo apt-get update
-sudo apt-get install -y dotnet-sdk-9.0
-```
-
-**macOS (Homebrew):**
-```bash
-brew install --cask dotnet-sdk
-```
-
-**Windows (winget):**
 ```powershell
-winget install Microsoft.DotNet.SDK.9
+. .\scripts\dotnet-sdk.ps1
+Assert-ApprovedDotnetSdk
 ```
 
-### Option 3: Installation Script
+A user-local installation requires `$HOME\.dotnet` on `PATH` and `DOTNET_ROOT`
+set to that directory. The bootstrap updates these for its own process;
+configure them for future shells if using that installation.
 
-The script uses Microsoft's official installation script:
+### Docker and devcontainers
+
+Docker-only hosts do not need a host SDK. The optional SDK check in the deploy
+script warns about a missing/mismatched SDK without preventing a container build.
+Its optional installer also uses the exact root version.
+
+Existing container build tooling derives `SDK_TAG` as `<sdk.version>-noble`
+through `scripts/docker/container-versions.conf` (PowerShell uses
+`Get-ApprovedDotnetSdkTag`). Old environment/configuration SDK tags cannot select
+another SDK. The pre-upgraded offline image variant is permitted only for the
+same approved version. Runtime tags remain independently configurable.
+
+SDK Dockerfile templates deliberately have **no default SDK tag**. For direct
+builds, pass the derived argument explicitly and use the repository root context:
 
 ```bash
-# Download
-curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-chmod +x dotnet-install.sh
-
-# Install
-./dotnet-install.sh --channel 9.0 --install-dir $HOME/.dotnet
-
-# Add to PATH
-export PATH="$HOME/.dotnet:$PATH"
-export DOTNET_ROOT="$HOME/.dotnet"
-
-# Verify
-dotnet --version
+docker build -f scripts/docker/dockerfiles/Dockerfile.multistage \
+  --build-arg "SDK_TAG=$(python3 scripts/dotnet-sdk.py tag)" \
+  --target api-runtime .
 ```
 
----
-
-## Troubleshooting
-
-### Installation Failed
-
-**Problem:** Installation script fails
-
-**Solution:**
-```bash
-# Check internet connectivity
-ping -c 3 dot.net
-
-# Try manual download
-curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-cat dotnet-install.sh  # Verify it's a shell script
-
-# Run manually
-chmod +x dotnet-install.sh
-./dotnet-install.sh --channel 9.0 --install-dir $HOME/.dotnet --verbose
-```
-
-### Command Not Found After Installation
-
-**Problem:** `dotnet: command not found` after installation
-
-**Solution:**
-```bash
-# Check if installed
-ls -la $HOME/.dotnet/dotnet
-
-# If exists, add to PATH for current session
-export PATH="$HOME/.dotnet:$PATH"
-export DOTNET_ROOT="$HOME/.dotnet"
-
-# Verify
-dotnet --version
-
-# Make permanent (choose your shell)
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.bashrc  # Linux
-echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc   # macOS
-```
-
-### Wrong Version Installed
-
-**Problem:** Have .NET 8.0 but need 9.0
-
-**Solution:**
-```bash
-# Install 9.0 alongside existing version
-./dotnet-install.sh --channel 9.0 --install-dir $HOME/.dotnet
-
-# Or uninstall old version first
-rm -rf $HOME/.dotnet
-# Then reinstall
-```
-
-### Permission Denied
-
-**Problem:** Permission errors during installation
-
-**Solution:**
-```bash
-# Installation goes to $HOME/.dotnet (no sudo needed)
-# If permission errors, check home directory permissions
-ls -la ~ | grep .dotnet
-
-# Fix if needed
-chmod 755 $HOME/.dotnet
-```
-
-### Disk Space Issues
-
-**Problem:** Not enough disk space
-
-**Solution:**
-```bash
-# Check available space
-df -h $HOME
-
-# .NET SDK needs ~500MB
-# Free up space if needed, then retry
-```
-
----
-
-## Docker-Only Deployment
-
-**Important:** You do **NOT** need .NET SDK installed to deploy with Docker!
-
-### Docker Handles Everything
-
-The Docker build process:
-1. Uses official Microsoft .NET SDK container image
-2. Builds application inside container
-3. Produces final runtime container
-4. No host .NET SDK required
-
-### When You Don't Need .NET SDK
-
-- ✅ Just deploying PrintFarmer via Docker
-- ✅ Not modifying source code
-- ✅ Not running tests locally
-- ✅ Not doing local development
-
-**In these cases, answer "no" when prompted to install .NET SDK.**
-
-### When .NET SDK Is Useful
-
-- 🔧 Local development and debugging
-- 🔧 Running unit tests before deploying
-- 🔧 Building custom modifications
-- 🔧 Using development scripts
-- 🔧 Faster iteration (no Docker rebuild)
-
----
-
-## CI/CD Considerations
-
-### GitHub Actions
-
-Most CI/CD platforms have .NET SDK pre-installed:
-
-```yaml
-# .github/workflows/deploy.yml
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: '9.0.x'
-      
-      - name: Verify .NET
-        run: dotnet --version
-      
-      - name: Deploy
-        run: ./scripts/deploy-docker.sh --non-interactive
-```
-
-### GitLab CI
-
-```yaml
-# .gitlab-ci.yml
-image: mcr.microsoft.com/dotnet/sdk:9.0
-
-deploy:
-  script:
-    - dotnet --version
-    - ./scripts/deploy-docker.sh --non-interactive
-```
-
-### Jenkins
-
-```groovy
-pipeline {
-    agent any
-    
-    tools {
-        dotnetsdk 'dotnet-9.0'
-    }
-    
-    stages {
-        stage('Deploy') {
-            steps {
-                sh 'dotnet --version'
-                sh './scripts/deploy-docker.sh --non-interactive'
-            }
-        }
-    }
-}
-```
-
----
-
-## Uninstallation
-
-If you need to remove .NET SDK:
-
-```bash
-# Remove installation
-rm -rf $HOME/.dotnet
-
-# Remove from shell profile
-# Linux (bash)
-sed -i '/dotnet/d' ~/.bashrc
-
-# macOS (zsh)
-sed -i '' '/dotnet/d' ~/.zshrc
-
-# Verify removed
-dotnet --version
-# Should show: command not found
-```
-
----
-
-## Security Notes
-
-### Official Installation Script
-
-The script downloads from Microsoft's official CDN:
-- **URL:** https://dot.net/v1/dotnet-install.sh
-- **Verified:** Script signature can be verified
-- **Safe:** Installs to user directory (no root required)
-
-### User-Level Installation
-
-- ✅ No sudo/administrator required
-- ✅ Installs to `$HOME/.dotnet`
-- ✅ No system-wide changes
-- ✅ Easy to remove
-
-### Package Manager Installation
-
-If using apt/yum/brew:
-- ⚠️ May require sudo/administrator
-- ⚠️ Installs system-wide
-- ✅ Managed by OS package manager
-- ✅ Automatic updates (if configured)
-
----
-
-## FAQ
-
-**Q: Do I need .NET SDK to run PrintFarmer?**  
-A: No! Docker deployment works without it. .NET SDK is only useful for local development.
-
-**Q: Will the script install .NET automatically?**  
-A: Only if you answer "yes" when prompted in interactive mode. Non-interactive mode skips installation.
-
-**Q: Can I install .NET later?**  
-A: Yes! You can install manually anytime from https://dotnet.microsoft.com/download
-
-**Q: What if I already have .NET 9.0?**  
-A: The script will warn you but continue. You can install .NET 10.0 alongside.
-
-**Q: Does this require admin/sudo?**  
-A: No! Installation goes to `$HOME/.dotnet` (user directory).
-
-**Q: Will this affect my system .NET?**  
-A: No! User installation is isolated. System .NET (if any) remains unchanged.
-
-**Q: Can I use the system-wide .NET instead?**  
-A: Yes! If .NET 10.0+ is already installed system-wide, the script will detect and use it.
-
-**Q: What about Windows?**  
-A: Automatic installation not supported. Download installer from Microsoft's website.
-
-**Q: How much disk space is needed?**  
-A: About 500MB total (200-300MB download, ~500MB installed).
-
----
-
-## Summary
-
-**The deployment script now:**
-- ✅ Automatically checks for .NET SDK
-- ✅ Offers to install if missing (interactive mode)
-- ✅ Provides clear instructions for manual installation
-- ✅ Works fine without .NET SDK (Docker handles it)
-- ✅ Verifies version compatibility
-- ✅ Sets up PATH for current session
-- ✅ Provides instructions for permanent setup
-
-**You can:**
-- Accept automatic installation (easiest)
-- Decline and install manually later
-- Skip entirely if only using Docker
-
-**Remember:** .NET SDK is **optional** for Docker deployment but **recommended** for development!
-
----
-
-**Installation script sourced from:** https://dot.net/v1/dotnet-install.sh  
-**Manual download:** https://dotnet.microsoft.com/download  
-**Documentation:** https://learn.microsoft.com/en-us/dotnet/core/install/
+Each SDK build stage copies `global.json` and logs the selected SDK before
+restoring/building. Release and daily-image builds pass the same derived tag.
+Build the devcontainer with `docker build -f .devcontainer/Dockerfile .`;
+its installer reads the copied `global.json`, and post-create provisioning
+repairs stale cached devcontainer SDKs before any restore.
+The devcontainer provisions the node user's SDK directory and persists its
+`DOTNET_ROOT` and `PATH` through `remoteEnv`, so new terminals and editor processes
+select the repaired SDK too.
+
+### CI and updates
+
+`actions/setup-dotnet` steps use `global-json-file: global.json` and immediately
+run `python3 scripts/dotnet-sdk.py verify`. The release build uses
+`source/global.json` and verification with `--root source`, because its selected
+application revision may differ from the release-tooling checkout.
+The unconditional SDK consistency gate
+rejects conflicting selectors. See [CI SDK controls](./CI.md#sdk-consistency-gate).
+
+Dependabot uses the supported
+[`dotnet-sdk` ecosystem](https://github.blog/changelog/2024-11-19-dependabot-can-now-perform-version-updates-for-the-net-sdk/)
+to propose weekly SDK patch/feature-band updates to root `global.json`. These
+are reviewable updates, not automatic approval or merge.
+
+Before approving a version, verify it in Microsoft's
+[.NET 10 release metadata](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json)
+and verify the SDK container tag supports the required architectures.
+The initial exact pin, 10.0.403, was verified there on 2026-10-25; its Windows
+archive checksum and Noble amd64/arm64 manifests were also verified.
+
+### Troubleshooting
+
+- **A compatible SDK was not found:** install the exact `sdk.version`; a newer
+  installed SDK is not a substitute. Check `dotnet --list-sdks`, `PATH` and
+  `DOTNET_ROOT`.
+- **HTTP 409/404 or interrupted download:** distinguish transport/feed failure
+  from version existence using official release metadata. Do not silently
+  change the pin or enable roll-forward to mask a failed download.
+- **SDK policy gate fails:** remove the independent selector and consume
+  `global.json`; do not add an exemption for another literal.
+- **An SDK update breaks compilation or formatting:** revert the `global.json`
+  update and requalify the proposed SDK. Contributors and CI are blocked until
+  the exact approved SDK is available; no application data migration is involved.

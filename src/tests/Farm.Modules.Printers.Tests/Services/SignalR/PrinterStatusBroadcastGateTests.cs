@@ -11,6 +11,16 @@ namespace Farm.Modules.Printers.Tests.Services.SignalR;
 /// </summary>
 public class PrinterStatusBroadcastGateTests
 {
+    [Fact]
+    public void ShouldBroadcast_RuntimeFactorOnlyChanges_AreNotSuppressed()
+    {
+        PrinterStatusUpdate initial = MakeUpdate() with { SpeedFactorPercent = 125, FlowFactorPercent = 87.5 };
+        Assert.True(PrinterStatusBroadcastGate.ShouldBroadcast(initial, initial with { SpeedFactorPercent = 80 }));
+        Assert.True(PrinterStatusBroadcastGate.ShouldBroadcast(initial, initial with { FlowFactorPercent = 95 }));
+        Assert.True(PrinterStatusBroadcastGate.ShouldBroadcast(initial, initial with { SpeedFactorPercent = null, FlowFactorPercent = null }));
+        Assert.False(PrinterStatusBroadcastGate.ShouldBroadcast(initial, initial with { }));
+    }
+
     private static PrinterStatusUpdate MakeUpdate(
         bool isOnline = true,
         string? state = "Idle",

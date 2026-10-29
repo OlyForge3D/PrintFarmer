@@ -44,6 +44,7 @@ const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
 
   // Files — which upload types are accepted is a routine policy decision.
   GcodeUpload: new Set(['allowedExtensions']),
+  PrinterFileIndex: new Set(['enabled']),
 
   // Catalog — the feature flag; auto-apply is intentionally left as advanced
   // because it changes printer config without user confirmation.

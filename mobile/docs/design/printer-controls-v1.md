@@ -6,6 +6,9 @@
 **Owner:** Newt (UX) → Hudson (iOS)
 **Last updated:** 2026-05-21
 
+> **Historical.** Superseded by [the current Controls design contract](printer-controls-section.md).
+> The lockout banner described here was removed in #3548, and `PrinterControlsSection` was deleted (#3542).
+
 This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
 
 ---

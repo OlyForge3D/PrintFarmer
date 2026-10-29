@@ -7,7 +7,7 @@ Use this suite as a smoke test after frontend or backend changes to catch regres
 ## Prerequisites
 
 - **Node.js 24+** and npm
-- **.NET 10 SDK** (10.0.101+)
+- **.NET SDK** exactly matching root `global.json`
 - npm dependencies installed in `src/Web/ReactApp/` (`npm install`)
 - .NET solution restored (`cd src && dotnet restore ./farm-web.sln`)
 

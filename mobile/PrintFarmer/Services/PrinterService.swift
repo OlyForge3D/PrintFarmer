@@ -211,9 +211,15 @@ actor PrinterService: PrinterServiceProtocol {
         try requireAccepted(result)
     }
 
+    func turnOffHeaters(printerId: UUID) async throws {
+        let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/heaters/off")
+        try requireAccepted(result)
+    }
+
     func setSensorValue(printerId: UUID, sensorId: String, quantity: SensorQuantity, value: Double) async throws -> CommandResult {
         try Task.checkCancellation()
-        guard value.isFinite, quantity != .unknown else {
+        guard value.isFinite, quantity != .unknown,
+              quantity != .enabled || value == 0 || value == 1 else {
             throw PrinterControlError.invalidRequest("Sensor value is not valid.")
         }
         let result: CommandResult = try await apiClient.post(
@@ -245,6 +251,21 @@ actor PrinterService: PrinterServiceProtocol {
         let result: CommandResult = try await apiClient.post(
             "/api/printers/\(printerId)/z-offset/adjust",
             body: ZOffsetAdjustmentRequest(offsetMm: offsetMm)
+        )
+        try requireAccepted(result)
+        return result
+    }
+
+    func setRuntimeFactor(printerId: UUID, factor: RuntimeFactor, percent: Double) async throws -> CommandResult {
+        try Task.checkCancellation()
+        guard RuntimeFactor.isValidPercent(percent) else {
+            throw PrinterControlError.invalidRequest(
+                "\(factor.title) must be between 1 and 200 percent with at most two decimals."
+            )
+        }
+        let result: CommandResult = try await apiClient.post(
+            "/api/printers/\(printerId)/\(factor.pathComponent)",
+            body: RuntimeFactorRequest(percent: percent)
         )
         try requireAccepted(result)
         return result
@@ -439,6 +460,18 @@ struct SetTemperaturesRequest: Encodable {
 struct SensorControlRequest: Encodable, Sendable {
     let quantity: String
     let value: Double
+
+    private enum CodingKeys: String, CodingKey { case quantity, value }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(quantity, forKey: .quantity)
+        if quantity == SensorQuantity.enabled.rawValue {
+            try container.encode(value == 1, forKey: .value)
+        } else {
+            try container.encode(value, forKey: .value)
+        }
+    }
 }
 
 struct FanSpeedRequest: Encodable, Sendable {
@@ -447,6 +480,11 @@ struct FanSpeedRequest: Encodable, Sendable {
 
 struct ZOffsetAdjustmentRequest: Encodable, Sendable {
     let offsetMm: Double
+}
+
+/// Encodes backend `RuntimeFactorRequest(double? Percent)` for speed and flow.
+struct RuntimeFactorRequest: Encodable, Sendable {
+    let percent: Double
 }
 
 /// Encodes a single-axis relative move into backend `MoveRequest(double? X, double? Y, double? Z, double? F)`.

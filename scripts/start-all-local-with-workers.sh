@@ -22,7 +22,7 @@
 #   5. (Deprecated) PrusaSlicer worker support has been removed
 #
 # Requirements:
-#   - .NET SDK 10.0.101+
+#   - Exact .NET SDK from root global.json
 #   - Node.js >=24.13
 #   - Docker (for worker containers)
 #   - Docker images: printfarmer/orcaslicer-worker
@@ -633,6 +633,7 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || [[ $ORCA_IMAGE_VALID -eq
   ORCA_BIN_CMD+=(-f "$ROOT_DIR/Dockerfile.multistage" --target orcaslicer-binaries \
     -t "orcaslicer-binaries:${ORCA_VERSION}" \
     -t "orcaslicer-binaries:latest" \
+    --build-arg SDK_TAG="${SDK_TAG}" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
     --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
     --build-arg ALLOW_STUB=false \
@@ -648,6 +649,7 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || [[ $ORCA_IMAGE_VALID -eq
   fi
   ORCA_WORKER_CMD+=(-f "$ROOT_DIR/Dockerfile.multistage" --target orcaslicer-worker \
     -t printfarmer/orcaslicer-worker \
+    --build-arg SDK_TAG="${SDK_TAG}" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
     --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
     "$ROOT_DIR")
@@ -711,7 +713,6 @@ cat > "$REACT_DIR/.env" <<EOF
 
 # SignalR URLs for development - connect directly to API server
 VITE_SIGNALR_PRINTERS_URL=$API_URL/hubs/printers
-VITE_SIGNALR_HARVEST_URL=$API_URL/hubs/harvest
 
 # API Base URL (optional, defaults to relative URLs which work via proxy)
 VITE_API_BASE_URL=$API_URL

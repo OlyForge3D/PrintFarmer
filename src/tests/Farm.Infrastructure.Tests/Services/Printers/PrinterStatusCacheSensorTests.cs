@@ -10,6 +10,26 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 
 public sealed class PrinterStatusCacheSensorTests
 {
+    [Fact]
+    public void ClearRuntimeFactors_Disconnected_PreservesOtherFieldsAndObservationAge()
+    {
+        Guid id = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(id, true, "printing", Progress: 42,
+            SpeedFactorPercent: 125, FlowFactorPercent: 87.5), originWatermark: 7);
+        PrinterStatusCacheSnapshot before = cache.GetSnapshot(id)!;
+
+        PrinterStatusDto result = Assert.IsType<PrinterStatusDto>(cache.ClearRuntimeFactors(id));
+
+        Assert.Null(result.SpeedFactorPercent);
+        Assert.Null(result.FlowFactorPercent);
+        Assert.Equal(42, result.Progress);
+        Assert.Equal(before.UpdatedAtUtc, cache.GetSnapshot(id)!.UpdatedAtUtc);
+        Assert.Equal(7, cache.GetSnapshot(id)!.OriginWatermark);
+        Assert.Null(cache.ClearRuntimeFactors(id));
+        Assert.Null(cache.ClearRuntimeFactors(Guid.NewGuid()));
+    }
+
     private static PrinterSensorDto Chamber(double temperature, double? humidity = null) =>
         new("temperature_sensor chamber", "Chamber", PrinterSensorKind.Chamber)
         {

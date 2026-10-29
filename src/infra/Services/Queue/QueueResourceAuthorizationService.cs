@@ -42,6 +42,12 @@ public interface IQueueResourceAuthorizationService
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
 
+    Task<bool> CanActorAccessGcodeFileAsync(
+        string actorSubject,
+        Guid gcodeFileId,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
+
     Task<bool> CanActorAccessProjectAsync(
         string actorSubject,
         Guid projectId,
@@ -50,6 +56,28 @@ public interface IQueueResourceAuthorizationService
     Task<IReadOnlySet<Guid>> FilterActorAccessibleJobIdsAsync(
         string actorSubject,
         IReadOnlyCollection<Guid> jobIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Set-based equivalent of <see cref="CanActorAccessPrinterAsync"/>: returns exactly the
+    /// candidate IDs for which that method would return <see langword="true"/>, using a bounded
+    /// number of queries independent of the candidate count.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> FilterActorAccessiblePrinterIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> printerIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Set-based equivalent of <see cref="CanActorAccessGcodeFileAsync"/>: returns exactly the
+    /// candidate IDs for which that method would return <see langword="true"/>, using a bounded
+    /// number of queries independent of the candidate count.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> FilterActorAccessibleGcodeFileIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> gcodeFileIds,
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
 
@@ -194,6 +222,27 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                      ct));
     }
 
+    public async Task<bool> CanActorAccessGcodeFileAsync(
+        string actorSubject,
+        Guid gcodeFileId,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        if (!Guid.TryParse(actorSubject, out Guid userId))
+        {
+            return false;
+        }
+
+        var file = await _db.GcodeFiles.AsNoTracking().Where(x => x.Id == gcodeFileId)
+            .Select(x => new { x.PrinterGroupId, x.CalibrationProjectId }).SingleOrDefaultAsync(ct);
+        return file is not null &&
+            (await IsFarmAdminAsync(userId, ct) ||
+             ((!file.PrinterGroupId.HasValue ||
+               await CanUserAccessGroupAsync(userId, file.PrinterGroupId.Value, minimumAccess, ct)) &&
+              (!file.CalibrationProjectId.HasValue ||
+               await CanActorAccessProjectAsync(actorSubject, file.CalibrationProjectId.Value, ct))));
+    }
+
     public async Task<IReadOnlySet<Guid>> FilterActorAccessibleJobIdsAsync(
         string actorSubject,
         IReadOnlyCollection<Guid> jobIds,
@@ -317,6 +366,104 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
             minimumAccess,
             ct);
         return allowed.Contains(jobId);
+    }
+
+    public async Task<IReadOnlySet<Guid>> FilterActorAccessiblePrinterIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> printerIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(printerIds);
+        if (printerIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        Guid[] distinctPrinterIds = printerIds.Distinct().ToArray();
+        if (QueueActorIdentity.IsTrustedSystemActor(actorSubject))
+        {
+            return distinctPrinterIds.ToHashSet();
+        }
+
+        if (!Guid.TryParse(actorSubject, out Guid userId))
+        {
+            return new HashSet<Guid>();
+        }
+
+        // Farm admins are allowed regardless of existence, matching the single-printer check.
+        if (await IsFarmAdminAsync(userId, ct))
+        {
+            return distinctPrinterIds.ToHashSet();
+        }
+
+        List<PrinterGroupScope> scopes = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => distinctPrinterIds.Contains(printer.Id))
+            .Select(printer => new PrinterGroupScope(printer.Id, printer.PrinterGroupId))
+            .ToListAsync(ct);
+        GroupAccessSnapshot groups = await LoadGroupAccessAsync(
+            userId,
+            scopes.Select(scope => scope.PrinterGroupId),
+            ct);
+        return scopes
+            .Where(scope => groups.Allows(scope.PrinterGroupId, minimumAccess))
+            .Select(scope => scope.PrinterId)
+            .ToHashSet();
+    }
+
+    public async Task<IReadOnlySet<Guid>> FilterActorAccessibleGcodeFileIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> gcodeFileIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeFileIds);
+        if (gcodeFileIds.Count == 0 || !Guid.TryParse(actorSubject, out Guid userId))
+        {
+            return new HashSet<Guid>();
+        }
+
+        Guid[] distinctFileIds = gcodeFileIds.Distinct().ToArray();
+        List<GcodeFileScope> files = await _db.GcodeFiles
+            .AsNoTracking()
+            .Where(file => distinctFileIds.Contains(file.Id))
+            .Select(file => new GcodeFileScope(file.Id, file.PrinterGroupId, file.CalibrationProjectId))
+            .ToListAsync(ct);
+        if (files.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        if (await IsFarmAdminAsync(userId, ct))
+        {
+            return files.Select(file => file.FileId).ToHashSet();
+        }
+
+        GroupAccessSnapshot groups = await LoadGroupAccessAsync(
+            userId,
+            files.Select(file => file.PrinterGroupId),
+            ct);
+        Guid[] projectIds = files
+            .Where(file => file.CalibrationProjectId.HasValue)
+            .Select(file => file.CalibrationProjectId!.Value)
+            .Distinct()
+            .ToArray();
+        HashSet<Guid> ownedProjects = projectIds.Length == 0
+            ? []
+            : (await _db.CalibrationProjects
+                .AsNoTracking()
+                .Where(project => projectIds.Contains(project.Id) && project.OwnerUserId == userId)
+                .Select(project => project.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+        return files
+            .Where(file =>
+                groups.Allows(file.PrinterGroupId, minimumAccess) &&
+                (!file.CalibrationProjectId.HasValue ||
+                 ownedProjects.Contains(file.CalibrationProjectId.Value)))
+            .Select(file => file.FileId)
+            .ToHashSet();
     }
 
     public async Task<IReadOnlySet<Guid>> FilterAccessiblePrinterIdsAsync(
@@ -456,15 +603,53 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
             return true;
         }
 
-        List<Guid> roles = await _db.UserRoles
-            .AsNoTracking()
-            .Where(role => role.UserId == userId && role.IsActive)
-            .Select(role => role.RoleId)
-            .ToListAsync(ct);
+        List<Guid> roles = await ActiveRoleIds(userId).ToListAsync(ct);
         return rules.Any(rule =>
             roles.Contains(rule.RoleId) &&
             rule.AccessLevel >= minimumAccess);
     }
+
+    /// <summary>
+    /// Loads the ACL rules for the given groups and, only when any exist, the user's live
+    /// role assignments, so per-resource group checks can be answered without further queries.
+    /// </summary>
+    private async Task<GroupAccessSnapshot> LoadGroupAccessAsync(
+        Guid userId,
+        IEnumerable<Guid?> groupIds,
+        CancellationToken ct)
+    {
+        Guid[] distinctGroupIds = groupIds
+            .Where(groupId => groupId.HasValue)
+            .Select(groupId => groupId!.Value)
+            .Distinct()
+            .ToArray();
+        if (distinctGroupIds.Length == 0)
+        {
+            return GroupAccessSnapshot.Unrestricted;
+        }
+
+        List<PrinterGroupAccess> rules = await _db.PrinterGroupAccesses
+            .AsNoTracking()
+            .Where(rule => distinctGroupIds.Contains(rule.PrinterGroupId))
+            .ToListAsync(ct);
+        if (rules.Count == 0)
+        {
+            return GroupAccessSnapshot.Unrestricted;
+        }
+
+        HashSet<Guid> roles = (await ActiveRoleIds(userId).ToListAsync(ct)).ToHashSet();
+        return new GroupAccessSnapshot(
+            rules.GroupBy(rule => rule.PrinterGroupId)
+                .ToDictionary(group => group.Key, group => group.ToList()),
+            roles);
+    }
+
+    private IQueryable<Guid> ActiveRoleIds(Guid userId) =>
+        _db.UserRoles
+            .AsNoTracking()
+            .Where(role => role.UserId == userId && role.IsActive && role.Role.IsActive &&
+                (role.ExpiresAt == null || role.ExpiresAt > DateTime.UtcNow))
+            .Select(role => role.RoleId);
 
     private Task<bool> IsFarmAdminAsync(Guid userId, CancellationToken ct) =>
         _db.UserRoles
@@ -473,6 +658,8 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                 userRole =>
                     userRole.UserId == userId &&
                     userRole.IsActive &&
+                    userRole.Role.IsActive &&
+                    (userRole.ExpiresAt == null || userRole.ExpiresAt > DateTime.UtcNow) &&
                     userRole.Role.Name == PrintFarmerPermissions.FarmAdminRole,
                 ct);
 
@@ -484,4 +671,20 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         Guid? GcodeGroupId);
 
     private sealed record PrinterGroupScope(Guid PrinterId, Guid? PrinterGroupId);
+
+    private sealed record GcodeFileScope(Guid FileId, Guid? PrinterGroupId, Guid? CalibrationProjectId);
+
+    /// <summary>Evaluates group ACLs exactly like <c>CanUserAccessGroupAsync</c>, from preloaded data.</summary>
+    private sealed class GroupAccessSnapshot(
+        IReadOnlyDictionary<Guid, List<PrinterGroupAccess>> rulesByGroup,
+        IReadOnlySet<Guid> activeRoleIds)
+    {
+        public static GroupAccessSnapshot Unrestricted { get; } =
+            new(new Dictionary<Guid, List<PrinterGroupAccess>>(), new HashSet<Guid>());
+
+        public bool Allows(Guid? groupId, PrinterGroupAccessLevel minimumAccess) =>
+            !groupId.HasValue ||
+            !rulesByGroup.TryGetValue(groupId.Value, out List<PrinterGroupAccess>? rules) ||
+            rules.Any(rule => activeRoleIds.Contains(rule.RoleId) && rule.AccessLevel >= minimumAccess);
+    }
 }

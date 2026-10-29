@@ -1,5 +1,7 @@
 # Deployment Readiness Check - October 6, 2025
 
+> **Historical record.** The legacy G-code harvest feature this snapshot describes (the `/api/gcode-harvest/*` endpoints, harvest operations, `FilesAdded` counters and discovered-file thumbnails) was retired permanently in #3531. Harvest-specific steps, endpoints and checks below no longer apply; the deployment guidance is otherwise unchanged.
+
 ## Executive Summary
 
 ✅ **The deployment script is ready to deploy your current changes to Ubuntu server**

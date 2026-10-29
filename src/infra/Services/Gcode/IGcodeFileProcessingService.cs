@@ -6,17 +6,17 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Infrastructure.Services.Gcode;
 
 /// <summary>
-/// Service for processing and storing G-code files from any source (upload, harvest, etc).
+/// Service for processing and storing G-code files from any source (upload, slice import, etc).
 /// Handles file storage, metadata extraction, thumbnail processing, and entity persistence.
 ///
-/// This interface enables the GcodeHarvestService (in Infrastructure) to coordinate with
-/// file processing logic without creating a circular dependency on the API layer.
+/// This interface lets Infrastructure services (for example the slice G-code import) coordinate
+/// with file processing logic without creating a circular dependency on the API layer.
 /// </summary>
 public interface IGcodeFileProcessingService
 {
     /// <summary>
     /// Unified method for processing and storing G-code files from any source
-    /// (upload, single harvest, bulk harvest, or future sources).
+    /// (upload, slice import, or future sources).
     ///
     /// Handles all file processing: storage, hash calculation, duplicate detection,
     /// metadata extraction, thumbnail processing, entity creation, and database persistence.
@@ -25,9 +25,6 @@ public interface IGcodeFileProcessingService
     /// <param name="originalFileName">Original filename as provided by source</param>
     /// <param name="folderId">Virtual folder ID where file should be organized</param>
     /// <param name="virtualDirectory">Virtual directory path (e.g., '/', '/subfolder'). Defaults to '/'.</param>
-    /// <param name="sourcePrinterId">Optional printer ID if harvested from a specific printer</param>
-    /// <param name="originalPrinterPath">Optional original path on printer if harvested</param>
-    /// <param name="thumbnailUrl">Optional thumbnail URL from printer API (harvest only)</param>
     /// <param name="fileId">Optional specific ID for the file. If null, a new GUID is generated.</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>The saved GcodeFile entity with all metadata populated</returns>
@@ -49,9 +46,6 @@ public interface IGcodeFileProcessingService
         string originalFileName,
         Guid folderId,
         string? virtualDirectory = null,
-        Guid? sourcePrinterId = null,
-        string? originalPrinterPath = null,
-        string? thumbnailUrl = null,
         Guid? fileId = null,
         CancellationToken ct = default);
 }

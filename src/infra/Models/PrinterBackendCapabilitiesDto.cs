@@ -53,6 +53,12 @@ public record PrinterBackendCapabilitiesDto(
     /// <summary>Whether the latest printer status includes a valid part-fan output percentage.</summary>
     public bool SupportsFanSpeedReadback { get; init; }
 
+    /// <summary>Whether the shared speed-factor route has a semantic backend implementation.</summary>
+    public bool SupportsSpeedFactorControl { get; init; }
+
+    /// <summary>Whether the shared flow-factor route has a semantic backend implementation.</summary>
+    public bool SupportsFlowFactorControl { get; init; }
+
     /// <summary>
     /// Whether the backend publishes backend-neutral <c>sensors</c> in status payloads. When false,
     /// <c>sensors</c> is always empty. Independent of the legacy temperature and fan flags.
@@ -64,6 +70,12 @@ public record PrinterBackendCapabilitiesDto(
     /// Individual sensors are writable only when they advertise a <c>writable</c> descriptor.
     /// </summary>
     public bool SupportsSensorControl { get; init; }
+
+    /// <summary>Whether manual temperature edits are supported during an active print or pause.</summary>
+    public bool SupportsTemperatureControlDuringPrint { get; init; }
+
+    /// <summary>Whether a distinct all-heaters-off operation is supported.</summary>
+    public bool SupportsHeaterShutdown { get; init; }
 
     /// <summary>Whether the latest printer status includes a valid live G-code Z offset.</summary>
     public bool SupportsZOffsetReadback { get; init; }

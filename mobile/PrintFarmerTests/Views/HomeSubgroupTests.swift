@@ -12,21 +12,20 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertTrue(HomeSubgroup.MotorReleaseControls.warning.contains("does not turn heaters off"))
     }
 
-    func test_accessGates_requirePreferenceIdentityReadinessAndPermission() {
-        func reason(enabled: Bool = true, authenticated: Bool = true, ready: Bool = true,
+    func test_accessGates_requireIdentityReadinessAndPermission() {
+        func reason(authenticated: Bool = true, ready: Bool = true,
                     sameServer: Bool = true, permissions: [String] = ["queue:start"]) -> String? {
             let user = UserDTO(
                 id: UUID(), username: "operator", email: "", firstName: nil, lastName: nil,
                 isActive: true, emailConfirmed: true, lastLogin: nil, createdAt: Date(),
                 roles: [], permissions: permissions
             )
-            return AdvancedPrinterControlsAccess.blockedReason(
-                enabled: enabled, authenticated: authenticated, ready: ready,
+            return PrinterControlsAccess.blockedReason(
+                authenticated: authenticated, ready: ready,
                 user: user, sameServer: sameServer
             )
         }
         XCTAssertNil(reason())
-        XCTAssertNotNil(reason(enabled: false))
         XCTAssertNotNil(reason(authenticated: false))
         XCTAssertNotNil(reason(ready: false))
         XCTAssertNotNil(reason(sameServer: false))

@@ -1243,10 +1243,12 @@ final class ConnectionStatusPresentationTests: XCTestCase {
 
     func testConnectedBanner() {
         let p = ConnectionStatusPresentation(status: .connected, now: now, calendar: calendar)
-        XCTAssertEqual(p.label, "Connected")
+        XCTAssertEqual(p.label, "Server connected")
         XCTAssertNil(p.timestampText)
         XCTAssertFalse(p.isStale)
         XCTAssertTrue(p.accessibilityLabel.contains("Connected"))
+        XCTAssertTrue(p.detailMessage.contains("Individual printers can still be offline"))
+        XCTAssertEqual(p.barBackground, .pfSuccess)
     }
 
     func testDegradedWithoutCacheBanner() {

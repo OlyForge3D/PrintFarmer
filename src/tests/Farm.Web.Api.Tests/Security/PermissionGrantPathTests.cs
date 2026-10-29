@@ -31,7 +31,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// <c>resource:action</c> permission, or holds <c>resource:admin</c> (which implies every other
 /// action on that resource per <see cref="PrintFarmerPermissions.ImpliesViaResourceAdmin(System.Security.Claims.ClaimsPrincipal, string, string)"/>); or</item>
 /// <item>the permission is on <see cref="AdminOnlyAllowlist"/> with a written reason explaining
-/// why it is intentionally farm_admin-only.</item>
+/// why no non-admin role receives it by default; explicit custom-role grants remain possible.</item>
 /// </list>
 ///
 /// <c>{resource}:admin</c> permissions themselves are deliberately excluded from the "must have a
@@ -53,9 +53,9 @@ namespace Farm.Web.Api.Tests.Security;
 public sealed class PermissionGrantPathTests
 {
     /// <summary>
-    /// Permissions that are intentionally reachable only by farm_admin, with a written reason.
+    /// Permissions intentionally granted only to farm_admin by default, with a written reason.
     /// Each entry here is a deliberate design decision, not an oversight — add to this list only
-    /// with a comment explaining why a custom or farm_user role must never hold the permission.
+    /// with a comment explaining why non-admin roles must not receive an automatic grant.
     /// </summary>
     private static readonly Dictionary<string, string> AdminOnlyAllowlist = new(StringComparer.Ordinal)
     {
@@ -73,12 +73,19 @@ public sealed class PermissionGrantPathTests
             "Gates the singleton, system-wide auto-dispatch configuration " +
             "(DispatchSettingsController) with no per-printer/per-group scoping — reviewed and " +
             "deliberately kept farm_admin-only during issue #1453's grant-path reconciliation.",
+
+        [PrintFarmerPermissions.PrinterFiles.Delete] =
+            "Remote deletion can permanently erase the only copy of printer-owned bytes. " +
+            "Do not automatically grant it to farm_user or queue writers. Administrators " +
+            "can explicitly assign the seeded printer_files/delete permission to a custom " +
+            "role; source-printer Manage access and exact irreversible-action consent are " +
+            "still required. See #3513 and PrinterFileDeleteAccessTests.",
     };
 
     private static readonly Assembly[] ScannedAssemblies =
     [
         typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly,
-        typeof(Farm.Infrastructure.Services.SignalR.HarvestHub).Assembly,
+        typeof(Farm.Infrastructure.Services.SignalR.PrinterHub).Assembly,
         typeof(Farm.Slicer.Module.Api.Controllers.WorkersController).Assembly,
         // Issue #2040: Farm.Modules.PrintQueue controllers (JobQueueController,
         // SlicePrintBridgeController, PrintApprovalsController, DispatchSettingsController, etc.)

@@ -22,7 +22,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// - API Key (X-Api-Key header): Read access to most endpoints
 /// - HTTP Digest Authentication: Full access including privileged operations
 /// </summary>
-public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
+public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
     private const int HistoryPageSize = 100;
     private const int MaxHistoryPagesForList = 20;

@@ -33,8 +33,6 @@ export const queryKeys = {
   spoolmanMaterials: ['spoolman', 'materials'] as const,
   gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
   gcodeFile: (id: string) => ['gcode-files', id] as const,
-  harvestOperations: (printerId?: string) => ['harvest-operations', printerId] as const,
-  harvestOperation: (id: string) => ['harvest-operations', id] as const,
   jobQueue: (printerId?: string) => ['job-queue', printerId] as const,
   health: ['health'] as const,
   fileConsistency: {

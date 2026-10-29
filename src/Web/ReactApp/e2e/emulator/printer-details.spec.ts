@@ -76,10 +76,10 @@ test.describe('Printer Details — Moonraker', () => {
     await details.getByLabel('X movement amount').press('Enter');
     await expect(details.getByLabel('X movement amount').locator('..')).toContainText('[ 135.0 ]', { timeout: 15_000 });
 
-    await details.getByLabel('Hotend target temperature').fill('205');
-    await details.getByLabel('Hotend target temperature').press('Enter');
-    await details.getByLabel('Bed target temperature').fill('60');
-    await details.getByLabel('Bed target temperature').press('Enter');
+    await details.getByLabel('Extruder target temperature').fill('205');
+    await details.getByLabel('Extruder target temperature').press('Enter');
+    await details.getByLabel('Heater Bed target temperature').fill('60');
+    await details.getByLabel('Heater Bed target temperature').press('Enter');
 
     await expect.poll(async () => {
       const response = await request.get(

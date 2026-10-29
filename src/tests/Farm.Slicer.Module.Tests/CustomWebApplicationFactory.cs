@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Thumbnails;
 using Farm.Testing.Shared;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -33,6 +34,9 @@ public class CustomWebApplicationFactory : HostFixture<Program>
         System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
             typeof(Farm.Slicer.Module.Api.SlicerApiExtensions).TypeHandle);
     }
+
+    /// <summary>Gets optional SQL instrumentation for specialized fixtures.</summary>
+    protected virtual DbCommandInterceptor? CommandInterceptor => null;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -73,12 +77,20 @@ public class CustomWebApplicationFactory : HostFixture<Program>
                 options.UseSqlite(
                     ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+                if (CommandInterceptor is not null)
+                {
+                    options.AddInterceptors(CommandInterceptor);
+                }
             });
 
             DbContextOptionsBuilder<SlicerDbContext> optionsBuilder = new DbContextOptionsBuilder<SlicerDbContext>();
             optionsBuilder.UseSqlite(
                 ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+            if (CommandInterceptor is not null)
+            {
+                optionsBuilder.AddInterceptors(CommandInterceptor);
+            }
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<SlicerDbContext>(_ => { }, ServiceLifetime.Scoped);
 
@@ -112,12 +124,20 @@ public class CustomWebApplicationFactory : HostFixture<Program>
                 options.UseSqlite(
                     ConnectionString,
                     sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+                if (CommandInterceptor is not null)
+                {
+                    options.AddInterceptors(CommandInterceptor);
+                }
             });
 
             DbContextOptionsBuilder<AppDbContext> appOptionsBuilder = new();
             appOptionsBuilder.UseSqlite(
                 ConnectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+            if (CommandInterceptor is not null)
+            {
+                appOptionsBuilder.AddInterceptors(CommandInterceptor);
+            }
             services.AddSingleton(appOptionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>(_ => { }, ServiceLifetime.Scoped);
 

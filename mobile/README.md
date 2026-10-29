@@ -84,7 +84,8 @@ cd mobile
   cat "$run_dir/destination.log"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
-    -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+    -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \
+    -only-testing:PrintFarmerTests/PrinterSensorsSnapshotTests \
     -parallel-testing-enabled NO \
     -resultBundlePath "$run_dir/Snapshots.xcresult" \
     2>&1 | tee "$run_dir/test.log"
@@ -105,9 +106,14 @@ for iPad-host runs; each family needs separate unchanged-reference evidence.
 To diagnose environmental drift, compare identical tests/reference blobs under
 identical pinned Xcode/runtime/build, family, scale and locale; do not assume
 every failure is environmental or conflate XCUI failures with image drift.
-Keep snapshot strictness, skip policy and PNGs unchanged. The
-[snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
-authorization to re-record baselines for #2536/#2572.
+The [snapshot policy and complete inventory](PrintFarmerTests/Views/__Snapshots__/README.md)
+retains one stable dark destructive-button golden (two host-family PNGs).
+Backend/loading/job-state and Tune sensor coverage uses focused assertions;
+volatile component screenshots are labeled review-only attachments, not pixel
+gates. Prefer state, command, accessibility and bounded-layout contracts over new
+whole-screen references. Retained goldens still require strict precision, no
+skips and separate approved iPhone/iPad evidence. The guide does not authorize
+re-recording to hide runtime drift.
 
 ## Updating App Store screenshots (manual)
 
@@ -120,11 +126,22 @@ python3 scripts/app-store-screenshots.py
 
 Requires Xcode, Python 3 and approved **iOS 26.5 (23F77)** simulators:
 **iPhone 17 Pro Max** (1320x2868) and **iPad Pro 13-inch (M5)** (2064x2752).
-The script captures Farm, printer Status, Queue, Filament and Scan once per
-device in dark mode with default Dynamic Type, using DEBUG-only API fixtures.
+The script captures Farm, printer Status, Queue, Filament, Scan, printer
+Control (Tune) and the camera header once per device in dark mode with default
+Dynamic Type, using DEBUG-only API fixtures. The camera still is a project-owned
+Blender render (`DebugAssets.xcassets/AppStoreCameraFrame`); regenerate it with
+`/Applications/Blender.app/Contents/MacOS/Blender -b -P scripts/render-app-store-camera-frame.py`.
 Missing device classes are errors; images are never resized.
+To use a dedicated simulator, set `APP_STORE_IPHONE_SIMULATOR` or
+`APP_STORE_IPAD_SIMULATOR` to its exact name; it must start with the device name
+above, and a name that does not match exactly one simulator fails rather than
+falling back. Each screen is asserted free of "unknown" status text on the
+settled frame that is captured. The status bar shows full signal and battery.
+On iPad the script turns Stage Manager and windowed apps off (Full Screen Apps,
+via `com.apple.springboard` `SBMedusaMultitaskingEnabled`/`SBChamoisWindowingEnabled`)
+and reboots the simulator so no resize handle appears; that setting is left in place.
 
-Review the ten PNGs under git-ignored `mobile/build/app-store/<run>/iPhone/`
+Review the fourteen PNGs under git-ignored `mobile/build/app-store/<run>/iPhone/`
 and `iPad/`, then upload them by hand in **App Store Connect**. Logs and result
 bundles stay beside the images. This is a local manual tool, not a release or
 CI pipeline: its capture driver is excluded from the default test plan and
@@ -138,18 +155,40 @@ The app supports multiple registered PrintFarmer backend servers. Server
 registrations are stored locally in UserDefaults on the device, and each server
 keeps its own Keychain-stored credentials.
 
+The printer detail **Open in web** link opens that printer's configured native
+web interface (`frontendUrl`), not the PrintFarmer web app or backend API.
+It is hidden when no valid HTTP(S) frontend URL is available.
+Canonical printer detail responses include this sanitized native URL, with
+credentials, query parameters and fragments removed.
+
 ### Direct Motion Controls
 
 Home All/XY/Z, relative jogs and absolute positioning use ordinary direct
 command endpoints. Controls remain gated by authorization, printer readiness,
 backend capabilities and movement safety. Absolute positioning allows blank
 axes to remain unchanged; current telemetry is used only to validate safety.
+Jogging additionally requires the corresponding axis to be reported homed.
+Unknown or unhomed axes stay disabled until a printer update reports homing;
+the same check applies immediately before dispatch.
+OctoPrint and PrusaLink currently provide no homing telemetry, so their jog
+buttons remain disabled even after a Home request succeeds. Unknown homing
+is not evidence that an axis is unhomed, and Home acceptance does not prove
+homing. Accepted motor release clears cached homing until a subsequent printer
+update supplies authoritative homing telemetry.
 
 A successful response means the backend accepted the command, not that physical
 motion completed. The in-flight request disables conflicting actions.
 Canceling observation, closing a screen or disconnecting cannot recall a command.
 After a timeout or uncertain outcome, inspect the printer before another action.
 Commands are never automatically retried or replayed on reconnect.
+Routine accepted commands are silent. Connection errors describe the failed
+command request, rather than claiming the device has no internet; they remain
+visible until dismissed or replaced by the next command.
+
+Once loaded, the Control panel stays in place through printer connectivity
+changes; offline commands remain disabled. The top "Server connected" banner
+describes the app's connection to PrintFarmer, not an individual printer's
+availability.
 
 There are no motion journals, operation IDs, receipt polling, recovery panels
 or admission-resubmission flows. Ordinary printer telemetry and safety refreshes
@@ -227,11 +266,16 @@ Navigation remains Farm grid → pushed printer detail.
 
 Both **Overview** and **Controls** remain visible, through the segmented selector
 or a swipe, even offline or with setup controls disabled. Controls explains the
-restriction and links to the existing per-server Printer Safety settings.
-Selection is retained when access changes; visibility does not grant permission
-or trigger capability loading while setup controls are unavailable.
+restriction (for example, the printer is offline or the account lacks permission).
+Selection is retained when access changes; visibility does not grant permission.
+The controls model, and with it the capability fetch, is built only when the
+printer is online, except for offline Moonraker printers, whose capabilities are
+always built so durable motion stays available (#2678). This construction gate
+checks connectivity only; the fetch itself is then skipped until the sign-in,
+server-readiness and Queue.Start access check passes.
 
-A compact labeled **Emergency Stop** stays above the selector on both pages,
+A full-width, solid red **Emergency Stop** with a white icon and label stays
+above the selector on both pages,
 with confirmation, its own pending guard, and an offline explanation. It never
 requires a timed hold and is not disabled by an unrelated pending command.
 Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
@@ -283,9 +327,20 @@ server generation fence rejects stale in-flight responses.
 Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
 support. A failed capability read remains unknown and shows a read-only retry
 affordance; it is not cached as permanent unsupported state.
-Preheat, including Cool Down, stays hidden and refuses dispatch until hotend
-support is confirmed. Cool Down omits an unconfirmed bed just like heating
-presets; unknown support never permits a speculative 0/0 command. Missing bed
+Preheat stays hidden and refuses dispatch until hotend support is confirmed.
+**Cool down** is always offered and is idle-only: it is disabled while a job is
+starting, printing or paused (Emergency stop covers stopping a print). Idle, it
+calls `POST /heaters/off` when the backend reports `supportsHeaterShutdown`,
+otherwise it sets 0/0 hotend/bed targets (matching the web app's fallback). Heat
+targets and writable sensors are idle-only: the instrument panel's Heat segment
+is disabled while a job is printing or paused, and **Tune** offers only Speed,
+Flow and Z babystep — no heater targets, sensors or fans (#3540). Above babystep, Tune shows **Speed %** and
+**Flow %** steppers (±5%, 1–200%) only when the backend reports
+`supportsSpeedFactorControl` / `supportsFlowFactorControl`. They use the shared
+`POST /api/printers/{id}/speed-factor` and `/flow-factor` API and stay pending
+until live status confirms the new value. Unreported values show `--` and are
+never treated as 100%. A 501 response means no command was sent. Heating presets omit an unconfirmed bed; unknown support never permits a
+speculative command. Missing bed
 support is described as unavailable control, not physically absent hardware.
 Demo mode advertises no physical or persistence capabilities: its no-op commands
 are not backend support evidence.
@@ -371,18 +426,15 @@ Emergency Stop remains separate and confirmed. After interruption or an
 uncertain response, inspect the original printer before another action.
 See the [guarded controls design and availability matrix](docs/design/printer-controls-section.md#guarded-physical-material-and-calibration-2599).
 
-### Advanced Printer Controls
+### Printer Controls Access
 
-Advanced printer controls are off by default for every server. To use jog,
-preheat, home, z-offset, or disable motors, open **Settings** → **Printer
-Safety** and enable **Advanced Printer Controls** for the active server. Once
-enabled, jog/preheat/home setup is reachable as the Controls page of printer
-detail (see above) — there is no separate "Advanced" screen nested inside
-another "Advanced" entry. Enabling the controls on one server does not enable
-them on another. Turning the setting off removes command access immediately;
-an open Controls page retains selection and explains the restriction. Changing a registered
-server's URL also resets the setting to off so an opt-in cannot carry over to a
-different endpoint. Misuse may damage a printer or ruin a print.
+Jog, preheat, home, z-offset and disable-motors controls live on the Control
+page of printer detail. There is no per-server opt-in and no separate
+"Advanced" screen. The Control page is always visible; its controls are
+blocked with a reason when the printer is offline, lacks control support, or
+the signed-in account lacks the server-side permission (Queue.Start). An open
+Control page keeps its selection when a check fails. Misuse may damage a printer
+or ruin a print.
 
 ### Post-Login Connection Check
 

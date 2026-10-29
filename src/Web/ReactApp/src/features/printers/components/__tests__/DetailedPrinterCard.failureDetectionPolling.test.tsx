@@ -4,6 +4,8 @@ import { render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type Printer } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const failureDetectionPollingEnabledMock = vi.hoisted(() => vi.fn(() => false));
 const usePrinterFailureDetectionStatusMock = vi.hoisted(() =>

@@ -38,7 +38,7 @@ namespace Farm.Infrastructure.Services.Queue;
 /// The service uses IQueueDataService for specialized data queries and IQueueRepository
 /// for persistence operations, maintaining proper separation of concerns.
 /// </remarks>
-public class JobQueueService : IJobQueueService
+public partial class JobQueueService : IJobQueueService, IPrinterFileQueueAdmission
 {
     private readonly IQueueRepository _repo;
     private readonly IQueueDataService _dataService;
@@ -267,7 +267,11 @@ public class JobQueueService : IJobQueueService
     /// If no compatible printer is available, the operation returns null. The job is assigned a queue position based on
     /// the next available position for its assigned printer. Job status defaults to Queued.
     /// </remarks>
-    public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
+    public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct) =>
+        AddJobCoreAsync(request, userId, null, ct);
+
+    private async Task<JobQueuePrintJobDto?> AddJobCoreAsync(
+        QueuePrintJobDto request, Guid? userId, PrinterFileOperation? catalogOperation, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -568,7 +572,22 @@ public class JobQueueService : IJobQueueService
             ct);
 
         // Calculate estimated cost if cost calculator is available
-        if (_costCalculator != null && job.SpoolmanFilamentId.HasValue)
+        if (catalogOperation is not null)
+        {
+            job.GcodeContentSha256 = catalogOperation.ContentSha256;
+            job.PinnedGcodeFileSizeBytes = catalogOperation.SizeBytes;
+            catalogOperation.State = PrinterFileOperationState.Queued;
+            catalogOperation.ReasonCode = null;
+            catalogOperation.UpdatedAtUtc = utcNow;
+            catalogOperation.Jobs.Add(new PrinterFileOperationJob
+            {
+                OperationId = catalogOperation.Id,
+                Ordinal = 0,
+                JobId = job.Id,
+            });
+        }
+
+        if (catalogOperation is null && _costCalculator != null && job.SpoolmanFilamentId.HasValue)
         {
             try
             {
@@ -716,39 +735,9 @@ public class JobQueueService : IJobQueueService
             }
         }
 
-        if (_coverageBroadcaster is not null && assignedPrinterId.HasValue)
+        if (catalogOperation is null && assignedPrinterId.HasValue)
         {
-            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
-                assignedPrinterId.Value,
-                FilamentCoverageChangeReasons.JobAssignment,
-                ct).ConfigureAwait(false);
-        }
-
-        // Notify auto-dispatch that a new job was queued for this printer.
-        // This triggers immediate dispatch (skipping idle threshold) if the
-        // printer is available and auto-dispatch is enabled.
-        if (assignedPrinterId.HasValue)
-        {
-            _dispatchTrigger?.NotifyJobQueued(assignedPrinterId.Value);
-
-            // Trigger the auto-dispatch ready gate if the printer is idle with
-            // automatic dispatch enabled. This prompts the operator to confirm the bed
-            // is clear before the job is dispatched — critical for first-time
-            // uploads where no prior completion event exists to trigger PendingReady.
-            if (_autoDispatchService is not null)
-            {
-                try
-                {
-                    await _autoDispatchService.TransitionToPendingReadyAsync(assignedPrinterId.Value, ct);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Failed to trigger auto-dispatch PendingReady for printer {PrinterId} after job queue",
-                        assignedPrinterId.Value);
-                }
-            }
+            await NotifyCommittedAsync(assignedPrinterId.Value, ct);
         }
 
         JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
@@ -758,6 +747,45 @@ public class JobQueueService : IJobQueueService
         await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
 
         return dto;
+    }
+
+    /// <summary>Notifies existing ready/dispatch machinery only after the owning transaction commits.</summary>
+    public async Task NotifyCommittedAsync(Guid printerId, CancellationToken ct)
+    {
+        if (_coverageBroadcaster is not null)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.JobAssignment,
+                ct).ConfigureAwait(false);
+        }
+
+        // Notify auto-dispatch that a new job was queued for this printer.
+        // This triggers immediate dispatch (skipping idle threshold) if the
+        // printer is available and auto-dispatch is enabled.
+        if (printerId != Guid.Empty)
+        {
+            _dispatchTrigger?.NotifyJobQueued(printerId);
+
+            // Trigger the auto-dispatch ready gate if the printer is idle with
+            // automatic dispatch enabled. This prompts the operator to confirm the bed
+            // is clear before the job is dispatched — critical for first-time
+            // uploads where no prior completion event exists to trigger PendingReady.
+            if (_autoDispatchService is not null)
+            {
+                try
+                {
+                    await _autoDispatchService.TransitionToPendingReadyAsync(printerId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to trigger auto-dispatch PendingReady for printer {PrinterId} after job queue",
+                        printerId);
+                }
+            }
+        }
     }
 
     /// <summary>

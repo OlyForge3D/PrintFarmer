@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Farm.Backend.Plugins.Tests.Backends;
 
-/// <summary>Issue #3407: targeted Moonraker sensor/fan writes re-validate against the live printer.</summary>
+/// <summary>Native interactive writes use one command; Klipper enforces configured limits.</summary>
 public sealed class MoonrakerSensorControlTests
 {
     private const string BaseUrl = "http://sensor-fixture.invalid";
@@ -20,6 +20,66 @@ public sealed class MoonrakerSensorControlTests
 
     private static MoonrakerClient CreateClient(HttpClient http) =>
         new(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+
+    [Theory]
+    [InlineData("extruder", 200.5, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200.5")]
+    [InlineData("extruder1", 201.5, "SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=201.5")]
+    [InlineData("extruder2", 202.5, "SET_HEATER_TEMPERATURE HEATER=extruder2 TARGET=202.5")]
+    [InlineData("extruder3", 0, "SET_HEATER_TEMPERATURE HEATER=extruder3 TARGET=0")]
+    [InlineData("heater_bed", 0, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0")]
+    [InlineData("filament_switch_sensor runout", 0, "SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0")]
+    [InlineData("filament_switch_sensor runout", 1, "SET_FILAMENT_SENSOR SENSOR=runout ENABLE=1")]
+    public async Task SetSensorValueAsync_PhysicalHeaterOrFilamentSwitch_SendsOnlyAddressedCommand(string id, double value, string expected)
+    {
+        using var handler = new SensorHandler { SettingsBody = FourToolSettings, Objects = FourToolObjects };
+        using var http = new HttpClient(handler);
+        PrinterSensorQuantity quantity = id.StartsWith("filament_", StringComparison.Ordinal)
+            ? PrinterSensorQuantity.Enabled : PrinterSensorQuantity.TargetTemperature;
+
+        (await CreateClient(http).SetSensorValueAsync(BaseUrl, id, quantity, value, Credential)).Should().BeTrue();
+
+        handler.Scripts.Should().Equal(expected);
+        handler.ApiKeys.Should().OnlyContain(key => key == "fixture-key");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(10)]
+    [InlineData(280)]
+    [InlineData(280.5)]
+    public async Task SetSensorValueAsync_Extruder3_LeavesConfiguredBoundsToFirmware(double target)
+    {
+        using var handler = new SensorHandler { SettingsBody = FourToolSettings, Objects = FourToolObjects };
+        using var http = new HttpClient(handler);
+        (await CreateClient(http).SetSensorValueAsync(BaseUrl, "extruder3", PrinterSensorQuantity.TargetTemperature, target, Credential))
+            .Should().BeTrue();
+        handler.Scripts.Should().HaveCount(1);
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+    }
+
+    [Fact]
+    public async Task TurnOffHeatersAsync_SendsExplicitAllHeaterShutdownWithoutChangingOrdinaryZeroTargets()
+    {
+        using var handler = new SensorHandler();
+        using var http = new HttpClient(handler);
+        (await CreateClient(http).TurnOffHeatersAsync(BaseUrl, Credential)).Should().BeTrue();
+        handler.Scripts.Should().Equal("TURN_OFF_HEATERS");
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+    }
+
+    private static readonly string[] FourToolObjects =
+        ["extruder", "extruder1", "extruder2", "extruder3", "heater_bed", "filament_switch_sensor runout"];
+    private const string FourToolSettings =
+        """
+        {"result":{"status":{"configfile":{"settings":{
+          "extruder":{"min_temp":10,"max_temp":250},
+          "extruder1":{"min_temp":10,"max_temp":260},
+          "extruder2":{"min_temp":10,"max_temp":270},
+          "extruder3":{"min_temp":10,"max_temp":280},
+          "heater_bed":{"min_temp":10,"max_temp":120}
+        }}}}}
+        """;
 
     [Fact]
     public void MoonrakerClient_ImplementsSensorControlContract()
@@ -43,11 +103,11 @@ public sealed class MoonrakerSensorControlTests
         accepted.Should().BeTrue();
         handler.Scripts.Should().Equal(expected);
         handler.ApiKeys.Should().OnlyContain(key => key == "fixture-key");
-        handler.Requests.Should().StartWith("GET /printer/objects/list");
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
     }
 
     [Fact]
-    public async Task SetSensorValueAsync_TemperatureTarget_ReadsLiveConfigBounds()
+    public async Task SetSensorValueAsync_TemperatureTarget_DoesNotFetchConfiguredBounds()
     {
         using var handler = new SensorHandler { HeaterMaxTemp = 50 };
         using var http = new HttpClient(handler);
@@ -55,21 +115,22 @@ public sealed class MoonrakerSensorControlTests
         bool accepted = await CreateClient(http).SetSensorValueAsync(
             BaseUrl, "heater_generic chamber_heater", PrinterSensorQuantity.TargetTemperature, 55.5, Credential);
 
-        accepted.Should().BeFalse();
-        handler.Requests.Should().Equal("GET /printer/objects/list", "GET /printer/objects/query?configfile=settings");
-        handler.Scripts.Should().BeEmpty();
+        accepted.Should().BeTrue();
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("SET_HEATER_TEMPERATURE HEATER=chamber_heater TARGET=55.5");
     }
 
     [Fact]
-    public async Task SetSensorValueAsync_ObjectNoLongerListed_SendsNoGcode()
+    public async Task SetSensorValueAsync_ObjectNotInTelemetry_LetsFirmwareResolveObject()
     {
         using var handler = new SensorHandler { Objects = ["fan", "extruder"] };
         using var http = new HttpClient(handler);
 
         bool accepted = await CreateClient(http).SetSensorValueAsync(BaseUrl, "fan_generic aux", PrinterSensorQuantity.FanSpeed, 50, Credential);
 
-        accepted.Should().BeFalse();
-        handler.Scripts.Should().BeEmpty();
+        accepted.Should().BeTrue();
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("SET_FAN_SPEED FAN=aux SPEED=0.5");
     }
 
     [Theory]
@@ -89,7 +150,10 @@ public sealed class MoonrakerSensorControlTests
 
     [Theory]
     [InlineData("heater_fan hotend_fan", PrinterSensorQuantity.FanSpeed, 50)]
-    [InlineData("extruder", PrinterSensorQuantity.TargetTemperature, 200)]
+    [InlineData("temperature_sensor chamber", PrinterSensorQuantity.TargetTemperature, 200)]
+    [InlineData("extruder", PrinterSensorQuantity.TargetTemperature, -1)]
+    [InlineData("extruder", PrinterSensorQuantity.TargetTemperature, double.NaN)]
+    [InlineData("extruder", PrinterSensorQuantity.TargetTemperature, double.PositiveInfinity)]
     [InlineData("fan", PrinterSensorQuantity.FanSpeed, 150)]
     public async Task SetSensorValueAsync_ReadOnlyOrOutOfRange_SendsNoGcode(string id, PrinterSensorQuantity quantity, double value)
     {
@@ -107,19 +171,20 @@ public sealed class MoonrakerSensorControlTests
     [InlineData(HttpStatusCode.OK, """{"result":{"objects":"nope"}}""")]
     [InlineData(HttpStatusCode.OK, "<html>proxy login</html>")]
     [InlineData(HttpStatusCode.OK, "[]")]
-    public async Task SetSensorValueAsync_ObjectListUnavailableOrMalformed_SendsNoGcode(HttpStatusCode status, string body)
+    public async Task SetSensorValueAsync_ObjectListUnavailableOrMalformed_DoesNotRequireDiscovery(HttpStatusCode status, string body)
     {
         using var handler = new SensorHandler { ObjectsStatus = status, ObjectsBody = body };
         using var http = new HttpClient(handler);
 
         bool accepted = await CreateClient(http).SetSensorValueAsync(BaseUrl, "fan", PrinterSensorQuantity.FanSpeed, 50, Credential);
 
-        accepted.Should().BeFalse();
-        handler.Scripts.Should().BeEmpty();
+        accepted.Should().BeTrue();
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("M106 S128");
     }
 
     [Fact]
-    public async Task SetSensorValueAsync_ConfigQueryFails_SendsNoGcode()
+    public async Task SetSensorValueAsync_ConfigQueryFails_DoesNotRequireDiscovery()
     {
         using var handler = new SensorHandler { SettingsStatus = HttpStatusCode.InternalServerError };
         using var http = new HttpClient(handler);
@@ -127,12 +192,13 @@ public sealed class MoonrakerSensorControlTests
         bool accepted = await CreateClient(http).SetSensorValueAsync(
             BaseUrl, "temperature_fan exhaust_fan", PrinterSensorQuantity.TargetTemperature, 40, Credential);
 
-        accepted.Should().BeFalse();
-        handler.Scripts.Should().BeEmpty();
+        accepted.Should().BeTrue();
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("SET_TEMPERATURE_FAN_TARGET temperature_fan=exhaust_fan target=40");
     }
 
     [Fact]
-    public async Task SetSensorValueAsync_ConfigQueryNotJson_SendsNoGcode()
+    public async Task SetSensorValueAsync_ConfigQueryNotJson_DoesNotRequireDiscovery()
     {
         using var handler = new SensorHandler { SettingsBody = "<html>gateway error</html>" };
         using var http = new HttpClient(handler);
@@ -140,8 +206,37 @@ public sealed class MoonrakerSensorControlTests
         bool accepted = await CreateClient(http).SetSensorValueAsync(
             BaseUrl, "temperature_fan exhaust_fan", PrinterSensorQuantity.TargetTemperature, 40, Credential);
 
-        accepted.Should().BeFalse();
-        handler.Scripts.Should().BeEmpty();
+        accepted.Should().BeTrue();
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("SET_TEMPERATURE_FAN_TARGET temperature_fan=exhaust_fan target=40");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task SetSensorValueAsync_FirmwareRejectsCommand_ReturnsFailureWithoutRetry(HttpStatusCode status)
+    {
+        using var handler = new SensorHandler { CommandStatus = status };
+        using var http = new HttpClient(handler);
+
+        (await CreateClient(http).SetSensorValueAsync(
+            BaseUrl, "extruder", PrinterSensorQuantity.TargetTemperature, 400, Credential)).Should().BeFalse();
+
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("SET_HEATER_TEMPERATURE HEATER=extruder TARGET=400");
+    }
+
+    [Fact]
+    public async Task SetTempsAsync_WithoutDiscovery_SendsNativeActiveToolAndBedTargets()
+    {
+        using var handler = new SensorHandler { ObjectsStatus = HttpStatusCode.ServiceUnavailable };
+        using var http = new HttpClient(handler);
+        ISupportsTemperatureControl client = CreateClient(http);
+
+        (await client.SetTemperaturesAsync(BaseUrl, 215, 60, Credential, default)).Should().BeTrue();
+
+        handler.Requests.Should().Equal("POST /printer/gcode/script");
+        handler.Scripts.Should().Equal("M104 S215\nM140 S60");
     }
 
     [Theory]
@@ -169,6 +264,8 @@ public sealed class MoonrakerSensorControlTests
         public string? ObjectsBody { get; init; }
 
         public HttpStatusCode SettingsStatus { get; init; } = HttpStatusCode.OK;
+
+        public HttpStatusCode CommandStatus { get; init; } = HttpStatusCode.OK;
 
         public string? SettingsBody { get; init; }
 
@@ -206,7 +303,7 @@ public sealed class MoonrakerSensorControlTests
                         Scripts.Add(doc.RootElement.GetProperty("script").GetString()!);
                     }
 
-                    return Json(HttpStatusCode.OK, """{"result":"ok"}""");
+                    return Json(CommandStatus, """{"result":"ok"}""");
                 default:
                     return new HttpResponseMessage(HttpStatusCode.NotFound);
             }

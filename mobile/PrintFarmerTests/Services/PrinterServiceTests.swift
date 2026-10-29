@@ -74,6 +74,54 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertEqual(zOffsetPayload["offsetMm"], -0.05)
     }
 
+    func testRuntimeFactorsPostExactRoutesAndPercentPayloads() async throws {
+        mockAPIClient.stubResponse(json: #"{"success":true,"message":"accepted"}"#)
+
+        _ = try await printerService.setRuntimeFactor(printerId: TestData.testUUID, factor: .speed, percent: 125)
+        _ = try await printerService.setRuntimeFactor(printerId: TestData.testUUID, factor: .flow, percent: 87.5)
+
+        let requests = mockAPIClient.capturedRequests
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST"])
+        XCTAssertEqual(
+            requests.map { $0.url?.path },
+            [
+                "/api/printers/\(TestData.testUUID)/speed-factor",
+                "/api/printers/\(TestData.testUUID)/flow-factor"
+            ]
+        )
+        for (request, expected) in zip(requests, [125.0, 87.5]) {
+            let body = try XCTUnwrap(request.capturedHTTPBody())
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Double])
+            XCTAssertEqual(payload, ["percent": expected])
+        }
+    }
+
+    func testRuntimeFactorRejectsInvalidPercentWithoutSending() async {
+        for invalid in [0, 200.001, 1.234, .nan] {
+            do {
+                _ = try await printerService.setRuntimeFactor(printerId: TestData.testUUID, factor: .speed, percent: invalid)
+                XCTFail("\(invalid) must be rejected locally")
+            } catch { }
+        }
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    func testRuntimeFactorUnsupportedAndUnknownOutcomeStatusesPropagate() async {
+        for code in [501, 503] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: #"{"title":"failed"}"#, statusCode: code)
+            do {
+                _ = try await printerService.setRuntimeFactor(printerId: TestData.testUUID, factor: .flow, percent: 100)
+                XCTFail("\(code) must throw")
+            } catch NetworkError.serverError(let status) {
+                XCTAssertEqual(status, code)
+            } catch {
+                XCTFail("Unexpected \(error)")
+            }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1, "No automatic replay")
+        }
+    }
+
     private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var printerService: PrinterService!
@@ -196,6 +244,49 @@ final class PrinterServiceTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    // MARK: - turnOffHeaters()
+
+    func testTurnOffHeatersPostsToHeatersOffEndpoint() async throws {
+        mockAPIClient.stubResponse(json: #"{"success":true,"message":"accepted"}"#)
+
+        try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+
+        let requests = mockAPIClient.capturedRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.httpMethod, "POST")
+        XCTAssertEqual(requests.first?.url?.path, "/api/printers/\(TestData.testUUID)/heaters/off")
+        let body = requests.first?.capturedHTTPBody()
+        XCTAssertTrue(body?.isEmpty ?? true, "heaters/off is a bodiless command")
+    }
+
+    func testTurnOffHeatersThrowsWhenBackendRejectsCommand() async {
+        mockAPIClient.stubResponse(json: #"{"success":false,"message":"Heaters are busy"}"#)
+
+        do {
+            try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+            XCTFail("Expected PrinterControlError.rejected")
+        } catch let error as PrinterControlError {
+            guard case .rejected(let message) = error else { return XCTFail("Expected .rejected, got \(error)") }
+            XCTAssertEqual(message, "Heaters are busy")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testTurnOffHeatersThrowsOnServerError() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 500)
+
+        do {
+            try await printerService.turnOffHeaters(printerId: TestData.testUUID)
+            XCTFail("Expected NetworkError.serverError")
+        } catch let error as NetworkError {
+            if case .serverError = error { } else { XCTFail("Expected .serverError, got \(error)") }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.first?.url?.path, "/api/printers/\(TestData.testUUID)/heaters/off")
     }
 
     // MARK: - get()

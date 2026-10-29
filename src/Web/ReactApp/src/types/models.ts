@@ -59,9 +59,20 @@ export interface ModelListItem {
   id: string;
   fileName: string;
   originalFileName: string;
-  fileFormat: number;
+  fileType: string;
   uploadedAt: string;
   filePath?: string;
+}
+
+/**
+ * Lightweight model picker response from GET /3d-models/picker.
+ */
+export interface Model3DPickerItem {
+  id: string;
+  name: string | null;
+  fileName: string;
+  fileType: string;
+  uploadedAt: string;
 }
 
 /**

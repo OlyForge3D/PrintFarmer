@@ -125,6 +125,119 @@ public class UserTaskServiceTests
     #region CreateOrUpdateProfileImportTaskAsync Tests
 
     [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_OverlappingBatchAndSingularRequests_RetainsFullUnion()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] ids = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+        ProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateProfileImportRepository(state);
+        UserTaskService first = new(repository.Object, _loggerMock.Object);
+        UserTaskService second = new(repository.Object, _loggerMock.Object);
+        UserTaskService third = new(repository.Object, _loggerMock.Object);
+
+        await Task.WhenAll(
+            first.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", [ids[0], ids[1], ids[0]])),
+            second.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", [ids[1], ids[2]])),
+            third.CreateOrUpdateProfileImportTaskAsync(CreateProfileImportDto(modelId, ids[3])));
+
+        UserTask persisted = state.GetOpenTask(modelId);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(persisted.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(ids));
+        Assert.Equal("4 printers waiting for slicer profiles", persisted.Description);
+        repository.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Once);
+
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_TerminalRace_RecoversWholeBatchAndSourceWithoutHistoricalIds()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask stale = CreateUserTask("Keep terminal", UserTaskType.ProfileImport);
+        stale.EntityId = modelId;
+        stale.EntityType = "PrinterModel";
+        stale.SourceKind = UserTaskSourceKind.Unspecified;
+        stale.SourceId = "source";
+        stale.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { Guid.NewGuid() });
+        _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stale);
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        UserTask? added = null;
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) => added = task).Returns(Task.CompletedTask);
+        _repositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, CancellationToken _) => Task.FromResult(added));
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming));
+
+        Assert.NotNull(added);
+        Assert.NotEqual(stale.Id, result.Id);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(added.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming));
+        Assert.Equal(stale.SourceKind, added.SourceKind);
+        Assert.Equal(stale.SourceId, added.SourceId);
+        _broadcasterMock.Verify(b => b.BroadcastTaskCreatedAsync(
+            It.Is<UserTaskDto>(dto => dto.RelatedEntityCount == 2), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_UniqueInsertLoser_DetachesAndMergesWholeBatch()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid winnerPrinter = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask winner = CreateUserTask("Winner", UserTaskType.ProfileImport);
+        winner.EntityId = modelId;
+        winner.RelatedEntityIdsJson = JsonSerializer.Serialize(new[] { winnerPrinter });
+        _repositoryMock.SetupSequence(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((UserTask?)null).ReturnsAsync(winner);
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("unique", new SqliteException("unique", 19, 2067)));
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _repositoryMock.Setup(r => r.GetByIdAsync(winner.Id, It.IsAny<CancellationToken>())).ReturnsAsync(winner);
+
+        UserTaskDto result = await _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming));
+
+        Assert.Equal(winner.Id, result.Id);
+        Assert.True(JsonSerializer.Deserialize<Guid[]>(winner.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming.Append(winnerPrinter)));
+        _repositoryMock.Verify(r => r.DetachTrackedAsync(It.IsAny<IEnumerable<UserTask>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskUpdatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        _broadcasterMock.Verify(b => b.BroadcastTaskCreatedAsync(It.IsAny<UserTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateOrUpdateProfileImportTaskAsync_RepeatedOccFailure_ExhaustsWithoutDroppingBatchOrBroadcasting()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid[] incoming = [Guid.NewGuid(), Guid.NewGuid()];
+        UserTask existing = CreateUserTask("Existing", UserTaskType.ProfileImport);
+        existing.RelatedEntityIdsJson = "[]";
+        _repositoryMock.Setup(r => r.GetByEntityAsync(UserTaskType.ProfileImport, "PrinterModel", modelId, It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<UserTask?>(new UserTask
+            {
+                Id = existing.Id,
+                Title = existing.Title,
+                RelatedEntityIdsJson = "[]"
+            }));
+        _repositoryMock.Setup(r => r.TryUpdateFieldsIfOpenAsync(
+            It.IsAny<UserTask>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()))
+            .Callback<UserTask, CancellationToken>((task, _) =>
+                Assert.True(JsonSerializer.Deserialize<Guid[]>(task.RelatedEntityIdsJson!)!.ToHashSet().SetEquals(incoming)))
+            .ThrowsAsync(new DbUpdateException("unique", new SqliteException("unique", 19, 2067)));
+
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
+            _service.CreateOrUpdateProfileImportTaskAsync(new CreateProfileImportTaskBatchDto(modelId, "MK4", "Prusa", incoming)));
+
+        _repositoryMock.Verify(r => r.AddAsync(It.IsAny<UserTask>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
+        _broadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task CreateOrUpdateProfileImportTaskAsync_WithNoExistingTask_CreatesNewTask()
     {
         // Arrange
@@ -527,39 +640,134 @@ public class UserTaskServiceTests
         UserTaskService firstService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
         UserTaskService secondService = new(repository.Object, _loggerMock.Object, broadcaster.Object);
 
+        using CancellationTokenSource operationCancellation = new();
         Task<UserTaskDto> firstOperation = firstService.CreateOrUpdateProfileImportTaskAsync(
-            CreateProfileImportDto(printerModelId, firstPrinterId));
-        await state.FirstAddAttempted.WaitAsync(TimeSpan.FromSeconds(5));
+            CreateProfileImportDto(printerModelId, firstPrinterId), operationCancellation.Token);
+        try
+        {
+            await WaitForProfileImportSignalAsync(
+                state.FirstAddAttempted, firstOperation, "first add attempted", state.DescribeProgress, TimeSpan.FromSeconds(5));
 
-        Task<UserTaskDto> secondOperation = secondService.CreateOrUpdateProfileImportTaskAsync(
-            CreateProfileImportDto(printerModelId, secondPrinterId));
-        bool secondAddArmedBeforeInsert = await WaitForSignalAsync(state.SecondAddAttempted, TimeSpan.FromSeconds(1));
+            Task<UserTaskDto> secondOperation = secondService.CreateOrUpdateProfileImportTaskAsync(
+                CreateProfileImportDto(printerModelId, secondPrinterId), operationCancellation.Token);
+            bool secondAddArmedBeforeInsert = await WaitForSignalAsync(state.SecondAddAttempted, TimeSpan.FromSeconds(1));
+
+            state.AllowFirstInsert();
+            await WaitForProfileImportSignalAsync(
+                firstCreatedBroadcastEntered.Task, firstOperation, "first created broadcast entered", state.DescribeProgress, TimeSpan.FromSeconds(5));
+            state.AllowConflictingInsert();
+
+            if (secondAddArmedBeforeInsert)
+            {
+                await WaitForProfileImportSignalAsync(
+                    updatedBroadcastCompleted.Task, secondOperation, "updated broadcast completed", state.DescribeProgress, TimeSpan.FromSeconds(5));
+            }
+
+            _ = allowFirstCreatedBroadcast.TrySetResult(true);
+
+            UserTaskDto[] results = await Task.WhenAll(firstOperation, secondOperation);
+            UserTask finalTask = state.GetOpenTask(printerModelId);
+            List<Guid> relatedPrinterIds = JsonSerializer.Deserialize<List<Guid>>(finalTask.RelatedEntityIdsJson!)!;
+
+            Assert.Equal(2, results.Length);
+            Assert.All(results, result => Assert.Equal(finalTask.Id, result.Id));
+            Assert.Single(createdBroadcasts);
+            Assert.Single(updatedBroadcasts);
+            Assert.Equal(2, orderedBroadcasts.Count);
+            Assert.Equal(1, orderedBroadcasts[0].RelatedEntityCount);
+            Assert.Equal(2, orderedBroadcasts[1].RelatedEntityCount);
+            Assert.Equal(2, relatedPrinterIds.Count);
+            Assert.Contains(firstPrinterId, relatedPrinterIds);
+            Assert.Contains(secondPrinterId, relatedPrinterIds);
+        }
+        finally
+        {
+            await operationCancellation.CancelAsync();
+            state.AllowFirstInsert();
+            state.AllowConflictingInsert();
+            _ = allowFirstCreatedBroadcast.TrySetResult(true);
+        }
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_ReloadFaults_ReportsOriginalOperationException()
+    {
+        InverseInterleavingProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateInverseInterleavingProfileImportRepository(state);
+        InvalidOperationException expected = new("Injected committed-task reload failure");
+        repository.Setup(r => r.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(expected);
+        UserTaskService service = new(repository.Object, _loggerMock.Object, _broadcasterMock.Object);
+        TaskCompletionSource<bool> broadcastEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<UserTaskDto> operation = service.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(Guid.NewGuid(), Guid.NewGuid()));
+        Task wait = WaitForProfileImportSignalAsync(
+            broadcastEntered.Task, operation, "first created broadcast entered", state.DescribeProgress, TimeSpan.FromSeconds(5));
 
         state.AllowFirstInsert();
-        await firstCreatedBroadcastEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        state.AllowConflictingInsert();
+#pragma warning disable VSTHRD003 // The assertion observes the fixture wait started above, not foreign work.
+        InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() => wait);
+#pragma warning restore VSTHRD003
 
-        if (secondAddArmedBeforeInsert)
+        Assert.Same(expected, actual);
+        Assert.False(broadcastEntered.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_InsertHeld_ReportsStageWithoutReleasingInsert()
+    {
+        InverseInterleavingProfileImportRepositoryState state = new();
+        Mock<IUserTaskRepository> repository = CreateInverseInterleavingProfileImportRepository(state);
+        UserTaskService service = new(repository.Object, _loggerMock.Object);
+        TaskCompletionSource<bool> broadcastEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<UserTaskDto> operation = service.CreateOrUpdateProfileImportTaskAsync(
+            CreateProfileImportDto(Guid.NewGuid(), Guid.NewGuid()));
+        try
         {
-            await updatedBroadcastCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+#pragma warning disable VSTHRD003 // The assertion races this test's own signal and service operation.
+            TimeoutException exception = await Assert.ThrowsAsync<TimeoutException>(() => WaitForProfileImportSignalAsync(
+                broadcastEntered.Task, operation, "first created broadcast entered", state.DescribeProgress, TimeSpan.Zero));
+#pragma warning restore VSTHRD003
+
+            Assert.Contains("first created broadcast entered", exception.Message);
+            Assert.Contains("operation=WaitingForActivation", exception.Message);
+            Assert.Contains("firstInsertAllowed=False", exception.Message);
+            Assert.Contains("firstInsertCompleted=False", exception.Message);
+            Assert.Contains("reloadAttempts=0", exception.Message);
+            Assert.Contains("threadPoolThreads=", exception.Message);
+            Assert.False(operation.IsCompleted);
         }
+        finally
+        {
+            state.AllowFirstInsert();
+            _ = await operation.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
 
-        _ = allowFirstCreatedBroadcast.TrySetResult(true);
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_SignalArrives_DoesNotRequireOperationCompletion()
+    {
+        TaskCompletionSource<bool> operation = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        UserTaskDto[] results = await Task.WhenAll(firstOperation, secondOperation);
-        UserTask finalTask = state.GetOpenTask(printerModelId);
-        List<Guid> relatedPrinterIds = JsonSerializer.Deserialize<List<Guid>>(finalTask.RelatedEntityIdsJson!)!;
+        await WaitForProfileImportSignalAsync(
+            Task.CompletedTask, operation.Task, "first created broadcast entered", () => "unused", TimeSpan.FromSeconds(5));
 
-        Assert.Equal(2, results.Length);
-        Assert.All(results, result => Assert.Equal(finalTask.Id, result.Id));
-        Assert.Single(createdBroadcasts);
-        Assert.Single(updatedBroadcasts);
-        Assert.Equal(2, orderedBroadcasts.Count);
-        Assert.Equal(1, orderedBroadcasts[0].RelatedEntityCount);
-        Assert.Equal(2, orderedBroadcasts[1].RelatedEntityCount);
-        Assert.Equal(2, relatedPrinterIds.Count);
-        Assert.Contains(firstPrinterId, relatedPrinterIds);
-        Assert.Contains(secondPrinterId, relatedPrinterIds);
+        Assert.False(operation.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task WaitForProfileImportSignalAsync_OperationCompletesWithoutSignal_ReportsMissingStage()
+    {
+        TaskCompletionSource<bool> signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+#pragma warning disable VSTHRD003 // The assertion supplies this test's own signal.
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() => WaitForProfileImportSignalAsync(
+            signal.Task, Task.CompletedTask, "first created broadcast entered", () => "completed operation", TimeSpan.FromSeconds(5)));
+#pragma warning restore VSTHRD003
+
+        Assert.Contains("Operation completed without signaling first created broadcast entered", exception.Message);
+        Assert.Contains("completed operation", exception.Message);
+        Assert.False(signal.Task.IsCompleted);
     }
 
     [Fact]
@@ -998,6 +1206,40 @@ public class UserTaskServiceTests
         return completedTask == signal;
     }
 
+    private static async Task WaitForProfileImportSignalAsync(
+        Task signal, Task operation, string stage, Func<string> describeProgress, TimeSpan timeout)
+    {
+        try
+        {
+#pragma warning disable VSTHRD003 // Both tasks belong to the caller-controlled concurrency fixture.
+            _ = await Task.WhenAny(signal, operation).WaitAsync(timeout);
+#pragma warning restore VSTHRD003
+        }
+        catch (TimeoutException ex)
+        {
+            ThreadPool.GetAvailableThreads(out int workers, out int completionPorts);
+            throw new TimeoutException(
+                $"Timed out waiting for {stage}: signal={signal.Status}; operation={operation.Status}; {describeProgress()}; " +
+                $"threadPoolThreads={ThreadPool.ThreadCount}; pendingWorkItems={ThreadPool.PendingWorkItemCount}; " +
+                $"availableWorkers={workers}; availableCompletionPorts={completionPorts}. Scheduling delay is not proven by this snapshot.", ex);
+        }
+
+        // Observe an operation fault before it can be disguised as a missing fixture signal.
+#pragma warning disable VSTHRD003 // These are the same caller-controlled tasks raced above.
+        if (operation.IsCompleted)
+        {
+            await operation;
+        }
+
+        if (!signal.IsCompleted)
+        {
+            throw new InvalidOperationException($"Operation completed without signaling {stage}: {describeProgress()}");
+        }
+
+        await signal;
+#pragma warning restore VSTHRD003
+    }
+
     private sealed class ProfileImportRepositoryState
     {
         private readonly object _sync = new();
@@ -1122,10 +1364,16 @@ public class UserTaskServiceTests
         private readonly TaskCompletionSource<bool> _allowConflictingInsert =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _addAttemptCount;
+        private int _reloadAttemptCount;
 
         public Task FirstAddAttempted => _firstAddAttempted.Task;
 
         public Task SecondAddAttempted => _secondAddAttempted.Task;
+
+        public string DescribeProgress() =>
+            $"addAttempts={Volatile.Read(ref _addAttemptCount)}; firstInsertAllowed={_allowFirstInsert.Task.IsCompletedSuccessfully}; " +
+            $"firstInsertCompleted={_firstInsertCompleted.Task.IsCompletedSuccessfully}; " +
+            $"conflictingInsertAllowed={_allowConflictingInsert.Task.IsCompletedSuccessfully}; reloadAttempts={Volatile.Read(ref _reloadAttemptCount)}";
 
         public void AllowFirstInsert()
         {
@@ -1152,6 +1400,7 @@ public class UserTaskServiceTests
 
         public Task<UserTask?> GetByIdAsync(Guid id, CancellationToken _)
         {
+            Interlocked.Increment(ref _reloadAttemptCount);
             lock (_sync)
             {
                 return Task.FromResult(_tasks.TryGetValue(id, out UserTask? task) ? Clone(task) : null);

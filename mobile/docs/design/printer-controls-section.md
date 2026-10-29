@@ -11,6 +11,15 @@ Preheat/Home/Jog stack and not separate per-heater Set/Off rows. The original
 subgroup specification is retained only as historical context in numbered
 sections 1–7 below; it must not override this contract.
 
+> **No lockout text (#3548).** A gated control is hidden or disabled. It never
+> renders a lockout banner, blocked-reason caption, hint text, toast or error for
+> printing, paused, pending or offline states; the reason is exposed only as a
+> short VoiceOver hint. Blocked taps are refused silently. This overrides every
+> lockout banner, "explanatory lockout" and visible blocked-reason requirement
+> below, including §3.4 and the lockout rows in the accessibility table. The
+> standalone `PrinterControlsSection` and `PrinterSetupControlsContent` views
+> were deleted (#3542).
+
 ## Approved Essential composition
 
 Printer identity belongs above the shared Overview/Controls selector, not inside
@@ -39,7 +48,8 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   distance, disclosures or the command owner.
 - Heat: side-by-side Hotend/Bed target fields with **one compact Go button**
   on the same row (stacked at accessibility text sizes), compact
-  PLA/PETG/ABS row, then **Cool down**. Actual/target values appear only in the
+  PLA · PETG · ABS · **More** · **Cool down** row (More is a native menu, with
+  no section title, listing ASA/TPU/PC/Nylon and "Custom…", which focuses the Nozzle field). Actual/target values appear only in the
   strip above, not repeated around each editor. Accessibility text stacks the
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
   native controls; do not import the browser wrapper's styling.
@@ -60,7 +70,7 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   Calibration stays inline after entry so Emergency Stop remains reachable.
   Before entry, its unsupported-operation explanation belongs behind
   **Details & safety**, not a permanent paragraph next to Z-offset. During an
-  active calibration workflow, blocked reasons remain immediately visible.
+  active calibration workflow, blocked controls are disabled with a VoiceOver hint only (#3548).
   Supported design fixtures must include Disable motors. Unsupported operations
   stay in their original positions but are disabled, including motor release,
   heater targets/presets, the increment selector, all directional/home actions,
@@ -68,12 +78,12 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   Capability changes must not remove groups or rearrange their controls.
   This does not relax authorization, offline access or physical-command gates.
 - Command feedback appears beneath the originating **Heat**, **Move & home**,
-  or **Filament tools** heading, not below the scrolling page. Pending commands
-  show visible progress and a local **Stop waiting for command** action; home
-  jog and absolute GO buttons also show a stable-size spinner and a VoiceOver
-  pending value. Errors and dismissal stay in that card,
-  as do acceptance, telemetry confirmation and interrupted-observation notices.
-  Request acceptance never implies physical completion, and stopping observation
+  or **Filament tools** heading, not below the scrolling page. Pending and
+  success are silent (#3496): the tapped control shows a stable-size spinner
+  and a VoiceOver "Pending" value, and there is no visible "Stop waiting"
+  action. Only actionable notices (rejected, unsupported, error, unknown
+  outcome) and their dismissal appear in that card.
+  Request acceptance never implies physical completion, and ending observation
   never claims to stop the printer.
   Home, jog and absolute commands settle when their direct HTTP request returns.
   Acceptance explicitly does not confirm physical completion. Pending requests
@@ -142,49 +152,55 @@ Necessary runtime differences from the illustrative prototype:
 
 ## Embedding contract (#2521)
 
-`Views/PrinterControls/PrinterSetupControlsContent.swift` exports
-`PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
-owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
-command outcome presentation. It does not create services/models or subscribe to
+`Views/PrinterControls/PrinterInstrumentPanelControls.swift` exports
+`PrinterInstrumentPanelControls(printer:viewModel:)`; shared rows live in
+`PrinterControlsSharedViews.swift`. They observe an externally
+owned `PrinterControlsViewModel` and render thermal/motion and
+command outcome presentation, with no lockout presentation (#3548). It does not create services/models or subscribe to
 SignalR. Production hosts explicitly opt into `observesSafety`, which asks the same
 owner to refresh read-only evidence every five seconds while foregrounded; default
 embedded content performs no automatic reads. Directional movement reads only
 the existing owner's capabilities and dispatches the explicitly chosen axis.
 
-`PrinterControlsSection(printer:composition:)` remains the standalone owner,
-with lazy construction directly inside `StateObject(wrappedValue:)`. The
-`printer:viewModel:` wrapper initializer is test-only. The wrapper loads
-capabilities and forwards `PrinterControlsUpdateSignal` changes outside
-online/offline content, so hiding controls cannot strand an acknowledgement.
+`PrinterDetailView` owns one `PrinterControlsViewModel` per scoped server and
+printer and forwards `PrinterControlsUpdateSignal` changes even while controls
+are hidden, so hiding them cannot strand an acknowledgement. The standalone
+`PrinterControlsSection` and `PrinterSetupControlsContent` wrappers were
+deleted (#3542).
 
-**Essential integration (#2594):** `PrinterDetailView` embeds the presentation-only
-`PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
-`AdvancedPrinterControlsAccess.isEntryVisible` gates command content and owner
-construction, not destination existence. An offline/disabled visit explains
-the restriction without loading capabilities, enabling a setting or dispatching
-commands. The settings link uses the existing `AppDestination.settings` route.
+**Essential integration (#2594):** `PrinterDetailView` renders
+`PrinterInstrumentPanelControls` in an always-discoverable Overview/Controls pager.
+`PrinterControlsAccess.isEntryVisible` gates command content and owner
+construction, not destination existence. An offline visit retains an existing
+owner's supported controls, disabled with no visible lockout banner (#3548).
+Unsupported motion stays hidden; its empty-state explanation is also suppressed
+offline. Printers without a controls owner use the silent unavailable view.
+The host loads
+capabilities only for
+Moonraker printers (the detail view always builds their owner for durable motion, #2678). There is
+no per-server opt-in setting.
 
 For embedding, retain one owner above page visibility, scoped by registered server
 and printer UUID. The host supplies the scoped service, loads capabilities once,
 and forwards meaningful updates while the Controls page is hidden. Do not use
 the test-only wrapper initializer or create an owner per page. Apply
-`AdvancedPrinterControlsAccess` before exposing command content; this observer does not
+`PrinterControlsAccess` before exposing command content; this observer does not
 read feature flags. Replace the owner when the real server/printer target changes.
 
 ### Effective native operations and gates
 
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
-| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
-| Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
+| Preheat PLA/PETG/ABS (+ ASA/TPU/PC/Nylon via More) | `setTemperatures` | Idle-only (blocked while starting, printing or paused, regardless of `supportsTemperatureControlDuringPrint`). Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
+| Cool Down | `turnOffHeaters` (`POST /heaters/off`), else `setTemperatures` 0/0 | Always shown; idle-only (disabled while starting, printing or paused). Heater shutdown when `supportsHeaterShutdown`, otherwise 0/0 targets; confirms 0 on each supported heater |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
-| Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
+| Jog | `move` | Movement + supported axis explicitly reported homed; unknown/unhomed axes stay disabled. Recheck before dispatch; HTTP response settles the request without claiming physical completion |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
 | Absolute XYZ | `moveTo` | All XYZ required; verified operation, frame, bounds, homing and clearance; every coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
 All operations retain shared command single-flight and online/idle gating. Printing
-and paused printers keep the explanatory lockout. Unrelated telemetry and
+and paused printers keep physical controls disabled or hidden, with no explanatory text (#3548). Unrelated telemetry and
 other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
 HTTP response. Network/server failures can have uncertain physical outcomes;
@@ -235,8 +251,14 @@ Load, Unload and Change filament require their own explicit operation flags,
 Supported per-operation discovery, the same measured-temperature guard, and
 a native confirmation. The unload path consumes `FilamentUnloadResult`;
 its residual weight and spool ID are not physical-loaded state. Successful
-results say **request accepted**, preserve server guidance and ask the operator
-to verify completion. False/failed/uncertain responses never become success.
+results are silent, as are sensor targets, extrusion, motor release, firmware
+saves and Z-offset adjustments without readback (#3565). No routine acceptance
+or physical-completion disclaimer is rendered. False/failed/uncertain responses
+remain actionable failures, never success.
+Command transport failures describe the failed request, not the device's global
+internet state; a healthy server connection does not confirm a command's outcome.
+Errors retain a concise check-before-retry instruction and an icon-only,
+VoiceOver-labelled dismissal.
 No physical action binds or clears a spool, and no action supplies a toolhead
 index. Existing Assign/Change spool, Clear assignment, NFC and combined Eject
 remain unchanged under their original owners.
@@ -264,8 +286,9 @@ The guarded downstream semantics use 0.01/0.05/0.1 mm increments (negative is
 closer), -5…5 mm save bounds, a freshly reviewed `PrinterDetails.rowVersion`,
 and `saveToFirmware: true`. A review is consumed on any save attempt, including
 412/428 or an uncertain outcome; refresh/review never automatically retries.
-Done describes firmware-request acceptance, not a measured gap or first-layer
-quality. The full conditional flow is exercised with a synthetic shared-contract
+Done retains only the first-layer check instruction, without an acceptance
+disclaimer or a claim of measured clearance or first-layer quality.
+The full conditional flow is exercised with a synthetic shared-contract
 fixture; it is not a claim that any current production backend proves every fact.
 
 Cancellation/dismissal, loss of access and server-epoch changes invalidate the
@@ -310,9 +333,25 @@ These tests prove native guards and typed synthetic shared-contract behavior,
 - Heat follows the approved Essential composition above, with one combined
   command owner path. Range guidance is in the field's VoiceOver hint and
   specific validation errors, not repeated permanent range paragraphs.
-- Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
-  Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
-  explicitly bed-less hardware omits the bed, including during Cool Down.
+- Presets (nozzle/bed °C) are PLA **200/60**, PETG **230/80**, ABS
+  **245/100**, plus ASA **245/100**, TPU **220/50**, PC **260/110** and Nylon
+  **250/80** under More. PC and Nylon are capped for PTFE-lined hotends: they
+  are preheat values, not print temperatures. `PreheatPreset.definition` is the
+  only place these values live; views and tests read from it. Also
+  Cool Down (heater shutdown with `supportsHeaterShutdown`, else a 0/0 idle
+  fallback matching the web app). Presets
+  require proven hotend support; unsupported or explicitly bed-less hardware
+  omits the bed. Heat (presets, More, Custom… and its target fields) is
+  idle-only. The app offers no mid-print temperature or sensor edits: Tune is
+  Speed, Flow and Z babystep only (#3540). While printing, Move and Heat
+  segments are disabled and Tune is auto-selected; it stays selected when the
+  print ends. Tune lists Speed % and Flow % steppers (±5%, 1–200%) above
+  babystep, hidden unless `supportsSpeedFactorControl` /
+  `supportsFlowFactorControl` is true. They are enabled only while printing or
+  paused, online and authorised, with no other command pending. A step stays
+  pending until changed matching live readback; null readback shows `--`.
+  Cool Down is idle-only, with no
+  confirmation; Emergency stop covers stopping an active print.
 - The paired editors send only entered, supported heaters in one request.
   Zero explicitly turns that heater off; blank is not zero. Both requested
   targets must match before telemetry acknowledgement; measured-temperature
@@ -359,7 +398,7 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   unchanged, including signed coordinates and zero; no firmware tolerance is
   invented. Decimal validation also rejects tiny entered fractions that would
   otherwise disappear during numeric parsing.
-- Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
+- Relative jog retains **0.1/1/10/100 mm** (default **1 mm**), XY **3000 mm/min**, Z **600 mm/min**.
   Unknown/false specific movement flags hide movement controls. The #2597
   handoff currently proves neither relative nor absolute motion on production
   backends; synthetic UI fixtures are not capability evidence.
@@ -378,18 +417,17 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   until the request returns even when matching telemetry arrives first.
   Other-axis, measured-temperature and unrelated setpoint noise do not
   acknowledge an individual target or absolute move.
-- Only a matching **post-dispatch** update permits “Matching telemetry received.”
-  If cached heater setpoints or absolute coordinates already match, successful
-  HTTP acceptance ends waiting with an explicit notice that fresh physical
-  completion is **not confirmed**. This applies equally to repeated presets,
-  already-zero Cool Down, individual heaters and already-matching destinations.
-  A fresh update arriving before the HTTP response retains telemetry wording,
-  but never releases the response's single-flight slot early.
-- Home All/XY/Z on axes already reported homed completes local waiting after
-  successful request acceptance, explicitly **without confirming fresh physical
-  completion**. Otherwise homing waits for a fresh requested-axis report.
-  Cached homing or unrelated noise never releases an outstanding HTTP request;
-  a server rejection still wins over telemetry received before its response.
+- Pending and success are **silent** (#3496). The app triggers the action as
+  the web UI does: the tapped control shows a small spinner and a VoiceOver
+  "Pending" value while its command is in flight, then returns to normal. There
+  is no "Command pending", acceptance or "Matching telemetry received" text.
+  Correlation rules are unchanged: only a matching **post-dispatch** update
+  acknowledges telemetry, cached setpoints, coordinates or homed axes end
+  waiting on HTTP acceptance, and a fresh update never releases the response's
+  single-flight slot early. A server rejection still wins over telemetry
+  received before its response.
+- Only actionable outcomes show a notice: **rejected**, **unsupported**,
+  **error**, or an **unknown outcome** the user must check on the printer.
 - The access-lifecycle modifier belongs on the **detail host**, not a pager
   child. It fences server generation, signed-in user, per-server preference,
   readiness and Queue.Start permission. Leaving the detail or losing authority
@@ -399,8 +437,8 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   visible, while acceptance is reported with an unknown physical outcome even
   if the printer reconnects first. With no outstanding response, unsafe state
   ends telemetry waiting with an uncertainty warning.
-  **Stop waiting**, caller cancellation, access revocation and deactivation
-  never cancel a dispatched transport task or free its unresolved response's
+  Internal cancellation (`cancelPendingCommand()`, caller cancellation),
+  access revocation and deactivation never cancel a dispatched transport task or free its unresolved response's
   single-flight slot. Routine actions remain locked even if an owner is
   recreated, reactivated or permission is restored. Matching telemetry cannot release this
   lock early. The eventual response releases its own slot: acceptance after
@@ -409,14 +447,24 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   neither a stale success nor failure becomes a new lifecycle's result; a
   notice instead directs the operator to check the original printer.
   Cancellation proven to precede dispatch releases safely without sending
-  anything. After an HTTP response has already returned, Stop waiting may end
-  telemetry observation, but cannot undo printer execution. Nothing is replayed.
-  Disabled editors expose the preference/permission reason in the
+  anything. After an HTTP response has already returned, internal cancellation
+  or deactivation may end telemetry observation, but cannot undo printer
+  execution. Nothing is replayed.
+- **Leaving the detail screen clears a stuck pending command.** There is no
+  visible "Stop waiting" action and no timer. If the HTTP response has returned
+  but matching telemetry never arrives, the tapped control stays pending until
+  the user leaves the printer detail screen. Leaving deactivates the controls
+  owner, which ends observation and releases that command; on return the
+  controls are enabled again and an unknown-outcome notice asks the user to
+  check the printer. A request whose HTTP response is still outstanding stays
+  locked until it returns, as described above.
+  Disabled editors expose the readiness/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
-  success/acceptance notices. Offline controls remain hidden, with the
+  notices. Offline controls remain hidden, with the
   explanation supplied by the detail host.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
-  and no dependency on pending setup commands. The shared owner/composition
+  and no dependency on pending setup commands. It is a full-width, solid red
+  (`pfErrorFill`) rectangle with a white icon and label. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
 
 **Owner-lifetime contract:** a MainActor registry in
@@ -468,10 +516,10 @@ release matching command/workflow tokens when a settled observer is destroyed;
 an abandoned view cannot strand the process-wide registry. An in-flight call
 still retains its cleanup owner until the response returns.
 
-A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
-not offer Stop waiting for another owner's request. Shared-state observation
+A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it
+cannot end another owner's request. Shared-state observation
 updates the replacement UI when matching telemetry clears the original pending
-command. Stop waiting/deactivation after HTTP settlement explicitly ends
+command. Internal cancellation/deactivation after HTTP settlement explicitly ends
 observation and releases that token with an uncertainty warning; it does not
 cancel, reverse or prove completion of the physical action. Before settlement,
 neither cancellation nor matching telemetry releases the outstanding request.
@@ -620,14 +668,21 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 
 #### Preheat
 
-- Four buttons, fixed order: **PLA, PETG, ABS, Cool Down**.
+- Fixed order: **PLA, PETG, ABS, Cool Down**; Cool Down is always shown.
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.
-- Presets use a compact four-button row on standard phone and iPad text sizes,
-  two columns at XX Large/XXX Large, and one column at accessibility sizes.
-  Labels and temperature pairs remain visible; the compact **Cool** label keeps
-  the full **Cool down** VoiceOver name. Hit targets remain at least 44pt.
+- On the Control tab's Heat segment the row is **PLA · PETG · ABS · More ·
+  Cool down** (mockup v3). From XX Large, including every accessibility size,
+  it wraps to the three materials, then More + Cool down, so More (ASA, TPU,
+  PC, Nylon, Custom…) stays reachable at every text size. At accessibility
+  sizes the buttons grow taller instead of clipping their captions. The native
+  More menu doesn't scroll, so at accessibility sizes each material item is a
+  single line ("ASA  245° · 100°") and Custom… moves to the top of the menu. Elsewhere
+  presets use a compact four-button row on standard text sizes, two columns at
+  XX Large/XXX Large, and one column at accessibility sizes. Labels and
+  temperature pairs remain visible; the compact **Cool** label keeps the full
+  **Cool down** VoiceOver name. Hit targets remain at least 44pt.
 - **No custom temp input. No long-press. No swipe.**
 
 #### Home
@@ -694,19 +749,19 @@ Example: tapping **Preheat PLA** disables PETG/ABS/Cool Down until the command r
     └── 200 OK
          │
          ▼
-   [ wait for printerupdated SignalR event matching printerId ]
+   [ wait silently for a matching post-dispatch printerupdated event ]
          │
-         ├── event arrives within 5s ────► [ Pending → Default, banner clears ]
-         └── timeout (5s, no event) ─────► [ Pending → Default with subtle toast
-                                            "Sent. Awaiting printer." — not an error,
-                                            because the HTTP call succeeded ]
+         ├── matching event arrives ─────► [ Pending → Default, no text ]
+         └── no matching event ──────────► [ stays Pending (spinner only) until the
+                                            user leaves the detail screen; see
+                                            "Embedding contract (#2521)" ]
 ```
 
 **Debounce window:** 250ms (single trailing-edge debounce). Below 250ms feels sticky on iOS 17 button presses; above 400ms users start re-tapping.
 
 **Pending → Default transition:** crossfade 150ms.
 
-**Pending timeout:** 5 seconds. After 5s with no `printerupdated`, the button returns to Default and a non-blocking toast says "Sent. Awaiting printer." This is **not** an error — the API accepted the command, the printer just hasn't echoed state yet.
+**No pending timeout or toast (#3496).** Pending and success are silent. A command that is accepted but never echoed in telemetry stays pending until the detail screen is left, which ends observation and releases it.
 
 ### 3.3 Error banner
 
@@ -730,6 +785,8 @@ Position: **directly below the affected subgroup**, full width, slides down 200m
 - Only **one banner per subgroup** at a time; a new error replaces the previous.
 
 ### 3.4 Mid-print lockout
+
+> Superseded by #3548: no banner renders. Controls are disabled or hidden and carry a VoiceOver hint only.
 
 When `printer.state` is `.printing` or `.paused`:
 
@@ -775,9 +832,10 @@ All controls must satisfy:
 | Control | Label | Hint | Traits | State announcement |
 | --- | --- | --- | --- | --- |
 | Preheat PLA | "Preheat for PLA" | "Sets hotend to 200 degrees, bed to 60 degrees." | `.button` | "Pending" / "Failed: <reason>. Double-tap to retry." |
-| Preheat PETG | "Preheat for PETG" | "Sets hotend to 240 degrees, bed to 80 degrees." | `.button` | (same pattern) |
-| Preheat ABS | "Preheat for ABS" | "Sets hotend to 240 degrees, bed to 100 degrees." | `.button` | (same pattern) |
-| Cool Down | "Cool down" | "Sets hotend and bed to 0 degrees." | `.button` | (same pattern) |
+| Preheat PETG | "Preheat for PETG" | "Sets hotend to 230 degrees, bed to 80 degrees." | `.button` | (same pattern) |
+| Preheat ABS | "Preheat for ABS" | "Sets hotend to 245 degrees, bed to 100 degrees." | `.button` | (same pattern) |
+| More (Control tab) | "More materials" | "Shows more preheat materials and a custom nozzle target." (while blocked: the actual reason, e.g. "Controls are locked while a print is active.", "Printer is offline." or "Another printer operation is still pending.") | `.button` (native `Menu`) | Menu items read "<material>" with "<nozzle>° · <bed>°"; "Custom…" focuses the Nozzle field |
+| Cool Down | "Cool down" | "Turns off all heaters." with heater shutdown; otherwise "Sets hotend and bed to 0 degrees." (hotend-only: "Sets hotend to 0 degrees.") | `.button` | (same pattern) |
 | Home All | "Home all axes" | "Homes X, Y, and Z." | `.button` | (same pattern) |
 | Home XY | "Home X and Y" | "Homes X and Y axes only." | `.button` | (same pattern) |
 | Home Z | "Home Z" | "Homes Z axis only." | `.button` | (same pattern) |
@@ -814,6 +872,8 @@ VoiceOver swipe order: section header → lockout banner (if any) → Preheat he
 ---
 
 ## 6. SwiftUI Skeleton (for Hudson)
+
+> Historical: the `PrinterControlsSection` skeleton below was deleted in #3542.
 
 This is structure only — no business logic. Use existing services and view models.
 
@@ -901,9 +961,11 @@ struct JogSubgroup: View {
 **Helper enums** (Hudson decides exact ownership — model layer or view-local):
 
 ```swift
-enum PreheatPreset { case pla, petg, abs, coolDown
-    var hotend: Double { ... }   // 200, 240, 240, 0
-    var bed: Double { ... }      // 60, 80, 100, 0
+enum PreheatPreset { case pla, petg, abs, asa, tpu, pc, nylon, coolDown
+    // Row: pla, petg, abs (rowMaterials) · More · coolDown.
+    // More menu: asa, tpu, pc, nylon (menuMaterials), then "Custom…".
+    var hotend: Double { ... }   // from `definition`: 200, 230, 245, 245, 220, 260, 250, 0
+    var bed: Double { ... }      // 60, 80, 100, 100, 50, 110, 80, 0
     var label: String { ... }
 }
 enum JogAxis: String, CaseIterable, Identifiable { case x, y, z; var id: String { rawValue } }

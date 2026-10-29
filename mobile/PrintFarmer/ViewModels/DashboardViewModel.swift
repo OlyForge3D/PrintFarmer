@@ -245,6 +245,8 @@ final class DashboardViewModel {
         printers[idx].totalLayers = update.totalLayers
         printers[idx].fanSpeedPercent = update.fanSpeedPercent
         printers[idx].liveZOffsetMm = update.liveZOffsetMm
+        printers[idx].speedFactorPercent = update.speedFactorPercent
+        printers[idx].flowFactorPercent = update.flowFactorPercent
         if let sensors = update.sensors { printers[idx].sensors = sensors }
         if let name = update.jobName { printers[idx].jobName = name }
         if let fn = update.fileName { printers[idx].fileName = fn }

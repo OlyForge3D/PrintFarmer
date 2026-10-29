@@ -1,7 +1,8 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -14,7 +15,7 @@ import {
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
-import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
@@ -39,7 +40,7 @@ import {
 } from '@/features/printers/utils/printerSupport';
 import {
   getPresetTargets,
-  getExtrudeMinTemp,
+  temperatureTargetLimitError,
   EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
   EXTRUDE_SPEED_OPTIONS,
@@ -180,15 +181,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // token here so the details query below can self-fetch the authoritative one
   // when it is missing (independent of Spoolman readiness).
   const propRowVersion = printerProp?.rowVersion ?? apiPrinter?.rowVersion ?? null;
+  const support = getPrinterSupport(backendCapabilities);
 
   // Fetch printer details to check for multi-toolhead configuration and to
   // recover the reviewed revision. Fetch when Spoolman is configured (spool
   // section would be shown) OR when the prop lacks a revision, so the spool
   // mutation guards below always have an authoritative token to review against.
+  // Temperature controls also need the authoritative heater limits in details.
   const { data: printerDetails } = usePrinterDetails(
     printerId ?? '', 
     { 
-      enabled: !!printerId && (spoolmanReady || !propRowVersion),
+      enabled: !!printerId && (spoolmanReady || !propRowVersion || support.supportsTemperatureControl),
       staleTime: 60000, // Cache for 1 minute since toolhead config doesn't change frequently
     }
   );
@@ -218,7 +221,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [isControlExpanded, setIsControlExpanded] = useState(true);
   const [isMoveExpanded, setIsMoveExpanded] = useState(true);
 
-  const [isSpoolExpanded, setIsSpoolExpanded] = useState(true);
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
@@ -267,8 +269,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [hotendTemp, setHotendTemp] = useState<number | ''>('');
-  const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
   const [moveY, setMoveY] = useState<number | ''>('');
   const [moveZ, setMoveZ] = useState<number | ''>('');
@@ -333,15 +333,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     });
   }, [printer]);
 
-  // Keep target temperature inputs in sync with the printer's actual targets via SignalR
-  const printerHotendTarget = printer?.hotendTarget ?? 0;
-  const printerBedTarget = printer?.bedTarget ?? 0;
-  useEffect(() => {
-    setHotendTemp(printerHotendTarget > 0 ? printerHotendTarget : '');
-    setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
-  }, [printerHotendTarget, printerBedTarget]);
-
-  const support = getPrinterSupport(backendCapabilities);
   const preRenderRawState = printer?.state ?? '';
   const isActivePrintForObjectQuery = isActivePrintForObjects({ state: preRenderRawState, isOnline: printer?.isOnline ?? false });
   // A pending skip confirmation never outlives its print or its printer.
@@ -402,6 +393,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
+  const activeExtruderId = printer?.backend === PrinterBackend.Moonraker ? printer.activeExtruderId ?? null : undefined;
+  const hasMoonrakerSensorSnapshot = printer?.backend === PrinterBackend.Moonraker && printer.sensors !== undefined;
 
   // Authoritative reviewed revision for spool mutations. `displayPrinter`
   // (and thus the passed-in prop) can lack `rowVersion` when it was sourced from
@@ -445,19 +438,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = !motion.blocked && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canDisableMotorsNow = !motion.blocked && backendCapabilities?.supportsDisableMotors !== false && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
-  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
+  const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support, supportsHeaterShutdown: backendCapabilities?.supportsHeaterShutdown });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
   const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
   const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
 
-  const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
-  const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
+  const canExtrudeNow = isOnline && isEnabled && !isPrinting && !isShutdown && backendCapabilities?.supportsExtrusion === true;
 
   // Use state values to track last known values for display (fallback when data is undefined)
   const lastKnownHotendTemp = lastKnownValues.hotendTemp;
@@ -519,7 +511,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const result = await motion.execute({ kind: axes === 'xy' ? 'HomeXY' : axes === 'z' ? 'HomeZ' : 'HomeAll' });
       if (!result.success) {
         console.error('Failed to home:', result.error);
-        toast.error(result.error || 'Failed to home printer');
+        toast.error(result.error || result.message || 'Failed to home printer');
       }
     } catch (error) {
       console.error('Error homing:', error);
@@ -541,7 +533,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       const result = await motion.execute({ kind: 'Jog', ...move });
       if (!result.success) {
         console.error(`Failed to move ${axis}:`, result.error);
-        toast.error(result.error || `Failed to move ${axis}`);
+        toast.error(result.error || result.message || `Failed to move ${axis}`);
       }
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
@@ -556,7 +548,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });
-      if (!result.success) toast.error(result.error || 'Movement did not succeed');
+      if (!result.success) toast.error(result.error || result.message || 'Movement did not succeed');
     } catch (error) {
       toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
     } finally {
@@ -609,16 +601,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
     setFilamentActionPending(true);
     try {
-      const methodMap: Record<string, () => Promise<{ success: boolean; error?: string | null }>> = {
+      const methodMap = {
         load: () => apiClient.loadFilament(printer.id),
         unload: () => apiClient.unloadFilament(printer.id),
       };
       const result = await methodMap[action]();
       if (!result.success) {
         console.error(`Failed to ${action} filament:`, result.error);
+        toast.error(result.error || result.message || `Failed to ${action} filament`);
       }
     } catch (error) {
       console.error(`Error during filament ${action}:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to ${action} filament`));
     } finally {
       setFilamentActionPending(false);
     }
@@ -629,6 +623,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     ? {
       blockedReason: filamentControlBlockedReason({ isOnline, isEnabled, isPrinting }),
       pending: filamentActionPending,
+      supportsLoad: backendCapabilities?.supportsFilamentLoad,
+      supportsUnload: backendCapabilities?.supportsFilamentUnload,
       onAction: (action) => void handleFilamentAction(action),
     }
     : undefined;
@@ -648,7 +644,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
-        toast.error(result.error || `Failed to ${direction}`);
+        toast.error(result.error || result.message || `Failed to ${direction}`);
       }
     } catch (error) {
       console.error(`Error ${direction}ing:`, error);
@@ -658,50 +654,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentBedTemp = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : bedTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(hotendTemp),
-        bed: Number(currentBedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set hotend temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting hotend temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) return;
-
-    setTemperatureActionPending(true);
-    try {
-      const currentHotendTemp = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : hotendTemp;
-      const result = await apiClient.setTemperatures(printer.id, {
-        hotend: Number(currentHotendTemp),
-        bed: Number(bedTemp)
-      });
-
-      if (!result.success) {
-        console.error('Failed to set bed temperature:', result.error);
-      }
-    } catch (error) {
-      console.error('Error setting bed temperature:', error);
-    } finally {
-      setTemperatureActionPending(false);
-    }
-  };
-
   const handleApplyPreset = async (preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || (preset.toLowerCase() !== 'cooldown' && (isPrinting || isPaused))) {
       return;
     }
 
@@ -715,24 +669,31 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         console.warn(`Unknown preset: ${preset}`);
         return;
       }
+      const limitError = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? undefined : temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
+      if (limitError) {
+        toast.error(limitError);
+        return;
+      }
 
-      const result = await apiClient.setTemperatures(printer.id, targets);
+      const result = preset.toLowerCase() === 'cooldown' && backendCapabilities?.supportsHeaterShutdown
+        ? await apiClient.turnOffHeaters(printer.id)
+        : await apiClient.setTemperatures(printer.id, targets);
 
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${preset} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${preset} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${preset} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${preset} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
   };
 
   const handleApplySingleHeaterPreset = async (heater: 'hotend' | 'bed', preset: string) => {
-    if (temperatureActionPending) {
+    if (temperatureActionPending || isPrinting || isPaused) {
       return;
     }
 
@@ -742,23 +703,23 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       return;
     }
 
-    const currentHotend = hotendTemp === '' ? (displayPrinter?.hotendTarget ?? 0) : Number(hotendTemp);
-    const currentBed = bedTemp === '' ? (displayPrinter?.bedTarget ?? 0) : Number(bedTemp);
-    const targets: TempTargets = heater === 'hotend'
-      ? { hotend: presetTargets.hotend, bed: currentBed }
-      : { hotend: currentHotend, bed: presetTargets.bed };
+    const targets = { [heater]: presetTargets[heater] };
+    const limitError = temperatureTargetLimitError(targets, displayPrinter?.sensors, printerDetails?.capabilities, activeExtruderId);
+    if (limitError) {
+      toast.error(limitError);
+      return;
+    }
 
     setTemperatureActionPending(true);
     try {
       const result = await apiClient.setTemperatures(printer.id, targets);
-      if (result.success) {
-        setHotendTemp(targets.hotend);
-        setBedTemp(targets.bed);
-      } else {
+      if (!result.success) {
         console.error(`Failed to apply ${heater} preset:`, result.error);
+        toast.error(result.error || result.message || `Failed to apply ${heater} preset`);
       }
     } catch (error) {
       console.error(`Error applying ${heater} preset:`, error);
+      toast.error(mutationErrorMessage(error, `Failed to apply ${heater} preset`));
     } finally {
       setTemperatureActionPending(false);
     }
@@ -1055,7 +1016,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHoming === false}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
                 padSize="small"
@@ -1091,7 +1052,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ArrowLeftIcon className="h-4 w-4" />
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingXY === false}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
                 padSize="small"
@@ -1133,7 +1094,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 Z+
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMoveNow}
+                disabled={movementActionPending || !canMoveNow || backendCapabilities?.supportsHomingZ === false}
                 onClick={() => handleHome('z')}
                 title="Home Z"
                 padSize="small"
@@ -1176,7 +1137,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('extrude')}
-                  title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                  title="Extrude filament"
                   aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >
@@ -1186,7 +1147,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrudeNow}
                   onClick={() => handleExtrude('retract')}
-                  title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                  title="Retract filament"
                   aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >
@@ -1227,7 +1188,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
             disabled={movementActionPending || !canManualMoveNow}
             onMove={handleMove}
-            onMoveTo={handleMoveTo}
+            onMoveTo={backendCapabilities?.supportsAbsoluteMovement === true ? handleMoveTo : undefined}
           />
           <PrinterMotionHelp />
         </CollapsibleSection>
@@ -1236,40 +1197,44 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         <PrinterSensorsSection
           printerId={printer.id}
           sensors={displayPrinter?.sensors}
-          temperatures={displayPrinter ?? {}}
+          temperatures={{ ...displayPrinter, activeExtruderId }}
           supportsTelemetry={backendCapabilities?.supportsSensorTelemetry}
           canControl={(backendCapabilities?.supportsSensorControl ?? false) && isEnabled}
           isOnline={isOnline}
         >
-          <TemperatureControlSection
+          {additionalRows => <TemperatureControlSection
+            printerId={printer.id}
+            activeExtruderId={activeExtruderId}
+            presetsDisabled={isPrinting || isPaused}
+            isOnline={isOnline}
             sensors={displayPrinter?.sensors}
             showHeading={false}
-            hotendTemp={hotendTemp}
-            bedTemp={bedTemp}
+            additionalRows={additionalRows}
             hotendTarget={displayPrinter?.hotendTarget}
             bedTarget={displayPrinter?.bedTarget}
-            hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
-            bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            hotendCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.hotendTemp : displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
+            bedCurrent={hasMoonrakerSensorSnapshot ? displayPrinter?.bedTemp : displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            reportedTemperatures={displayPrinter ?? {}}
+            maxHotendTemp={printerDetails?.capabilities?.maxHotendTemp}
+            maxBedTemp={printerDetails?.capabilities?.maxBedTemp}
             temperatureActionPending={temperatureActionPending}
             canSetTemperatures={canSetTemperaturesNow}
             canCooldown={canCooldownNow}
-            onHotendTempChange={(value) => setHotendTemp(value === '' ? '' : Number(value))}
-            onBedTempChange={(value) => setBedTemp(value === '' ? '' : Number(value))}
-            onHotendTempKeyDown={(event) => { void handleHotendTempKeyDown(event); }}
-            onBedTempKeyDown={(event) => { void handleBedTempKeyDown(event); }}
             onApplyPreset={(preset) => {
               void handleApplyPreset(preset);
             }}
             onApplySingleHeaterPreset={(heater, preset) => {
               void handleApplySingleHeaterPreset(heater, preset);
             }}
-          />
+          />}
         </PrinterSensorsSection>
+
+        <RuntimeFactorControls printer={displayPrinter} backendCapabilities={backendCapabilities} />
 
         {/* MMU Control Box - the single slot representation when MMU/ERCF/AMS is
             detected via real-time status; spool assignment lives in its action row. */}
         {showMmuControlBox && displayPrinter?.mmuStatus && (
-          <CollapsibleSection title="Materials" expanded={true}>
+          <CollapsibleSection title="Materials" keepMounted>
             <MmuControlBox
               printerId={printer.id}
               mmuStatus={displayPrinter.mmuStatus}
@@ -1290,7 +1255,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             coverage rings and the assignment drawer. Suppressed when the MMU
             control box already shows the slots so there is exactly one view. */}
         {materialLoadout && !showMmuControlBox && (
-          <CollapsibleSection title="Materials" expanded={true}>
+          <CollapsibleSection title="Materials" keepMounted>
             <MaterialLoadout
               printerId={printer.id}
               mmuStatus={displayPrinter?.mmuStatus}
@@ -1311,13 +1276,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Single-spool printers keep the classic spool card; multi-slot printers are
             fully described by the materials module above. */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          if (materialLoadout) return null;
+          if (materialLoadout || showMmuControlBox) return null;
 
           return (
             <CollapsibleSection
-              title="Spool"
-              expanded={isSpoolExpanded}
-              onToggle={setIsSpoolExpanded}
+              title="Materials"
+              keepMounted
               headerActions={
                 <div className="flex items-center gap-0.5">
                   {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (

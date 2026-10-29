@@ -106,7 +106,7 @@ public class PrintersControllerControlGuardsTests
         var statusCache = new Mock<IPrinterStatusCacheReader>();
         statusCache.Setup(cache => cache.GetStatus(id)).Returns(status);
         var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
-        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+        capabilities.Setup(service => service.GetControlCapabilitiesAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterBackendCapabilitiesDto(
                 id,
                 "Test printer",
@@ -134,7 +134,7 @@ public class PrintersControllerControlGuardsTests
             It.IsAny<string>(),
             "set_fan_speed",
             It.IsAny<CancellationToken>()),
-            expectsActiveLease ? Times.Never() : Times.Once());
+            Times.Once());
         actuation.Verify(service => service.AcquireActiveAsync(
             id,
             It.IsAny<string>(),
@@ -148,20 +148,22 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
-    public async Task SetFanSpeedAsync_RequiresReadbackAndSubmitAccessBeforeDispatch()
+    public async Task SetFanSpeedAsync_WithoutReadback_DispatchesButStillRequiresSubmitAccess()
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
         PrinterStatusDto status = new(id, IsOnline: true, State: "idle");
         printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(status);
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
+        printers.Setup(service => service.SetFanSpeedAsync(id, 75, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         var statusCache = new Mock<IPrinterStatusCacheReader>();
         var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
-        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+        capabilities.Setup(service => service.GetControlCapabilitiesAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
             {
                 SupportsFanControl = true,
-                SupportsFanSpeedReadback = true,
+                SupportsFanSpeedReadback = false,
             });
         var actuation = new Mock<IPrinterPhysicalActuationService>();
         PrintersController controller = CreateController(
@@ -176,11 +178,11 @@ public class PrintersControllerControlGuardsTests
             new FanSpeedRequest { SpeedPercent = 75 },
             CancellationToken.None);
 
-        Assert.Equal(StatusCodes.Status502BadGateway, Assert.IsType<ObjectResult>(response.Result).StatusCode);
+        Assert.True(GetCommandResult(response).Success);
         printers.Verify(service => service.SetFanSpeedAsync(
             It.IsAny<Guid>(),
             It.IsAny<int>(),
-            It.IsAny<CancellationToken>()), Times.Never());
+            It.IsAny<CancellationToken>()), Times.Once());
 
         var deniedAuthorization = new Mock<IQueueResourceAuthorizationService>();
         deniedAuthorization.Setup(service => service.CanAccessPrinterAsync(
@@ -209,13 +211,13 @@ public class PrintersControllerControlGuardsTests
             CancellationToken.None);
 
         Assert.IsType<NotFoundResult>(response.Result);
-        capabilities.Verify(service => service.GetByPrinterIdAsync(
+        capabilities.Verify(service => service.GetControlCapabilitiesAsync(
             id,
             It.IsAny<CancellationToken>()), Times.Once());
         printers.Verify(service => service.SetFanSpeedAsync(
             It.IsAny<Guid>(),
             It.IsAny<int>(),
-            It.IsAny<CancellationToken>()), Times.Never());
+            It.IsAny<CancellationToken>()), Times.Once());
     }
 
     private static PrinterSensorDto[] AdvertisedSensorControls() =>
@@ -232,13 +234,23 @@ public class PrintersControllerControlGuardsTests
             Available = false,
             Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, null, PrinterSensorUnit.Percent)],
         },
+        new("extruder3", "Tool 3", PrinterSensorKind.Nozzle)
+        {
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 10, 280, 0.5, PrinterSensorUnit.Celsius) { AllowZero = true }],
+        },
+        new("filament_switch_sensor runout", "Runout sensor", PrinterSensorKind.FilamentRunout)
+        {
+            Writable = [new PrinterSensorWritableDto(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None)],
+        },
     ];
 
     private static PrintersController CreateSensorController(
         Guid id,
         Mock<IPrintersService> printers,
         bool supportsSensorControl,
-        string state = "idle")
+        string state = "idle",
+        bool supportsTemperatureControlDuringPrint = false,
+        bool supportsHeaterShutdown = false)
     {
         PrinterStatusDto status = new(id, IsOnline: true, State: state);
         printers.Setup(service => service.GetStatusDtoAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(status);
@@ -250,11 +262,13 @@ public class PrintersControllerControlGuardsTests
         var statusCache = new Mock<IPrinterStatusCacheReader>();
         statusCache.Setup(cache => cache.GetStatus(id)).Returns(status);
         var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
-        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+        capabilities.Setup(service => service.GetControlCapabilitiesAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
             {
                 SupportsSensorTelemetry = supportsSensorControl,
                 SupportsSensorControl = supportsSensorControl,
+                SupportsTemperatureControlDuringPrint = supportsTemperatureControlDuringPrint,
+                SupportsHeaterShutdown = supportsHeaterShutdown,
             });
         return CreateController(
             printers,
@@ -272,6 +286,99 @@ public class PrintersControllerControlGuardsTests
     [Theory]
     [InlineData("idle")]
     [InlineData("printing")]
+    [InlineData("paused")]
+    public async Task SetTempsAsync_CapableBackend_AllowsManualTargetsInKnownState(string state)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state, supportsTemperatureControlDuringPrint: true);
+        printers.Setup(service => service.SetTempsAsync(id, 215.5, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
+
+        ActionResult<CommandResult> response = await controller.SetTempsAsync(id, new TempTargets(215.5, null), default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.SetTempsAsync(id, 215.5, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("idle")]
+    [InlineData("printing")]
+    [InlineData("paused")]
+    public async Task TurnOffHeatersAsync_CapableBackend_UsesExplicitShutdownNotOrdinaryTargets(string state)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state, supportsHeaterShutdown: true);
+        printers.Setup(service => service.TurnOffHeatersAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        ActionResult<CommandResult> response = await controller.TurnOffHeatersAsync(id, default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.TurnOffHeatersAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.SetTempsAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TurnOffHeatersAsync_UnsupportedBackend_DoesNotDispatch()
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true);
+
+        ObjectResult response = Assert.IsType<ObjectResult>((await controller.TurnOffHeatersAsync(id, default)).Result);
+
+        Assert.Equal(501, response.StatusCode);
+        printers.Verify(service => service.TurnOffHeatersAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SetSensorValueAsync_FilamentEnable_AcceptsBooleanAndDispatchesBinaryBackendValue(bool enabled)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true);
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(id, "filament_switch_sensor runout",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)), default);
+
+        Assert.True(GetCommandResult(response).Success);
+        printers.Verify(service => service.SetSensorValueAsync(
+            id, "filament_switch_sensor runout", PrinterSensorQuantity.Enabled, enabled ? 1 : 0, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0, 200)]
+    [InlineData(5, 400)]
+    [InlineData(280, 200)]
+    [InlineData(280.5, 400)]
+    public async Task SetSensorValueAsync_PhysicalExtruder_ValidatesItsOwnLimitsIncludingSafeOff(double target, int expectedStatus)
+    {
+        Guid id = Guid.NewGuid();
+        var printers = new Mock<IPrintersService>();
+        PrintersController controller = CreateSensorController(id, printers, true, state: "printing");
+
+        ActionResult<CommandResult> response = await controller.SetSensorValueAsync(id, "extruder3",
+            new PrinterSensorSetRequest(PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(target)), default);
+
+        if (expectedStatus == 200)
+        {
+            Assert.True(GetCommandResult(response).Success);
+            printers.Verify(service => service.SetSensorValueAsync(id, "extruder3", PrinterSensorQuantity.TargetTemperature, target, It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            Assert.Equal(expectedStatus, Assert.IsType<ObjectResult>(response.Result).StatusCode);
+            VerifyNoSensorDispatch(printers);
+        }
+    }
+
+    [Theory]
+    [InlineData("idle")]
+    [InlineData("printing")]
+    [InlineData("offline")]
     public async Task SetSensorValueAsync_ValidAdvertisedControl_DispatchesOnce(string state)
     {
         Guid id = Guid.NewGuid();
@@ -280,13 +387,13 @@ public class PrintersControllerControlGuardsTests
 
         ActionResult<CommandResult> response = await controller.SetSensorValueAsync(
             id,
-            "fan part",
+            state == "offline" ? "fan offline" : "fan part",
             new PrinterSensorSetRequest(PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromNumber(40)),
             CancellationToken.None);
 
         Assert.True(GetCommandResult(response).Success);
         printers.Verify(service => service.SetSensorValueAsync(
-            id, "fan part", PrinterSensorQuantity.FanSpeed, 40, It.IsAny<CancellationToken>()), Times.Once());
+            id, state == "offline" ? "fan offline" : "fan part", PrinterSensorQuantity.FanSpeed, 40, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
@@ -311,7 +418,6 @@ public class PrintersControllerControlGuardsTests
     [Theory]
     [InlineData("missing", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
     [InlineData("heater_fan hotend", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
-    [InlineData("fan offline", PrinterSensorQuantity.FanSpeed, 40, StatusCodes.Status409Conflict)]
     [InlineData("fan part", PrinterSensorQuantity.TargetTemperature, 40, StatusCodes.Status409Conflict)]
     [InlineData("fan part", PrinterSensorQuantity.FanSpeed, 101, StatusCodes.Status400BadRequest)]
     [InlineData("fan part", PrinterSensorQuantity.FanSpeed, -5, StatusCodes.Status400BadRequest)]
@@ -383,7 +489,7 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
-    public async Task AdjustZOffsetAsync_RequiresLiveReadbackAndUsesActiveLeaseWhilePrinting()
+    public async Task AdjustZOffsetAsync_WithoutReadback_UsesActiveLeaseWhilePrinting()
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
@@ -392,23 +498,26 @@ public class PrintersControllerControlGuardsTests
                 id,
                 IsOnline: true,
                 State: "printing",
-                LiveZOffsetMm: 0.025));
+                LiveZOffsetMm: null));
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id)).Returns(new PrinterStatusDto(id, true, "printing"));
         printers.Setup(service => service.AdjustZOffsetAsync(
                 id,
                 0.02m,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
-        capabilities.Setup(service => service.GetByPrinterIdAsync(id, It.IsAny<CancellationToken>()))
+        capabilities.Setup(service => service.GetControlCapabilitiesAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterBackendCapabilitiesDto(id, "Test printer", PrinterBackend.Moonraker)
             {
                 SupportsZOffsetAdjustment = true,
-                SupportsZOffsetReadback = true,
+                SupportsZOffsetReadback = false,
             });
         var actuation = new Mock<IPrinterPhysicalActuationService>();
         PrintersController controller = CreateController(
             printers,
-            new Mock<IPrinterStatusCacheReader>(),
+            statusCache,
             out _,
             actuation: actuation,
             capabilitiesService: capabilities);
@@ -436,14 +545,14 @@ public class PrintersControllerControlGuardsTests
     [InlineData("homez")]
     [InlineData("move")]
     [InlineData("moveto")]
-    public async Task DirectMotionAsync_Moonraker_SendsOnceWithoutTrackedCapability(string route)
+    public async Task DirectMotionAsync_Moonraker_SendsOnceWithoutSafetySnapshot(string route)
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
         printers.Setup(p => p.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)PrinterBackend.Moonraker });
         printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
+            .ThrowsAsync(new HttpRequestException("Manual commands must not fetch a preflight snapshot."));
         printers.Setup(p => p.SendHomeAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         printers.Setup(p => p.HomeXYAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         printers.Setup(p => p.HomeZAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -464,7 +573,7 @@ public class PrintersControllerControlGuardsTests
         Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
         actuation.Verify(a => a.AcquireDirectAsync(id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         printers.Verify(p => p.GetMovementStatusAsync(
-            It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()), Times.Never);
         printers.Verify(p => p.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Single(printers.Invocations, invocation => invocation.Method.Name is "SendHomeAsync" or "HomeXYAsync" or "HomeZAsync" or "MoveAsync" or "MoveToAsync");
         Assert.All(printers.Invocations, invocation => Assert.Contains(invocation.Method.Name,
@@ -681,12 +790,14 @@ public class PrintersControllerControlGuardsTests
     [InlineData("qidibox-unload", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("qidibox-eject", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("afc-load", PrinterSafetyOperation.FilamentChange)]
-    public async Task MmuPhysicalFilamentRoute_RevalidatesSafetyBeforeBackendIo(
+    public async Task MmuPhysicalFilamentRoute_UnknownSafety_DispatchesNativeCommand(
         string route,
         PrinterSafetyOperation expectedOperation)
     {
         Guid id = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.ExecuteMmuAsync(id, It.IsAny<MmuControlRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         printersService.Setup(service => service.FindByIdAsync(
                 id,
                 It.IsAny<CancellationToken>()))
@@ -753,13 +864,12 @@ public class PrintersControllerControlGuardsTests
                 CancellationToken.None),
         };
 
-        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(503, problem.StatusCode);
+        Assert.True(GetCommandResult(result).Success);
         guard.Verify(service => service.ValidateAsync(
             id,
             expectedOperation,
             null,
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Never);
         capabilities.Verify(
             service => service.InvalidateVerifiedSafety(id),
             Times.Never());
@@ -770,18 +880,20 @@ public class PrintersControllerControlGuardsTests
         printersService.Verify(service => service.ExecuteMmuAsync(
             It.IsAny<Guid>(),
             It.IsAny<MmuControlRequest>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
     [InlineData("Unload")]
     [InlineData("Eject")]
-    public async Task MmuGateActionAsync_TemperatureRejectionWithoutVerifiedMinimum_PreservesSafetyReasonWithoutBackendIo(string action)
+    public async Task MmuGateActionAsync_ColdNozzle_DispatchesWithoutHeatingOrSafetyProbe(string action)
     {
         Guid id = Guid.NewGuid();
         const string code = "printer_temperature_below_minimum";
         const string reason = "The fresh measured hotend temperature is below the required minimum of 220 °C.";
         var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.ExecuteMmuAsync(id, It.IsAny<MmuControlRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         printersService.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(SamplePrinter(id));
         var statusCache = new Mock<IPrinterStatusCacheReader>();
@@ -798,16 +910,13 @@ public class PrintersControllerControlGuardsTests
             new MmuGateActionRequest { Protocol = "Qidibox", Action = action, GateIndex = 1 },
             CancellationToken.None);
 
-        ObjectResult response = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(StatusCodes.Status409Conflict, response.StatusCode);
-        ProblemDetails problem = Assert.IsType<ProblemDetails>(response.Value);
-        Assert.Equal(reason, problem.Title);
-        Assert.Equal(code, problem.Extensions["code"]);
-        Assert.Equal($"https://printfarmer.dev/problems/{code}", problem.Type);
+        Assert.True(GetCommandResult(result).Success);
         guard.Verify(service => service.ValidateAsync(
-            id, PrinterSafetyOperation.FilamentUnload, null, It.IsAny<CancellationToken>()), Times.Once);
+            id, PrinterSafetyOperation.FilamentUnload, null, It.IsAny<CancellationToken>()), Times.Never);
         printersService.Verify(service => service.ExecuteMmuAsync(
-            It.IsAny<Guid>(), It.IsAny<MmuControlRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid>(), It.IsAny<MmuControlRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        printersService.Verify(service => service.SetTempsAsync(
+            It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
         printersService.Verify(service => service.SendGcodeAsync(
             It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -867,10 +976,12 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
-    public async Task LoadFilamentAsync_UnsupportedSafetyEvidence_Returns422WithoutBackendIo()
+    public async Task LoadFilamentAsync_UnsupportedSafetyEvidence_DispatchesNativeCommand()
     {
         Guid id = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.LoadFilamentAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, "Native command accepted."));
         printersService.Setup(service => service.FindByIdAsync(
                 id,
                 It.IsAny<CancellationToken>()))
@@ -897,17 +1008,14 @@ public class PrintersControllerControlGuardsTests
         ActionResult<CommandResult> result =
             await controller.LoadFilamentAsync(id, CancellationToken.None);
 
-        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(422, problem.StatusCode);
-        ProblemDetails details = Assert.IsType<ProblemDetails>(problem.Value);
-        Assert.Equal(
-            "https://printfarmer.dev/problems/printer_operation_unsupported",
-            details.Type);
+        Assert.True(GetCommandResult(result).Success);
+        guard.Verify(service => service.ValidateAsync(
+            id, It.IsAny<PrinterSafetyOperation>(), It.IsAny<PrinterSafetyMoveRequest?>(), It.IsAny<CancellationToken>()), Times.Never);
         printersService.Verify(
             service => service.LoadFilamentAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
@@ -979,10 +1087,12 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
-    public async Task LoadFilamentAsync_SafetyGuardThrows_ReleasesLeaseBeforeRethrow()
+    public async Task LoadFilamentAsync_SafetyDiscoveryUnavailable_DoesNotBlockNativeCommand()
     {
         Guid id = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.LoadFilamentAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, "Native command accepted."));
         printersService.Setup(service => service.FindByIdAsync(
                 id,
                 It.IsAny<CancellationToken>()))
@@ -1005,17 +1115,17 @@ public class PrintersControllerControlGuardsTests
             guard,
             actuation);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            controller.LoadFilamentAsync(id, CancellationToken.None));
+        Assert.True(GetCommandResult(await controller.LoadFilamentAsync(id, CancellationToken.None)).Success);
 
         actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(),
-            false,
-            "printer_safety_revalidation_failed",
-            CancellationToken.None), Times.Once);
+            true,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+        guard.VerifyNoOtherCalls();
         printersService.Verify(service => service.LoadFilamentAsync(
             It.IsAny<Guid>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static IPrinterSafetyGuard CreatePermissiveSafetyGuard()
@@ -1740,7 +1850,7 @@ public class PrintersControllerControlGuardsTests
             });
         ObjectResult response = Assert.IsType<ObjectResult>((await controller.HomeAsync(id, default)).Result);
         Assert.Equal(503, response.StatusCode);
-        Assert.Equal("printer_safety_evidence_unknown", Assert.IsType<ProblemDetails>(response.Value).Extensions["code"]);
+        Assert.Contains("ownership", Assert.IsType<CommandResult>(response.Value).Message, StringComparison.OrdinalIgnoreCase);
         printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(), false, "printer_safety_revalidation_failed",

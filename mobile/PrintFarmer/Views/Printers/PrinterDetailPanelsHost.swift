@@ -74,7 +74,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
                     PrinterDetailPanelPicker(selection: $selection)
                     .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
                     .frame(maxWidth: .infinity)
-                    pageIndicator
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, inset)
@@ -96,26 +95,6 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         .onChange(of: controlsAvailable) { _, newValue in
             selection = Self.resolvedSelection(current: selection, controlsAvailable: newValue)
         }
-    }
-
-    private var pageIndicator: some View {
-        HStack(spacing: 0) {
-            ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
-                Button { selection = panel } label: {
-                    Circle()
-                        .fill(selection == panel ? Color.pfTextPrimary : Color.pfTextTertiary)
-                        .frame(width: 6, height: 6)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(panel.title)
-                .accessibilityValue(selection == panel ? "Selected" : "")
-                .accessibilityAddTraits(selection == panel ? .isSelected : [])
-                .accessibilityIdentifier("printer.detail.pageIndicator.\(panel.rawValue)")
-            }
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private struct PrinterDetailPanelPicker: View {
@@ -214,10 +193,16 @@ struct PrinterDetailPanelsHost<Status: View, Control: View, Filament: View, Queu
         let printer: Printer
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-        private var status: String {
-            guard printer.isOnline else { return "Offline" }
-            guard let state = printer.state, !state.isEmpty else { return "Unknown" }
-            return state.capitalized
+        private var status: String { Self.statusText(state: printer.state, isOnline: printer.isOnline) }
+
+        /// Ready, idle and operational all read "Idle", matching the printer list.
+        static func statusText(state: String?, isOnline: Bool) -> String {
+            guard isOnline else { return "Offline" }
+            guard let state, !state.isEmpty else { return "Not reported" }
+            switch state.lowercased() {
+            case "ready", "idle", "operational": return "Idle"
+            default: return state.capitalized
+            }
         }
 
         private var statusColor: Color {
@@ -392,7 +377,7 @@ enum PrinterDetailFilamentActionMapping {
         if !isOnline {
             safetyReason = "Printer is offline."
         } else if isPerformingAction {
-            safetyReason = "Another printer operation is in progress."
+            safetyReason = "Command in progress."
         } else if ["printing", "paused"].contains(state ?? "") {
             safetyReason = nil
         } else if state == "starting" {
@@ -490,21 +475,28 @@ enum PrinterDetailFilamentCoverageStateMapping {
 /// (`PrinterControlsViewModel`, hoisted above the pager in
 /// `PrinterDetailView` per finding 10) should be built or replaced.
 ///
-/// Construction is gated on `controlsAvailable` so a Overview-only visit — the
-/// common case, since Advanced Printer Controls defaults off — never
-/// dispatches a capability request nobody can reach. Once an owner exists
+/// Construction is gated on `controlsAvailable` so an Overview-only visit to a
+/// printer whose controls are hidden never dispatches a capability request
+/// nobody can reach. The exception is Moonraker: `PrinterDetailView` passes
+/// `true` for every Moonraker printer, so an offline Moonraker visit still
+/// builds the owner and fetches capabilities. Once an owner exists
 /// for the CURRENT printer, this always says "no" again even if
 /// `controlsAvailable` is (still or again) `true` — an owner already built
-/// must be retained across a later transition back to unavailable (offline,
-/// or the safety toggle revoked) and forward again once more; this function
+/// must be retained across a later transition back to unavailable (for
+/// example, offline) and forward again once more; this function
 /// only ever authorizes a fresh build, never a teardown.
 enum PrinterDetailControlsOwnerMapping {
+    /// - Parameter isPrinterConfirmed: False while the page shows the farm
+    ///   list's unconfirmed cached printer (#3507). The owner is never built
+    ///   from that instance, because a same-ID canonical printer would then
+    ///   be rejected below and leave the owner pinned to cached data.
     static func shouldBuildOwner(
         existingOwnerPrinterID: UUID?,
         printerID: UUID,
-        controlsAvailable: Bool
+        controlsAvailable: Bool,
+        isPrinterConfirmed: Bool = true
     ) -> Bool {
-        guard controlsAvailable else { return false }
+        guard isPrinterConfirmed, controlsAvailable else { return false }
         return existingOwnerPrinterID != printerID
     }
 }
@@ -561,9 +553,83 @@ enum PrinterDetailCameraLifecycleMapping {
 /// Use the actual detail width, not the device family: an iPad split can be
 /// narrower than a phone in landscape. Accessibility text uses one column.
 enum PrinterDetailLayout {
+    /// Bottom space that keeps scrolled content clear of the Emergency Stop bar.
+    static let emergencyStopClearance: CGFloat = 80
+
     static func usesColumns(width: CGFloat, dynamicTypeSize: DynamicTypeSize) -> Bool {
         width >= 760 && !dynamicTypeSize.isAccessibilitySize
     }
+}
+
+/// Camera media fills the card width; a quarter-turn swaps the image's aspect ratio.
+enum PrinterDetailCameraLayout {
+    static func isQuarterTurn(_ rotation: Int) -> Bool {
+        ((rotation % 360) + 360) % 180 == 90
+    }
+
+    static func aspectRatio(imageSize: CGSize, rotation: Int) -> CGFloat? {
+        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+        return isQuarterTurn(rotation)
+            ? imageSize.height / imageSize.width
+            : imageSize.width / imageSize.height
+    }
+
+    /// Livestreams do not report their frame size; assume 16:9 before rotation.
+    static let streamImageSize = CGSize(width: 16, height: 9)
+
+    /// Media may use at most this share of the visible page height, so a
+    /// portrait (or quarter-turned) image never pushes the job off screen.
+    static let maximumHeightFraction: CGFloat = 0.6
+    static let minimumMaximumHeight: CGFloat = 180
+
+    static func maximumHeight(containerHeight: CGFloat) -> CGFloat {
+        guard containerHeight.isFinite, containerHeight > 0 else { return .infinity }
+        return max(containerHeight * maximumHeightFraction, minimumMaximumHeight)
+    }
+
+    /// Aspect-fit inside `width` x `maxHeight`: full width unless that would
+    /// exceed the height cap, in which case the media narrows and centres.
+    static func fittedSize(aspect: CGFloat, width: CGFloat, maxHeight: CGFloat) -> CGSize {
+        guard aspect > 0, width > 0 else { return .zero }
+        let height = width / aspect
+        guard height > maxHeight else { return CGSize(width: width, height: height) }
+        return CGSize(width: maxHeight * aspect, height: maxHeight)
+    }
+
+    /// Width limit that keeps aspect-fit media within `maxHeight`.
+    static func maximumWidth(aspect: CGFloat?, maxHeight: CGFloat) -> CGFloat {
+        guard let aspect, aspect > 0, maxHeight.isFinite else { return .infinity }
+        return maxHeight * aspect
+    }
+
+    #if canImport(UIKit)
+    /// The opaque top-left pixel of a slicer thumbnail, used as the print
+    /// preview card's surface so the image never sits in a mismatched inner
+    /// rectangle. Transparent or unreadable images return nil.
+    static func surfaceColor(of image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let drawn: Bool = pixel.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .none
+            // Draw so the image's top-left pixel lands in the 1x1 context.
+            context.draw(cgImage, in: CGRect(
+                x: 0, y: 1 - CGFloat(cgImage.height),
+                width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)
+            ))
+            return true
+        }
+        guard drawn, pixel[3] == 255 else { return nil }
+        return UIColor(
+            red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+            blue: CGFloat(pixel[2]) / 255, alpha: 1
+        )
+    }
+    #endif
 }
 
 struct PrinterDetailTemperatureReading: Equatable {
@@ -571,16 +637,21 @@ struct PrinterDetailTemperatureReading: Equatable {
     let target: Double?
     let isOnline: Bool
 
+    var hasMeasured: Bool { isOnline && (measured?.isFinite ?? false) }
+
     var measuredText: String {
-        guard isOnline, let measured, measured.isFinite else {
-            return String(localized: "Unavailable")
-        }
+        guard hasMeasured, let measured else { return PrinterDetailViewModel.missingValuePlaceholder }
         return measured.temperatureFormatted
+    }
+
+    /// VoiceOver form of `measuredText`; never reads the placeholder aloud.
+    var spokenMeasuredText: String {
+        hasMeasured ? measuredText : String(localized: "not reported")
     }
 
     var targetText: String {
         guard isOnline, let target, target.isFinite else {
-            return String(localized: "Unknown")
+            return String(localized: "Not reported")
         }
         return target == 0 ? String(localized: "Off") : target.temperatureFormatted
     }
@@ -592,60 +663,15 @@ struct PrinterDetailTemperatureStrip: View {
     var showsBed = true
     var identifier = "printer.detail.temperatures"
     var essentialControls = false
-    var compact = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var essentialReadingSize: CGFloat = 24
 
     var body: some View {
-        if compact {
-            compactRow
-        } else if essentialControls {
+        if essentialControls {
             essentialStrip
         } else {
             originalStrip
         }
-    }
-
-    private var compactRow: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
-            statusReading(title: "Nozzle", value: hotend)
-            if showsBed {
-                if !dynamicTypeSize.isAccessibilitySize {
-                    Rectangle()
-                        .fill(Color.pfBorder)
-                        .frame(width: 1, height: 20)
-                        .accessibilityHidden(true)
-                }
-                statusReading(title: "Bed", value: bed)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.pfBorder, lineWidth: 1)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(identifier)
-    }
-
-    private func statusReading(title: String, value: PrinterDetailTemperatureReading) -> some View {
-        HStack(spacing: 4) {
-            Text(title)
-                .foregroundStyle(Color.pfTextSecondary)
-            Text("\(value.measuredText) / \(value.targetText)")
-                .fontWeight(.semibold)
-                .monospacedDigit()
-        }
-        .font(.caption)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
     }
 
     private var originalStrip: some View {
@@ -685,7 +711,7 @@ struct PrinterDetailTemperatureStrip: View {
 
     /// Whether the heater glyph should render in its "on" color. A non-finite
     /// (NaN/Infinity) target is treated as unknown/off, matching
-    /// `compactTemperature`'s "—" rendering for the same values, rather than
+    /// `compactTemperature`'s "--" rendering for the same values, rather than
     /// incorrectly appearing to be heating.
     static func isHeatingGlyph(value: PrinterDetailTemperatureReading) -> Bool {
         value.isOnline && (value.target?.isFinite ?? false) && (value.target ?? 0) > 0
@@ -708,28 +734,25 @@ struct PrinterDetailTemperatureStrip: View {
             }
             .font(.footnote)
             .padding(.bottom, 5)
-            if dynamicTypeSize.isAccessibilitySize {
-                Text(value.measuredText).font(.system(size: essentialReadingSize)).monospacedDigit()
-                Text("Target: \(value.targetText)").font(.footnote).monospacedDigit()
-                    .foregroundStyle(Color.pfTextSecondary)
-            } else {
-                (
-                    Text(compactTemperature(value.measured, isOnline: value.isOnline))
-                        .font(.system(size: essentialReadingSize))
-                    + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
-                        .font(.footnote).foregroundColor(.pfTextSecondary)
-                )
-                .monospacedDigit()
-            }
+            (
+                Text(compactTemperature(value.measured, isOnline: value.isOnline))
+                    .font(.system(size: essentialReadingSize))
+                + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
+                    .font(.footnote).foregroundColor(.pfTextSecondary)
+            )
+            .monospacedDigit()
+            // Keep measured and target on one compact line at every text size.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 18)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
+        .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
     }
 
     private func compactTemperature(_ value: Double?, isOnline: Bool) -> String {
-        guard isOnline, let value, value.isFinite else { return "—" }
+        guard isOnline, let value, value.isFinite else { return PrinterDetailViewModel.missingValuePlaceholder }
         return "\(value.formatted(.number.precision(.fractionLength(0...1))))°"
     }
 
@@ -749,6 +772,35 @@ struct PrinterDetailTemperatureStrip: View {
         .padding(12)
         .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
+        .accessibilityLabel("\(title), measured \(value.spokenMeasuredText), target \(value.targetText)")
+    }
+}
+
+/// Compact, read-only notice shown while the page still renders the farm
+/// list's last-known printer and the canonical refresh failed (#3507). It
+/// replaces nothing: the cached content stays on screen beneath it.
+struct PrinterDetailStaleRefreshBanner: View {
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.caption)
+                .accessibilityHidden(true)
+            Text("Showing last known status")
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 8)
+            Button("Retry", action: onRetry)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("printer-detail-stale-retry")
+        }
+        .foregroundStyle(Color.pfTextSecondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .background(Color.pfWarningFill)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer-detail-stale-refresh")
     }
 }

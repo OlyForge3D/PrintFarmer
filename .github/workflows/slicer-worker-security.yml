@@ -49,6 +49,7 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA='${{ github.sha }}'
           docker build --platform linux/amd64 -f scripts/docker/dockerfiles/Dockerfile.multistage --target slicer-base -t printfarmer-slicer-base:scan-${{ github.sha }} \
+            --build-arg "SDK_TAG=$(python3 scripts/dotnet-sdk.py tag)" \
             --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" .
           echo "image=printfarmer-slicer-base:scan-${{ github.sha }}" >> $GITHUB_OUTPUT
 
@@ -117,6 +118,7 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA='${{ github.sha }}'
           docker build --platform linux/amd64 \
+            --build-arg "SDK_TAG=$(python3 scripts/dotnet-sdk.py tag)" \
             --build-arg ORCASLICER_VERSION=${{ env.ORCASLICER_VERSION }} \
             --build-arg ORCASLICER_SHA256=${{ env.ORCASLICER_SHA256 }} \
             --build-arg ALLOW_STUB=false \

@@ -498,7 +498,32 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(PrinterSensorFormatting.displayName("heater_temp_a_box1"), "Heater Temp A Box1")
     }
 
-    func testPrinterSensorGroupingAndHiddenObjectDetection() {
+    func testMoonrakerSensorExtensionsDecodeAndBooleanEnableEncodesWithoutNumericCoercion() throws {
+        let payload = """
+        {
+          "id":"extruder3","displayName":"Tool 3","kind":"Nozzle","available":true,
+          "readings":[
+            {"quantity":"MeasuredMinTemperature","value":22.5,"unit":"Celsius"},
+            {"quantity":"MeasuredMaxTemperature","value":240,"unit":"Celsius"},
+            {"quantity":"Gas","value":32000,"unit":"Ohm"}
+          ],
+          "writable":[{"quantity":"TargetTemperature","min":10,"max":280,"step":0.5,"unit":"Celsius","allowZero":true}]
+        }
+        """
+        let sensor = try decoder.decode(PrinterSensor.self, from: Data(payload.utf8))
+        XCTAssertEqual(sensor.id, "extruder3")
+        XCTAssertEqual(sensor.readings.map(\.quantity), [.measuredMinTemperature, .measuredMaxTemperature, .gas])
+        XCTAssertEqual(sensor.readings.last?.value, .number(32000))
+        XCTAssertEqual(sensor.writable.first?.allowZero, true)
+        let request = SensorControlRequest(quantity: SensorQuantity.enabled.rawValue, value: 0)
+        let encoded = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["quantity"] as? String, "Enabled")
+        XCTAssertEqual(object["value"] as? Bool, false)
+        XCTAssertTrue(String(decoding: encoded, as: UTF8.self).contains("\"value\":false"))
+    }
+
+    func testPrinterSensorIdentityAndHiddenObjectDetection() {
         let humiditySensor = PrinterSensor(
             id: "temperature_sensor heater_box1",
             displayName: "heater_box1",
@@ -531,9 +556,6 @@ final class ModelDecodingTests: XCTestCase {
             displayName: "_private",
             kind: .ambient
         )
-        XCTAssertEqual(PrinterSensorGroup.group(for: humiditySensor), .temperatures)
-        XCTAssertEqual(PrinterSensorGroup.group(for: heaterTemperature), .temperatures)
-        XCTAssertEqual(PrinterSensorGroup.group(for: genericHeater), .temperatures)
         XCTAssertEqual(heaterTemperature.id, "temperature_sensor heater_box1")
         XCTAssertEqual(genericHeater.id, "heater_generic heater_box1")
         XCTAssertFalse(PrinterSensorFormatting.isHidden(humiditySensor))
@@ -1055,6 +1077,49 @@ final class PrinterSensorModelTests: XCTestCase {
         let cached = try decode(#"[{"id":"a","displayName":"A","kind":"Bed","readings":[],"available":true,"writable":[]}]"#)
         XCTAssertEqual(PrinterSensorFormatting.merge(cached: cached, update: nil), cached)
         XCTAssertEqual(PrinterSensorFormatting.merge(cached: cached, update: []), [])
+    }
+
+    func test_steppedTarget_allowZeroTargetStepsBetweenOffAndMinimum() {
+        let d = SensorWritable(quantity: .targetTemperature, min: 30, max: 60, step: 5, unit: .celsius, allowZero: true)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 30, increasing: false, descriptor: d), 0)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 0, increasing: true, descriptor: d), 30)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 35, increasing: false, descriptor: d), 30)
+        let noZero = SensorWritable(quantity: .targetTemperature, min: 30, max: 60, step: 5, unit: .celsius)
+        XCTAssertEqual(PrinterSensorFormatting.steppedTarget(current: 30, increasing: false, descriptor: noZero), 30)
+    }
+
+    func test_steppableDescriptors_leavePrimaryHeaterTargetsToHeatAndSkipEnabledSwitches() {
+        let target = SensorWritable(quantity: .targetTemperature, min: 0, max: 300, step: 1, unit: .celsius, allowZero: true)
+        let enabled = SensorWritable(quantity: .enabled, min: 0, max: 1, step: 1, unit: .none)
+        let nozzle = PrinterSensor(id: "extruder", displayName: "Extruder", kind: .nozzle, writable: [target])
+        let secondNozzle = PrinterSensor(id: "extruder1", displayName: "Extruder 1", kind: .nozzle, writable: [target])
+        let bed = PrinterSensor(id: "heater_bed", displayName: "Bed", kind: .bed, writable: [target])
+        let chamber = PrinterSensor(id: "chamber", displayName: "Chamber", kind: .chamber, writable: [target])
+        let runout = PrinterSensor(id: "runout", displayName: "Runout", kind: .filamentRunout, writable: [enabled])
+
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(nozzle, activeExtruderId: nil).isEmpty)
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(bed, activeExtruderId: nil).isEmpty)
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(secondNozzle, activeExtruderId: nil), [target])
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(secondNozzle, activeExtruderId: "extruder1").isEmpty)
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(nozzle, activeExtruderId: "extruder1"), [target])
+        XCTAssertEqual(PrinterSensorFormatting.steppableDescriptors(chamber, activeExtruderId: nil), [target])
+        XCTAssertTrue(PrinterSensorFormatting.steppableDescriptors(runout, activeExtruderId: nil).isEmpty)
+    }
+
+    func test_isFan_coversFanKindAndAnyFanRoleIncludingTemperatureFans() {
+        let target = SensorWritable(quantity: .targetTemperature, min: 0, max: 80, step: 1, unit: .celsius)
+        let temperatureFan = PrinterSensor(id: "rpi_fan", displayName: "Rpi Fan", kind: .fan, fanRole: .auxiliary, writable: [target])
+        let roleOnly = PrinterSensor(id: "x", displayName: "X", kind: .other, fanRole: .controller)
+        let chamber = PrinterSensor(id: "chamber", displayName: "Chamber", kind: .chamber, writable: [target])
+        XCTAssertTrue(PrinterSensorFormatting.isFan(temperatureFan))
+        XCTAssertTrue(PrinterSensorFormatting.isFan(roleOnly))
+        XCTAssertFalse(PrinterSensorFormatting.isFan(chamber))
+    }
+
+    func test_missingSensorValuesUseDashPlaceholderAndNotReportedSpeech() {
+        let reading = SensorReading(quantity: .temperature, value: .number(.nan), unit: .celsius)
+        XCTAssertEqual(PrinterSensorFormatting.valueText(reading), "--")
+        XCTAssertEqual(PrinterSensorFormatting.spokenValue(reading), "not reported")
     }
 
     func test_capabilityFlagsDefaultFalseAndDecodeTrue() throws {

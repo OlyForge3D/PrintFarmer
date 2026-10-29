@@ -156,6 +156,48 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(dto.supportsStartPrint, true)
     }
 
+    func testWireDto_runtimeFactorCapabilitiesMapExactlyAndFailClosed() throws {
+        let cases: [(String, Bool, Bool)] = [
+            (#""supportsSpeedFactorControl": true, "supportsFlowFactorControl": false,"#, true, false),
+            (#""supportsSpeedFactorControl": false, "supportsFlowFactorControl": true,"#, false, true),
+            (#""supportsSpeedFactorControl": null,"#, false, false),
+            ("", false, false),
+        ]
+        for (fields, speed, flow) in cases {
+            let json = Data("""
+            { \(fields) "printerId": "550e8400-e29b-41d4-a716-446655440000", "backend": "Moonraker" }
+            """.utf8)
+            let dto = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            let caps = PrinterBackendCapabilities(wire: dto)
+            XCTAssertEqual(caps.supportsSpeedFactorControl, speed, fields)
+            XCTAssertEqual(caps.supportsFlowFactorControl, flow, fields)
+            XCTAssertEqual(RuntimeFactor.speed.isSupported(by: caps), speed)
+            XCTAssertEqual(RuntimeFactor.flow.isSupported(by: caps), flow)
+        }
+        XCTAssertFalse(RuntimeFactor.speed.isSupported(by: nil))
+        XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsSpeedFactorControl)
+        XCTAssertFalse(PrinterBackendCapabilities.fallback(for: .moonraker).supportsFlowFactorControl)
+    }
+
+    func testRuntimeFactorValidatesBoundsPrecisionAndSteps() {
+        for valid in [1, 87.5, 99.99, 100, 200] {
+            XCTAssertTrue(RuntimeFactor.isValidPercent(valid), "\(valid)")
+        }
+        for invalid in [0, 0.99, 200.01, 1.234, -1, .nan, .infinity] {
+            XCTAssertFalse(RuntimeFactor.isValidPercent(invalid), "\(invalid)")
+        }
+        XCTAssertEqual(RuntimeFactor.steppedPercent(from: 100, delta: 5), 105)
+        XCTAssertEqual(RuntimeFactor.steppedPercent(from: 87.5, delta: 5), 92.5)
+        XCTAssertEqual(RuntimeFactor.steppedPercent(from: 198, delta: 5), 200, "Clamps to the verified maximum")
+        XCTAssertEqual(RuntimeFactor.steppedPercent(from: 3, delta: -5), 1, "Clamps to the verified minimum")
+        XCTAssertEqual(RuntimeFactor.steppedPercent(from: 250, delta: -5), 200)
+        XCTAssertNil(RuntimeFactor.steppedPercent(from: 200, delta: 5))
+        XCTAssertNil(RuntimeFactor.steppedPercent(from: 1, delta: -5))
+        XCTAssertNil(RuntimeFactor.steppedPercent(from: nil, delta: 5), "Unknown readback is never treated as 100")
+        XCTAssertEqual(RuntimeFactor.speed.pathComponent, "speed-factor")
+        XCTAssertEqual(RuntimeFactor.flow.pathComponent, "flow-factor")
+    }
+
     // Validates that optional fields absent from the wire response decode as nil
     // (graceful forward-compat: future backends may omit unsupported flags).
     func testWireDto_missingOptionalFields_decodedAsNil() throws {
@@ -210,5 +252,20 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsFilamentUnload)
         XCTAssertFalse(caps.supportsFilamentChange)
         XCTAssertEqual(caps.supportedAxes, ["X", "Y"])
+        XCTAssertFalse(caps.supportsTemperatureControlDuringPrint, "Absent evidence stays false")
+        XCTAssertFalse(caps.supportsHeaterShutdown, "Absent evidence stays false")
+    }
+
+    func testHeatDuringPrintAndHeaterShutdownDecodeFromWire() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "supportsHotendTemperature":true,"supportsTemperatureControlDuringPrint":true,
+         "supportsHeaterShutdown":true}
+        """.utf8)
+        let caps = PrinterBackendCapabilities(
+            wire: try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        )
+        XCTAssertTrue(caps.supportsTemperatureControlDuringPrint)
+        XCTAssertTrue(caps.supportsHeaterShutdown)
     }
 }

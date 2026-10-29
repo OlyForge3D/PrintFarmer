@@ -152,16 +152,19 @@ public sealed class MoonrakerSensorMapperTests
             (PrinterSensorQuantity.Humidity, 40.5, PrinterSensorUnit.Percent),
             (PrinterSensorQuantity.Pressure, 1012.3, PrinterSensorUnit.HectoPascal),
             (PrinterSensorQuantity.Gas, 52000d, PrinterSensorUnit.Ohm));
-        Readings(sensors["temperature_sensor mcu_temp"]).Should().Equal((PrinterSensorQuantity.Temperature, 45d, PrinterSensorUnit.Celsius));
+        Readings(sensors["temperature_sensor mcu_temp"]).Should().Equal(
+            (PrinterSensorQuantity.Temperature, 45d, PrinterSensorUnit.Celsius),
+            (PrinterSensorQuantity.MeasuredMinTemperature, 30d, PrinterSensorUnit.Celsius),
+            (PrinterSensorQuantity.MeasuredMaxTemperature, 50d, PrinterSensorUnit.Celsius));
         Readings(sensors["sht3x enclosure"]).Should().Equal(
             (PrinterSensorQuantity.Temperature, 30d, PrinterSensorUnit.Celsius),
             (PrinterSensorQuantity.Humidity, 55d, PrinterSensorUnit.Percent));
         Readings(sensors["filament_switch_sensor runout"]).Should().Equal(
             (PrinterSensorQuantity.FilamentDetected, true, PrinterSensorUnit.None),
-            (PrinterSensorQuantity.Other, false, PrinterSensorUnit.None));
+            (PrinterSensorQuantity.Enabled, false, PrinterSensorUnit.None));
         Readings(sensors["filament_motion_sensor encoder"]).Should().Equal(
             (PrinterSensorQuantity.FilamentDetected, false, PrinterSensorUnit.None),
-            (PrinterSensorQuantity.Other, true, PrinterSensorUnit.None));
+            (PrinterSensorQuantity.Enabled, true, PrinterSensorUnit.None));
     }
 
     [Fact]
@@ -174,10 +177,16 @@ public sealed class MoonrakerSensorMapperTests
         sensors["fan_generic aux"].Writable.Should().Equal(
             new PrinterSensorWritableDto(PrinterSensorQuantity.FanSpeed, 0, 100, 1, PrinterSensorUnit.Percent));
         sensors["temperature_fan exhaust_fan"].Writable.Should().Equal(
-            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 70, null, PrinterSensorUnit.Celsius));
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 70, null, PrinterSensorUnit.Celsius) { AllowZero = true });
         sensors["heater_generic chamber_heater"].Writable.Should().Equal(
-            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 80, null, PrinterSensorUnit.Celsius));
-        sensors.Where(pair => pair.Key is not ("fan" or "fan_generic aux" or "temperature_fan exhaust_fan" or "heater_generic chamber_heater"))
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 80, null, PrinterSensorUnit.Celsius) { AllowZero = true });
+        foreach (string id in new[] { "filament_switch_sensor runout", "filament_motion_sensor encoder" })
+        {
+            sensors[id].Writable.Should().Equal(
+                new PrinterSensorWritableDto(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None));
+        }
+
+        sensors.Where(pair => pair.Key is not ("fan" or "fan_generic aux" or "temperature_fan exhaust_fan" or "heater_generic chamber_heater" or "filament_switch_sensor runout" or "filament_motion_sensor encoder"))
             .Should().OnlyContain(pair => pair.Value.Writable.Count == 0);
     }
 
@@ -226,9 +235,9 @@ public sealed class MoonrakerSensorMapperTests
             (PrinterSensorQuantity.Temperature, 24.26, PrinterSensorUnit.Celsius),
             (PrinterSensorQuantity.Humidity, 34d, PrinterSensorUnit.Percent));
         sensors["heater_generic chamber"].Writable.Should().Equal(
-            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 10, 65, null, PrinterSensorUnit.Celsius));
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 10, 65, null, PrinterSensorUnit.Celsius) { AllowZero = true });
         sensors["heater_generic heater_box1"].Writable.Should().Equal(
-            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 90, null, PrinterSensorUnit.Celsius));
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 0, 90, null, PrinterSensorUnit.Celsius) { AllowZero = true });
         foreach (string id in new[] { "chamber_fan chamber_fan", "box_heater_fan heater_fan_a_box1", "heater_fan hotend_fan" })
         {
             sensors[id].Kind.Should().Be(PrinterSensorKind.Fan);
@@ -242,7 +251,7 @@ public sealed class MoonrakerSensorMapperTests
         sensors["chamber_fan chamber_fan"].FanRole.Should().Be(PrinterFanRole.Chamber);
         Readings(sensors["filament_switch_sensor fila"]).Should().Equal(
             (PrinterSensorQuantity.FilamentDetected, true, PrinterSensorUnit.None),
-            (PrinterSensorQuantity.Other, false, PrinterSensorUnit.None));
+            (PrinterSensorQuantity.Enabled, false, PrinterSensorUnit.None));
         Readings(sensors["fan_generic chamber_circulation_fan"]).Should().Equal(
             (PrinterSensorQuantity.FanSpeed, 0d, PrinterSensorUnit.Percent));
         sensors["fan_generic chamber_circulation_fan"].Writable.Should().Equal(
@@ -260,7 +269,7 @@ public sealed class MoonrakerSensorMapperTests
         IReadOnlySet<string> objects = new HashSet<string>(["heater_generic chamber"]);
 
         MoonrakerSensorMapper.GetWritable("heater_generic chamber", settings).Should().Equal(
-            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, min, max, null, PrinterSensorUnit.Celsius));
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, min, max, null, PrinterSensorUnit.Celsius) { AllowZero = true });
         MoonrakerSensorMapper.TryBuildCommand("heater_generic chamber", PrinterSensorQuantity.TargetTemperature, min - 1, objects, settings)
             .Should().BeNull();
         MoonrakerSensorMapper.TryBuildCommand("heater_generic chamber", PrinterSensorQuantity.TargetTemperature, max + 1, objects, settings)
@@ -278,6 +287,62 @@ public sealed class MoonrakerSensorMapperTests
 
         MoonrakerSensorMapper.GetWritable("heater_generic chamber", MoonrakerSensorMapper.ReadSettings(document.RootElement))
             .Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("extruder", 250)]
+    [InlineData("extruder1", 260)]
+    [InlineData("extruder2", 270)]
+    [InlineData("extruder3", 280)]
+    [InlineData("heater_bed", 110)]
+    public void TryBuildCommand_ConfiguredHeaters_AddressesExactObjectAndEnforcesItsLimits(string id, double max)
+    {
+        using JsonDocument document = JsonDocument.Parse(JsonSerializer.Serialize(
+            new Dictionary<string, object> { [id] = new { min_temp = 10, max_temp = max } }));
+        Dictionary<string, MoonrakerSectionSettings> settings = MoonrakerSensorMapper.ReadSettings(document.RootElement);
+        IReadOnlySet<string> objects = new HashSet<string>(["extruder", "extruder1", "extruder2", "extruder3", "heater_bed"]);
+
+        MoonrakerSensorMapper.GetWritable(id, settings).Should().Equal(
+            new PrinterSensorWritableDto(PrinterSensorQuantity.TargetTemperature, 10, max, null, PrinterSensorUnit.Celsius) { AllowZero = true });
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 200 > max ? 100 : 200, objects, settings)
+            .Should().Be($"SET_HEATER_TEMPERATURE HEATER={id} TARGET={(200 > max ? 100 : 200)}");
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, max + 1, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 5, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 1e-9, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, -1e-9, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.TargetTemperature, 0, objects, settings)
+            .Should().Be($"SET_HEATER_TEMPERATURE HEATER={id} TARGET=0");
+    }
+
+    [Theory]
+    [InlineData("filament_switch_sensor runout")]
+    [InlineData("filament_motion_sensor runout")]
+    public void TryBuildCommand_FilamentEnablement_UsesExactDiscoveredSafeName(string id)
+    {
+        IReadOnlySet<string> objects = new HashSet<string>([id]);
+        Dictionary<string, MoonrakerSectionSettings> settings = new();
+
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.Enabled, 1, objects, settings)
+            .Should().Be("SET_FILAMENT_SENSOR SENSOR=runout ENABLE=1");
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.Enabled, 0, objects, settings)
+            .Should().Be("SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0");
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.Enabled, 0.5, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand(id, PrinterSensorQuantity.Enabled, 2, objects, settings).Should().BeNull();
+        MoonrakerSensorMapper.TryBuildCommand("filament_switch_sensor missing", PrinterSensorQuantity.Enabled, 1, objects, settings).Should().BeNull();
+    }
+
+    [Fact]
+    public void Snapshot_RawBme680Driver_PreservesGasAndUnits()
+    {
+        var tracker = new MoonrakerSensorTracker();
+        tracker.Discover(["bme280 ambient"]);
+        Apply(tracker, """{"bme280 ambient":{"temperature":24.5,"pressure":1012,"humidity":45,"gas":123456}}""", T0);
+
+        Readings(Assert.Single(tracker.Snapshot())).Should().Equal(
+            (PrinterSensorQuantity.Temperature, 24.5, PrinterSensorUnit.Celsius),
+            (PrinterSensorQuantity.Humidity, 45d, PrinterSensorUnit.Percent),
+            (PrinterSensorQuantity.Pressure, 1012d, PrinterSensorUnit.HectoPascal),
+            (PrinterSensorQuantity.Gas, 123456d, PrinterSensorUnit.Ohm));
     }
 
     [Fact]
@@ -348,6 +413,33 @@ public sealed class MoonrakerSensorMapperTests
         Apply(tracker, status, T0);
 
         tracker.HasSensors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Discover_ConfigurationWasLoaded_RevokesLimitsUntilNewSettingsArrive()
+    {
+        MoonrakerSensorTracker tracker = DiscoverAndApply();
+        ById(tracker)["heater_generic chamber_heater"].Writable.Should().NotBeEmpty();
+
+        tracker.Discover(AllObjects);
+        Apply(tracker, """{"heater_generic chamber_heater":{"temperature":30,"target":0}}""", T0.AddSeconds(1));
+
+        PrinterSensorDto sensor = ById(tracker)["heater_generic chamber_heater"];
+        sensor.Available.Should().BeTrue();
+        sensor.Writable.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MarkAllUnavailable_ConfigurationWasLoaded_DoesNotRestoreLimitsOnReadingOnlyUpdate()
+    {
+        MoonrakerSensorTracker tracker = DiscoverAndApply();
+        tracker.MarkAllUnavailable().Should().BeTrue();
+        tracker.MarkAllUnavailable().Should().BeFalse();
+        Apply(tracker, """{"heater_generic chamber_heater":{"temperature":30,"target":0}}""", T0.AddSeconds(1));
+
+        PrinterSensorDto sensor = ById(tracker)["heater_generic chamber_heater"];
+        sensor.Available.Should().BeTrue();
+        sensor.Writable.Should().BeEmpty();
     }
 
     [Fact]

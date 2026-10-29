@@ -213,6 +213,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         {
             new { Name = "create", DisplayName = "Create", Description = "Create new resources" },
             new { Name = "read", DisplayName = "Read", Description = "View and read resources" },
+            new { Name = "copy", DisplayName = "Copy", Description = "Copy an observed printer file into owned local storage" },
             new { Name = "update", DisplayName = "Update", Description = "Modify existing resources" },
             new { Name = "delete", DisplayName = "Delete", Description = "Remove resources" },
             new { Name = "execute", DisplayName = "Execute", Description = "Execute operations on resources" },
@@ -301,8 +302,8 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         var resources = new[]
         {
             new { Name = "printers", DisplayName = "Printers", ResourceType = "printer", Description = "3D printer management" },
-            new { Name = "gcode_harvest", DisplayName = "G-code Harvest", ResourceType = "harvest", Description = "G-code file harvesting operations" },
             new { Name = "gcode_library", DisplayName = "G-code Library", ResourceType = "library", Description = "G-code file library management" },
+            new { Name = "printer_files", DisplayName = "Printer Files", ResourceType = "printer", Description = "Permission-filtered remote file metadata, explicit local copying and separately authorized remote deletion" },
             new { Name = "job_queue", DisplayName = "Print Job Queue (legacy admin overrides)", ResourceType = "queue", Description = "Administrative print-job retry/approval overrides (RetriesController, PrintApprovalsController). Distinct from \"queue\", which gates the calibration/dispatch queue actions that farm_user can hold; job_queue is farm_admin-only by design." },
             new { Name = "slicer_engines", DisplayName = "Slicer Engines (admin management)", ResourceType = "slicer", Description = "Administrative slicer worker/engine management (Slicer host admin endpoints, SlicerHub). Distinct from \"slicing\", which gates the farm_user-reachable slice-submit/artifact/promote actions; slicer_engines is farm_admin-only by design." },
             new { Name = "users", DisplayName = "Users", ResourceType = "system", Description = "User account management" },
@@ -420,6 +421,8 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 ("printers", "execute"),
                 ("gcode_library", "read"),
                 ("gcode_library", "create"),
+                ("printer_files", "read"),
+                ("printer_files", "copy"),
                 ("job_queue", "read"),
                 ("job_queue", "create"),
                 ("spoolman", "read"),

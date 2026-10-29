@@ -137,11 +137,6 @@ public static class PrinterSensorNormalizer
             return new(PrinterSensorControlValidationCode.UnknownSensor, $"Sensor '{sensorId}' is not reported by this printer.");
         }
 
-        if (!sensor.Available)
-        {
-            return new(PrinterSensorControlValidationCode.SensorUnavailable, $"Sensor '{sensor.Id}' is not currently available.");
-        }
-
         if (sensor.Writable.Count == 0)
         {
             return new(PrinterSensorControlValidationCode.ReadOnly, $"Sensor '{sensor.Id}' is read-only.");
@@ -153,9 +148,21 @@ public static class PrinterSensorNormalizer
             return new(PrinterSensorControlValidationCode.UnsupportedQuantity, $"Sensor '{sensor.Id}' does not accept {quantity}.");
         }
 
+        if (quantity == PrinterSensorQuantity.Enabled)
+        {
+            return value.IsBoolean
+                ? new(PrinterSensorControlValidationCode.Valid, null, sensor.Id, descriptor)
+                : new(PrinterSensorControlValidationCode.InvalidValue, "Enabled requires a boolean value.");
+        }
+
         if (value.Number is not double number || !double.IsFinite(number))
         {
             return new(PrinterSensorControlValidationCode.InvalidValue, $"{quantity} requires a finite numeric value.");
+        }
+
+        if (number.Equals(0d) && descriptor.AllowZero && quantity == PrinterSensorQuantity.TargetTemperature)
+        {
+            return new(PrinterSensorControlValidationCode.Valid, null, sensor.Id, descriptor);
         }
 
         if (number < descriptor.Min || number > descriptor.Max)
@@ -209,7 +216,9 @@ public static class PrinterSensorNormalizer
                         double.IsFinite(writable.Min) &&
                         double.IsFinite(writable.Max) &&
                         writable.Min <= writable.Max &&
-                        (writable.Step is null || (writable.Step is double step && double.IsFinite(step) && step > 0))),
+                        (writable.Step is null || (writable.Step is double step && double.IsFinite(step) && step > 0)) &&
+                        (writable.Quantity != PrinterSensorQuantity.Enabled ||
+                            writable is { Min: 0, Max: 1, Step: 1, Unit: PrinterSensorUnit.None })),
                     writable => writable.Quantity),
         };
     }

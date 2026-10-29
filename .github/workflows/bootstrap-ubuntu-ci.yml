@@ -6,6 +6,8 @@ on:
     branches: [main, development]
     paths:
       - 'scripts/bootstrap-ubuntu.sh'
+      - 'scripts/dotnet-sdk.*'
+      - 'global.json'
       - '.github/workflows/bootstrap-ubuntu-ci.yml'
 
 jobs:
@@ -18,19 +20,17 @@ jobs:
       - name: Ensure sudo available
         run: sudo true
 
-      - name: Install .NET 10 SDK via dotnet-install.sh
-        run: |
-          # .NET 10 is not yet available via Microsoft apt repo, use dotnet-install.sh
-          chmod +x ./scripts/dotnet-install.sh
-          ./scripts/dotnet-install.sh --version 10.0.101
-          echo "$HOME/.dotnet" >> $GITHUB_PATH
-        env:
-          DOTNET_INSTALL_DIR: ${{ github.workspace }}/.dotnet
+      - name: Install approved .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Run bootstrap script (verify)
         run: |
           chmod +x scripts/bootstrap-ubuntu.sh
-          sudo -E bash ./scripts/bootstrap-ubuntu.sh --verify
+          bash ./scripts/bootstrap-ubuntu.sh --verify
         env:
-          DOTNET_VERSION: '10.0.101'
           NODE_VERSION: '24'

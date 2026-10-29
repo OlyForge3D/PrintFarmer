@@ -174,13 +174,13 @@
         },
         {
           "name": "printers",
-          "namespacePrefixes": ["Services/Printers", "Services/Cameras", "Locations", "Discovery", "Services/Catalog"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Printers.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cameras.|FullyQualifiedName~Farm.Infrastructure.Tests.Locations.|FullyQualifiedName~Farm.Infrastructure.Tests.Discovery.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Catalog."
+          "namespacePrefixes": ["Services/Printers", "Services/Cameras", "Locations", "Discovery", "Services/Catalog", "Services/PrinterFileAccessServiceTests", "Services/PrinterFileDeleteAccessTests", "Services/PrinterFileLeaseCoordinatorTests"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Printers.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cameras.|FullyQualifiedName~Farm.Infrastructure.Tests.Locations.|FullyQualifiedName~Farm.Infrastructure.Tests.Discovery.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Catalog.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.PrinterFileAccessServiceTests.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.PrinterFileDeleteAccessTests.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.PrinterFileLeaseCoordinatorTests."
         },
         {
           "name": "slicing",
-          "namespacePrefixes": ["Infrastructure", "Builders", "Services/Sync", "Services/ReleaseUpdates", "Services/GcodeHarvest"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Infrastructure.|FullyQualifiedName~Farm.Infrastructure.Tests.Builders.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Sync.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.ReleaseUpdates.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.GcodeHarvest."
+          "namespacePrefixes": ["Infrastructure", "Builders", "Services/Sync", "Services/ReleaseUpdates"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Infrastructure.|FullyQualifiedName~Farm.Infrastructure.Tests.Builders.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Sync.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.ReleaseUpdates."
         },
         {
           "name": "filament",

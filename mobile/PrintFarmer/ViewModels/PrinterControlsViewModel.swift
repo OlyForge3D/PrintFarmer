@@ -3,26 +3,38 @@ import Foundation
 
 // MARK: - Public Types
 
-enum PreheatPreset: String, Equatable, Sendable {
-    case pla, petg, abs, coolDown
+enum PreheatPreset: String, CaseIterable, Equatable, Sendable {
+    case pla, petg, abs, asa, tpu, pc, nylon, coolDown
 
-    var hotend: Double {
+    /// Display name plus nozzle/bed targets in °C. This table is the only
+    /// place preset values live; views and tests read from it. PC and Nylon
+    /// are capped for PTFE-lined hotends: they are preheat values, not
+    /// print temperatures.
+    struct Definition: Equatable, Sendable {
+        let name: String
+        let hotend: Double
+        let bed: Double
+    }
+
+    var definition: Definition {
         switch self {
-        case .pla: return 200
-        case .petg: return 240
-        case .abs: return 240
-        case .coolDown: return 0
+        case .pla: Definition(name: "PLA", hotend: 200, bed: 60)
+        case .petg: Definition(name: "PETG", hotend: 230, bed: 80)
+        case .abs: Definition(name: "ABS", hotend: 245, bed: 100)
+        case .asa: Definition(name: "ASA", hotend: 245, bed: 100)
+        case .tpu: Definition(name: "TPU", hotend: 220, bed: 50)
+        case .pc: Definition(name: "PC", hotend: 260, bed: 110)
+        case .nylon: Definition(name: "Nylon", hotend: 250, bed: 80)
+        case .coolDown: Definition(name: "Cool down", hotend: 0, bed: 0)
         }
     }
 
-    var bed: Double {
-        switch self {
-        case .pla: return 60
-        case .petg: return 80
-        case .abs: return 100
-        case .coolDown: return 0
-        }
-    }
+    var hotend: Double { definition.hotend }
+    var bed: Double { definition.bed }
+
+    /// Materials on the Heat row, then those behind the "More" menu.
+    static let rowMaterials: [PreheatPreset] = [.pla, .petg, .abs]
+    static let menuMaterials: [PreheatPreset] = [.asa, .tpu, .pc, .nylon]
 }
 
 struct ControlCommand: Equatable, Sendable {
@@ -38,14 +50,14 @@ struct ControlCommand: Equatable, Sendable {
 
     var section: Section {
         switch kind {
-        case .preheat, .heater, .heaterTargets:
+        case .preheat, .heater, .sensorControl:
             return .heat
         case .home, .jog, .moveTo, .disableMotors,
              .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
             return .motion
         case .extrusion, .filament:
             return .material
-        case .fanSpeed, .transientZOffset, .sensorControl:
+        case .transientZOffset, .runtimeFactor:
             return .runtime
         }
     }
@@ -60,7 +72,6 @@ struct ControlCommand: Equatable, Sendable {
         case home(axes: [String])
         case jog(axis: String, distanceMm: Double)
         case heater(Heater, target: Double)
-        case heaterTargets(hotend: Double?, bed: Double?)
         case moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)
         case disableMotors
         case extrusion(distanceMm: Double, feedrateMmMin: Int)
@@ -69,9 +80,9 @@ struct ControlCommand: Equatable, Sendable {
         case calibrationPosition(target: SafetyVector3Dto, centered: Bool)
         case calibrationAdjust(delta: Double, target: SafetyVector3Dto)
         case calibrationSave(offsetMm: Double)
-        case fanSpeed(targetPercent: Int)
-        case transientZOffset(targetMm: Double, deltaMm: Double)
+        case transientZOffset(targetMm: Double?, deltaMm: Double)
         case sensorControl(sensorId: String, quantity: SensorQuantity, value: Double)
+        case runtimeFactor(RuntimeFactor, percent: Double)
     }
 }
 
@@ -82,89 +93,21 @@ enum PhysicalFilamentOperation: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum PhysicalFilamentCommandEligibility {
-    static let minimumLoadUnloadTemperatureC = 220.0
-
     static func blockedReason(
         for operation: PhysicalFilamentOperation,
-        capabilities: PrinterBackendCapabilities?,
-        status: PrinterStatusDetail?,
-        configurationRevision: Int64,
-        now: Date
+        capabilities: PrinterBackendCapabilities?
     ) -> String? {
         guard let capabilities else { return "\(operation.title): backend capabilities are unavailable." }
         let supported: Bool
-        let evidence: VerifiedSafetyOperationCapabilityDto?
         switch operation {
         case .load:
             supported = capabilities.supportsFilamentLoad
-            evidence = capabilities.verifiedSafety?.operations.filamentLoad
         case .unload:
             supported = capabilities.supportsFilamentUnload
-            evidence = capabilities.verifiedSafety?.operations.filamentUnload
         case .change:
             supported = capabilities.supportsFilamentChange
-            evidence = capabilities.verifiedSafety?.operations.filamentChange
         }
-        guard supported else {
-            return "\(operation.title) is unavailable: no verified per-operation backend/macro support."
-        }
-        guard let safety = capabilities.verifiedSafety else {
-            return "\(operation.title): backend did not provide verified safety data. Refresh safety checks."
-        }
-        guard safety.contractVersion == 1 else {
-            return "\(operation.title): verified safety contract version is unsupported. Refresh safety checks."
-        }
-        guard safety.discovery.state != .unavailable else {
-            return "\(operation.title): verified safety discovery is unavailable. Refresh safety checks."
-        }
-        guard safety.discovery.sourceRevision == String(configurationRevision) else {
-            return "\(operation.title): verified safety discovery does not match the current printer configuration. Refresh safety checks."
-        }
-        guard let discoveryObservedAt = safety.discovery.observedAtUtc,
-              discoveryObservedAt <= now else {
-            return "\(operation.title): verified safety discovery timestamp is invalid. Refresh safety checks."
-        }
-        guard let evidence else { return "\(operation.title): verified support is unknown. Refresh safety checks." }
-        if evidence.support == .unsupported {
-            return "\(operation.title) is unsupported by the authoritative printer probe. Use the printer's supported procedure."
-        }
-        guard evidence.support == .supported,
-              hasProvenance(evidence.source, evidence.observedAtUtc, discoveryObservedAt: discoveryObservedAt, now: now) else {
-            return "\(operation.title): verified support or its provenance is unknown. Refresh safety checks."
-        }
-
-        let floor = operation == .load || operation == .unload
-            ? minimumLoadUnloadTemperatureC
-            : nil
-        let minimum = safety.extrusion.minimumSafeMeasuredHotendTemperatureC
-        let requiredTemperature: Double
-        if minimum.state == .verified,
-           let value = minimum.value, value.isFinite,
-           hasProvenance(minimum.source, minimum.observedAtUtc, discoveryObservedAt: discoveryObservedAt, now: now) {
-            requiredTemperature = max(value, floor ?? value)
-        } else if minimum.state == .unknown, let floor {
-            requiredTemperature = floor
-        } else {
-            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
-        }
-
-        guard let measured = status?.safetyTelemetry?.measuredHotendTemperatureC,
-              measured.isFresh(at: now), let temperature = measured.value, temperature.isFinite else {
-            return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
-        }
-        return temperature >= requiredTemperature ? nil :
-            "Measured hotend is below the required minimum of \(requiredTemperature.formatted()) °C. Use Hotend preheat, then refresh safety checks."
-    }
-
-    private static func hasProvenance(
-        _ source: String?,
-        _ observedAt: Date?,
-        discoveryObservedAt: Date,
-        now: Date
-    ) -> Bool {
-        guard let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let observedAt else { return false }
-        return observedAt <= now && observedAt <= discoveryObservedAt
+        return supported ? nil : "\(operation.title) is unavailable on this backend."
     }
 }
 
@@ -177,6 +120,8 @@ enum MaterialControlInput {
     static let distances = [10.0, 25, 50, 100]
     static let speeds = [1, 5, 10]
     static let increments = [0.01, 0.05, 0.1]
+    /// Live babystep deltas offered on the Tune segment; adjustments round to 0.001 mm.
+    static let babystepIncrements = [0.005, 0.01, 0.025, 0.05]
 
     static func feedrate(distance: Double, speed: Int) throws -> Int {
         guard distance.isFinite, distances.contains(abs(distance)), speeds.contains(speed) else {
@@ -207,7 +152,7 @@ enum ControlNumberInput {
     static let absoluteCoordinatesMessage = "Enter destination coordinate in mm for X, Y, or Z. Unspecified axes remain unchanged."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
-    static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
+    static let customFeedrateMessage = "Leave this field blank to use the default movement feedrate."
 
     static func optional(_ text: String) throws -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -360,7 +305,24 @@ final class PrinterControlsViewModel: ObservableObject {
     static let xyFeedrateMmMin: Int = 3000
     static let zFeedrateMmMin: Int = 600
 
+    /// Shared by every blocked reason that reports an in-flight operation.
+    static let operationPendingReason = "Command pending."
+
     @Published private(set) var capabilities: PrinterBackendCapabilities?
+    /// Defense-in-depth latch: set when `configureAccess` is handed a
+    /// registered server other than this model's own, after which late
+    /// readbacks and 501 responses for the old server must never update it.
+    ///
+    /// The production lifecycle (`PrinterControlsAccessLifecycle.configure`)
+    /// always passes this model's own `registeredServerID`, so it never sets
+    /// this flag. A production server switch is instead blocked by the access
+    /// check ("Server changed. Reopen this printer."), which cancels pending
+    /// work and leaves the open detail blocked; a fresh model for the new
+    /// composition is built only when the user reopens the printer. The
+    /// latch is kept, and covered by `PrinterControlsViewModelTests`, so any
+    /// future caller that passes the live selected server cannot let a stale
+    /// model absorb another server's responses.
+    private var isRetired = false
     @Published private(set) var lastError: ControlsError?
     @Published private(set) var pendingCommand: ControlCommand? {
         didSet {
@@ -414,7 +376,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private var commandStateInvalidated = false
     private var lifecycleGeneration = 0
 
-    private(set) var printer: Printer
+    @Published private(set) var printer: Printer
 
     private let printerService: any PrinterServiceProtocol
     private let clock: @Sendable () -> Date
@@ -548,6 +510,8 @@ final class PrinterControlsViewModel: ObservableObject {
             printer.state = status.state
             printer.fanSpeedPercent = status.fanSpeedPercent
             printer.liveZOffsetMm = status.liveZOffsetMm
+            printer.speedFactorPercent = status.speedFactorPercent
+            printer.flowFactorPercent = status.flowFactorPercent
             if let sensors = status.sensors { printer.sensors = sensors }
             safetyCheckedAt = clock()
             safetyReadError = nil
@@ -630,26 +594,13 @@ final class PrinterControlsViewModel: ObservableObject {
         return nil
     }
 
-    private var materialTemperatureBlockedReason: String? {
-        if let reason = safetyEvidenceBlockedReason { return reason }
-        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC,
-              minimum.state == .verified, let value = minimum.value, value.isFinite,
-              hasProvenance(minimum.source, minimum.observedAtUtc) else {
-            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
-        }
-        guard let measured = safetyStatus?.safetyTelemetry?.measuredHotendTemperatureC,
-              measured.isFresh(at: clock()), let temperature = measured.value, temperature.isFinite else {
-            return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
-        }
-        return temperature >= value ? nil :
-            "Measured hotend is below the verified minimum of \(value.formatted()) °C. Use Hotend preheat, then refresh safety checks."
-    }
-
     func configureAccess(
         serverID: UUID?,
         _ check: @escaping @MainActor () -> String?
     ) {
         guard let serverID, composition != nil, registeredServerID == serverID else {
+            // A different registered server can never become this model's server again.
+            if serverID != nil { isRetired = true }
             deactivate()
             return
         }
@@ -695,7 +646,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if commandTask != nil, commandWasDispatched {
             // Canceling an observer cannot recall a physical command. Keep
             // both the response and its single-flight owner until it settles.
-            commandNotice = "Stopped waiting for telemetry. The request outcome is unresolved; routine controls remain locked. The printer may still execute the request."
+            commandNotice = "Stopped waiting for telemetry. The request outcome is unresolved; the printer may still execute the request."
             return
         }
         commandTask?.cancel()
@@ -713,7 +664,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard capabilities?.supportsExtrusion == true else {
             return "Extrusion is unavailable without explicit backend support."
         }
-        return materialTemperatureBlockedReason
+        return nil
     }
 
     func extrude(distanceMm: Double, speedMmPerSecond: Int) async {
@@ -741,18 +692,14 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
-        finishAcceptedRequest(command, notice: "Extrusion request accepted. Travel and physical filament state are not reported; verify at the printer.")
+        finishAcceptedRequest(command)
     }
 
     func filamentBlockedReason(_ operation: PhysicalFilamentOperation) -> String? {
         if let reason = blockedReason { return reason }
-        if let reason = safetyEvidenceBlockedReason { return reason }
         return PhysicalFilamentCommandEligibility.blockedReason(
             for: operation,
-            capabilities: capabilities,
-            status: safetyStatus,
-            configurationRevision: printer.configurationRevision,
-            now: clock()
+            capabilities: capabilities
         )
     }
 
@@ -764,35 +711,30 @@ final class PrinterControlsViewModel: ObservableObject {
             setError(command: command, message: reason, isRetryable: false)
             return
         }
-        var responseMessage: String?
         await perform(command) { [self] in
             if let reason = filamentBlockedReason(operation) { throw PrinterControlError.invalidRequest(reason) }
             switch operation {
             case .load:
                 let result = try await printerService.loadFilament(printerId: printer.id)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             case .unload:
                 // Residual weight/spool ID describe inventory, not physical
                 // completion. No binding, clearing or slot targeting occurs.
                 let result = try await printerService.unloadFilament(printerId: printer.id, toolheadIndex: nil)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             case .change:
                 let result = try await printerService.changeFilament(printerId: printer.id)
                 guard result.success else { throw PrinterControlError.rejected(result.message) }
-                responseMessage = result.message
             }
         }
-        let detail = responseMessage.map { " Server response: \($0)" } ?? ""
-        finishAcceptedRequest(command, notice: "\(operation.title) request accepted. Follow the printer's prompts and verify physical completion. Spool assignment was not changed.\(detail)")
+        finishAcceptedRequest(command)
     }
 
-    private func finishAcceptedRequest(_ command: ControlCommand, notice: String) {
+    private func finishAcceptedRequest(_ command: ControlCommand) {
         guard pendingCommand == command, lastError == nil, !commandStateInvalidated,
-              !Task.isCancelled, canControl else { return }
+              !Task.isCancelled, canExecute(command) else { return }
         pendingCommand = nil
-        commandNotice = notice
+        commandNotice = nil
     }
 
     // MARK: - Interruptible calibration
@@ -1144,7 +1086,7 @@ final class PrinterControlsViewModel: ObservableObject {
             calibrationMessage = "Save was not confirmed. Check the printer, then cancel and refresh/review. No automatic retry was sent."
             return
         }
-        finishAcceptedRequest(command, notice: "Firmware save request accepted. The printer may restart or disconnect. Verify the offset at the machine before printing.")
+        finishAcceptedRequest(command)
         calibrationStep = .done
         calibrationCommandID = nil
         releaseCalibrationLease()
@@ -1199,7 +1141,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(command)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: command)
+                commandNotice = nil
             }
         }
     }
@@ -1212,17 +1154,16 @@ final class PrinterControlsViewModel: ObservableObject {
         // value is valid evidence even when it matches the previous cached value.
         let matches: Bool
         switch command.kind {
-        case let .fanSpeed(targetPercent):
-            guard let actual = status.fanSpeedPercent,
-                  actual.isFinite, (0...100).contains(actual) else { return }
-            matches = abs(actual - Double(targetPercent)) < 0.5
         case let .transientZOffset(targetMm, _):
-            guard let actual = status.liveZOffsetMm, actual.isFinite else { return }
+            guard let targetMm, let actual = status.liveZOffsetMm, actual.isFinite else { return }
             matches = abs(actual - targetMm) < 0.001
         case let .sensorControl(sensorId, quantity, value):
             guard let actual = status.sensors?.first(where: { $0.id == sensorId })?
                 .reading(quantity)?.value.number else { return }
             matches = abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: status) else { return }
+            matches = abs(actual - percent) < RuntimeFactor.readbackTolerance
         default:
             return
         }
@@ -1230,7 +1171,7 @@ final class PrinterControlsViewModel: ObservableObject {
         telemetryConfirmed = true
         if commandTask == nil {
             pendingCommand = nil
-            commandNotice = "Matching readback received. This reports the backend value, not a physical inspection."
+            commandNotice = nil
         }
     }
 
@@ -1260,18 +1201,21 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
 
+        // Cool down is idle-only (canExecute). It prefers the backend's
+        // all-heaters-off command and otherwise falls back to 0/0 setpoints,
+        // matching the web app.
+        if preset == .coolDown, caps.supportsHeaterShutdown {
+            await perform(command) { [printerService, printer] in
+                try await printerService.turnOffHeaters(printerId: printer.id)
+            }
+            return
+        }
+
         guard validateTemperature(sentHotend, heater: .hotend, command: command),
               validateTemperature(sentBed, heater: .bed, command: command) else { return }
         await perform(command) { [printerService, printer] in
             try await printerService.setTemperatures(printerId: printer.id, hotend: sentHotend, bed: sentBed)
         }
-    }
-
-    var fanSpeedPercent: Double? {
-        guard let value = printer.fanSpeedPercent, value.isFinite, (0...100).contains(value) else {
-            return nil
-        }
-        return value
     }
 
     var liveZOffsetMm: Double? {
@@ -1284,44 +1228,12 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && runtimePrinterStateIsSupported && !isExecuting
     }
 
-    var fanControlUnavailableReason: String? {
-        guard let capabilities else { return "Checking fan support…" }
-        guard capabilities.supportsFanControl, capabilities.supportsFanSpeedReadback else {
-            return "Fan control and readback are unavailable on this printer."
-        }
-        guard fanSpeedPercent != nil else { return "Fan speed readback is unknown; controls are disabled." }
-        return runtimeControlAccessReason
-    }
-
     var zOffsetUnavailableReason: String? {
         guard let capabilities else { return "Checking Z-offset support…" }
-        guard capabilities.supportsZOffsetAdjustment, capabilities.supportsZOffsetReadback else {
-            return "Transient Z-offset control and readback are unavailable on this printer."
+        guard capabilities.supportsZOffsetAdjustment else {
+            return "Transient Z-offset control is unavailable on this printer."
         }
-        guard liveZOffsetMm != nil else { return "Live Z-offset readback is unknown; controls are disabled." }
         return runtimeControlAccessReason
-    }
-
-    func setFanSpeed(_ targetPercent: Int) async {
-        let command = ControlCommand(kind: .fanSpeed(targetPercent: targetPercent), startedAt: clock())
-        guard beginCommand(command) else { return }
-        defer { endCommand(command) }
-        guard (0...100).contains(targetPercent),
-              capabilities?.supportsFanControl == true,
-              capabilities?.supportsFanSpeedReadback == true,
-              let current = fanSpeedPercent,
-              Double(targetPercent) != current else {
-            setError(command: command, message: "Fan control requires a supported capability and a known current readback.", isRetryable: false)
-            return
-        }
-        await perform(command) { [printerService, printer] in
-            let result = try await printerService.setFanSpeed(
-                printerId: printer.id, speedPercent: targetPercent
-            )
-            guard result.success else { throw PrinterControlError.rejected(result.message) }
-        }
-        guard pendingCommand == command, lastError == nil else { return }
-        await refreshSafetyEvidence(refreshDiscovery: false)
     }
 
     /// Writable sensor entries (read-only entries never expose inputs).
@@ -1329,12 +1241,42 @@ final class PrinterControlsViewModel: ObservableObject {
         printer.sensors.filter { !$0.writable.isEmpty }
     }
 
-    var sensorControlUnavailableReason: String? {
-        guard let capabilities else { return "Checking sensor control support…" }
+    /// VoiceOver hint for disabled sensor rows: genuine unsupported/access reasons
+    /// only, never rendered as visible text (#3548). Loading and in-flight states
+    /// return nil (#3547).
+    var sensorRowMessage: String? {
+        guard let capabilities else { return nil }
         guard capabilities.supportsSensorControl else {
             return "Sensor control is unavailable on this printer."
         }
-        return runtimeControlAccessReason
+        return runtimeControlAccessReason(includingPending: false)
+    }
+
+    /// An in-flight request elsewhere never disables sensor rows, so a field
+    /// being edited keeps focus and its draft (#3547).
+    var canControlSensors: Bool {
+        capabilities?.supportsSensorControl == true
+            && runtimeControlAccessReason(includingPending: false) == nil
+    }
+
+    /// User-facing validation for a sensor value, or nil when it can be sent.
+    /// Shared by `setSensorValue` and the row's typed entry.
+    func sensorValueError(sensorId: String, quantity: SensorQuantity, value: Double) -> String? {
+        guard capabilities?.supportsSensorControl == true,
+              let sensor = printer.sensors.first(where: { $0.id == sensorId }),
+              let descriptor = sensor.descriptor(for: quantity) else {
+            return "Sensor control is unavailable for this entry."
+        }
+        let allowsOff = descriptor.allowZero == true && quantity == .targetTemperature
+        guard value.isFinite,
+              (value == 0 && allowsOff) || (value >= descriptor.min && value <= descriptor.max),
+              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
+            let step = descriptor.step ?? 0
+            return "Enter \(descriptor.min.formatted()) to \(descriptor.max.formatted())"
+                + (allowsOff ? ", or 0 for off" : "")
+                + (step > 0 ? " in steps of \(step.formatted())." : ".")
+        }
+        return nil
     }
 
     func setSensorValue(sensorId: String, quantity: SensorQuantity, value: Double) async {
@@ -1344,14 +1286,8 @@ final class PrinterControlsViewModel: ObservableObject {
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
-        guard capabilities?.supportsSensorControl == true,
-              value.isFinite,
-              let sensor = printer.sensors.first(where: { $0.id == sensorId }),
-              sensor.available,
-              let descriptor = sensor.descriptor(for: quantity),
-              value >= descriptor.min, value <= descriptor.max,
-              PrinterSensorFormatting.isOnGrid(value, descriptor: descriptor) else {
-            setError(command: command, message: "Sensor control requires a supported, available, writable entry and a value within its limits and step.", isRetryable: false)
+        guard sensorValueError(sensorId: sensorId, quantity: quantity, value: value) == nil else {
+            setError(command: command, message: "Sensor control requires a supported writable entry and a value within its limits and step.", isRetryable: false)
             return
         }
         await perform(command) { [printerService, printer] in
@@ -1360,24 +1296,96 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
+        finishAcceptedRequest(command)
+    }
+
+    func runtimeFactorPercent(_ factor: RuntimeFactor) -> Double? {
+        factor.percent(of: printer)
+    }
+
+    /// Missing or false capabilities hide the control; it never sends a request.
+    func supportsRuntimeFactor(_ factor: RuntimeFactor) -> Bool {
+        factor.isSupported(by: capabilities)
+    }
+
+    func runtimeFactorUnavailableReason(_ factor: RuntimeFactor) -> String? {
+        guard supportsRuntimeFactor(factor) else {
+            return "\(factor.title) control is not supported on this printer."
+        }
+        if let reason = runtimeControlAccessReason { return reason }
+        guard isRunningPrint, runtimePrinterStateIsSupported else {
+            return "\(factor.title) can be tuned only while printing or paused."
+        }
+        guard runtimeFactorPercent(factor) != nil else {
+            return "\(factor.title) readback is unknown; controls are disabled."
+        }
+        return nil
+    }
+
+    func canStepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) -> Bool {
+        runtimeFactorUnavailableReason(factor) == nil && canAdjustRuntimeControls
+            && RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) != nil
+    }
+
+    /// Steps from the authoritative readback, never from an unconfirmed local value.
+    func stepRuntimeFactor(_ factor: RuntimeFactor, by delta: Double) async {
+        guard let target = RuntimeFactor.steppedPercent(from: runtimeFactorPercent(factor), delta: delta) else { return }
+        await setRuntimeFactor(factor, percent: target)
+    }
+
+    func setRuntimeFactor(_ factor: RuntimeFactor, percent: Double) async {
+        let command = ControlCommand(kind: .runtimeFactor(factor, percent: percent), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard supportsRuntimeFactor(factor), RuntimeFactor.isValidPercent(percent) else {
+            setError(
+                command: command,
+                message: "\(factor.title) requires confirmed backend support and a value from 1 to 200 percent.",
+                isRetryable: false
+            )
+            return
+        }
+        let generation = lifecycleGeneration
+        await perform(command) { [weak self, printerService, printer] in
+            do {
+                let result = try await printerService.setRuntimeFactor(
+                    printerId: printer.id, factor: factor, percent: percent
+                )
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+            } catch NetworkError.serverError(501) {
+                self?.markRuntimeFactorUnsupported(factor, generation: generation)
+                throw PrinterControlError.rejected(
+                    "\(factor.title) control is not supported by this printer. No command was sent."
+                )
+            }
+        }
         guard pendingCommand == command, lastError == nil else { return }
         await refreshSafetyEvidence(refreshDiscovery: false)
     }
 
+    /// A 501 proves the backend cannot apply this factor, so hide it until
+    /// capabilities are reloaded.
+    private func markRuntimeFactorUnsupported(_ factor: RuntimeFactor, generation: Int) {
+        guard !isRetired, generation == lifecycleGeneration else { return }
+        switch factor {
+        case .speed: capabilities?.supportsSpeedFactorControl = false
+        case .flow: capabilities?.supportsFlowFactorControl = false
+        }
+    }
+
     func adjustLiveZOffset(by deltaMm: Double) async {
-        guard let current = liveZOffsetMm else { return }
-        let target = ((current + deltaMm) * 1000).rounded() / 1000
+        let current = capabilities?.supportsZOffsetReadback == true ? liveZOffsetMm : nil
+        let target = current.map { (($0 + deltaMm) * 1000).rounded() / 1000 }
         let command = ControlCommand(
             kind: .transientZOffset(targetMm: target, deltaMm: deltaMm), startedAt: clock()
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
         guard capabilities?.supportsZOffsetAdjustment == true,
-              capabilities?.supportsZOffsetReadback == true,
               deltaMm.isFinite, deltaMm != 0, abs(deltaMm) <= 0.2,
-              MaterialControlInput.increments.contains(abs(deltaMm)),
-              target.isFinite, target != current else {
-            setError(command: command, message: "Transient Z-offset adjustment requires supported controls and a known live readback.", isRetryable: false)
+              MaterialControlInput.babystepIncrements.contains(abs(deltaMm)),
+              target?.isFinite != false else {
+            setError(command: command, message: "Choose a supported transient Z-offset adjustment.", isRetryable: false)
             return
         }
         await perform(command) { [printerService, printer] in
@@ -1387,7 +1395,11 @@ final class PrinterControlsViewModel: ObservableObject {
             guard result.success else { throw PrinterControlError.rejected(result.message) }
         }
         guard pendingCommand == command, lastError == nil else { return }
-        await refreshSafetyEvidence(refreshDiscovery: false)
+        if target != nil {
+            await refreshSafetyEvidence(refreshDiscovery: false)
+        } else {
+            finishAcceptedRequest(command)
+        }
     }
 
     func homeAll() async { await runHome(axes: ["X", "Y", "Z"]) { [printer, printerService] in
@@ -1452,11 +1464,8 @@ final class PrinterControlsViewModel: ObservableObject {
     func heaterTargetError(_ heater: Heater, target: Double) -> String? {
         guard ControlNumberInput.isWholeDegree(target) else { return ControlNumberInput.heaterPrecisionMessage }
         guard target >= 0 else { return "\(heater.title) target must be nonnegative." }
-        if target == 0 { return nil }
-        guard let maximum = maximum(for: heater) else {
-            return "A valid reported \(heater.title.lowercased()) maximum is required for heating. Only zero-off is available; retry the heater limits check."
-        }
-        guard target <= Double(maximum) else {
+        guard target <= Double(Int32.max) else { return "Target must fit a whole-degree API value." }
+        if let maximum = maximum(for: heater), target > Double(maximum) {
             return "\(heater.title) target must not exceed the reported maximum of \(maximum) °C."
         }
         return nil
@@ -1467,6 +1476,69 @@ final class PrinterControlsViewModel: ObservableObject {
         if let reason = heaterTargetError(.hotend, target: preset.hotend) { return reason }
         if supports(.bed) { return heaterTargetError(.bed, target: preset.bed) }
         return nil
+    }
+
+    // MARK: - Queued heat-row targets (#3547)
+
+    /// Targets a Heat row has accepted but not yet settled, keyed by row. The
+    /// model owns the queue so leaving the view never silently drops a send.
+    @Published private(set) var queuedHeatTargets: [String: Double] = [:]
+    private var heatTargetTasks: [String: Task<Void, Never>] = [:]
+    /// Counts commands that acquired the single-flight slot, so a queued send can tell rejection from dispatch.
+    private var beganCommandCount = 0
+    /// How long a sent target stays queued while readback catches up.
+    var heatTargetSettleGrace: Duration = .seconds(5)
+    /// Longest a queued target waits for another request's single-flight slot.
+    var heatTargetBusyTimeout: Duration = .seconds(30)
+
+    /// Queues `value` for the row `key`, replacing any earlier queued value,
+    /// and sends it after `delay`. Idle and access are re-checked right before
+    /// sending; a target that can no longer be sent is dropped with feedback
+    /// on the Heat panel instead of being sent into a print.
+    func scheduleHeatTarget(
+        key: String,
+        title: String,
+        value: Double,
+        after delay: Duration?,
+        isSendable: @escaping @MainActor (PrinterControlsViewModel) -> Bool = { $0.canControl },
+        apply: @escaping @MainActor (PrinterControlsViewModel) async -> Void
+    ) {
+        heatTargetTasks[key]?.cancel()
+        queuedHeatTargets[key] = value
+        heatTargetTasks[key] = Task { @MainActor [weak self] in
+            if let delay {
+                do { try await Task.sleep(for: delay) } catch { return }
+            }
+            var waited = Duration.zero
+            while let model = self, model.isExecuting, waited < model.heatTargetBusyTimeout {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                waited += .milliseconds(100)
+            }
+            guard let self, !Task.isCancelled else { return }
+            guard isSendable(self), !isExecuting else {
+                dropQueuedHeatTarget(key: key, title: title, value: value)
+                return
+            }
+            let began = beganCommandCount
+            await apply(self)
+            guard !Task.isCancelled else { return }
+            // A rejected or failed send has nothing to settle; release the row now.
+            if beganCommandCount == began || lastError != nil {
+                if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
+                return
+            }
+            do { try await Task.sleep(for: heatTargetSettleGrace) } catch { return }
+            if queuedHeatTargets[key] == value { queuedHeatTargets[key] = nil }
+        }
+    }
+
+    private func dropQueuedHeatTarget(key: String, title: String, value: Double) {
+        guard queuedHeatTargets[key] == value else { return }
+        queuedHeatTargets[key] = nil
+        let reason = blockedReason ?? (isExecuting ? Self.operationPendingReason : "Controls are unavailable.")
+        feedbackSection = .heat
+        lastError = nil
+        commandNotice = "\(title) target not sent. \(reason)"
     }
 
     func setHeaterTarget(_ heater: Heater, target: Double) async {
@@ -1486,46 +1558,17 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
-    func setHeaterTargets(hotend: Double?, bed: Double?) async {
-        let command = ControlCommand(kind: .heaterTargets(hotend: hotend, bed: bed), startedAt: clock())
-        guard beginCommand(command) else { return }
-        defer { endCommand(command) }
-        guard hotend != nil || bed != nil else {
-            setError(command: command, message: "Enter at least one target. Blank leaves a heater unchanged.", isRetryable: false)
-            return
-        }
-        guard (hotend == nil || supports(.hotend)), (bed == nil || supports(.bed)) else {
-            setError(command: command, message: "A requested heater is unavailable. Refresh heater support before setting targets.", isRetryable: false)
-            return
-        }
-        guard validateTemperature(hotend, heater: .hotend, command: command),
-              validateTemperature(bed, heater: .bed, command: command) else { return }
-        await perform(command) { [printerService, printer] in
-            try await printerService.setTemperatures(printerId: printer.id, hotend: hotend, bed: bed)
-        }
-    }
-
     func absoluteMoveBlockedReason(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int? = nil) -> String? {
         if let reason = blockedReason { return reason }
         guard feedrateMmMin == nil else { return ControlNumberInput.customFeedrateMessage }
-        let target: (x: Double?, y: Double?, z: Double?)
         do {
-            target = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
+            _ = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
         } catch { return error.localizedDescription }
         guard capabilities?.supportsAbsoluteMovement == true,
               Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"]) else {
             return "Absolute movement requires confirmed support for all X, Y and Z axes."
         }
-        guard let current = reportedSafetyPosition else {
-            return positioningEvidenceBlockedReason ?? "Reported X, Y and Z positions are required to validate safe movement."
-        }
-        let fullPoint = SafetyVector3Dto(
-            x: target.x ?? current.x,
-            y: target.y ?? current.y,
-            z: target.z ?? current.z
-        )
-        return supportReason(capabilities?.verifiedSafety?.operations.absoluteMovement, title: "Absolute positioning")
-            ?? safeMoveReason(fullPoint)
+        return nil
     }
 
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {
@@ -1565,10 +1608,12 @@ final class PrinterControlsViewModel: ObservableObject {
             guard result.success else {
                 throw PrinterControlError.invalidRequest(result.message ?? "Motor release was rejected.")
             }
+            if self.pendingCommand == command {
+                // Acceptance invalidates cached homing; only subsequent telemetry can restore it.
+                self.printer.homedAxes = nil
+            }
         }
-        guard pendingCommand == command, lastError == nil else { return }
-        commandNotice = "Motor release request accepted. Motor state is not reported; verify the machine and re-home before moving."
-        pendingCommand = nil
+        finishAcceptedRequest(command)
     }
 
     func dismissError() {
@@ -1587,7 +1632,7 @@ final class PrinterControlsViewModel: ObservableObject {
     /// position and homing changes. Direct motion settles at the HTTP response;
     /// ordinary telemetry never establishes correlated physical completion.
     func handlePrinterUpdate(_ updated: Printer) {
-        guard updated.id == printer.id else { return }
+        guard !isRetired, updated.id == printer.id else { return }
         let previous = printer
         printer = updated
         if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
@@ -1618,7 +1663,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if commandTask == nil {
                 confirmCalibration(pending)
                 pendingCommand = nil
-                commandNotice = Self.confirmationNotice(for: pending)
+                commandNotice = nil
             }
         }
     }
@@ -1652,22 +1697,18 @@ final class PrinterControlsViewModel: ObservableObject {
                 hotendTarget: heater == .hotend ? target : nil,
                 bedTarget: heater == .bed ? target : nil, in: updated
             )
-        case let .heaterTargets(hotend, bed):
-            return (hotend != nil || bed != nil)
-                && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
-        case let .fanSpeed(targetPercent):
-            guard let actual = updated.fanSpeedPercent,
-                  actual.isFinite, (0...100).contains(actual),
-                  previous.fanSpeedPercent != actual else { return false }
-            return abs(actual - Double(targetPercent)) < 0.5
         case let .transientZOffset(targetMm, _):
-            guard let actual = updated.liveZOffsetMm, actual.isFinite,
+            guard let targetMm, let actual = updated.liveZOffsetMm, actual.isFinite,
                   previous.liveZOffsetMm != actual else { return false }
             return abs(actual - targetMm) < 0.001
         case let .sensorControl(sensorId, quantity, value):
             let read = { (p: Printer) in p.sensors.first(where: { $0.id == sensorId })?.reading(quantity)?.value.number }
             guard let actual = read(updated), read(previous) != actual else { return false }
             return abs(actual - value) < 0.5
+        case let .runtimeFactor(factor, percent):
+            guard let actual = factor.percent(of: updated),
+                  factor.percent(of: previous) != actual else { return false }
+            return abs(actual - percent) < RuntimeFactor.readbackTolerance
         case .disableMotors, .extrusion, .filament, .calibrationSave:
             return false
         case .calibrationHome, .calibrationPosition, .calibrationAdjust:
@@ -1709,36 +1750,91 @@ final class PrinterControlsViewModel: ObservableObject {
             && printer.isOnline && !isPrintingOrPaused
     }
 
+    func canJog(axis: String) -> Bool {
+        canControl && !isExecuting && isJogAxisReady(axis)
+    }
+
+    private func isJogAxisReady(_ axis: String) -> Bool {
+        let normalized = axis.uppercased()
+        return ["X", "Y", "Z"].contains(normalized)
+            && capabilities?.supportsMovement == true
+            && capabilities?.supportedAxes.contains(normalized) == true
+            && printer.homedAxes?.uppercased().contains(normalized) == true
+    }
+
+    /// Heater targets stay available during a print only when the backend
+    /// confirms it can apply them under the active-print lease.
+    var supportsHeatDuringPrint: Bool {
+        capabilities?.supportsTemperatureControlDuringPrint == true
+    }
+
+    /// Heat presets, including Cool down, are idle-only: the app offers no
+    /// mid-print temperature changes (Tune is Speed, Flow and babystep only,
+    /// #3540), and Emergency Stop covers stopping an active print.
+    func canRunPreheat(_ preset: PreheatPreset) -> Bool {
+        canControl
+    }
+
+    /// Why the Heat More menu is disabled, or nil when it is usable.
+    var preheatMenuBlockedReason: String? {
+        if !canRunPreheat(.pla) { return preheatAccessReason(.pla) ?? "Controls are unavailable." }
+        if isExecuting { return Self.operationPendingReason }
+        return nil
+    }
+
+    func preheatAccessReason(_ preset: PreheatPreset) -> String? {
+        blockedReason
+    }
+
+    /// Cool down uses POST /heaters/off when supported; otherwise it sets 0/0 targets while idle.
+    var supportsHeaterShutdown: Bool {
+        capabilities?.supportsHeaterShutdown == true
+    }
+
     private var runtimePrinterStateIsSupported: Bool {
         Self.runtimeStatusStateIsSupported(printer.state)
     }
 
     private static func runtimeStatusStateIsSupported(_ state: String?) -> Bool {
-        ["idle", "ready", "standby", "complete", "completed", "cancelled", "printing", "paused"]
-            .contains(state?.lowercased() ?? "")
+        state?.lowercased() != "shutdown"
     }
 
     private var runtimeControlAccessReason: String? {
+        runtimeControlAccessReason(includingPending: true)
+    }
+
+    private func runtimeControlAccessReason(includingPending: Bool) -> String? {
         if commandIdentity == nil { return "Controls require a registered server identity." }
         if !hasConfiguredAccess { return "Waiting for registered-server access confirmation." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
-        if !runtimePrinterStateIsSupported { return "Printer state is unknown or transitioning." }
-        if isExecuting { return "Another printer operation is still pending." }
+        if !runtimePrinterStateIsSupported { return "Printer is shut down." }
+        if includingPending, isExecuting { return Self.operationPendingReason }
         return nil
     }
 
     private func canExecute(_ command: ControlCommand) -> Bool {
         let permitsActivePrint: Bool
         switch command.kind {
-        case .fanSpeed, .transientZOffset, .sensorControl:
+        case .transientZOffset, .sensorControl, .runtimeFactor:
             permitsActivePrint = true
+        case .preheat:
+            permitsActivePrint = false
+        case .heater:
+            permitsActivePrint = supportsHeatDuringPrint
         default:
             permitsActivePrint = false
         }
         guard commandIdentity != nil, hasConfiguredAccess, isActive,
               accessCheck() == nil, printer.isOnline else { return false }
+        if case let .jog(axis, _) = command.kind,
+           ["X", "Y", "Z"].contains(axis.uppercased()) {
+            return !isPrintingOrPaused && isJogAxisReady(axis)
+        }
+        if case .runtimeFactor = command.kind {
+            return isRunningPrint && runtimePrinterStateIsSupported
+        }
         if permitsActivePrint {
             return runtimePrinterStateIsSupported
         }
@@ -1753,16 +1849,52 @@ final class PrinterControlsViewModel: ObservableObject {
         if !printer.isOnline { return "Printer is offline." }
         if isPrintingOrPaused { return "Controls are locked while a print is active." }
         if pendingCommand == nil, isExecuting {
-            return "Another controls view is waiting for this printer's request outcome. Routine controls remain locked."
+            return "Another controls view is waiting for this printer's request outcome."
         }
         return nil
     }
 
+    /// `blockedReason` for heater rows: an in-flight request elsewhere only
+    /// disables the row; it never surfaces as a caption (#3547).
+    var heatRowBlockedReason: String? {
+        if pendingCommand == nil, isExecuting, printer.isOnline, !isPrintingOrPaused,
+           commandIdentity != nil, hasConfiguredAccess, isActive, accessCheck() == nil {
+            return nil
+        }
+        return blockedReason
+    }
+
     var isPrintingOrPaused: Bool {
-        switch printer.state?.lowercased() {
+        Self.isPrintingOrPaused(state: printer.state)
+    }
+
+    /// Motion commands have no correlated telemetry, so HTTP success settles them.
+    private static func settlesOnResponse(_ command: ControlCommand) -> Bool {
+        switch command.kind {
+        case .home, .jog, .moveTo: return true
+        default: return false
+        }
+    }
+
+    nonisolated static func isPrintingOrPaused(state: String?) -> Bool {
+        switch state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false
         }
+    }
+
+    /// A print that is actually running or paused. Unlike `isPrintingOrPaused`
+    /// (which also locks idle controls during `starting`), this excludes
+    /// transitional states and gates Tune and the current-job block (#3496).
+    nonisolated static func isRunningPrint(state: String?) -> Bool {
+        switch state?.lowercased() {
+        case "printing", "paused": return true
+        default: return false
+        }
+    }
+
+    var isRunningPrint: Bool {
+        Self.isRunningPrint(state: printer.state)
     }
 
     // MARK: - Private
@@ -1790,25 +1922,15 @@ final class PrinterControlsViewModel: ObservableObject {
             case .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
                 break
             default:
-                feedbackSection = command.section
-                lastError = nil
-                commandNotice = "Cancel calibration before another setup command. Emergency Stop remains independent."
                 return false
             }
         }
-        guard canExecute(command) else {
-            feedbackSection = command.section
-            commandNotice = nil
-            lastError = ControlsError(
-                command: command,
-                message: blockedReason ?? "Controls are unavailable.",
-                isRetryable: false
-            )
-            return false
-        }
+        // Gated commands are refused silently; no lockout text is rendered (#3548).
+        guard canExecute(command) else { return false }
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)
+        beganCommandCount += 1
         feedbackSection = command.section
         lastError = nil
         commandNotice = nil
@@ -1864,13 +1986,8 @@ final class PrinterControlsViewModel: ObservableObject {
                 commandNotice = "Request accepted, but waiting was interrupted or controls became unavailable. Physical outcome is unknown; check the machine before another action."
                 return
             }
-            switch command.kind {
-            case .home, .jog, .moveTo:
-                pendingCommand = nil
-                commandNotice = "Command accepted. Physical completion is not confirmed; check the printer before another action."
-            default:
-                commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
-            }
+            commandNotice = nil
+            if Self.settlesOnResponse(command) { pendingCommand = nil }
         case .failure(let error):
             if error is CancellationError {
                 pendingCommand = nil
@@ -1900,9 +2017,8 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     confirmation domain — e.g. a same-preset preheat on a printer already
     ///     at the requested targets, an already-zero cool-down, or a confirming
     ///     snapshot that landed before the HTTP response — where waiting for a
-    ///     further delta would hang forever, so we clear now. Only a fresh
-    ///     post-dispatch snapshot permits telemetry wording; cached matches
-    ///     report request acceptance without physical confirmation.
+    ///     further delta would hang forever, so we clear now. Success is silent
+    ///     (#3496); only actionable failures or unknown outcomes post a notice.
     /// HTTP settlement alone cannot unlock another owner while this command
     /// still awaits telemetry. Pending-state cleanup releases the matching token.
     private func endCommand(_ command: ControlCommand) {
@@ -1923,10 +2039,10 @@ final class PrinterControlsViewModel: ObservableObject {
         if telemetryConfirmed {
             confirmCalibration(command)
             pendingCommand = nil
-            commandNotice = Self.confirmationNotice(for: command)
+            commandNotice = nil
         } else if Self.transition(from: printer, to: printer, resolves: command) {
             pendingCommand = nil
-            commandNotice = "Request accepted. Previously reported values already match; fresh physical completion is not confirmed. Check the machine before further setup."
+            commandNotice = nil
         }
     }
 
@@ -1934,17 +2050,6 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity else { return }
         commandLeases.release(identity, token: command.id)
         if commandLease?.id == command.id { commandLease = nil }
-    }
-
-    private static func confirmationNotice(for command: ControlCommand) -> String {
-        switch command.kind {
-        case .preheat, .heater, .heaterTargets:
-            return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
-        case .fanSpeed, .transientZOffset, .sensorControl:
-            return "Matching readback received. This reports the backend value, not a physical inspection."
-        default:
-            return "Matching telemetry received. Check the machine before further setup."
-        }
     }
 
     private func setError(command: ControlCommand, error: Error) {
@@ -1961,7 +2066,7 @@ final class PrinterControlsViewModel: ObservableObject {
             uncertainResponse = false
         }
         let message = mapped.isRetryable || uncertainResponse
-            ? "\(mapped.message) Outcome may be unknown. Check the printer before sending another request."
+            ? "\(mapped.message) Check the printer before retrying."
             : mapped.message
         setError(command: command, message: message, isRetryable: mapped.isRetryable)
     }
@@ -1979,9 +2084,9 @@ final class PrinterControlsViewModel: ObservableObject {
     static func mapError(_ error: Error) -> (message: String, isRetryable: Bool) {
         if let net = error as? NetworkError {
             switch net {
-            case .noConnection: return ("No internet connection.", true)
+            case .noConnection: return ("Command connection failed.", true)
             case .timeout: return ("Request timed out.", true)
-            case .serverUnreachable: return ("Printer is unreachable.", true)
+            case .serverUnreachable: return ("Couldn't reach the server for this command.", true)
             case .transportError: return ("Network error.", true)
             case .serverError: return ("Printer reported a server error.", true)
             case .conflict(let api): return (api?.displayMessage ?? "Printer is busy.", false)
@@ -2007,9 +2112,9 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         if let url = error as? URLError {
             switch url.code {
-            case .notConnectedToInternet, .networkConnectionLost: return ("No internet connection.", true)
+            case .notConnectedToInternet, .networkConnectionLost: return ("Command connection failed.", true)
             case .timedOut: return ("Request timed out.", true)
-            case .cannotConnectToHost, .cannotFindHost: return ("Printer is unreachable.", true)
+            case .cannotConnectToHost, .cannotFindHost: return ("Couldn't reach the server for this command.", true)
             default: return ("Network error.", true)
             }
         }

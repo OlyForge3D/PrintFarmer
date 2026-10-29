@@ -1,158 +1,89 @@
-import { Button, TemperatureControlRow, Select } from '@/common/components/ui';
-import { NozzleIcon, BedIcon, SnowflakeIcon } from '@/common/components/icons/MdiIcons';
-import type { PrinterSensor } from '@/types/api';
-import { primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
-import {
-  bedPresetOptions,
-  hotendPresetOptions,
-  materialPresets,
-} from '@/features/printers/constants/temperaturePresets';
-
-function formatTemperature(temp: number | undefined): string {
-  if (temp === undefined || temp === null) return '---';
-  return `${temp.toFixed(1)}°C`;
-}
+import { useState, type ReactNode } from 'react';
+import { Button } from '@/common/components/ui';
+import { SnowflakeIcon } from '@/common/components/icons/MdiIcons';
+import { apiClient } from '@/services/api';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { PrinterValueControl } from '@/features/printers/components/PrinterValueControl';
+import { PrinterSensorGlyph, PrinterThermalRow, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
+import { TemperaturePresetMenu } from '@/features/printers/components/TemperaturePresetMenu';
+import { HEATER_LABELS } from '@/features/printers/constants/temperaturePresets';
+import { primaryHeater, primaryHeaterLimits, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
+import type { PrinterSensor, PrinterTemperatures } from '@/types/api';
 
 interface TemperatureControlSectionProps {
-  hotendTemp: number | string;
-  bedTemp: number | string;
+  printerId: string;
+  activeExtruderId?: string | null;
+  presetsDisabled?: boolean;
   hotendTarget?: number;
   bedTarget?: number;
   hotendCurrent?: number;
   bedCurrent?: number;
+  reportedTemperatures?: PrinterTemperatures;
+  maxHotendTemp?: number;
+  maxBedTemp?: number;
   temperatureActionPending: boolean;
   canSetTemperatures: boolean;
   canCooldown: boolean;
-  onHotendTempChange: (value: number | string) => void;
-  onBedTempChange: (value: number | string) => void;
-  onHotendTempKeyDown: (e: React.KeyboardEvent) => void;
-  onBedTempKeyDown: (e: React.KeyboardEvent) => void;
+  isOnline?: boolean;
   onApplyPreset: (preset: string) => void;
   onApplySingleHeaterPreset: (heater: 'hotend' | 'bed', preset: string) => void;
   showHeading?: boolean;
   sensors?: PrinterSensor[];
+  additionalRows?: ReactNode;
 }
 
 export function TemperatureControlSection({
-  hotendTemp,
-  bedTemp,
-  hotendTarget = 0,
-  bedTarget = 0,
-  hotendCurrent,
-  bedCurrent,
-  temperatureActionPending,
-  canSetTemperatures,
-  canCooldown,
-  onHotendTempChange,
-  onBedTempChange,
-  onHotendTempKeyDown,
-  onBedTempKeyDown,
-  onApplyPreset,
-  onApplySingleHeaterPreset,
-  showHeading = true,
-  sensors,
+  printerId, hotendTarget, bedTarget, hotendCurrent, bedCurrent, maxHotendTemp, maxBedTemp,
+  temperatureActionPending, canSetTemperatures, canCooldown, onApplyPreset, onApplySingleHeaterPreset,
+  showHeading = true, sensors, additionalRows, isOnline = true, reportedTemperatures, activeExtruderId, presetsDisabled = false,
 }: TemperatureControlSectionProps) {
-  const temperatureControlsDisabled = temperatureActionPending || !canSetTemperatures;
-  const cooldownDisabled = temperatureActionPending || !canCooldown;
-
-  return (
-    <div className="mb-2">
-      {showHeading && (
-        <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">
-          Temperatures
-        </div>
-      )}
-      <div className="space-y-1">
-        <div className="flex justify-end gap-1 items-stretch h-8 pb-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={cooldownDisabled}
-            onClick={() => onApplyPreset('cooldown')}
-            title="Cooldown"
-            aria-label="Cooldown"
-            className="shrink-0 px-2!"
-            iconCenter={
-              <SnowflakeIcon
-                className={`h-4 w-4 ${
-                  hotendTarget > 0 || bedTarget > 0
-                    ? 'text-pf-accent'
-                    : 'text-pf-text-secondary'
-                }`}
-              />
-            }
-          />
-          <div className="relative w-24">
-            <Select
-              defaultValue=""
-              aria-label="Apply temperature preset"
-              disabled={temperatureControlsDisabled}
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value) {
-                  onApplyPreset(value);
-                  e.currentTarget.value = '';
-                }
-              }}
-              className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
-            >
-              <option value="">PRESETS</option>
-              {materialPresets.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {preset.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4.5rem_1.5rem] gap-1 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
-          <span>Name</span>
-          <span className="text-right">Power</span>
-          <span className="text-right">Actual</span>
-          <span className="text-right">Target</span>
-          <span></span>
-        </div>
-
-        <TemperatureControlRow
-          icon={
-            <NozzleIcon
-              className="w-4 h-4 text-pf-error"
-              isOn={hotendTarget > 0}
-            />
-          }
-          label="Hotend"
-          powerReading={primaryHeaterPower(sensors, 'hotend')}
-          stateLabel={hotendTarget > 0 ? 'on' : 'off'}
-          liveReading={formatTemperature(hotendCurrent)}
-          value={hotendTemp}
-          onChange={(e) => onHotendTempChange(e.target.value === '' ? '' : Number(e.target.value))}
-          onKeyDown={onHotendTempKeyDown}
-          disabled={temperatureControlsDisabled}
-          presetOptions={hotendPresetOptions}
-          onPresetSelect={(preset) => onApplySingleHeaterPreset('hotend', preset)}
-        />
-
-        <TemperatureControlRow
-          icon={
-            <BedIcon
-              className="w-4 h-4 text-pf-accent"
-              isOn={bedTarget > 0}
-            />
-          }
-          label="Bed"
-          powerReading={primaryHeaterPower(sensors, 'bed')}
-          stateLabel={bedTarget > 0 ? 'on' : 'off'}
-          liveReading={formatTemperature(bedCurrent)}
-          value={bedTemp}
-          onChange={(e) => onBedTempChange(e.target.value === '' ? '' : Number(e.target.value))}
-          onKeyDown={onBedTempKeyDown}
-          disabled={temperatureControlsDisabled}
-          presetOptions={bedPresetOptions}
-          onPresetSelect={(preset) => onApplySingleHeaterPreset('bed', preset)}
-        />
-      </div>
+  const { hasPermission } = useAuth();
+  const [sending, setSending] = useState(false);
+  const busy = temperatureActionPending || sending;
+  const authorized = hasPermission('queue', 'start');
+  const disabled = busy || !canSetTemperatures || !authorized;
+  const rows = [
+    { heater: 'hotend' as const, name: HEATER_LABELS.hotend, target: hotendTarget, current: hotendCurrent, max: maxHotendTemp },
+    { heater: 'bed' as const, name: HEATER_LABELS.bed, target: bedTarget, current: bedCurrent, max: maxBedTemp },
+  ];
+  return <div className="min-w-0">
+    {showHeading && <h4 className="mb-1 text-xs font-medium text-pf-text-secondary">Temperatures</h4>}
+    <div className="mb-1 flex items-center justify-end gap-1" data-temperature-toolbar>
+      <Button type="button" variant="ghost" size="sm" aria-label="Cooldown" title="Cooldown"
+        disabled={busy || !canCooldown || !authorized} className="h-8! min-h-8! w-8 p-0!"
+        onClick={() => onApplyPreset('cooldown')} iconCenter={<SnowflakeIcon className="h-4 w-4" />} />
+      <TemperaturePresetMenu disabled={disabled || presetsDisabled} onApplyPreset={onApplyPreset} onApplySingleHeaterPreset={onApplySingleHeaterPreset} />
     </div>
-  );
+    <PrinterThermalTable>
+      {rows.map(row => {
+        const sensor = sensors?.find(item => primaryHeater(item, activeExtruderId) === row.heater);
+        const { min, max, allowZero } = primaryHeaterLimits(sensors, row.heater, row.max, activeExtruderId);
+        const power = primaryHeaterPower(sensors, row.heater, activeExtruderId);
+        const unavailable = sensor?.available === false;
+        const blocked = !canSetTemperatures || !authorized;
+        const reportedCurrent = reportedTemperatures === undefined
+          ? row.current
+          : reportedTemperatures[row.heater === 'hotend' ? 'hotendTemp' : 'bedTemp'];
+        return <PrinterThermalRow key={`${printerId}-${row.heater}-${row.heater === 'hotend' ? activeExtruderId : ''}`}
+          warning={max === undefined ? `${row.name} maximum temperature unknown. Integer commands rely on firmware limits; this endpoint does not enforce an upper bound.` : undefined}
+          name={<span className="flex min-w-0 items-center gap-1 @[441px]/sensors:gap-2" data-sensor-name>
+            <PrinterSensorGlyph kind={row.heater === 'hotend' ? 'Nozzle' : 'Bed'}
+              temperature={isOnline && !unavailable ? reportedCurrent : undefined} />
+            <span>{row.name}{unavailable && <span className="block text-xs font-normal text-pf-text-secondary">Unavailable</span>}</span>
+          </span>}
+          state={<span>{power}</span>}
+          current={<span>{Number.isFinite(row.current) ? `${row.current!.toFixed(1)}°C` : ''}</span>}
+          target={status => <PrinterValueControl label={`${row.name} target temperature`} current={Number.isFinite(row.target) ? row.target : undefined}
+              min={Math.ceil(min)} max={max} step={1} allowZero={allowZero}
+              unit="°C" disabled={blocked} pending={busy} status={status}
+              onSubmit={async value => {
+                setSending(true);
+                try {
+                  return await apiClient.setTemperatures(printerId, { [row.heater]: value });
+                } finally { setSending(false); }
+              }} />} />;
+      })}
+      {additionalRows}
+    </PrinterThermalTable>
+  </div>;
 }

@@ -34,7 +34,7 @@ cd Web/ReactApp && npm run dev
 - **API Health**: http://localhost:5245/healthz
 
 ### Requirements
-- .NET 10.0.101 SDK
+- Exact .NET SDK from [`global.json`](../global.json) for local builds (not needed on a Docker-only host)
 - Node.js 24.15+ within 24.x, or 26+ (including the jsdom test environment)
 - 2GB+ RAM
 
@@ -129,8 +129,11 @@ If you are using local HTTPS for the iOS app, generate or regenerate the certifi
 
 This now creates a private CA (`ca.cer`) plus the nginx server certificate (`tls.crt` / `tls.key`).
 
-HTTP is bound to loopback only. Remote phones cannot use a LAN HTTP URL to
-bootstrap certificate trust. Transfer **only the public** `deploy/nginx/certs/ca.cer`
+The Docker deployment script publishes HTTP on the LAN by default;
+`BIND_ADDRESS=127.0.0.1` restricts it to the host. The separate `install.sh`
+installer and explicit HTTP-only labs remain local-only. HTTP does not
+authenticate the server, so do not rely on it to bootstrap certificate trust.
+Transfer **only the public** `deploy/nginx/certs/ca.cer`
 to the device through a trusted channel (for example, an authenticated file
 transfer from the deployment host). Verify its SHA-256 fingerprint against
 `openssl x509 -in deploy/nginx/certs/ca.crt -noout -fingerprint -sha256`
@@ -150,8 +153,8 @@ The page provides `ca.cer` and these required iPhone steps:
 2. Open `Settings > General > About > Certificate Trust Settings`.
 3. Enable trust for `PrintFarmer Local CA`.
 
-The host-local page at `http://localhost:8080/install-ca` is not remotely
-reachable. If HTTPS uses an already trusted certificate, remote clients can
+With a loopback HTTP binding, the page at `http://localhost:8080/install-ca`
+is not remotely reachable. If HTTPS uses an already trusted certificate, clients can
 download the CA over that HTTPS connection instead. Installing a CA grants
 trust to certificates it signs; install only the CA verified with the farm operator.
 
@@ -697,20 +700,6 @@ ENABLE_DISTRIBUTED_SLICING=true \
 ORCA_WORKER_COUNT=3 \
 ./scripts/deploy-docker.sh --non-interactive
 ```
-
-### Redis Harvest Queue
-For high-volume gcode harvesting, configure Redis backend:
-
-```bash
-REDIS_CONNECTION_STRING=redis://redis:6379 \
-HARVEST_QUEUE_ENABLED=true \
-./scripts/deploy-docker.sh --non-interactive
-```
-
-The Redis queue uses a 3-tier data structure:
-1. **Primary Queue**: Sorted set with timestamp scores for FIFO ordering
-2. **Processing Set**: Tracks jobs being processed (crash recovery)
-3. **Completed Set**: Retains completed jobs for 24 hours (audit trail)
 
 ### Monitoring & Telemetry
 Enable observability features:

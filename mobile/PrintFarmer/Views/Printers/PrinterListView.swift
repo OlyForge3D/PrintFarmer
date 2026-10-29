@@ -218,45 +218,43 @@ struct PrinterListView: View {
     private var printerList: some View {
         VStack(spacing: 0) {
             statusFilterBar
-                .padding(.horizontal)
                 .padding(.top, 8)
 
             ScrollView {
-                LazyVStack(spacing: 12) {
-                    Group {
-                        if viewModel.filteredPrinters.isEmpty {
-                            ContentUnavailableView {
-                                Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
-                            } description: {
-                                Text("Choose another Farm filter to see printers.")
-                            }
-                            .padding(.top, 40)
-                        } else {
-                            LazyVGrid(columns: iPadColumns, spacing: 12) {
-                                ForEach(viewModel.filteredPrinters) { printer in
-                                    NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
-                                        PrinterCardView(
-                                            printer: printer,
-                                            isPendingReady: viewModel.isPendingReady(printer),
-                                            attentionCount: attentionCount(for: printer.id),
-                                            failureReason: failureReason(for: printer.id),
-                                            printerService: services.printerService
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityHint("Opens \(printer.name) printer details.")
-                                    .accessibilityIdentifier(
-                                        printerAccessibilityIdentifier(for: printer)
+                // Avoid nesting lazy containers; Farm swipes hung with both LazyVStack and LazyVGrid (#3539).
+                Group {
+                    if viewModel.filteredPrinters.isEmpty {
+                        ContentUnavailableView {
+                            Label("No Printers in This Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        } description: {
+                            Text("Choose another Farm filter to see printers.")
+                        }
+                        .padding(.top, 40)
+                    } else {
+                        LazyVGrid(columns: iPadColumns, spacing: 12) {
+                            ForEach(viewModel.filteredPrinters) { printer in
+                                NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
+                                    PrinterCardView(
+                                        printer: printer,
+                                        isPendingReady: viewModel.isPendingReady(printer),
+                                        attentionCount: attentionCount(for: printer.id),
+                                        failureReason: failureReason(for: printer.id),
+                                        printerService: services.printerService
                                     )
                                 }
+                                .buttonStyle(.plain)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityHint("Opens \(printer.name) printer details.")
+                                .accessibilityIdentifier(
+                                    printerAccessibilityIdentifier(for: printer)
+                                )
                             }
                         }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .padding(.bottom, 112)
                 }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .padding(.bottom, 112)
             }
             .accessibilityIdentifier("farm.printerList")
         }
@@ -288,11 +286,20 @@ struct PrinterListView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     statusFilterChips(allowsWrapping: true)
                 }
+                .padding(.horizontal)
             } else {
-                HStack(spacing: 8) {
-                    statusFilterChips(allowsWrapping: false)
+                // Scroll rather than fixedSize-overflow: an over-wide chip row would
+                // widen the whole Farm root and push the header title off-screen (#3550).
+                // The row bleeds to the screen edges, with the inset applied inside the
+                // scroll content, so an overflowing chip peeks in as a scroll affordance.
+                // (Not .contentMargins: it widens the ScrollView by the margins, which
+                // re-widens the Farm root.)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        statusFilterChips(allowsWrapping: false)
+                    }
+                    .padding(.horizontal)
                 }
-                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

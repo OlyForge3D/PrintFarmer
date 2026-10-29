@@ -33,7 +33,6 @@ vi.mock('@/services/printer-signalr', () => ({
     replaceQueueResourceSubscriptions: vi.fn().mockResolvedValue(undefined),
   } 
 }));
-vi.mock('@/services/harvest-signalr', () => ({ signalRService: { connect: vi.fn().mockResolvedValue(undefined) } }));
 
 // Mock API helpers to keep network calls predictable
 vi.mock('@/common/utils/apiUrlHelpers', () => ({ 

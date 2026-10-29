@@ -191,17 +191,17 @@ public sealed class PluginSemanticControlTests
             Assert.Equal("test-key", request.ApiKey);
             Assert.Equal(HttpMethod.Post, request.Method);
         });
+        Request[] scripts = handler.Requests.Where(request => request.Uri.AbsolutePath == prefix + "/printer/gcode/script").ToArray();
+        Assert.Equal(6, scripts.Length);
         Assert.Equal(
             ["G28", "G28 X Y", "G28 Z", "M104 S205\nM140 S60", "M84"],
-            handler.Requests.Take(5).Select(request => request.Body!.Value.GetProperty("script").GetString()));
-        Request extrude = handler.Requests[5];
+            scripts.Take(5).Select(request => request.Body!.Value.GetProperty("script").GetString()));
+        Request extrude = scripts[5];
         Assert.Equal(
             "M83\nG1 E-2.5 F300\nM82",
             extrude.Body!.Value.GetProperty("script").GetString());
-        Assert.All(handler.Requests.Take(6), request =>
-            Assert.Equal(prefix + "/printer/gcode/script", request.Uri.AbsolutePath));
-        Assert.Equal(prefix + "/printer/emergency_stop", handler.Requests[6].Uri.AbsolutePath);
-        Assert.Null(handler.Requests[6].Body);
+        Assert.Equal(prefix + "/printer/emergency_stop", handler.Requests[^1].Uri.AbsolutePath);
+        Assert.Null(handler.Requests[^1].Body);
         Assert.True(client.ControlCapabilities.SupportsDisableMotors);
         Assert.True(client.ControlCapabilities.SupportsExtrusion);
     }
@@ -368,7 +368,9 @@ public sealed class PluginSemanticControlTests
 
     private sealed record Request(Uri Uri, HttpMethod Method, string? ApiKey, JsonElement? Body);
 
-    private sealed class CaptureHandler(HttpStatusCode status = HttpStatusCode.OK, string response = "{}") : HttpMessageHandler
+    private sealed class CaptureHandler(
+        HttpStatusCode status = HttpStatusCode.OK,
+        string response = "{}") : HttpMessageHandler
     {
         public List<Request> Requests { get; } = [];
 

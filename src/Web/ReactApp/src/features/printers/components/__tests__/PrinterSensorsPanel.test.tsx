@@ -1,18 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PrinterSensorsPanel, PrinterSensorsSection } from '@/features/printers/components/PrinterSensorsPanel';
+import { PrinterSensorsPanel, PrinterSensorsSection, PrinterThermalTable } from '@/features/printers/components/PrinterSensorsPanel';
 import { additionalPrinterSensors, primaryHeaterPower } from '@/features/printers/utils/additionalPrinterSensors';
 import type { PrinterSensor } from '@/types/api';
+import { mdiPrinter3dNozzle, mdiPrinter3dNozzleAlert, mdiRadiator, mdiRadiatorDisabled, mdiWaterPercent } from '@mdi/js';
 
 const mocks = vi.hoisted(() => ({
   setPrinterSensor: vi.fn(),
   toastError: vi.fn(),
+  allowed: true,
 }));
 
 vi.mock('@/services/api', () => ({ apiClient: { setPrinterSensor: mocks.setPrinterSensor } }));
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }));
-vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => mocks.allowed }) }));
 
 const fan: PrinterSensor = {
   id: 'fan part',
@@ -69,17 +71,48 @@ const renderPanel = (sensors: PrinterSensor[] | undefined, props: { canControl?:
 describe('PrinterSensorsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.allowed = true;
     mocks.setPrinterSensor.mockResolvedValue({ success: true });
   });
 
-  it('shows an empty state when there are no sensors', () => {
-    renderPanel([]);
-    expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
+  it.each([undefined, []])('renders nothing for an absent or empty sensor list (%j)', sensors => {
+    const { container } = renderPanel(sensors);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it.each([true, false])('hides writable filament sensors even when monitoring is enabled=%s', enabled => {
+    const { container } = renderPanel([{ ...runout, readings: [...runout.readings, { quantity: 'Enabled', value: enabled, unit: 'None' }],
+      writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] }], { canControl: true });
+    expect(container).toBeEmptyDOMElement();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: 'Nozzle' as const, cold: 50, hot: 50.1, offPath: mdiPrinter3dNozzle, onPath: mdiPrinter3dNozzleAlert, color: 'text-pf-error' },
+    { kind: 'Bed' as const, cold: 35, hot: 35.1, offPath: mdiRadiatorDisabled, onPath: mdiRadiator, color: 'text-pf-accent' },
+  ])('uses compact $kind glyph variants from actual readings, not targets or power', ({ kind, cold, hot, offPath, onPath, color }) => {
+    const heater = (value: number): PrinterSensor => ({
+      id: 'extra', displayName: 'Extra heater', kind, available: true,
+      readings: [{ quantity: 'Temperature', value, unit: 'Celsius' },
+        { quantity: 'TargetTemperature', value: 0, unit: 'Celsius' }, { quantity: 'Power', value: 0, unit: 'Percent' }],
+    });
+    const { container, rerender } = render(<PrinterSensorsPanel printerId="p1" sensors={[heater(hot)]} />);
+    const glyph = () => container.querySelector('[data-sensor-glyph] svg')!;
+    expect(glyph()).toHaveClass('opacity-100', color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', onPath);
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[heater(cold)]} />);
+    expect(glyph()).toHaveClass('opacity-40', color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', offPath);
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[heater(hot)]} isOnline={false} />);
+    expect(glyph()).toHaveClass('opacity-40');
+    expect(glyph()).not.toHaveClass(color);
+    expect(glyph().querySelector('path')).toHaveAttribute('d', offPath);
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
   });
 
   it('renders read-only sensors in groups with formatted units and no inputs', () => {
     renderPanel([chamber, bme, hotendFan, runout], { canControl: true });
-    for (const name of ['Temperatures', 'Fans & outputs', 'Filament']) {
+    for (const name of ['Temperatures']) {
       expect(screen.getByRole('region', { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole('region', { name: 'Environment' })).not.toBeInTheDocument();
@@ -87,7 +120,9 @@ describe('PrinterSensorsPanel', () => {
     expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeInTheDocument();
     expect(screen.getByLabelText('Enclosure Humidity: 45%')).toBeInTheDocument();
     expect(screen.getByLabelText('Enclosure Pressure: 1013 hPa')).toBeInTheDocument();
-    expect(screen.getByLabelText('Runout Filament: Empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('sensor-runout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sensor-fan hotend')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Miscellaneous' })).not.toBeInTheDocument();
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
   });
 
@@ -98,14 +133,220 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveAttribute('min', '0');
     expect(input).toHaveAttribute('max', '100');
     expect(input).toHaveAttribute('step', '1');
-    expect(input.parentElement).toHaveClass('w-[4.5rem]');
+    expect(input.parentElement).toHaveClass('w-[4.75rem]');
     expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toBeInTheDocument();
   });
 
-  it('marks unavailable sensors and disables their control', () => {
+  it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(
+    'omits generated type subtitles in the %s layout without stripping words from actual names',
+    layout => {
+      const sensors: PrinterSensor[] = [
+        { ...chamber, id: 'heater_generic chamber_heater', displayName: 'Chamber Heater' },
+        { ...chamber, id: 'temperature_sensor chamber_thermal_protection_sensor', displayName: 'Chamber Thermal Protection Sensor', available: false },
+      ];
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={sensors} layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      expect(screen.queryByText('Heater', { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByText('Sensor', { exact: true })).not.toBeInTheDocument();
+      expect(screen.getByText('Chamber Heater', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Chamber Thermal Protection Sensor', { exact: true })).toBeInTheDocument();
+      expect(screen.getByText('Unavailable')).toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, 'thermal', 'thermal-rows'] as const)(
+    'gives mixed HeaterBox humidity a glyph and its own Current cell in the %s layout',
+    layout => {
+      const sensor: PrinterSensor = { ...chamber, id: 'temperature_sensor heater_box1', displayName: 'Heater Box1',
+        readings: [...chamber.readings, { quantity: 'Humidity', value: 29, unit: 'Percent' }] };
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={[sensor]} canControl layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      const temperatureRow = screen.getByTestId(`sensor-${sensor.id}`);
+      const humidityRow = screen.getByRole('rowheader', { name: 'Heater Box1 Humidity' }).closest('tr')!;
+      expect(within(temperatureRow).getByRole('rowheader')).toHaveTextContent(/^Heater Box1$/);
+      expect(within(temperatureRow).getAllByRole('cell')[1]).toContainElement(screen.getByLabelText('Heater Box1 Temperature: 31.2°C'));
+      const cells = within(humidityRow).getAllByRole('cell');
+      expect(cells[0]).toBeEmptyDOMElement();
+      expect(cells[1]).toContainElement(screen.getByLabelText('Heater Box1 Humidity: 29%'));
+      expect(cells[2]).toBeEmptyDOMElement();
+      const glyph = within(humidityRow).getByRole('rowheader').querySelector('[data-sensor-glyph="Humidity"]')!;
+      expect(glyph).toHaveAttribute('aria-hidden', 'true');
+      expect(glyph.querySelector('path')).toHaveAttribute('d', mdiWaterPercent);
+      expect(within(humidityRow).getByRole('rowheader')).toHaveTextContent(/^Humidity$/);
+      expect(humidityRow.querySelector('[data-sensor-parent]')).toHaveAttribute('data-sensor-parent', sensor.id);
+      expect(humidityRow.querySelector('[data-sensor-parent]')).toHaveClass('pl-4');
+      expect(temperatureRow.nextElementSibling?.nextElementSibling).toBe(humidityRow);
+      expect(screen.getAllByLabelText('Heater Box1 Humidity: 29%')).toHaveLength(1);
+      expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([{ value: 0, available: true }, { value: 29, available: false }])(
+    'places humidity-only values under Current without an empty temperature row ($value%, available=$available)',
+    ({ value, available }) => {
+      renderPanel([{ ...bme, displayName: 'HeaterBox Humidity', available,
+        readings: [{ quantity: 'Humidity', value, unit: 'Percent' }] }]);
+
+      const row = screen.getByTestId('sensor-bme');
+      expect(within(row).getByRole('rowheader')).toHaveTextContent(
+        available ? /^HeaterBox Humidity$/ : /^HeaterBox HumidityUnavailable$/,
+      );
+      expect(within(row).getAllByRole('cell')[1]).toHaveTextContent(`${value}%`);
+      expect(row.querySelector('[data-sensor-glyph="Humidity"] path')).toHaveAttribute('d', mdiWaterPercent);
+      expect(screen.getAllByRole('rowheader')).toHaveLength(1);
+      expect(screen.getByLabelText(`HeaterBox Humidity Humidity: ${value}%${available ? '' : ' (unavailable)'}`)).toBeInTheDocument();
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])('does not invent a mixed-sensor humidity value for %s', value => {
+    renderPanel([{ ...chamber, readings: [...chamber.readings, { quantity: 'Humidity', value, unit: 'Percent' }] }]);
+    expect(screen.getAllByRole('rowheader')).toHaveLength(1);
+    expect(screen.queryByLabelText(/Humidity:/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeInTheDocument();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('aligns humidity under Current on both shared card and sidebar sections', () => {
+    render(<>
+      {['card', 'sidebar'].map(surface => <div key={surface} data-testid={surface}>
+        <PrinterSensorsSection printerId={surface} temperatures={{}} sensors={[{
+          ...chamber, displayName: 'Heater Box1',
+          readings: [...chamber.readings, { quantity: 'Humidity', value: 29, unit: 'Percent' }],
+        }]} />
+      </div>)}
+    </>);
+    for (const surface of ['card', 'sidebar']) {
+      const root = within(screen.getByTestId(surface));
+      const row = root.getByRole('rowheader', { name: 'Heater Box1 Humidity' }).closest('tr')!;
+      expect(root.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['Name', 'State', 'Current', 'Target']);
+      expect(within(row).getAllByRole('cell')[1]).toContainElement(root.getByLabelText('Heater Box1 Humidity: 29%'));
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('keeps humidity children associated with their own parent when devices have the same display name', () => {
+    const sensors: PrinterSensor[] = ['box1', 'box2'].map((id, index) => ({
+      ...chamber, id, displayName: 'Heater Box',
+      readings: [...chamber.readings, { quantity: 'Humidity', value: index === 0 ? 29 : 60, unit: 'Percent' }],
+    }));
+    renderPanel(sensors);
+
+    for (const [index, sensor] of sensors.entries()) {
+      const parent = screen.getByTestId(`sensor-${sensor.id}`);
+      const child = screen.getByTestId(`sensor-${sensor.id}-Humidity`);
+      expect(parent.nextElementSibling?.nextElementSibling).toBe(child);
+      expect(child.querySelector('[data-sensor-parent]')).toHaveAttribute('data-sensor-parent', sensor.id);
+      expect(within(child).getByRole('rowheader', { name: 'Heater Box Humidity' })).toHaveTextContent(/^Humidity$/);
+      expect(within(child).getAllByRole('cell')[1]).toHaveTextContent(index === 0 ? '29%' : '60%');
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  const nullTemperature: PrinterSensor['readings'][number] = JSON.parse('{"quantity":"Temperature","value":null,"unit":"Celsius"}');
+  it.each<PrinterSensor['readings'][number]>([
+    nullTemperature,
+    { ...nullTemperature, quantity: 'TargetTemperature' },
+    { quantity: 'Temperature', value: Number.NaN, unit: 'Celsius' },
+    { quantity: 'TargetTemperature', value: Number.NaN, unit: 'Celsius' },
+    { quantity: 'Temperature', value: Number.POSITIVE_INFINITY, unit: 'Celsius' },
+    { quantity: 'TargetTemperature', value: Number.NEGATIVE_INFINITY, unit: 'Celsius' },
+  ])('uses one named humidity row for an invalid $quantity=$value placeholder on both shared surfaces', reading => {
+    render(<>
+      {['card', 'sidebar'].map(surface => <div key={surface} data-testid={surface}>
+        <PrinterSensorsSection printerId={surface} temperatures={{}} sensors={[{
+          ...chamber, displayName: 'Heater Box1',
+          readings: [reading, { quantity: 'Humidity', value: 42, unit: 'Percent' }],
+        }]} />
+      </div>)}
+    </>);
+
+    for (const surface of ['card', 'sidebar']) {
+      const root = within(screen.getByTestId(surface));
+      expect(root.getAllByRole('rowheader')).toHaveLength(1);
+      const row = root.getByTestId('sensor-chamber');
+      expect(within(row).getByRole('rowheader')).toHaveTextContent(/^Heater Box1 Humidity$/);
+      expect(within(row).getAllByRole('cell')[1]).toContainElement(root.getByLabelText('Heater Box1 Humidity: 42%'));
+      expect(row.querySelector('[data-sensor-glyph="Humidity"]')).toBeInTheDocument();
+      expect(row.querySelector('[data-sensor-parent]')).not.toBeInTheDocument();
+      expect(root.queryByTestId('sensor-chamber-Humidity')).not.toBeInTheDocument();
+      expect(root.queryByLabelText(/Temperature:|Target:/)).not.toBeInTheDocument();
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it.each(['Temperature', 'TargetTemperature'] as const)('retains a zero %s as a valid parent with an indented humidity child', quantity => {
+    renderPanel([{ ...chamber, readings: [
+      { quantity, value: 0, unit: 'Celsius' }, { quantity: 'Humidity', value: 42, unit: 'Percent' },
+    ] }]);
+
+    expect(screen.getAllByRole('rowheader')).toHaveLength(2);
+    const parent = screen.getByTestId('sensor-chamber');
+    const child = screen.getByTestId('sensor-chamber-Humidity');
+    expect(within(parent).getByRole('rowheader')).toHaveTextContent(/^Chamber$/);
+    expect(within(parent).getByLabelText(`Chamber ${quantity === 'Temperature' ? 'Temperature' : 'Target'}: 0°C`)).toBeInTheDocument();
+    expect(parent.nextElementSibling?.nextElementSibling).toBe(child);
+    expect(child.querySelector('[data-sensor-parent]')).toHaveClass('pl-4');
+    expect(within(child).getAllByRole('cell')[1]).toHaveTextContent('42%');
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('retains a writable temperature parent when its observation is invalid and humidity is reported', () => {
+    renderPanel([{ ...chamber, readings: [
+      nullTemperature, { quantity: 'Humidity', value: 42, unit: 'Percent' },
+    ], writable: [{ quantity: 'TargetTemperature', min: 0, max: 80, step: 1, unit: 'Celsius' }] }], { canControl: true });
+
+    expect(screen.getAllByRole('rowheader')).toHaveLength(2);
+    const target = screen.getByRole('spinbutton', { name: 'Set Chamber Target' });
+    expect(target).toBeEnabled();
+    expect(target).toHaveValue(null);
+    expect(target).toHaveAttribute('max', '80');
+    expect(screen.getByTestId('sensor-chamber-Humidity')).toContainElement(screen.getByLabelText('Chamber Humidity: 42%'));
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'thermal', 'thermal-rows', 'plain'] as const)(
+    'omits measured temperature extrema in the %s layout while retaining current readings and control bounds',
+    layout => {
+      const sensor: PrinterSensor = {
+        ...chamber,
+        readings: [
+          { quantity: 'Temperature', value: 46, unit: 'Celsius' },
+          { quantity: 'TargetTemperature', value: 60, unit: 'Celsius' },
+          { quantity: 'MeasuredMinTemperature', value: 29, unit: 'Celsius' },
+          { quantity: 'MeasuredMaxTemperature', value: 99, unit: 'Celsius' },
+          { quantity: 'Gas', value: 4321, unit: 'Ohm' },
+        ],
+        writable: [{ quantity: 'TargetTemperature', min: 10, max: 70, unit: 'Celsius', allowZero: true }],
+      };
+      const panel = <PrinterSensorsPanel printerId="p1" sensors={[sensor]} canControl layout={layout} />;
+      render(layout === 'thermal-rows' ? <PrinterThermalTable>{panel}</PrinterThermalTable> : panel);
+
+      expect(screen.queryByText(/Measured (minimum|maximum)/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Measured (minimum|maximum)/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('29°C')).not.toBeInTheDocument();
+      expect(screen.queryByText('99°C')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Chamber Temperature: 46°C')).toBeInTheDocument();
+      expect(screen.getByLabelText('Chamber Gas: 4321 Ω')).toBeInTheDocument();
+      const target = screen.getByRole('spinbutton', { name: 'Set Chamber Target' });
+      expect(target).toHaveValue(60);
+      expect(target).toHaveAttribute('max', '70');
+      expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    },
+  );
+
+  it('marks unavailable readback without disabling descriptor-authorized writes', async () => {
     renderPanel([{ ...fan, available: false }], { canControl: true });
     expect(screen.getByText('Unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton')).toBeDisabled();
+    const target = screen.getByRole('spinbutton');
+    expect(target).toBeEnabled();
+    fireEvent.change(target, { target: { value: '50' } });
+    fireEvent.keyDown(target, { key: 'Enter' });
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', fan.id, { quantity: 'FanSpeed', value: 50 }));
   });
 
   it('hides redundant RPM quantity labels on both shared surfaces while retaining accessible context and other labels', () => {
@@ -113,33 +354,32 @@ describe('PrinterSensorsPanel', () => {
       <PrinterSensorsSection printerId="card" sensors={[fan]} temperatures={{}} />
       <PrinterSensorsSection printerId="sidebar" sensors={[fan]} temperatures={{}} />
     </>);
-    for (const label of screen.getAllByText('RPM', { exact: true })) expect(label).toHaveClass('sr-only');
+    expect(screen.queryByText('RPM', { exact: true })).not.toBeInTheDocument();
     expect(screen.getAllByText('Part Fan', { exact: true })).toHaveLength(2);
-    for (const label of screen.getAllByText('Speed', { exact: true })) expect(label).not.toHaveClass('sr-only');
     for (const reading of screen.getAllByLabelText('Part Fan RPM: 3200 RPM')) {
       expect(reading).toHaveTextContent('3200 RPM');
-      expect(reading).toHaveClass('ml-auto');
     }
   });
 
-  it('keeps RPM-only fan identity and the quantity label when no RPM value is reported', () => {
+  it('hides RPM-only fans while preserving writable fans with missing RPM', () => {
     renderPanel([{ ...fan, readings: [{ quantity: 'FanRpm', value: 3200, unit: 'Rpm' }], writable: [] },
       { ...fan, id: 'missing-rpm', displayName: 'Controller fan', readings: [
         { quantity: 'FanSpeed', value: 40, unit: 'Percent' },
         { quantity: 'FanRpm', value: Number.NaN, unit: 'Rpm' },
       ] }]);
-    expect(screen.getByText('Part Fan', { exact: true })).toBeInTheDocument();
-    expect(screen.getByText('RPM', { exact: true })).not.toHaveClass('sr-only');
-    expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toHaveTextContent('3200 RPM');
+    expect(screen.queryByText('Part Fan', { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText('Controller Fan', { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText('RPM', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Part Fan RPM: 3200 RPM')).not.toBeInTheDocument();
   });
 
-  it('renders detected filament and tolerates null values', () => {
+  it('hides filament sensors and tolerates null thermal values', () => {
     renderPanel([
       { ...runout, readings: [{ quantity: 'FilamentDetected', value: true, unit: 'None' }] },
       { ...chamber, readings: [{ quantity: 'Temperature', value: null as unknown as number, unit: 'Celsius' }] },
     ]);
-    expect(screen.getByLabelText('Runout Filament: Detected')).toBeInTheDocument();
-    expect(screen.getByLabelText('Chamber Temperature: —')).toBeInTheDocument();
+    expect(screen.queryByTestId('sensor-runout')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sensor-chamber').querySelectorAll('td')[1]).toBeEmptyDOMElement();
   });
 
   it('disables controls without control capability or when offline', () => {
@@ -160,17 +400,18 @@ describe('PrinterSensorsPanel', () => {
     await user.type(input, '65');
     await user.tab();
     expect(mocks.setPrinterSensor).toHaveBeenCalledWith('p1', 'fan part', { quantity: 'FanSpeed', value: 65 });
-    expect(screen.getByLabelText('Part Fan Speed: 65%')).toBeInTheDocument();
+    expect(input).toHaveValue(65);
     resolve({ success: true });
     await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1));
     // Confirmed value is retained until live data changes, then live data wins.
-    expect(screen.getByLabelText('Part Fan Speed: 65%')).toBeInTheDocument();
+    expect(input).toHaveValue(65);
+    await screen.findByText('Accepted 65% · awaiting telemetry');
     const live = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 70, unit: 'Percent' as const }, fan.readings[1]] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[live]} canControl />);
-    expect(screen.getByLabelText('Part Fan Speed: 70%')).toBeInTheDocument();
+    expect(input).toHaveValue(70);
     const back = { ...fan, readings: [{ quantity: 'FanSpeed' as const, value: 40, unit: 'Percent' as const }, fan.readings[1]] };
     rerender(<PrinterSensorsPanel printerId="p1" sensors={[back]} canControl />);
-    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
+    expect(input).toHaveValue(40);
   });
 
   it('rejects values not aligned to the writable step', async () => {
@@ -242,7 +483,7 @@ describe('PrinterSensorsPanel', () => {
     resolve({ success: true });
     await waitFor(() => expect(input).toBeEnabled());
     expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('button', { name: /Set/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Apply|^Cancel/ })).not.toBeInTheDocument();
   });
 
   it.each(['{Tab}', '{Enter}{Tab}'])('does not write an unchanged value with %s', async (keys) => {
@@ -277,6 +518,49 @@ describe('PrinterSensorsPanel', () => {
     expect(input).toHaveValue(40);
   });
 
+  it('uses existing disclosure keyboard behavior and retains independent expansion across telemetry renders', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PrinterSensorsSection printerId="p1" sensors={[chamber, fan, runout]} temperatures={{}} canControl />);
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeVisible();
+    const toggle = screen.getByRole('button', { name: 'Collapse Temperatures' });
+    toggle.focus();
+    await user.keyboard(' ');
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).not.toBeVisible();
+    expect(screen.getByRole('button', { name: /^Expand Temperatures/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('slider', { name: 'Set Part Fan Speed slider' })).toBeVisible();
+    rerender(<PrinterSensorsSection printerId="p1" sensors={[{ ...chamber }, fan, runout]} temperatures={{}} canControl />);
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).not.toBeVisible();
+    await user.keyboard('{Enter}');
+    expect(screen.getByLabelText('Chamber Temperature: 31.2°C')).toBeVisible();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('retains an in-flight row lock and deduplication through collapse and reopen', async () => {
+    const user = userEvent.setup();
+    let accept: ((result: { success: boolean }) => void) | undefined;
+    mocks.setPrinterSensor.mockImplementationOnce(() => new Promise(resolve => { accept = resolve; }));
+    render(<PrinterSensorsSection printerId="p1" sensors={[fan]} temperatures={{}} canControl />);
+    const input = screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' });
+    await user.clear(input);
+    await user.type(input, '65{Enter}');
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
+    expect(input).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Collapse Miscellaneous' }));
+    await user.click(screen.getByRole('button', { name: /^Expand Miscellaneous/ }));
+    expect(screen.getByRole('spinbutton', { name: 'Set Part Fan Speed' })).toBe(input);
+    expect(input).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Increase Part Fan Speed' }));
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
+    accept?.({ success: true });
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue(65);
+    await user.click(screen.getByRole('button', { name: 'Collapse Miscellaneous' }));
+    await user.click(screen.getByRole('button', { name: /^Expand Miscellaneous/ }));
+    await user.click(input);
+    await user.tab();
+    expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', fan.id, { quantity: 'FanSpeed', value: 65 });
+  });
+
   it('keeps all remaining heater readings inline with its target and temperature', async () => {
     const user = userEvent.setup();
     const heater: PrinterSensor = { ...chamber, displayName: 'Heater Box1',
@@ -295,10 +579,10 @@ describe('PrinterSensorsPanel', () => {
       ],
     };
     render(<PrinterSensorsSection printerId="p1" sensors={[heater, fan, runout]} temperatures={{}} canControl>
-      <div>Legacy temperature controls</div>
+      {rows => <PrinterThermalTable>{rows}</PrinterThermalTable>}
     </PrinterSensorsSection>);
     expect(screen.getAllByText('Temperatures')).toHaveLength(1);
-    expect(screen.getAllByRole('region', { name: 'Fans & outputs' })[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('region', { name: 'Miscellaneous' })[0]).toBeInTheDocument();
     expect(screen.getByLabelText('Heater Box1 Temperature: 36°C')).toBeInTheDocument();
     expect(screen.getAllByText('25%')).toHaveLength(1);
     expect(screen.getByLabelText('Heater Box1 Humidity: 42%')).toBeInTheDocument();
@@ -383,11 +667,11 @@ describe('PrinterSensorsPanel', () => {
       ]);
     });
 
-    it('hides a duplicate-only disclosure but preserves reported-empty and unsupported behavior', () => {
+    it('hides duplicate-only, reported-empty and unsupported sensor sections without placeholder text', () => {
       const { rerender } = render(<PrinterSensorsSection printerId="p1" sensors={[heater('nozzle')]} temperatures={temperatures} supportsTelemetry />);
       expect(screen.queryByText('Sensors & fans')).not.toBeInTheDocument();
       rerender(<PrinterSensorsSection printerId="p1" sensors={[]} temperatures={temperatures} supportsTelemetry />);
-      expect(screen.getByText('No sensors reported.')).toBeInTheDocument();
+      expect(screen.queryByText('No sensors reported.')).not.toBeInTheDocument();
       rerender(<PrinterSensorsSection printerId="p1" sensors={undefined} temperatures={temperatures} />);
       expect(screen.queryByText('Sensors & fans')).not.toBeInTheDocument();
     });
@@ -401,7 +685,8 @@ describe('PrinterSensorsPanel', () => {
     await user.clear(input);
     await user.type(input, '65{Enter}');
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1));
-    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
+    expect(input).toHaveValue(65);
+    expect(screen.getByText(/Read-only sensor.*retry/)).toBeVisible();
   });
 
   it('rolls back and toasts when the command result reports failure', async () => {
@@ -412,6 +697,196 @@ describe('PrinterSensorsPanel', () => {
     await user.clear(input);
     await user.type(input, '10{Enter}');
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Printer busy'));
-    expect(screen.getByLabelText('Part Fan Speed: 40%')).toBeInTheDocument();
+    expect(input).toHaveValue(10);
+    expect(screen.getByText(/Printer busy.*retry/)).toBeVisible();
+  });
+
+  it('previews slider movement locally and submits only its final pointer value', async () => {
+    renderPanel([fan], { canControl: true });
+    const slider = screen.getByRole('slider');
+    fireEvent.pointerDown(slider, { pointerId: 1 });
+    fireEvent.change(slider, { target: { value: '55' } });
+    fireEvent.change(slider, { target: { value: '65' } });
+    expect(screen.getByRole('spinbutton')).toHaveValue(65);
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    fireEvent.pointerUp(slider, { pointerId: 1 });
+    fireEvent.blur(slider);
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', fan.id, { quantity: 'FanSpeed', value: 65 }));
+    expect(screen.getByText('Accepted 65% · awaiting telemetry')).toBeVisible();
+    expect(screen.getByLabelText('Part Fan RPM: 3200 RPM')).toHaveTextContent('3200 RPM');
+  });
+
+  it('commits a keyboard slider adjustment on key release once', async () => {
+    renderPanel([fan], { canControl: true });
+    const slider = screen.getByRole('slider');
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
+    fireEvent.change(slider, { target: { value: '41' } });
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+    fireEvent.keyUp(slider, { key: 'ArrowRight' });
+    fireEvent.blur(slider);
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', fan.id, { quantity: 'FanSpeed', value: 41 }));
+  });
+
+  it.each(['reset', 'step', 'slider'])('a same-row pointer %s replaces the draft without sending it first', async action => {
+    const user = userEvent.setup();
+    renderPanel([fan], { canControl: true });
+    const number = screen.getByRole('spinbutton');
+    await user.clear(number);
+    await user.type(number, '65');
+    const target = action === 'reset' ? screen.getByRole('button', { name: /Reset/ })
+      : action === 'step' ? screen.getByRole('button', { name: /Increase/ }) : screen.getByRole('slider');
+    if (action !== 'slider') {
+      await user.click(target);
+    } else {
+      fireEvent.pointerDown(target, { pointerId: 1 });
+      // Chromium may publish the range's input before the number's focusout.
+      fireEvent.change(target, { target: { value: '30' } });
+      fireEvent.blur(number);
+      fireEvent.change(target, { target: { value: '70' } });
+      fireEvent.pointerUp(target, { pointerId: 1 });
+    }
+    await waitFor(() => expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1));
+    expect(mocks.setPrinterSensor).toHaveBeenLastCalledWith('p1', fan.id, {
+      quantity: 'FanSpeed', value: action === 'reset' ? 0 : action === 'step' ? 66 : 70,
+    });
+  });
+
+  it('keyboard Tab to the slider still sends the numeric draft', async () => {
+    const user = userEvent.setup();
+    renderPanel([fan], { canControl: true });
+    await user.clear(screen.getByRole('spinbutton'));
+    await user.type(screen.getByRole('spinbutton'), '65');
+    await user.tab();
+    expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', fan.id, { quantity: 'FanSpeed', value: 65 });
+  });
+
+  it('does not offer reset when zero is outside the allowed range', () => {
+    renderPanel([{ ...fan, writable: [{ ...fan.writable![0], min: 20, max: 80, step: 2 }] }], { canControl: true });
+    expect(screen.queryByRole('button', { name: /Reset/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('slider')).toHaveAttribute('min', '20');
+    expect(screen.getByRole('slider')).toHaveAttribute('max', '80');
+    expect(screen.getByRole('slider')).toHaveAttribute('step', '2');
+  });
+
+  it('retains 0 RPM and omits missing RPM on controllable fans', () => {
+    renderPanel([
+      { ...fan, readings: [{ quantity: 'FanSpeed', value: 0, unit: 'Percent' }, { quantity: 'FanRpm', value: 0, unit: 'Rpm' }] },
+      { ...fan, id: 'other', displayName: 'Other fan', readings: [{ quantity: 'FanSpeed', value: 40, unit: 'Percent' }] },
+    ], { canControl: true });
+    expect(screen.getByLabelText('Part Fan RPM: 0 RPM')).toHaveTextContent('0 RPM');
+    expect(screen.getAllByRole('slider')).toHaveLength(2);
+    expect(screen.getAllByRole('spinbutton')[0]).toHaveValue(0);
+    expect(screen.getByTestId('sensor-other')).not.toHaveTextContent('RPM');
+  });
+
+  it('hides read-only nonthermal and all filament sensors on both shared surfaces without empty groups', () => {
+    const excluded: PrinterSensor[] = [
+      hotendFan, runout,
+      { ...runout, id: 'writable-runout', writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { ...runout, id: 'switch-runout', writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { ...runout, id: 'unreported-runout', readings: [], writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { ...runout, id: 'generic-runout', kind: 'Other' },
+      { ...runout, id: 'generic-switch-runout', kind: 'Other', writable: [{ quantity: 'Enabled', min: 0, max: 1, step: 1, unit: 'None' }] },
+      { id: 'diagnostic', displayName: 'Diagnostic', kind: 'Other', available: true,
+        readings: [{ quantity: 'Other', value: 7, unit: 'None' }] },
+      { id: 'power', displayName: 'Power', kind: 'Other', available: true,
+        readings: [{ quantity: 'Power', value: 8, unit: 'Watt' }] },
+    ];
+    render(<>
+      <PrinterSensorsSection printerId="card" sensors={excluded} temperatures={{}} supportsTelemetry canControl />
+      <PrinterSensorsSection printerId="sidebar" sensors={excluded} temperatures={{}} supportsTelemetry canControl />
+    </>);
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    expect(screen.queryByText('No sensors reported.')).not.toBeInTheDocument();
+    for (const sensor of excluded) expect(screen.queryByTestId(`sensor-${sensor.id}`)).not.toBeInTheDocument();
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('renders a capability-declared binary output as a switch and sends once', async () => {
+    const user = userEvent.setup();
+    const light: PrinterSensor = { id: 'light', displayName: 'Case light', kind: 'Other', available: true,
+      readings: [{ quantity: 'Power', value: 0, unit: 'None' }],
+      writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] };
+    renderPanel([light], { canControl: true });
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('switch', { name: 'Set Case Light Power' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+    expect(mocks.setPrinterSensor).toHaveBeenCalledExactlyOnceWith('p1', light.id, { quantity: 'Power', value: 1 });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Accepted 1 · awaiting telemetry')).toBeVisible();
+  });
+
+  it('keeps a missing target blank but offers a descriptor-authorized number field', () => {
+    renderPanel([{ ...chamber, readings: [], writable: [{ quantity: 'TargetTemperature', unit: 'Celsius', min: 0, max: 80, step: 0.5 }] }], { canControl: true });
+    expect(screen.getByRole('spinbutton')).toHaveValue(null);
+    expect(screen.getByRole('columnheader', { name: 'State' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Current' })).toBeInTheDocument();
+    expect(screen.getByTestId('sensor-chamber').querySelectorAll('td')[1]).toBeEmptyDOMElement();
+  });
+
+  it.each(['permission', 'offline', 'missing reading'] as const)('does not send binary commands with %s', async gate => {
+    const user = userEvent.setup();
+    const light: PrinterSensor = { id: 'light', displayName: 'Case light', kind: 'Other', available: true,
+      readings: gate === 'missing reading' ? [] : [{ quantity: 'Power', value: 0, unit: 'None' }],
+      writable: [{ quantity: 'Power', min: 0, max: 1, step: 1, unit: 'None' }] };
+    renderPanel([light], { canControl: gate !== 'permission', isOnline: gate !== 'offline' });
+    if (gate === 'missing reading') {
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    } else {
+      const toggle = screen.getByRole('switch', { name: 'Set Case Light Power' });
+      expect(toggle).toBeDisabled();
+      await user.click(toggle);
+    }
+    expect(mocks.setPrinterSensor).not.toHaveBeenCalled();
+  });
+
+  it('all direct controls remain disabled by permission, offline and availability gates', () => {
+    mocks.allowed = false;
+    render(<PrinterSensorsSection printerId="p1" sensors={[fan]} temperatures={{}} canControl />);
+    expect(screen.getByRole('spinbutton')).toBeDisabled();
+    expect(screen.getByRole('slider')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Reset/ })).toBeDisabled();
+  });
+
+  it('discards offline drafts and never resends on reconnect, including interrupted requests', async () => {
+    const user = userEvent.setup();
+    let finish!: (result: { success: boolean }) => void;
+    mocks.setPrinterSensor.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const { rerender } = renderPanel([fan], { canControl: true });
+    await user.clear(screen.getByRole('spinbutton'));
+    await user.type(screen.getByRole('spinbutton'), '65{Enter}');
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[fan]} canControl isOnline={false} />);
+    expect(screen.getByText(/outcome unknown/)).toBeVisible();
+    finish({ success: true });
+    await waitFor(() => expect(screen.getByRole('slider')).toBeDisabled());
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[fan]} canControl />);
+    expect(screen.getByRole('spinbutton')).toHaveValue(40);
+    expect(screen.getByRole('slider')).toBeEnabled();
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
+    await user.clear(screen.getByRole('spinbutton'));
+    await user.type(screen.getByRole('spinbutton'), '70');
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[fan]} canControl isOnline={false} />);
+    rerender(<PrinterSensorsPanel printerId="p1" sensors={[fan]} canControl />);
+    await user.tab();
+    expect(screen.getByRole('spinbutton')).toHaveValue(40);
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a failed draft for explicit retry without retrying on blur', async () => {
+    const user = userEvent.setup();
+    mocks.setPrinterSensor.mockRejectedValueOnce(new Error('Rejected'));
+    renderPanel([fan], { canControl: true });
+    const input = screen.getByRole('spinbutton');
+    await user.clear(input);
+    await user.type(input, '65{Enter}');
+    await screen.findByText(/Rejected.*retry/);
+    await user.tab();
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(1);
+    await user.click(input);
+    await user.keyboard('{Enter}');
+    await screen.findByText('Accepted 65% · awaiting telemetry');
+    expect(mocks.setPrinterSensor).toHaveBeenCalledTimes(2);
   });
 });

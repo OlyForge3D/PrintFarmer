@@ -42,6 +42,28 @@ paths and emits outputs consumed by the conditional jobs. This produces a
 required, stable check name even when no application build runs, such as a
 docs-only PR.
 
+## Squad upgrades
+
+Squad CLI upgrades can overwrite customized automation and install upstream-only
+workflows. Reconcile against the committed PrintFarmer versions before opening
+a PR targeting `development`:
+
+- Preserve shared `scripts/ci/squad-routing.cjs` routing, per-issue serialization,
+  owner rechecks, and Scribe/Ralph dispatch exclusions.
+- Preserve the canonical review and merge policies in
+  [Copilot instructions](../.github/copilot-instructions.md#readiness-and-merge-review-gate).
+- Keep Copilot assignment in `squad-issue-assign.yml`; triage and heartbeat
+  dispatch that workflow instead of assigning the bot directly. API acceptance
+  is not proof that a coding session started.
+- Exclude upstream `squad-ci`, `squad-docs`, `squad-insider-release`,
+  `squad-preview`, `squad-promote`, and `squad-release` workflows. PrintFarmer
+  already owns its application CI, Pages deployment, and releases.
+- Keep `*.local-backup` upgrade artifacts out of commits; workflow backups are
+  ignored alongside agent backups.
+
+Run the focused routing, reviewer-dispatch, verdict-gate, and verdict-verifier
+tests under `scripts/ci/tests/`, plus yamllint on changed workflow YAML.
+
 ## iOS toolchain
 
 All iOS build, test, and release jobs use GitHub's explicit `macos-26` arm64
@@ -416,8 +438,8 @@ outputs.
 The workflow deliberately does **not** transport `obj/`. Generated
 `project.assets.json` and `*.nuget.g.props` files embed absolute workspace,
 package-cache, and source-root paths. Those paths commonly match between two
-GitHub-hosted Ubuntu runners, but they are not contractual, especially while
-the workflow selects a floating `10.0.x` SDK patch. Tests avoid project
+GitHub-hosted Ubuntu runners, but they are not contractual even with an exact
+SDK selected from `global.json`. Tests avoid project
 evaluation entirely by executing the compiled DLL. EF consumers still need
 project metadata, so each migration leg performs a measured 7–9 second local
 restore before running `dotnet ef --no-build`; the provider job similarly
@@ -438,6 +460,12 @@ permissions without paying for a second artifact compression pass.
   through their `--filter`. The `dotnet-test-providers` job executes those
   categories on the same ordinary .NET PR runs whenever
   `want_dotnet_test=true`.
+- When the infrastructure test project is selected, the provider job separately
+  runs the catalog's two populated upgrade cases against PostgreSQL and SQL
+  Server, using newly named isolated databases. Its TRX guard requires both
+  cases to pass with no skips; the API
+  assembly's generic provider results do not substitute for this evidence.
+  The configured CI accounts need create/drop database rights for these tests.
 
 ## `dotnet-format` CI gate (#2978)
 
@@ -453,9 +481,9 @@ before the test fan-out.
 
 ### Formatter SDK requirement
 
-Run format verification with **.NET SDK 10.0.200 or newer**. In the 10.0.1xx
-feature band (10.0.100 through 10.0.1xx, including the
-`mcr.microsoft.com/dotnet/sdk:10.0` images), `dotnet format` ignores
+Run format verification with **the exact SDK in root `global.json`**, which
+must be **10.0.200 or newer**. In the 10.0.1xx
+feature band, `dotnet format` ignores
 `DiagnosticSuppressor`s. `xunit.analyzers` suppresses `VSTHRD200` (the
 `Async` suffix rule) on test methods, and the build honors that suppressor,
 so the build is clean. The old formatter does not honor it and reports
@@ -466,11 +494,33 @@ it to 10.0.2xx only. The 10.0.1xx backport,
 [dotnet/sdk#51997](https://github.com/dotnet/sdk/pull/51997), is still
 unmerged. The CI job fails closed on a 10.0.1xx SDK.
 
-`global.json` still pins `10.0.100` with `latestMinor` roll-forward, so it
-picks the newest installed 10.0 SDK. Do not raise that pin to fix the
-formatter: the Docker build images use the 1xx band. If `dotnet format`
+`global.json` is the single approved SDK selector, with `rollForward: disable`
+and prereleases disabled. CI setup, bootstrap installers, devcontainers and
+Docker SDK build arguments consume it; target frameworks (`net10.0`) and
+ASP.NET runtime image tags remain separate. If `dotnet format`
 reports `VSTHRD200` on `[Fact]`/`[Theory]` methods, check
 `dotnet --version` from `src/` before renaming anything.
+
+### SDK consistency gate
+
+The unconditional `ci-tools` job runs
+`node scripts/ci/check-dotnet-sdk.mjs` and
+`node --test scripts/ci/tests/test-dotnet-sdk.mjs`.
+The gate rejects nested `global.json` selectors, independent CI/bootstrap/Docker
+SDK pins, floating installer channels, and setup steps that do not immediately
+verify and log `dotnet --version`. Negative fixtures exercise each failure.
+`actions/setup-dotnet` uses `global-json-file: global.json`; the following
+`python3 scripts/dotnet-sdk.py verify` fails if the selected version differs.
+The release build instead reads `source/global.json` and verifies with
+`--root source`, binding host restore and Docker builds to the selected application
+revision rather than the separate release-tooling checkout. Release entry points
+read the SDK policy without requiring the CI YAML checker's npm dependencies.
+
+Dependabot's `dotnet-sdk` ecosystem proposes weekly root `global.json` patch
+updates, including feature-band changes. Major/minor framework transitions remain
+manual. Approve SDK updates only after the ordinary CI/build/formatter checks;
+there is no separate SDK number to synchronize in a workflow or Dockerfile.
+See [SDK installation and Docker arguments](./DOTNET_SDK_INSTALLATION.md).
 
 ## Pre-push format gate
 

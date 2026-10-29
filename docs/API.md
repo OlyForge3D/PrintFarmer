@@ -95,18 +95,17 @@ state only for that request and display errors, cancellation, and timeouts
 explicitly. A lost response can mean the command was sent; never automatically
 retry, replay after reconnect, or infer that motion stopped.
 
-Moonraker jog and absolute positioning use one fresh authenticated
-movement-safety snapshot, not full composite status enrichment, then one send
-without tracking hops or artificial waits. Homing, effective coordinate-frame,
-and travel-envelope guards remain. Manual moves do not require the automated
-workflow's minimum Z clearance; unrelated automated protections remain unchanged.
+Interactive motion sends the native command without a preceding position,
+homing, geometry, or clearance query. Firmware enforces its own motion rules.
+Relative movement reflects native transport support (including OctoPrint and
+PrusaLink); absolute movement is advertised separately and is not inferred from
+verified geometry. Automated and calibration protections remain separate.
 
 The detailed card and sidebar offer Relative and Absolute coordinate entry.
 Tab/blur or Enter sends only the changed axis (`/move` for a relative distance,
 `/moveto` for an absolute target); omitted axes stay untouched. All coordinate
-fields require X, Y and Z to be explicitly reported homed, in both modes.
-Losing any required homing discards unsubmitted coordinate edits. Partial or unknown homing,
-offline/disabled printers, missing queue/start permission, unsupported movement,
+fields accept finite numeric inputs without requiring homing/geometry telemetry.
+Offline/disabled printers, missing queue/start permission, unsupported movement,
 and a pending command disable entry. Escape and mode changes discard drafts.
 Enter followed by blur never repeats a move. Submitted fields clear, so another
 relative move requires a deliberate new edit; commands are never replayed.
@@ -134,17 +133,15 @@ See [direct-motion coordination and upgrades](JOB_QUEUE_ARCHITECTURE.md#direct-m
 `{"speedPercent": 100}`. `POST /api/printers/{id}/z-offset/adjust` accepts a
 non-zero `offsetMm` from `-0.2` through `0.2`. Both use the existing
 `CommandResult` response, require `Queue.Start` permission and printer Submit
-access, and are capability/readback-gated. The Z-offset command is transient;
+access, and are capability-gated. The Z-offset command is transient;
 it does not save firmware configuration.
 
-Check `supportsFanControl` and `supportsFanSpeedReadback` before enabling fan
-controls, and `supportsZOffsetAdjustment` and `supportsZOffsetReadback` before
-enabling live Z-offset controls. A status value must also be present. At present
-these controls are supported only by Moonraker printers reporting the needed
-readback. Known online idle states use a direct actuation lease; printing and
-paused states use the active-print lease. Offline printers return `503`,
-unknown/transitional states return `409`, and unsupported controls or unknown
-readbacks return `502` without sending a command.
+Check `supportsFanControl` or `supportsZOffsetAdjustment` before enabling each
+control. Readback flags describe telemetry, not permission to send a command;
+missing values display as unknown. These controls are currently implemented by
+Moonraker. Printing and paused states use the active-print lease; other states
+use direct coordination. Cached offline/unknown status does not veto a native
+command; transport failure and backend rejection remain explicit errors.
 
 Status DTOs and `printerupdated` events may include:
 
@@ -162,6 +159,119 @@ status endpoint reports the printer offline, the composite status omits all
 secondary job and live telemetry readbacks rather than mixing them with an
 offline state.
 
+## Runtime Speed and Flow Overrides
+
+Read `GET /api/printers/{id}/backend-capabilities` before enabling controls:
+`supportsSpeedFactorControl` and `supportsFlowFactorControl` are independent
+operation flags, currently true only for Moonraker. Other backends report false
+and reject writes with `501`; raw G-code support is not a substitute.
+
+| Route | Body | Meaning |
+| --- | --- | --- |
+| `POST /api/printers/{id}/speed-factor` | `{"percent": 125}` | Speed multiplier 1.25, flow unchanged |
+| `POST /api/printers/{id}/flow-factor` | `{"percent": 87.5}` | Extrusion multiplier 0.875, speed unchanged |
+
+Both accept finite **1 through 200 percent**, inclusive, with at most two decimal
+places; `100` restores the normal multiplier. These are conservative application
+write limits, not firmware limits or a guarantee of print quality/safety on every
+machine. Klipper accepts positive percentages without an upper bound. Readback
+may legitimately exceed the application's write range after an external change;
+do not clamp it or infer a default. No profile/configuration is saved.
+
+Writes require authenticated `Queue.Start` permission and printer **Submit**
+access. Non-printing states use the existing direct actuation barrier; `printing`
+and `paused` use the active-print barrier. Existing queue ownership/fence checks
+still apply, including rejection of an externally started job without a local
+active attempt. The UI retains enabled/non-maintenance affordances.
+
+`200 {"success":true}` means the backend acknowledged **that single command**,
+not that the factor was subsequently observed. Never optimistically replace live
+values with the requested value. The two routes are intentionally separate:
+there is no atomic two-factor update or claim that both succeeded.
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Missing, malformed, non-finite, out-of-range or over-precision percent; no command |
+| `401` / `403` | Authentication / `Queue.Start` denied; no command |
+| `404` | Missing printer or insufficient resource access; no command |
+| `409` | Ownership/fence conflict; no command |
+| `501` | Unsupported operation; no command |
+| `503` | Offline/unavailable, or an unconfirmed/failed/timed-out backend command |
+
+Validation/unsupported failures use ProblemDetails; command/state outcomes use
+the existing `CommandResult` envelope. A `503` after dispatch can mean an unknown
+physical outcome; inspect status and the printer before retrying. Automatic
+retries can overwrite another operator's update.
+Backend-owned timeouts return the same `503` unknown-outcome envelope without
+retrying; actual caller cancellation still propagates as cancellation.
+
+`GET /api/printers/{id}/status`, detail/fast/complete snapshots and the existing
+lowercase `printerupdated` event add:
+
+```json
+{
+  "speedFactorPercent": 125,
+  "flowFactorPercent": 87.5
+}
+```
+
+Both are nullable numbers. New payloads explicitly send `null` when unknown,
+malformed, disconnected or unsupported, so clients can clear stale observations.
+Older servers can omit either field: treat absence as unknown on an initial
+snapshot, not 100. Existing `speedMultiplier` is unchanged and is not this
+contract. A client reconnect must re-subscribe with `SubscribeToPrinterAsync` /
+`SubscribeToPrintersAsync`, or invoke `RequestPrinterStatus`, to replay cached status.
+
+Moonraker subscribes to all `gcode_move` fields. Partial notifications preserve
+each omitted factor independently; invalid reported fields clear only that
+factor. Transport loss, Klippy restart and re-subscription invalidate prior
+observations until fresh readback. HTTP fallback queries both fields. HTTP
+refresh/fallback observations also become the baseline for subsequent
+factor-free notifications. Older in-flight HTTP reads cannot overwrite newer
+factor observations or invalidations.
+Changes from Mainsail, macros, tool changes and other operators use the same authoritative
+pipeline; command submission itself never fabricates telemetry.
+
+### Web tuning controls
+
+The detailed printer card and printer sidebar expose independent **Speed %**
+and **Flow %** sliders in a collapsible **Tuning** group only when their respective operation capability is
+explicitly true for that printer. Older servers and unsupported backends hide
+them. Queue.Start permission and online, enabled/non-maintenance status are required;
+printing state and live readback are not prerequisites. The server remains authoritative
+for printer Submit access and active-print queue ownership/fences.
+
+Each row separates **Observed** readback from the selected slider value.
+Unknown or explicitly cleared telemetry displays **Unknown**, never an assumed
+100%; external observations outside the write range are shown unchanged.
+Sliders show their 1-200% endpoints and accept 0.01% increments. Releasing a mouse,
+touch or pen drag sends its final value once; intermediate movements do not send.
+Keyboard adjustments commit on key release, or blur for an unfinished keyboard
+edit. Escape or pointer cancellation discards the edit. There are no Apply
+buttons. Speed and flow remain separate operations.
+An acknowledgement does not change the observed value. Reconnects and
+printer/server/identity changes discard old observations and drafts until fresh
+status arrives. Live external changes update the observation, not an unsent edit.
+
+Writes are not automatically retried or queued for a later connection.
+An HTTP `401` never replays a runtime override, including after successful
+token renewal or a switch to another signed-in operator. Authentication may
+renew for future requests; the failed command still requires a fresh,
+deliberate slider adjustment after reviewing the printer and current value.
+For failures, especially `503`/timeouts with an unknown physical outcome, inspect
+the live readback and printer before deliberately applying another value.
+These overrides affect the current runtime, not a saved slicer profile; reverting
+the percentage cannot repair print damage already caused by an unsuitable value.
+
+Verified upstream mapping: `M220 S<percent>` controls speed,
+`M221 S<percent>` controls extrusion; public `gcode_move.speed_factor` and
+`gcode_move.extrude_factor` are unitless multipliers converted by multiplying
+by 100. The public speed factor is **not** Klipper's internal minutes/seconds
+conversion. Sources: [Klipper gcode_move implementation](https://github.com/Klipper3d/klipper/blob/master/klippy/extras/gcode_move.py)
+and [Klipper status reference](https://www.klipper3d.org/Status_Reference.html#gcode_move).
+Mocked transport/SignalR regression coverage does not replace real-printer
+verification; no hardware verification is claimed.
+
 ## Printer Sensors and Fans
 
 Status DTOs (`GET /api/printers/{id}/status`) and every `printerupdated`
@@ -173,18 +283,22 @@ The React sidebar and detailed printer card share functional disclosures:
 **Temperatures** combines the existing Hotend/Bed controls and presets with
 additional heater/sensor rows (Power, Actual, Target). Power is shown only when
 reported, never inferred from heater state. Mapped primary heater readings appear
-once; extra nozzles and independent temperatures are retained. **Fans & outputs**,
-**Environment**, and **Filament** are separate sibling sections; mixed-quantity
-sensors retain each measurement in its appropriate section.
+once; extra nozzles and independent temperatures are retained. **Miscellaneous**
+contains only outputs with a writable descriptor; it is hidden when none exist.
+Read-only nonthermal sensors are hidden, while environmental measurements stay
+with their thermal sensor row under **Temperatures**. Filament sensors are hidden
+from the web UI, including writable monitoring switches; their telemetry and
+targeted API contract are unchanged.
 
 Writable sensor numbers apply a valid changed value on Tab/blur or Enter.
 Enter followed by blur sends one command; Escape cancels. Invalid, unchanged and
 disabled values do not send commands. Errors roll back optimistic values and show
 an explicit notification. Sensor writes require queue/start permission,
 sensor-control capability, an enabled online printer and an available sensor with
-a writable descriptor. Output switches are not invented: the current contract
-supports numeric writes only. Empty optional sections are hidden; a telemetry-capable
-printer reporting no sensors shows “No sensors reported.”
+a writable descriptor. `Enabled` writes use JSON booleans, not numeric 0/1;
+other writable quantities use numbers. Empty optional sections are hidden,
+including when a telemetry-capable printer reports no sensors; no placeholder
+message is rendered.
 
 ```json
 {
@@ -208,9 +322,13 @@ printer reporting no sensors shows “No sensors reported.”
   (`Other`, `PartCooling`, `Hotend`, `Controller`, `Chamber`, `Auxiliary`);
   `fanRole` is omitted for non-fan entries.
 - `quantity`: `Other`, `Temperature`, `TargetTemperature`, `Humidity`,
-  `Pressure`, `Gas`, `FanSpeed`, `FanRpm`, `Power`, `FilamentDetected`.
+  `Pressure`, `Gas`, `FanSpeed`, `FanRpm`, `Power`, `FilamentDetected`, `Enabled`,
+  `MeasuredMinTemperature`, `MeasuredMaxTemperature`.
 - `unit`: `None`, `Celsius`, `Percent`, `HectoPascal`, `Ohm`, `Rpm`, `Watt`.
 - `value` is a bare JSON number or boolean. All enums are strings.
+- A target-temperature descriptor can set `allowZero: true`: accepted values are
+  exactly zero (heater off) or the advertised inclusive interval and step.
+  A positive heating minimum never prevents a safe-off command.
 
 The server normalizes every list: at most 64 sensors, at most 16 readings and
 16 writable descriptors per sensor, ids of 1–128 characters, duplicates
@@ -223,9 +341,8 @@ status update that does not report sensors keeps the cached list, while a
 reported list (even `[]`) replaces it. Backends may also deliver partial sensor
 updates; omitted sensors and readings keep their last values, and omitted
 `displayName`, `fanRole`, `lastUpdated`, and `writable` keep their previous
-values. Sensor control is accepted only while the last sensor report (a
-reported list or a sensor update, even with unchanged values) is under two
-minutes old; status updates that do not report sensors do not extend it. A
+values. The last advertised writable descriptors remain usable without a fresh
+measurement; unavailable readings do not revoke native control support. A
 sensor-only or availability-only change still emits
 `printerupdated`. When a printer goes offline, all entries are kept with
 `available: false`. `SubscribeToPrinter`, `SubscribeToPrinters`, and
@@ -239,20 +356,24 @@ Both default to `false` and are only `true` for backends that opt in.
 
 Sets one writable quantity: `{"quantity": "FanSpeed", "value": 40}`. Requires
 `Queue.Start` permission and printer Submit access. It uses the same lease rules
-as `/fan`: offline returns `503` and unknown printer states return `409`. The
+as `/fan`: cached offline/unknown status does not block the command. The
 request is checked against the sensor's advertised `writable` descriptors
 before any command is sent:
 
 | Status | Reason |
 |---|---|
 | `200` | Backend confirmed the command (`CommandResult`). |
-| `400` | Missing body, non-numeric value, or a value outside `min`/`max`/`step`. |
+| `400` | Missing body, wrong value type, or a value outside the advertised range/step (including `allowZero`). |
 | `404` | Printer not found or not accessible. |
-| `409` | Unknown or unavailable sensor, read-only sensor, or quantity not writable. |
+| `409` | Unknown sensor, read-only sensor, or quantity not writable. |
 | `501` | Backend does not support targeted sensor control. |
 
 Errors use `application/problem+json`. Sensor ids are matched exactly
 (case-sensitive).
+
+The iOS shared controls lease ends when the sensor command request settles.
+An acknowledgment does not require matching readback and does not replace
+observed values or prove physical completion.
 
 #### Moonraker (Klipper) mapping
 
@@ -261,31 +382,84 @@ names (for example `temperature_sensor chamber`), so they stay stable across
 reconnects. Objects are re-enumerated on reconnect and `notify_klippy_ready`;
 removed objects and all objects during a Klippy disconnect are reported with
 `available: false`. While the WebSocket subscription is degraded to HTTP polling,
-broadcasts report the last known sensors with `available: false`, because HTTP
-polling does not read Klipper sensors. The next WebSocket status update restores
-availability.
+broadcasts report the last known sensors with `available: false` if HTTP
+polling cannot obtain a sensor snapshot. Successful fallback polls authenticate
+object-list and full status/configuration queries and publish fresh, mapped
+sensors; a failed query preserves the previous list as unavailable, not live.
+The next WebSocket status update restores its own tracked availability.
+
+Before initial subscription and after object rediscovery, PrintFarmer explicitly
+queries `configfile.settings` with the printer's configured authentication and
+loads the validated bounds into the live sensor tracker. Subscription responses
+may omit these static settings; subsequent temperature/fan deltas retain the
+loaded limits rather than replacing HTTP-populated controls with read-only rows.
+Disconnect, shutdown and rediscovery invalidate old limits. Configuration reads
+are bounded to five seconds; HTTP errors, malformed responses or timeouts are
+logged and leave heaters read-only without blocking live readings. A subsequent
+connection or rediscovery reads configuration again. Model defaults and another
+printer's bounds are never substituted. Writes use the known descriptor for
+typed input validation, then send one command without rediscovery; Klipper
+validates the current object and configured limits at execution time.
+
+`activeExtruderId` identifies the physical `extruder`/`extruderN` represented by
+the primary Hotend readings and controls. It follows `toolhead.extruder`, not
+an assumed tool zero. The other extruders remain individually addressed rows.
+Unknown active identity clears primary readings, not the native primary control.
+Primary writes use `M104`, so Klipper resolves the active extruder at execution.
+Omitted fields in Klipper deltas retain their previous values; explicit null or
+invalid readings clear that field. Safety timestamps belong to each measured
+field; an unrelated fan update does not refresh heater evidence.
+The JSON serializer omits null fields: a complete Moonraker `sensors` snapshot is
+authoritative for its accompanying primary heater fields, so missing primary
+numbers clear the web display rather than restoring older API/sidebar values.
+Missing active identity on a Moonraker response means unknown, not tool zero.
+Updates without a complete sensor snapshot and other backends retain their
+existing partial-update merge behavior.
 
 | Klipper object | Kind / role | Readings | Writable |
 |---|---|---|---|
-| `extruder*`, `heater_bed` | `Nozzle` / `Bed` | temperature, target, power | — (use existing temperature endpoints) |
+| `extruder*`, `heater_bed` | `Nozzle` / `Bed` | temperature, target, power | named `TargetTemperature` within configured bounds; zero turns off |
 | `heater_generic <name>` | name hint, else `Other` | temperature, target, power | `TargetTemperature` within configured `min_temp`/`max_temp` |
-| `temperature_sensor <name>` | `Mcu`/`Host` from `sensor_type`, else name hint | temperature, humidity, pressure, gas | — |
+| `temperature_sensor <name>` | `Mcu`/`Host` from `sensor_type`, else name hint | temperature, measured min/max, humidity, pressure, gas | — |
 | `temperature_fan <name>` | `Fan` / `Chamber` by name hint, else `Auxiliary` | temperature, target, speed, rpm | `TargetTemperature` within configured `min_temp`/`max_temp` |
 | `fan` | `Fan` / `PartCooling` | speed, rpm | `FanSpeed` 0–100 (`M106`) |
 | `fan_generic <name>` | `Fan` / `Chamber` by name hint, else `Auxiliary` | speed, rpm | `FanSpeed` 0–100 (`SET_FAN_SPEED`) |
 | `heater_fan`, `controller_fan` | `Fan` / `Hotend`, `Controller` | speed, rpm | — (firmware-managed) |
 | Vendor-specific `*_fan` objects | `Fan` / name hint, else `Auxiliary` | speed, rpm | — |
-| `filament_switch_sensor`, `filament_motion_sensor` | `FilamentRunout` | filament detected, enabled (`Other`) | — |
-| Other objects with `temperature`/`humidity`/`pressure` | name hint, else `Other` | those fields | — |
+| `filament_switch_sensor`, `filament_motion_sensor` | `FilamentRunout` | filament detected, `Enabled` (booleans) | `Enabled` via `SET_FILAMENT_SENSOR` |
+| Other objects with `temperature`/`humidity`/`pressure`/`gas` | name hint, else `Other` | those fields | — |
 
 Name hints: `chamber`, `enclosure`, or `exhaust` map to `Chamber`; `ambient`
-maps to `Ambient`. Writes are rejected without sending G-code unless the object
-name is a safe Klipper identifier that is currently listed by the printer and the
-value is in range.
+maps to `Ambient`. Writes require a safe Klipper identifier, a known writable
+descriptor, and a valid typed value. They do not re-enumerate objects before
+sending; Klipper resolves the object and current bounds.
 Temperature controls require finite configured sensor limits, exclude negative
 targets, and intersect those limits with `target_min_temp`/`target_max_temp`
 when a Klipper fork reports separate target limits. Invalid or conflicting
 limits make the control read-only.
+Gas is raw resistance in ohms, not an air-quality score. Wrapper objects such as
+`bme280 <name>` are excluded when their `temperature_sensor <name>` wrapper
+already reports the same physical sensor.
+Measured temperature extrema remain available in the API but are omitted from
+the web sensor rows to keep the controls compact.
+
+Manual target edits and presets are available while printing or paused on
+backends with `supportsTemperatureControlDuringPrint`. Permissions, valid
+inputs, native capability and command-lease checks still apply; cached
+readback/online status is not an additional API admission requirement.
+
+### `POST /api/printers/{id}/heaters/off`
+
+Requires `Queue.Start`, printer Submit access and `supportsHeaterShutdown`.
+Moonraker sends `TURN_OFF_HEATERS`, including all extruders, the bed and generic
+chamber heaters. It does not turn off automatic cooling fans or temperature fans.
+This operation is available while printing or paused, using the active command
+lease. Unsupported backends return `501`; transport failures or unconfirmed
+outcomes return `503`, and ownership/fence conflicts return `409`.
+
+This is distinct from `/temps` with zero targets: ordinary zero targets affect
+only the addressed primary heater/bed, never every heater. Successful commands
+report backend acceptance, not verified cooling or physical completion.
 
 ## API Contract and Calibration Capabilities
 
@@ -1569,6 +1743,41 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 ```
 
 ## 3D Model API
+
+### List Models for Slicer Pickers
+
+```http
+GET /api/3d-models/picker
+Authorization: Bearer <token>
+```
+
+Returns only the fields needed by the New Slice Job picker (`id`, `name`,
+`fileName`, `fileType`, and `uploadedAt`). It includes valid models from the
+shared library, ordered by upload time descending, and uses the same
+`LibrarySync` authorization policy as the full model-list endpoint. The dedicated
+projection avoids loading model metadata or tags for picker requests; Desktop
+exchange tokens must carry `LibrarySync`.
+
+The local in-memory SQLite comparison below measures the service call plus JSON
+serialization, after five warmups and across 20 requests per size. Command counts
+include only the model and tag queries used by each list; unrelated host background
+queries are excluded. Response bytes are uncompressed UTF-8 JSON.
+
+| Models | List | Queries/request | JSON bytes | Latency p50/p95 (ms) | Managed allocation p50/p95 (bytes) |
+|---:|---|---:|---:|---:|---:|
+| 10 | Full | 21 | 8,781 | 1.754 / 2.377 | 558,568 / 565,536 |
+| 10 | Picker | 1 | 1,731 | 0.197 / 0.369 | 86,976 / 91,016 |
+| 100 | Full | 201 | 87,801 | 13.712 / 16.200 | 4,638,304 / 4,646,656 |
+| 100 | Picker | 1 | 17,301 | 0.447 / 0.473 | 148,936 / 152,064 |
+| 1,000 | Full | 2,001 | 878,001 | 117.624 / 201.081 | 44,699,176 / 45,873,072 |
+| 1,000 | Picker | 1 | 173,001 | 1.345 / 2.373 | 897,400 / 906,336 |
+
+These are local comparative measurements, not end-to-end HTTP or browser timings.
+The database was in-memory SQLite; PostgreSQL, SQL Server, network transfer, and
+browser rendering were not measured. Managed allocation deltas use process-wide
+GC counters, so background runtime activity can add noise and the values are not
+isolated per-request allocation profiles. The harness is
+`src/tests/Farm.Slicer.Module.Tests/Integration/Model3DPickerBenchmarkEvidenceTests.cs`.
 
 ### Upload a Model
 

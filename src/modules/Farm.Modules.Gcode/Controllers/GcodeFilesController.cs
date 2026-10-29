@@ -30,7 +30,7 @@ namespace Farm.Modules.Gcode.Controllers;
 /// <summary>
 /// Provides a lightweight virtual file browser over the server-side G-code library directory (wwwroot/gcode-library).
 /// This controller exists primarily to satisfy the React FileBrowser component which expects:
-///   GET    /api/gcode-files                (query: path, sortBy, sortOrder, search, harvestId, printerId)
+///   GET    /api/gcode-files                (query: path, sortBy, sortOrder, search, printerId)
 ///   DELETE /api/gcode-files                (body: { filePaths: string[] })
 ///   GET    /api/gcode-files/download       (query: path)
 /// The underlying persistent metadata &amp; deduplicated storage is still handled by GcodeLibraryController / database.
@@ -131,7 +131,6 @@ public class GcodeFilesController(
     /// <param name="search">Optional search term for file names.</param>
     /// <param name="page">Page number (1-based).</param>
     /// <param name="pageSize">Page size.</param>
-    /// <param name="harvestId">Optional filter by harvest operation ID.</param>
     /// <param name="printerId">Optional filter by source printer ID.</param>
     [HttpGet]
     [Authorize(Policy = "ModelRead")]
@@ -143,11 +142,8 @@ public class GcodeFilesController(
     [FromQuery] string? search = null,
     [FromQuery] int page = 1,
     [FromQuery] int pageSize = 100,
-    [FromQuery] Guid? harvestId = null,
     [FromQuery] Guid? printerId = null)
     {
-        _ = harvestId;
-
         try
         {
             GcodeFileListResponse response = await gcodeFilesService.QueryAsync(
@@ -167,7 +163,7 @@ public class GcodeFilesController(
 
     /// <summary>
     /// New efficient query endpoint that pushes all filtering, sorting, and pagination to the database.
-    /// Supports comprehensive filtering including path, search, printer model, printer, and harvest.
+    /// Supports comprehensive filtering including path, search, tags, printer model, and source printer.
     /// Intended to replace the base GET endpoint once frontend migration is complete.
     /// </summary>
     /// <param name="path">Virtual directory path. Null/empty returns all files. Non-null returns files in that directory only.</param>
@@ -750,6 +746,12 @@ public class GcodeFilesController(
                 _ => "image/png"
             };
 
+            // .bgcode files may only embed JPG thumbnails; they share the _thumb.png naming, so sniff JPEG bytes.
+            if (contentType == "image/png" && IsJpegFile(absolutePath))
+            {
+                contentType = "image/jpeg";
+            }
+
             logger.LogInformation("[Thumbnail] Returning thumbnail for GCode file {Id} with content type {ContentType}", id, contentType);
             return PhysicalFile(absolutePath, contentType);
         }
@@ -936,6 +938,25 @@ public class GcodeFilesController(
         return string.IsNullOrWhiteSpace(status.FinalFilePath)
             ? throw new InvalidOperationException("Upload has not completed - no final file path available")
             : status.FinalFilePath;
+    }
+
+    private static bool IsJpegFile(string path)
+    {
+        try
+        {
+            using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> header = stackalloc byte[3];
+            return stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) == header.Length
+                && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // ---------------- Settings & Move endpoints ----------------

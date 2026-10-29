@@ -158,7 +158,11 @@ jobs:
         if: matrix.language == 'csharp'
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        if: matrix.language == 'csharp'
+        run: python3 scripts/dotnet-sdk.py verify
 
       # CodeQL analyses exactly what the build compiles, and `paths-ignore` in
       # codeql-config.yml has no effect under `build-mode: manual` — so test

@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+const yaml = require('js-yaml');
 const {
   canonicalMemberLabel,
   canonicalOwnerLabels,
@@ -21,6 +22,180 @@ const {
   slugify,
 } = require('../squad-routing.cjs');
 const ralph = require('../../../.squad/templates/ralph-triage.js');
+
+function readWorkflow(name) {
+  return yaml.load(readFileSync(path.join(here, '../../../.github/workflows', name), 'utf8'));
+}
+
+async function runWorkflowScript(step, { context, github = {}, teamMd = '' }) {
+  const scriptRequire = (name) => {
+    if (name === 'fs') {
+      return { existsSync: () => true, readFileSync: () => teamMd };
+    }
+    if (name === 'path') return path;
+    if (name.endsWith('scripts/ci/squad-routing.cjs')) return require('../squad-routing.cjs');
+    return require(name);
+  };
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+  await new AsyncFunction('require', 'context', 'github', 'core', 'process', step.with.script)(
+    scriptRequire,
+    context,
+    github,
+    { info() {}, warning() {}, setFailed(message) { throw new Error(message); } },
+    { env: { GITHUB_WORKSPACE: path.resolve(here, '../../..') } },
+  );
+}
+
+test('upgraded member handoff preserves exclusions, legacy labels, and collision refusal', async (t) => {
+  const workflow = readWorkflow('squad-issue-assign.yml');
+  const step = workflow.jobs['assign-work'].steps.find(
+    (candidate) => candidate.name === 'Identify assigned member and trigger work',
+  );
+  const teamMd = readFileSync(path.join(here, '../../../.squad/team.md'), 'utf8');
+  for (const [label, expected] of [
+    ['squad:scribe', /Not a dispatchable owner/],
+    ['squad:ralph', /Not a dispatchable owner/],
+    ['squad:⚛️ ripley', /Assigned to ⚛️ Ripley/],
+    ['squad:kaylee', /No squad member found/],
+    ['squad:copilot', undefined],
+  ]) {
+    await t.test(label, async () => {
+      const comments = [];
+      await runWorkflowScript(step, {
+        context: {
+          repo: { owner: 'example', repo: 'farm' },
+          payload: { label: { name: label }, issue: { number: 42, title: 'Routing check' } },
+        },
+        github: { rest: { issues: { createComment: async (comment) => comments.push(comment) } } },
+        teamMd,
+      });
+      assert.equal(comments.length, expected ? 1 : 0);
+      if (expected) assert.match(comments[0].body, expected);
+    });
+  }
+  await t.test('colliding names do not claim assignment', async () => {
+    const comments = [];
+    await runWorkflowScript(step, {
+      context: {
+        repo: { owner: 'example', repo: 'farm' },
+        payload: { label: { name: 'squad:ripley' }, issue: { number: 42 } },
+      },
+      github: { rest: { issues: { createComment: async (comment) => comments.push(comment) } } },
+      teamMd: teamMd.replace('| 🏗️ Dallas', '| Ripley | Frontend Dev | duplicate | Active |\n| 🏗️ Dallas'),
+    });
+    assert.equal(comments.length, 1);
+    assert.match(comments[0].body, /Multiple squad members/);
+    assert.doesNotMatch(comments[0].body, /Assigned to/);
+  });
+});
+
+test('Copilot handoff acknowledges only verified API acceptance and rejects stale routing', async (t) => {
+  const steps = readWorkflow('squad-issue-assign.yml').jobs['assign-work'].steps;
+  await t.test('missing assignment token fails before any handoff', async () => {
+    const preflight = steps.find((candidate) => candidate.name === 'Require Copilot assignment token');
+    await assert.rejects(runWorkflowScript(preflight, { context: {} }), /COPILOT_ASSIGN_TOKEN is required/);
+  });
+  const step = steps.find(
+    (candidate) => candidate.name === 'Assign @copilot coding agent',
+  );
+  for (const scenario of ['accepted', 'unconfirmed', 'stale']) {
+    await t.test(scenario, async () => {
+      const calls = [];
+      const operation = runWorkflowScript(step, {
+        context: {
+          repo: { owner: 'example', repo: 'farm' },
+          payload: { inputs: { issue_number: '42' } },
+        },
+        github: {
+          rest: {
+            repos: { get: async () => ({ data: { default_branch: 'development' } }) },
+            issues: {
+              get: async () => ({
+                data: { number: 42, title: 'Work', labels: scenario === 'stale' ? [] : [{ name: 'squad:copilot' }] },
+              }),
+              createComment: async (comment) => calls.push(comment),
+            },
+          },
+          request: async (_route, request) => {
+            calls.push(request);
+            return { status: 201, data: { assignees: scenario === 'accepted' ? [{ login: 'copilot-swe-agent[bot]' }] : [] } };
+          },
+        },
+      });
+      if (scenario === 'accepted') {
+        await operation;
+        assert.equal(calls.length, 2);
+        assert.equal(calls[0].agent_assignment.base_branch, 'development');
+        assert.match(calls[1].body, /not proof of a running session/);
+      } else {
+        await assert.rejects(operation, scenario === 'stale' ? /refusing stale/ : /unverified/);
+        assert.equal(calls.length, scenario === 'stale' ? 0 : 1);
+      }
+    });
+  }
+});
+
+test('Copilot handoffs serialize label and manual dispatches for the same issue', () => {
+  const job = readWorkflow('squad-issue-assign.yml').jobs['assign-work'];
+  assert.equal(job.concurrency.group, 'squad-issue-assign-${{ github.event.issue.number || inputs.issue_number }}');
+  assert.equal(job.concurrency['cancel-in-progress'], false);
+});
+
+test('Copilot handoff skips already-assigned issues without posting requests or comments', async (t) => {
+  const step = readWorkflow('squad-issue-assign.yml').jobs['assign-work'].steps.find(
+    (candidate) => candidate.name === 'Assign @copilot coding agent',
+  );
+  for (const login of ['copilot-swe-agent[bot]', 'copilot-swe-agent']) {
+    await t.test(login, async () => {
+      const calls = [];
+      await runWorkflowScript(step, {
+        context: {
+          repo: { owner: 'example', repo: 'farm' },
+          payload: { inputs: { issue_number: '42' } },
+        },
+        github: {
+          rest: {
+            issues: {
+              get: async () => ({
+                data: { number: 42, labels: [{ name: 'squad:copilot' }], assignees: [{ login }] },
+              }),
+              createComment: async (comment) => calls.push(comment),
+            },
+          },
+          request: async (_route, request) => calls.push(request),
+        },
+      });
+      assert.deepEqual(calls, []);
+    });
+  }
+});
+
+test('heartbeat routes Copilot through the assignment workflow only when auto-assign is enabled', async () => {
+  const workflow = readWorkflow('squad-heartbeat.yml');
+  const step = workflow.jobs.heartbeat.steps.find(
+    (candidate) => candidate.name === 'Ralph — Dispatch @copilot issues',
+  );
+  for (const enabled of [false, true]) {
+    const dispatched = [];
+    await runWorkflowScript(step, {
+      context: {
+        repo: { owner: 'example', repo: 'farm' },
+        payload: { repository: { default_branch: 'development' } },
+      },
+      teamMd: `🤖 Coding Agent\n<!-- copilot-auto-assign: ${enabled} -->`,
+      github: {
+        rest: {
+          issues: { listForRepo: async () => ({ data: [{ number: 42, assignees: [] }, { number: 43, assignees: [{ login: 'existing' }] }] }) },
+          actions: { createWorkflowDispatch: async (request) => dispatched.push(request) },
+        },
+      },
+    });
+    assert.deepEqual(dispatched, enabled ? [{
+      owner: 'example', repo: 'farm', workflow_id: 'squad-issue-assign.yml',
+      ref: 'development', inputs: { issue_number: '42' },
+    }] : []);
+  }
+});
 
 // The full live roster from .squad/team.md, in file order. Roster order
 // matters: under the old member-outer loop, Ripley (Frontend) preceding

@@ -2018,7 +2018,9 @@ public class PrintersService(
                     CurrentLayer: status.CurrentLayer,
                     TotalLayers: status.TotalLayers,
                     FanSpeedPercent: status.FanSpeedPercent,
-                    LiveZOffsetMm: status.LiveZOffsetMm));
+                    LiveZOffsetMm: status.LiveZOffsetMm,
+                    SpeedFactorPercent: status.SpeedFactorPercent,
+                    FlowFactorPercent: status.FlowFactorPercent));
             }
             catch (Exception ex)
             {
@@ -2186,7 +2188,10 @@ public class PrintersService(
                     UseModelDispatchDefaults: p.UseModelDispatchDefaults,
                     RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
                     CurrentJobThumbnailUrl: status.CurrentJobThumbnailUrl,
-                    ShowExternalSpool: p.ShowExternalSpool));
+                    ShowExternalSpool: p.ShowExternalSpool,
+                    ActiveExtruderId: status.ActiveExtruderId,
+                    SpeedFactorPercent: status.SpeedFactorPercent,
+                    FlowFactorPercent: status.FlowFactorPercent));
             }
             catch (Exception ex)
             {
@@ -3580,7 +3585,7 @@ public class PrintersService(
     /// <remarks>
     /// Requires backend to implement ITemperatureCapability interface.
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
-    /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
+    /// Backend adapters validate known configured limits; firmware remains responsible for its own heater protections.
     /// </remarks>
     public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
@@ -3694,7 +3699,8 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is ISupportsMovement movement)
+            if (client is ISupportsMovement movement &&
+                client is ISupportsPrinterControlCapabilities { ControlCapabilities.SupportsAbsoluteMovement: true })
             {
                 bool ok = await movement.MoveToAsync(p.BackendUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
@@ -4029,12 +4035,38 @@ public class PrintersService(
             ct);
 
     /// <inheritdoc />
+    public Task<bool> SetSpeedFactorAsync(Guid id, double percent, CancellationToken ct)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return ExecuteBackendControlAsync<ISupportsRuntimeFactorControl>(
+            id,
+            (client, printer, token) => client.SetSpeedFactorAsync(printer.BackendUrl, percent, printer.Credential, token),
+            ct);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> SetFlowFactorAsync(Guid id, double percent, CancellationToken ct)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return ExecuteBackendControlAsync<ISupportsRuntimeFactorControl>(
+            id,
+            (client, printer, token) => client.SetFlowFactorAsync(printer.BackendUrl, percent, printer.Credential, token),
+            ct);
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<PrinterSensorDto> GetLiveSensors(Guid id)
     {
-        PrinterStatusCacheSnapshot? snapshot = _statusCache.GetSnapshot(id);
-        return PrinterStatusFreshness.IsSensorFreshOnline(snapshot, DateTime.UtcNow)
-            ? snapshot!.Status.Sensors
-            : [];
+        // Control descriptors describe native targets, not proof of a fresh measured value.
+        return _statusCache.GetSnapshot(id)?.Status.Sensors ?? [];
     }
 
     /// <inheritdoc />
@@ -4042,6 +4074,13 @@ public class PrintersService(
         ExecuteBackendControlAsync<ISupportsSensorControl>(
             id,
             (client, printer, token) => client.SetSensorValueAsync(printer.BackendUrl, sensorId, quantity, value, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> TurnOffHeatersAsync(Guid id, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsHeaterShutdown>(
+            id,
+            (client, printer, token) => client.TurnOffHeatersAsync(printer.BackendUrl, printer.Credential, token),
             ct);
 
     /// <inheritdoc />
@@ -5628,6 +5667,8 @@ public class PrintersService(
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>
+    /// <remarks>Legacy backend seam only; catalog and HTTP deletion must use
+    /// IPrinterFileDeleteService so they cannot bypass consent or the send boundary.</remarks>
     /// <param name="id">Unique printer identifier (GUID)</param>
     /// <param name="filename">Filename of gcode file to delete (backend-specific path format)</param>
     /// <param name="ct">Cancellation token for async operation</param>

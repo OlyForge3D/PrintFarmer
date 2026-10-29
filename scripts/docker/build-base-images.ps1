@@ -23,6 +23,8 @@ if (-not (Test-Path $CacheDir)) {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DockerDir = Join-Path $ScriptDir "dockerfiles"
+. (Join-Path $ScriptDir '..\dotnet-sdk.ps1')
+$SdkTag = Get-ApprovedDotnetSdkTag
 
 # Array of base images to build and cache
 $images = @(
@@ -45,10 +47,10 @@ $images = @(
         tarName = "aspnet-10.0-bookworm-slim-upgraded.tar"
     },
     @{
-        base = "mcr.microsoft.com/dotnet/sdk:10.0"
+        base = "mcr.microsoft.com/dotnet/sdk:$SdkTag"
         dockerfile = "Dockerfile.base-sdk"
-        tag = "mcr.microsoft.com/dotnet/sdk:10.0-upgraded"
-        tarName = "dotnet-sdk-10.0-upgraded.tar"
+        tag = "mcr.microsoft.com/dotnet/sdk:$SdkTag-upgraded"
+        tarName = "dotnet-sdk-$SdkTag-upgraded.tar"
     },
     @{
         base = "postgres:16-alpine"
@@ -86,6 +88,7 @@ foreach ($image in $images) {
         # Build the image
         Write-Host "Building Docker image..."
         docker build `
+            --build-arg "SDK_TAG=$SdkTag" `
             -f $dockerfilePath `
             -t $image.tag `
             --label="printfarmer-precache=true" `
@@ -143,7 +146,7 @@ Write-Host "  1. Transfer all .tar files from $CacheDir to offline system"
 Write-Host "  2. Run: docker load -i ubuntu-24.04-upgraded.tar"
 Write-Host "  3. Run: docker load -i node-24-alpine-upgraded.tar"
 Write-Host "  4. Run: docker load -i aspnet-10.0-bookworm-slim-upgraded.tar"
-Write-Host "  5. Run: docker load -i dotnet-sdk-10.0-upgraded.tar"
+Write-Host "  5. Run: docker load -i dotnet-sdk-$SdkTag-upgraded.tar"
 Write-Host "  6. Run: docker load -i postgres-16-alpine-upgraded.tar"
 Write-Host "  7. Run: docker load -i nginx-alpine-upgraded.tar"
 Write-Host "  8. Then deploy: .\scripts\deploy-docker.ps1 --pull=missing"

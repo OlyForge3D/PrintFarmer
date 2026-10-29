@@ -298,7 +298,8 @@ export function MmuControlBox({
           kind,
           label: slotActionLabel(kind, 'single', view.id),
           onClick: () => filamentControl.onAction(kind),
-          disabledReason: macroReason,
+          disabledReason: (kind === 'load' ? filamentControl.supportsLoad : filamentControl.supportsUnload) === false
+            ? `Filament ${kind === 'load' ? 'loading' : 'unloading'} is not supported` : macroReason,
         });
       }
     } else if (!isRack) {

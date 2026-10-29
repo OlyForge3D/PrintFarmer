@@ -556,6 +556,15 @@ public interface IPrintersService
     /// <summary>Sets the part-cooling fan to a bounded percentage through a semantic backend capability.</summary>
     Task<bool> SetFanSpeedAsync(Guid id, int speedPercent, CancellationToken ct);
 
+    /// <summary>Sets only the runtime speed override percentage through a semantic backend capability.</summary>
+    Task<bool> SetSpeedFactorAsync(Guid id, double percent, CancellationToken ct);
+
+    /// <summary>Sets only the runtime flow override percentage through a semantic backend capability.</summary>
+    Task<bool> SetFlowFactorAsync(Guid id, double percent, CancellationToken ct);
+
+    /// <summary>Turns off all heaters through an explicitly supported backend operation.</summary>
+    Task<bool> TurnOffHeatersAsync(Guid id, CancellationToken ct);
+
     /// <summary>
     /// Gets the backend-neutral sensors from a fresh online cached status, or an empty list when
     /// the printer is offline, stale or uncached. Used to validate targeted sensor writes.
@@ -770,6 +779,8 @@ public interface IPrintersService
     /// <summary>
     /// Deletes a gcode file from the printer's storage.
     /// </summary>
+    /// <remarks>Legacy backend seam only. Never use for catalog or HTTP deletion;
+    /// use IPrinterFileDeleteService for authority, consent, fencing and durable outcomes.</remarks>
     /// <param name="id">The printer ID</param>
     /// <param name="filename">The filename to delete (backend-specific path format)</param>
     /// <param name="ct">Cancellation token</param>

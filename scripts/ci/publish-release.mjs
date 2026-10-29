@@ -16,6 +16,7 @@ import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
 import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
+import { approvedSdkVersion } from './dotnet-sdk-policy.mjs';
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -49,6 +50,7 @@ export function buildImages(release, source, assets, run = command, rejectImages
   requireThat(run('git', ['rev-parse', 'HEAD'], { cwd: source }).trim() === release.sourceCommit,
     'Build checkout does not match selected source');
   validateVersion(release.version, release.channel, readFileSync(join(source, 'VERSION'), 'utf8'));
+  const sdkTag = `${approvedSdkVersion(source)}-noble`;
   rejectImages(release.version);
   mkdirSync(assets, { recursive: true });
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
@@ -81,6 +83,7 @@ export function buildImages(release, source, assets, run = command, rejectImages
       '--label', `org.opencontainers.image.version=${release.version}`,
       '--label', `org.printfarmer.release-channel=${release.channel}`,
       '--build-arg', `GIT_SHA=${release.sourceCommit}`, '--build-arg', `VITE_GIT_SHA=${release.sourceCommit}`,
+      '--build-arg', `SDK_TAG=${sdkTag}`,
       '--build-arg', `BUILD_VERSION=${release.version}`, '--build-arg', `VCS_REF=${release.sourceCommit}`,
       '--build-arg', `SOURCE_REPOSITORY=https://github.com/${repository}`,
       '--build-arg', `SOURCE_ARCHIVE_URL=${baseUrl}/PrintFarmer-${release.tag}-source.tar.gz`,

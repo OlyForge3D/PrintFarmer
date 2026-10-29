@@ -91,7 +91,7 @@ test_help_output() {
 test_standard_generation() {
     start_test "standard generation"
     
-    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
+    assert_command_success "SDK_TAG=9.0-stale $COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
     
     # Check required files were created
     assert_file_exists "$TEST_TEMP_DIR/docker-compose.yml"
@@ -104,6 +104,25 @@ test_standard_generation() {
     assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile"
     assert_contains "$compose_content" "target: api-runtime" "Should contain API runtime target"
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend runtime target"
+
+    local test_python
+    test_python="$(resolve_test_python_cmd)"
+    "$test_python" - "$REPO_ROOT/global.json" "$TEST_TEMP_DIR/docker-compose.yml" <<'PY'
+import json
+import sys
+from ruamel.yaml import YAML
+
+with open(sys.argv[1]) as policy:
+    expected = json.load(policy)["sdk"]["version"] + "-noble"
+with open(sys.argv[2]) as compose:
+    services = YAML(typ="safe").load(compose)["services"]
+tags = [
+    service["build"]["args"]["SDK_TAG"]
+    for service in services.values()
+    if "SDK_TAG" in service.get("build", {}).get("args", {})
+]
+assert len(tags) >= 2 and all(tag == expected for tag in tags), (expected, tags)
+PY
     
     # Validate service structure
     assert_contains "$compose_content" "services:" "Should have services section"
@@ -1731,8 +1750,8 @@ test_https_port_zero_disables_https_binding() {
     local test_dir="$TEST_TEMP_DIR/test-https-disabled"
     capture_output "HTTPS_PORT=0 $COMPOSE_GENERATOR --output-dir $test_dir"
     assert_equals "0" "$(get_output_exit_code)" "HTTPS-disabled generation should succeed"
-    assert_contains "$(get_output)" "HTTPS_PORT=0: local-only HTTP on 127.0.0.1:8080; no LAN access." \
-        "Disabling HTTPS must warn that LAN access is unavailable"
+    assert_contains "$(get_output)" "HTTPS_PORT=0: TLS is disabled; HTTP uses BIND_ADDRESS (default 0.0.0.0)." \
+        "Disabling HTTPS must preserve configurable HTTP access"
 
     local compose_file="$test_dir/docker-compose.yml"
     assert_file_exists "$compose_file" "Should create compose file when HTTPS_PORT=0"
@@ -1740,18 +1759,18 @@ test_https_port_zero_disables_https_binding() {
     local compose_content
     compose_content=$(cat "$compose_file")
 
-    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain loopback-only"
+    assert_contains "$compose_content" '"${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80"' "HTTP port mapping should remain configurable"
     assert_not_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS port mapping should be removed when HTTPS_PORT=0"
     assert_not_contains "$compose_content" '0:443' "HTTPS port 0 must not publish a random host port"
 
     pass_test
 }
 
-# Test: base Compose must not publish cleartext HTTP on a network interface (#3447)
-test_http_listener_is_loopback_only() {
-    start_test "HTTP listener is loopback-only; HTTPS remains published"
+# Test: preserve LAN HTTP defaults and explicit interface restrictions.
+test_http_listener_honors_bind_address() {
+    start_test "HTTP listener honors BIND_ADDRESS; HTTPS remains published"
 
-    local test_dir="$TEST_TEMP_DIR/test-http-loopback"
+    local test_dir="$TEST_TEMP_DIR/test-http-bind-address"
     assert_command_success "BIND_ADDRESS=0.0.0.0 $COMPOSE_GENERATOR --output-dir $test_dir"
 
     local compose_file="$test_dir/docker-compose.yml"
@@ -1760,31 +1779,31 @@ test_http_listener_is_loopback_only() {
     local compose_content
     compose_content=$(cat "$compose_file")
 
-    assert_contains "$compose_content" '"127.0.0.1:${HTTP_PORT:-8080}:80"' "HTTP must bind to loopback"
-    assert_not_contains "$compose_content" '${BIND_ADDRESS' "BIND_ADDRESS must not widen HTTP exposure"
-    assert_not_contains "$compose_content" '0.0.0.0:${HTTP_PORT' "HTTP must never default to all interfaces"
+    assert_contains "$compose_content" '"${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80"' "HTTP must preserve configurable LAN access"
     assert_contains "$compose_content" '"${HTTPS_PORT:-8443}:443"' "HTTPS (TLS) listener remains published"
 
-    # Authenticated /api/ is proxied on port 80 only; with the loopback-only
-    # binding that listener is unreachable from the network.
     local nginx_conf
     nginx_conf=$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")
     assert_contains "$nginx_conf" 'listen 443 ssl;' "nginx must keep the TLS listener"
 
     if check_docker_compose_available; then
-        HTTP_PORT=18080 HTTPS_PORT=18443 docker compose --file "$compose_file" config --format json > "$test_dir/rendered.json"
         local test_python
         test_python=$(resolve_test_python_cmd)
-        "$test_python" - "$test_dir/rendered.json" <<'PY'
+        local bind_address
+        for bind_address in "" "127.0.0.1" "192.0.2.10"; do
+            BIND_ADDRESS="$bind_address" HTTP_PORT=18080 HTTPS_PORT=18443 \
+                docker compose --file "$compose_file" config --format json > "$test_dir/rendered.json"
+            "$test_python" - "$test_dir/rendered.json" "$bind_address" <<'PY'
 import json
 import sys
 
 ports = json.load(open(sys.argv[1]))["services"]["nginx-proxy"]["ports"]
 http = next(port for port in ports if port["target"] == 80)
 https = next(port for port in ports if port["target"] == 443)
-assert http["host_ip"] == "127.0.0.1" and str(http["published"]) == "18080", http
+assert http["host_ip"] == (sys.argv[2] or "0.0.0.0") and str(http["published"]) == "18080", http
 assert https.get("host_ip", "0.0.0.0") == "0.0.0.0" and str(https["published"]) == "18443", https
 PY
+        done
     fi
 
     pass_test
@@ -1795,7 +1814,7 @@ test_http_only_lab_is_local_only() {
     start_test "HTTP_ONLY lab generation warns about local-only access"
 
     local test_dir="$TEST_TEMP_DIR/test-http-only-lab"
-    capture_output "INSTALLER_LAB=true HTTP_ONLY=true HTTPS_PORT=8443 $COMPOSE_GENERATOR --output-dir $test_dir"
+    capture_output "BIND_ADDRESS=0.0.0.0 INSTALLER_LAB=true HTTP_ONLY=true HTTPS_PORT=8443 $COMPOSE_GENERATOR --output-dir $test_dir"
     assert_equals "0" "$(get_output_exit_code)" "HTTP_ONLY lab generation should succeed"
     assert_contains "$(get_output)" "HTTP_ONLY lab mode: local-only HTTP on 127.0.0.1:8080; no LAN access." \
         "HTTP_ONLY must warn even when HTTPS_PORT is nonzero"
@@ -2369,7 +2388,7 @@ run_all_tests() {
     test_duplicate_service_names
     test_port_conflict_detection
     test_https_port_zero_disables_https_binding
-    test_http_listener_is_loopback_only
+    test_http_listener_honors_bind_address
     test_http_only_lab_is_local_only
     test_invalid_connection_string
     test_missing_config_files

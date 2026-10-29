@@ -1,6 +1,8 @@
 import React from 'react';
 import { NozzleIcon, BedIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { ProgressBar } from '@/common/components/ui';
+import { isPrinterHeaterHot } from '@/features/printers/utils/printerSensorDisplay';
+import { HEATER_LABELS } from '@/features/printers/constants/temperaturePresets';
 
 interface PrintProgressBarProps {
   progress: number | undefined;
@@ -70,8 +72,8 @@ export function PrintProgressBar({
       {/* Temperature readouts */}
       {showTemperatures && (
         <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-pf-text-secondary">
-          <span className="flex items-center gap-1" title="Hotend temperature">
-            <NozzleIcon className={`w-3.5 h-3.5 ${currentHotendTemp != null ? 'text-pf-error' : ''}`} isOn={(currentHotendTemp ?? 0) > 50} />
+          <span className="flex items-center gap-1" title={`${HEATER_LABELS.hotend} temperature`}>
+            <NozzleIcon className={`w-3.5 h-3.5 ${currentHotendTemp != null ? 'text-pf-error' : ''}`} ariaLabel={`${HEATER_LABELS.hotend} temperature`} isOn={isPrinterHeaterHot('hotend', currentHotendTemp)} />
             <span>{currentHotendTemp != null ? `${Math.round(currentHotendTemp)}°` : '--°'}</span>
             {isOnline && hotendTarget != null && hotendTarget > 0 && (
               <>
@@ -80,8 +82,8 @@ export function PrintProgressBar({
               </>
             )}
           </span>
-          <span className="flex items-center gap-1" title="Bed temperature">
-            <BedIcon className={`w-3.5 h-3.5 ${currentBedTemp != null ? 'text-pf-accent' : ''}`} isOn={(currentBedTemp ?? 0) > 35} />
+          <span className="flex items-center gap-1" title={`${HEATER_LABELS.bed} temperature`}>
+            <BedIcon className={`w-3.5 h-3.5 ${currentBedTemp != null ? 'text-pf-accent' : ''}`} ariaLabel={`${HEATER_LABELS.bed} temperature`} isOn={isPrinterHeaterHot('bed', currentBedTemp)} />
             <span>{currentBedTemp != null ? `${Math.round(currentBedTemp)}°` : '--°'}</span>
             {isOnline && bedTarget != null && bedTarget > 0 && (
               <>

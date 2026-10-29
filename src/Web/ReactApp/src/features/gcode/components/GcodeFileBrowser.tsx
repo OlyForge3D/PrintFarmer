@@ -11,7 +11,6 @@ import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { signalRService } from '@/services/harvest-signalr';
 import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 
 const toGcodeFileItem = (file: GcodeFile): GcodeFileItem => ({
@@ -170,7 +169,6 @@ const gcodeColumns: ColumnDef[] = [
 ];
 
 interface GcodeFileBrowserProps {
-  harvestId?: string;
   printerId?: string;
   viewMode?: 'grid' | 'explorer';
   onViewModeChange?: (mode: 'grid' | 'explorer') => void;
@@ -187,7 +185,6 @@ interface GcodeFileBrowserProps {
 }
 
 export const GcodeFileBrowser = ({
-  harvestId,
   printerId,
   viewMode,
   onViewModeChange,
@@ -573,7 +570,6 @@ export const GcodeFileBrowser = ({
         mapQueryParams: (query: FileQueryState) => {
           const params: Record<string, unknown> = {
             viewMode: currentViewMode,
-            harvestId,
             printerId,
             sortBy: query.sortBy as 'name' | 'size' | 'date',
             sortOrder: query.sortOrder,
@@ -598,7 +594,7 @@ export const GcodeFileBrowser = ({
         defaultSort: { sortBy: 'name', sortOrder: 'asc' },
         selectedIds: selection,
         onSelectionChange: handleSelectionChange,
-        canCreateDirectory: hasPermission('gcode_harvest', 'create'),
+        canCreateDirectory: hasPermission('gcode_library', 'create'),
         onCreateDirectory: async (path: string, folderName: string) => {
           try {
             const fullPath = path === '/' ? `/${folderName}` : `${path}/${folderName}`;
@@ -632,12 +628,12 @@ export const GcodeFileBrowser = ({
         onViewModeChange: handleViewModeChange,
       };
     },
-    [fetcher, harvestId, hasPermission, printerId, currentViewMode, handleViewModeChange, selectedTags, selectedPrinterModels, selection, handleSelectionChange]
+    [fetcher, hasPermission, printerId, currentViewMode, handleViewModeChange, selectedTags, selectedPrinterModels, selection, handleSelectionChange]
   );
 
   const extraToolbarActions = (
     <>
-      {hasPermission('gcode_harvest', 'create') && (
+      {hasPermission('gcode_library', 'create') && (
         <Button
           type="button"
           variant="secondary"
@@ -683,7 +679,7 @@ export const GcodeFileBrowser = ({
           Add to Project ({selection.length})
         </Button>
       )}
-      {selection.length > 0 && hasPermission('gcode_harvest', 'delete') && (
+      {selection.length > 0 && hasPermission('gcode_library', 'admin') && (
         <Button
           type="button"
           variant="secondary"
@@ -708,57 +704,31 @@ export const GcodeFileBrowser = ({
       onItemComplete?: (fileName: string, status: 'done' | 'error', error?: string) => void
     ) => {
       try {
-        // Establish SignalR connection BEFORE starting uploads to avoid race condition
-        await signalRService.connect();
-        
-        // Set up listeners for upload progress
-        const unsubscribeUploadProgress = signalRService.onSingleFileHarvestProgress((event) => {
-          onProgress?.(event.fileName, event.percentComplete);
-        });
-        
-        const unsubscribeUploadComplete = signalRService.onSingleFileHarvestComplete((event) => {
-          onItemComplete?.(
-            event.fileName,
-            event.success ? 'done' : 'error',
-            event.success ? undefined : event.message
-          );
-        });
-        
-        try {
-          // NOW start uploading files sequentially (listeners are in place)
-          let succeededCount = 0;
-          let failedCount = 0;
+        let succeededCount = 0;
+        let failedCount = 0;
 
-          for (const file of files) {
-            try {
-              await apiClient.uploadGcodeLibraryFile(file, "/", onProgress);
-              succeededCount++;
-              // Mark as done after successful upload
-              onItemComplete?.(file.name, 'done');
-            } catch (error) {
-              failedCount++;
-              const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-              onItemComplete?.(file.name, 'error', errorMsg);
-            }
+        for (const file of files) {
+          try {
+            await apiClient.uploadGcodeLibraryFile(file, "/", onProgress);
+            succeededCount++;
+            onItemComplete?.(file.name, 'done');
+          } catch (error) {
+            failedCount++;
+            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+            onItemComplete?.(file.name, 'error', errorMsg);
           }
-          
-          if (succeededCount && failedCount) {
-            // Mixed results
-            toast.warning(`${succeededCount} uploaded, ${failedCount} failed`);
-          } else if (succeededCount) {
-            toast.success(`Uploaded ${succeededCount} file${succeededCount > 1 ? 's' : ''}`);
-          } else if (failedCount) {
-            toast.error(`Failed to upload ${failedCount} file${failedCount > 1 ? 's' : ''}`);
-          }
-          
-          // Invalidate file browser cache to refresh the list
-          if (succeededCount) {
-            queryClient.invalidateQueries({ queryKey: ['file-browser'] });
-          }
-        } finally {
-          // Clean up listeners
-          unsubscribeUploadProgress();
-          unsubscribeUploadComplete();
+        }
+
+        if (succeededCount && failedCount) {
+          toast.warning(`${succeededCount} uploaded, ${failedCount} failed`);
+        } else if (succeededCount) {
+          toast.success(`Uploaded ${succeededCount} file${succeededCount > 1 ? 's' : ''}`);
+        } else if (failedCount) {
+          toast.error(`Failed to upload ${failedCount} file${failedCount > 1 ? 's' : ''}`);
+        }
+
+        if (succeededCount) {
+          queryClient.invalidateQueries({ queryKey: ['file-browser'] });
         }
       } catch (error) {
         toast.error(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -787,7 +757,6 @@ export const GcodeFileBrowser = ({
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onFilesSelected={handleUpload}
-        harvestId={harvestId}
         printerId={printerId}
       />
       {queueFileToAdd && (

@@ -14,6 +14,41 @@ namespace Farm.Modules.Printers.Controllers;
 
 public partial class PrintersController
 {
+    /// <summary>Turns off every heater through an explicit backend capability; automatic cooling fans are unchanged.</summary>
+    [HttpPost("{id:guid}/heaters/off")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(501)]
+    [ProducesResponseType(503)]
+    public async Task<ActionResult<CommandResult>> TurnOffHeatersAsync(Guid id, CancellationToken ct)
+    {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
+        PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
+        if (capabilities is null)
+        {
+            return NotFound();
+        }
+
+        if (!capabilities.SupportsHeaterShutdown)
+        {
+            return SensorProblem(501, "Heater shutdown not supported", "This backend does not support all-heater shutdown; no command was sent.");
+        }
+
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "turn_off_heaters",
+            "turn_off_heaters",
+            token => _printersService.TurnOffHeatersAsync(id, token),
+            ct,
+            allowActivePrint: true);
+    }
+
     /// <summary>
     /// Sets a writable quantity of one backend-neutral sensor or fan entry. The request is
     /// validated against the sensor's advertised <c>writable</c> descriptors before any backend
@@ -54,7 +89,7 @@ public partial class PrintersController
         }
 
         PrinterBackendCapabilitiesDto? capabilities =
-            await _printerBackendCapabilitiesService.GetByPrinterIdAsync(id, ct);
+            await _printerBackendCapabilitiesService.GetControlCapabilitiesAsync(id, ct);
         if (capabilities is null)
         {
             return NotFound();
@@ -66,12 +101,6 @@ public partial class PrintersController
                 StatusCodes.Status501NotImplemented,
                 "Sensor control not supported",
                 "This printer backend does not support targeted sensor control; no command was sent.");
-        }
-
-        (bool useActiveLease, _, ActionResult? stateFailure) = await ResolveFanControlLeaseAsync(id, ct);
-        if (stateFailure is not null)
-        {
-            return stateFailure;
         }
 
         IReadOnlyList<PrinterSensorDto> advertised = _printersService.GetLiveSensors(id);
@@ -89,26 +118,14 @@ public partial class PrintersController
         }
 
         string targetId = validation.SensorId!;
-        double target = value.Number!.Value;
-        if (!useActiveLease)
-        {
-            return await ExecuteDirectBooleanControlAsync(
-                id,
-                "set_sensor_value",
-                "set_sensor_value",
-                token => _printersService.SetSensorValueAsync(id, targetId, quantity, target, token),
-                ct);
-        }
-
-        return await ExecuteActiveCommandControlAsync(
+        double target = value.Boolean is bool enabled ? enabled ? 1 : 0 : value.Number!.Value;
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "set_sensor_value",
             "set_sensor_value",
-            async token => await _printersService.SetSensorValueAsync(id, targetId, quantity, target, token)
-                ? new CommandResult(true, null)
-                : new CommandResult(false, "The backend did not confirm whether the sensor command was applied."),
+            token => _printersService.SetSensorValueAsync(id, targetId, quantity, target, token),
             ct,
-            mapUnconfirmedAsUnavailable: true);
+            allowActivePrint: true);
     }
 
     private static ObjectResult SensorProblem(int statusCode, string title, string detail) =>

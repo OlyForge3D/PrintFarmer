@@ -25,7 +25,7 @@ else
   cat > "$OUTFILE" <<EOF
 {
   "name": "PrintFarmer (local build)",
-  "build": { "dockerfile": "Dockerfile" },
+  "build": { "dockerfile": "Dockerfile", "context": ".." },
   "postCreateCommand": ".devcontainer/post-create.sh --verify",
   "forwardPorts": [5245,3000]
 }

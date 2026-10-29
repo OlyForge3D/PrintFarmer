@@ -4,8 +4,115 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Filament Dynamic Type (#3535, #3536)** — Remaining amount and job demand
+  stack without a separator when space is limited. Spool names scale through
+  accessibility text sizes, with the reel above the text and actions below it
+  so names and controls do not compete for horizontal space.
+
+- **Filament loading flash (#3565)** — Opening the Filament tab no longer
+  briefly reports unknown spool amounts before the inventory lookup finishes.
+  Completed missing-data and lookup-failure states remain visible.
+
+- **Stable control panel (#3565)** — Loaded controls no longer disappear and
+  reappear on printer offline/online updates; offline commands stay disabled.
+  Homing and readiness changes update buttons immediately rather than waiting
+  for another refresh. The global banner now says "Server connected", and the
+  redundant offline safety-switch footer is removed.
+
+- **Native printer web link (#3565)** — "Open in web" opens the printer's
+  configured frontend URL rather than PrintFarmer's printer page. The link is
+  hidden if there is no valid HTTP(S) frontend address. Canonical detail
+  responses preserve the sanitized URL without credentials, queries or fragments.
+
+- **Request-scoped connection errors (#3565)** — A failed control request no
+  longer claims "No internet connection" while the server banner is Connected.
+  Failures retain a short check-before-retry instruction and an accessible
+  close icon instead of the visible "Dismiss" label.
+
+- **Jog homing gate (#3565)** — Jog buttons enable only for supported axes
+  reported homed. Unknown or unhomed axes stay disabled without lockout text;
+  the same rule is checked again before dispatch. OctoPrint and PrusaLink
+  lack homing telemetry, so Home acceptance cannot enable their jog buttons.
+  VoiceOver distinguishes unknown homing from explicitly unhomed axes.
+  Accepted motor release invalidates cached homing until subsequent telemetry.
+
 ### Removed
 
+- **Remaining control acceptance disclaimers (#3565)** — Sensor targets,
+  extrusion, filament operations, motor release, firmware saves and Z-offset
+  adjustments without readback are now silent on success, like other controls.
+  Actual errors and interrupted-request warnings remain visible.
+
+- **Leftover lockout text (#3548, #3542)** — Printer detail, the Control tab
+  (Move, Heat, Tune) and the filament section no longer render lockout banners,
+  blocked-reason captions, tap-to-reveal hints or errors such as "Controls are
+  locked while a print is active." or "Another printer operation is in
+  progress." Gated controls stay hidden or disabled exactly as before and keep a
+  short VoiceOver hint; blocked taps are refused silently. The dead
+  `PrinterControlsSection` and `PrinterSetupControlsContent` views were deleted.
+
+- **Tune trimmed to Speed, Flow and babystep (#3540)** — The Control › Tune
+  segment no longer shows hotend/bed target steppers or writable sensor rows
+  while printing, even when the backend supports temperature control during a
+  print. Writable sensors and heater targets remain on Heat while idle.
+
+- **Printer detail clutter (#3496)** — Removed the visible "Speed/Flow can be
+  tuned only while printing or paused." lines under the disabled Tune
+  steppers (VoiceOver hints keep the reason), the Filament tab's
+  "Assignment does not verify physical loading." and unsupported
+  filament-command captions, the Filament tab's **Coverage details**
+  disclosure, and the four page-indicator dots under the
+  Status/Control/Filament/Queue picker. The X/Y/Z position readout now
+  appears only on the Move panel, and is hidden when the printer does not
+  report any position (unhomed or unknown axes read "—"). Control commands on
+  Move, Heat and Tune are now silent on success: the "Command pending" label and the
+  "Matching telemetry received…" / "Command accepted…" / "Request
+  accepted…" notices are gone, and only actionable failures or unknown
+  outcomes are shown; the tapped control shows a spinner and a VoiceOver
+  "Pending" value instead, and the "Stop waiting for command" button is
+  gone. The Control › Tune segment is disabled (VoiceOver hint
+  "Available while printing") unless the printer is printing or paused (not
+  starting), and falls back to Move when a print ends; writable sensor
+  controls moved to Heat so they stay reachable while idle. Tune shows only
+  Speed, Flow and Z babystep (#3540), and Heat/Move no longer show
+  "Unavailable while printing" text. The
+  iPad jog pad is capped at 480 pt and centred. The camera card now puts the
+  "Camera" title and rotate/refresh buttons in a header row above
+  full-width, aspect-preserving media whose height is capped relative to the
+  screen (including quarter-turn rotation and the MJPEG livestream). The card
+  is titled "Print preview" when it shows the sliced-model preview, and
+  collapses to a one-line "No camera available" header when there is no
+  media. The Layer cell is omitted when the printer reports no layers, the
+  state chip reads "Idle" for ready printers, and the Filament tab states the
+  remaining weight once with a full-width meter. Idle printers that still report the
+  last file name (Moonraker) now show "No active print" instead of a stale
+  job heading with "Layer --". Follow-up polish: the Move/Heat/Tune picker,
+  steppers and Filament Load/Unload stack vertically at accessibility text
+  sizes; the X/Y/Z readout and jog-distance selector share the jog pad's width;
+  Control content clears the emergency-stop bar; the "Not homed" sentence and
+  SNAPSHOT/LIVE badges are gone; every camera mode keeps "Camera" with
+  Rotate and Refresh in the header (the live/snapshot toggle sits on the
+  media), MJPEG streams size to the stream's own aspect with a loading
+  placeholder; Status uses the same page background as Control with "No active
+  print" in a card; a disconnected Control tab shows "Reconnect to control"
+  with a Reconnect button; filament shortfall reads "84 g / needs 140 g"; and
+  the Queue tab drops "Reorder in the Queue tab." Leaving the detail screen
+  clears a stuck pending command, and a starting printer shows a "Starting…"
+  label. Final alignment pass: Raise/Lower nozzle labels stay centred after a
+  command, the Queue tab uses the navy page background, "No active print"
+  aligns with the Camera card, every Tune stepper shares one value-column width
+  and spans the full row, and the Filament shortfall warning replaces the
+  remaining-weight line while Swap/Scan spool stack at equal height.
+- **Advanced Printer Controls opt-in and legacy screen** — Removed the
+  unreachable Advanced printer controls screen and its navigation destination,
+  the per-server **Settings → Printer Safety → Advanced printer controls**
+  toggle, and the onboarding prompt that offered it. The Control tab stays
+  visible; its controls are blocked with a reason when the printer is offline,
+  lacks control support, or the account lacks Queue.Start. Every existing
+  capability, connectivity and permission check still applies. Stored opt-in values from older installs
+  are ignored.
 - **APNs registration from the v1 mobile client** — Removed remote-notification
   registration callbacks, device-token persistence/upload, the in-app push
   toggle, APNs entitlement/build setting, and unreachable actionable
@@ -19,6 +126,28 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   require checking the printer and are never automatically replayed (#2713).
 
 ### Fixed
+
+- **Printer detail no longer blocks on offline printers** — Opening a printer
+  from the farm list renders its last-known details immediately instead of a
+  multi-second "Loading printer…" spinner. The canonical printer, status and
+  job details then fill in progressively in the background, and a failed
+  background refresh keeps the shown content. Camera metadata and snapshot
+  fetches are skipped while the printer is offline and resume once it reports
+  online. The full-screen spinner appears only when no cached printer is
+  available. While only cached details are shown, printer controls, filament
+  actions and Start Next Job stay disabled until the server confirms the
+  printer, except Emergency Stop. NFC "ready" and guided spool-swap deep links
+  opened during that window wait and run once the printer is confirmed,
+  including after a failed first load succeeds on Retry. A
+  connectivity-only live update during a refresh no longer lets the cached
+  printer state override the server's current state.
+  A failed refresh shows a compact "Showing last known status" note with
+  Retry. Switching servers never leaves the previous server's printer on
+  screen, and a printer that comes online during a refresh keeps its live
+  status and loads its camera. NFC "ready" deep links now show the Mark
+  Printer Ready confirmation from the printer page; previously the request
+  was dropped. A refresh that restarts mid-load no longer lets an older live
+  state override the newer server state (#3507).
 
 - Stop the offline farm snapshot from silently keeping an older fleet after the
   device clock steps backward or two writes land in the same millisecond. Farm
@@ -50,6 +179,17 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   and homing information without the old bordered identity card.
 
 ### Added
+
+- **Speed and Flow steppers in Tune** — Control → Tune shows Speed % and
+  Flow % steppers (±5%) above babystep while a job is printing or paused
+  (#3476). Rows appear only when the backend reports
+  `supportsSpeedFactorControl` / `supportsFlowFactorControl`; missing or false
+  capabilities hide them. Each step posts `{"percent":N}` (1–200%) to
+  `/api/printers/{id}/speed-factor` or `/flow-factor` and stays pending until
+  live status reports the new value. Unreported readback shows `--` (VoiceOver
+  "not reported") and is never assumed to be 100%. 501 explains that no command
+  was sent; 503 warns that the outcome may be unknown. Nothing is retried
+  automatically.
 
 - **Essential Controls alignment** — Restore owner-selected concept 1: one
   Heat group with paired inputs and Set targets, compact presets and Cool down,
@@ -119,6 +259,53 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Changed
 
+- Control tab follows the #3460 heater contract: **Cool down** is always shown
+  and is idle-only (disabled while a job is starting, printing or paused;
+  Emergency stop covers that case). It calls `POST /heaters/off` when the
+  backend reports `supportsHeaterShutdown`, otherwise it sets hotend/bed
+  targets to 0. No confirmation is needed. Heat is idle-only: presets, the
+  More menu, Custom… and the Heat target fields are blocked while a job is
+  starting, printing or paused, even with
+  `supportsTemperatureControlDuringPrint`. The app offers no mid-print
+  temperature changes: Tune is only Speed, Flow and Z babystep (#3540).
+  Writable sensor rows on Heat omit the `enabled` quantity, and `allowZero`
+  targets step to/from 0. Missing thermal values show "--"
+  (VoiceOver "not reported").
+- Heat presets: PLA · PETG · ABS · **More** · Cool down in one row (wrapping
+  to presets, then More + Cool down at xxLarge and above, including every
+  accessibility text size, so More stays reachable). Each material preset
+  shows its nozzle/bed targets; More and Cool down show none. More's disabled
+  VoiceOver hint names the actual reason (printing, offline, a pending command
+  or unconfirmed access). More is a native menu (no section title) with ASA, TPU, PC and Nylon, then
+  "Custom…", which focuses the Nozzle target field. Preset temperatures
+  (°C, nozzle/bed): PLA 200/60, PETG 230/80, ABS 245/100, ASA 245/100,
+  TPU 220/50, PC 260/110, Nylon 250/80. PETG and ABS change from 240/80 and
+  240/100. PC and Nylon are capped for PTFE-lined hotends (preheat values, not
+  print temperatures). All values live in the single `PreheatPreset.definition` table.
+- At accessibility text sizes the More menu lists each material on one line
+  and puts "Custom…" at the top, because the native menu doesn't scroll and
+  Custom… was clipped below its bottom edge.
+- Printer detail polish: the pager's page dots use a compact 16 pt indicator,
+  the Move empty state shows an SF Symbol like the other empty states, and
+  Emergency Stop is a full-width, solid red button with a white icon and label
+  (accessibility label and confirmation unchanged).
+- Tune shows editable hotend and bed targets while a job is printing or paused,
+  disabled with a short reason only when the backend cannot apply them.
+- **Removed:** all fan controls from Tune (part-fan stepper and fan or
+  temperature-fan sensor rows).
+- Move & home X/Y/Z readouts show "--" for a missing position (VoiceOver
+  "not reported").
+- Instrument panel: while printing, Move and Heat are disabled and Tune is
+  the only enabled segment. Tune is selected on entering Control and when a
+  print starts; when the print ends Move and Heat re-enable and Tune stays
+  selected. Disabled segments use standard VoiceOver "dimmed" semantics (the
+  extra "Unavailable while printing" hint is gone). Other instrument panel changes: jog distance defaults to 1 mm, the X/Y/Z readout is
+  centred with hairline dividers, the babystep readout sits on the "Z babystep"
+  header row in medium-weight monospaced text (shows "--", VoiceOver "Z offset
+  not reported", when missing), and temperature steppers show the target as
+  centred primary monospaced text with no fill chip.
+- Idle Status no longer shows an empty progress bar and duplicate "0%"; the
+  progress block appears only while actively printing.
 - Native control capability fallback no longer infers physical-command support
   from a backend name. Explicit per-operation server evidence is required;
   older servers without that evidence leave commands unavailable. Heater,

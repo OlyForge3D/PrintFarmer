@@ -133,8 +133,66 @@ public sealed class PrintersServicePluginControlTests
         (await service.EmergencyStopAsync(printer.Id, CancellationToken.None)).Should().BeFalse();
         (await service.ExecuteMmuAsync(printer.Id, new MmuControlRequest(MmuControlAction.Load), CancellationToken.None)).Should().BeFalse();
         (await service.SaveZOffsetToFirmwareAsync(printer.Id, -0.25m, CancellationToken.None)).Should().BeFalse();
+        (await service.SetSpeedFactorAsync(printer.Id, 125, CancellationToken.None)).Should().BeFalse();
+        (await service.SetFlowFactorAsync(printer.Id, 90, CancellationToken.None)).Should().BeFalse();
 
         rawCommands.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RuntimeFactorAsync_SemanticCapability_ForwardsIndependentPercentAndCredentials()
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        var client = new Mock<IBackendClient>(MockBehavior.Strict);
+        Mock<ISupportsRuntimeFactorControl> factors = client.As<ISupportsRuntimeFactorControl>();
+        factors.Setup(c => c.SetSpeedFactorAsync(printer.BackendUrl, 123.45,
+            It.Is<PrinterCredential?>(value => value != null && value.ApiKey == "test-key"), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        factors.Setup(c => c.SetFlowFactorAsync(printer.BackendUrl, 87.65,
+            It.Is<PrinterCredential?>(value => value != null && value.ApiKey == "test-key"), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        Assert.True(await service.SetSpeedFactorAsync(printer.Id, 123.45, default));
+        Assert.True(await service.SetFlowFactorAsync(printer.Id, 87.65, default));
+        Assert.False(await service.SetSpeedFactorAsync(Guid.NewGuid(), 125, default));
+        factors.VerifyAll();
+        factors.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(0)]
+    [InlineData(201)]
+    [InlineData(1.001)]
+    public async Task RuntimeFactorAsync_InvalidPercent_RejectsBeforeBackendLookup(double percent)
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        var client = new Mock<IBackendClient>(MockBehavior.Strict);
+        Mock<ISupportsRuntimeFactorControl> factors = client.As<ISupportsRuntimeFactorControl>();
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SetSpeedFactorAsync(printer.Id, percent, default));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SetFlowFactorAsync(printer.Id, percent, default));
+        factors.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RuntimeFactorAsync_BackendFailure_DoesNotReportSuccessOrRetry()
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        var client = new Mock<IBackendClient>(MockBehavior.Strict);
+        Mock<ISupportsRuntimeFactorControl> factors = client.As<ISupportsRuntimeFactorControl>();
+        factors.Setup(c => c.SetSpeedFactorAsync(It.IsAny<string>(), 125,
+            It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("fixture"));
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        Assert.False(await service.SetSpeedFactorAsync(printer.Id, 125, default));
+        factors.Verify(c => c.SetSpeedFactorAsync(It.IsAny<string>(), 125,
+            It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
+        factors.VerifyNoOtherCalls();
     }
 
     [Theory]

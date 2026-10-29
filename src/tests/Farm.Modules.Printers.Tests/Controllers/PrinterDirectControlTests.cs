@@ -491,6 +491,19 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     [InlineData("home_z")]
     [InlineData("move")]
     [InlineData("move_to")]
+    [InlineData("set_temperature")]
+    [InlineData("set_fan_speed")]
+    [InlineData("set_sensor_value")]
+    [InlineData("turn_off_heaters")]
+    [InlineData("adjust_z_offset")]
+    [InlineData("set_speed_factor")]
+    [InlineData("set_flow_factor")]
+    [InlineData("extrude_filament")]
+    [InlineData("filament_load")]
+    [InlineData("filament_unload")]
+    [InlineData("filament_change")]
+    [InlineData("mmu_unload")]
+    [InlineData("disable_motors")]
     public async Task MarkDirectUnknownAsync_ManualCommand_ReleasesBarrierAndPreservesUnknown(string operation)
     {
         await using AppDbContext db = CreateContext();
@@ -501,6 +514,26 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
         Assert.Single(await db.QueueDispatchOutbox.Where(row => row.EventType == PrinterPhysicalActuationService.EventTypeUnknown).ToListAsync());
         Assert.False(await db.QueueDispatchOutbox.AnyAsync(row => row.EventType == PrinterPhysicalActuationService.EventTypeCompleted));
+    }
+
+    [Fact]
+    public async Task MarkDirectUnknownAsync_ActiveJobAppeared_PreservesFenceAndOwnership()
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterPhysicalActuationService service = CreateActuation(db);
+        PrinterActuationResult acquired = await service.AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+        Assert.NotNull(acquired.Lease);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Guid activeJobId = Guid.NewGuid();
+        state.ActiveJobId = activeJobId;
+        await db.SaveChangesAsync();
+
+        await service.MarkDirectUnknownAsync(acquired.Lease, "response_lost");
+
+        Assert.Equal(acquired.Lease.CommandId, state.PhysicalControlCommandId);
+        Assert.Equal(activeJobId, state.ActiveJobId);
+        Assert.True(state.PhysicalControlRequiresReconciliation);
+        Assert.Single(await db.QueueDispatchOutbox.Where(row => row.EventType == PrinterPhysicalActuationService.EventTypeUnknown).ToListAsync());
     }
 
     [Fact]
@@ -543,7 +576,7 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ManualMoveAsync_Moonraker_ValidatesFreshDestinationWithoutClearancePolicy(bool absolute)
+    public async Task ManualMoveAsync_Moonraker_DispatchesWithoutGeometryOrPositionPreflight(bool absolute)
     {
         var observed = new PrinterStatusDto(printerId, true, "Idle", X: 10, Y: 20, Z: 0);
         printers.Setup(service => service.GetMovementStatusAsync(
@@ -553,12 +586,6 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         printers.Setup(service => service.MoveToAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PrinterControlOutcome.Ok);
         var safety = new Mock<IPrinterSafetyGuard>(MockBehavior.Strict);
-        var expected = absolute
-            ? new PrinterSafetyMoveRequest(2, null, 0.2)
-            : new PrinterSafetyMoveRequest(12, 20, 0.2);
-        safety.Setup(service => service.ValidateObservedManualMoveAsync(
-            printerId, expected, observed, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(PrinterSafetyValidationResult.Allowed);
         await using AppDbContext db = CreateContext();
         PrintersController controller = PrintersControllerControlGuardsTests.CreateController(
             printers, new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict), out _,
@@ -571,125 +598,74 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
 
         Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
         printers.Verify(service => service.GetMovementStatusAsync(
-            It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()), Times.Never);
         printers.Verify(service => service.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         printers.Verify(service => service.MoveAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()),
             absolute ? Times.Never() : Times.Once());
         printers.Verify(service => service.MoveToAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()),
             absolute ? Times.Once() : Times.Never());
-        safety.Verify(service => service.ValidateObservedManualMoveAsync(
-            printerId, expected, observed, It.IsAny<CancellationToken>()), Times.Once);
-        safety.Verify(service => service.ValidateAsync(
-            It.IsAny<Guid>(), It.IsAny<PrinterSafetyOperation>(), It.IsAny<PrinterSafetyMoveRequest?>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+        safety.VerifyNoOtherCalls();
         Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
     }
 
     [Theory]
-    [InlineData("home", "exception")]
-    [InlineData("home", "read_timeout")]
-    [InlineData("home", "cancel")]
-    [InlineData("home", "deadline")]
-    [InlineData("move", "exception")]
-    [InlineData("move", "read_timeout")]
-    [InlineData("move", "cancel")]
-    [InlineData("move", "deadline")]
-    public async Task ManualControlAsync_FreshSnapshotFails_ReleasesLeaseWithoutSending(string route, string failure)
+    [InlineData("home")]
+    [InlineData("move")]
+    public async Task ManualControlAsync_SnapshotUnavailable_StillSendsOneNativeCommand(string route)
     {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var clock = new DirectControlTestClock();
-        using var caller = new CancellationTokenSource();
         printers.Setup(service => service.GetMovementStatusAsync(
                 It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()))
-            .Returns(async (Printer _, CancellationToken token) =>
-            {
-                entered.TrySetResult();
-                await release.Task.WaitAsync(token);
-                if (failure == "read_timeout")
-                {
-                    throw new TaskCanceledException("Snapshot HTTP deadline exceeded");
-                }
-
-                throw new IOException("Snapshot unavailable");
-            });
+            .ThrowsAsync(new IOException("Snapshot unavailable"));
+        printers.Setup(service => service.SendHomeAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        printers.Setup(service => service.MoveAsync(printerId, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
         await using AppDbContext db = CreateContext();
-        PrintersController controller = CreateController(db, clock);
-        Task<ActionResult<CommandResult>> pending = route == "home"
-            ? controller.HomeAsync(printerId, caller.Token)
-            : controller.MoveAsync(printerId, new MoveRequest(1, null, null, null), caller.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        try
-        {
-            if (failure == "cancel")
-            {
-                caller.Cancel();
-            }
-            else if (failure == "deadline")
-            {
-                clock.Advance(TimeSpan.FromMinutes(5));
-            }
-            else
-            {
-                release.TrySetResult();
-            }
+        PrintersController controller = CreateController(db);
+        ActionResult<CommandResult> response = route == "home"
+            ? await controller.HomeAsync(printerId, default)
+            : await controller.MoveAsync(printerId, new MoveRequest(1, null, null, null), default);
 
-            if (failure == "cancel")
-            {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                    () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
-            }
-            else
-            {
-                ActionResult<CommandResult> response = await pending.WaitAsync(TimeSpan.FromSeconds(10));
-                ObjectResult error = Assert.IsType<ObjectResult>(response.Result);
-                Assert.Equal(503, error.StatusCode);
-                Assert.Equal("printer_safety_evidence_unknown",
-                    Assert.IsType<ProblemDetails>(error.Value).Extensions["code"]);
-            }
-
-            await using AppDbContext verify = CreateContext();
-            PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync();
-            Assert.Null(state.PhysicalControlCommandId);
-            Assert.False(state.PhysicalControlRequiresReconciliation);
-            Assert.DoesNotContain(printers.Invocations,
-                invocation => invocation.Method.Name is "SendHomeAsync" or "MoveAsync");
-            printers.Verify(service => service.GetMovementStatusAsync(
-                It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()), Times.Once);
-            printers.Verify(service => service.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        }
-        finally
-        {
-            release.TrySetResult();
-        }
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Null(state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        Assert.Single(printers.Invocations, invocation => invocation.Method.Name is "SendHomeAsync" or "MoveAsync");
+        printers.Verify(service => service.GetMovementStatusAsync(
+            It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
     [InlineData("Printing", true)]
     [InlineData("Idle", false)]
     [InlineData("unknown", true)]
-    public async Task HomeAsync_FreshStatusNotReady_DoesNotSend(string state, bool online)
+    public async Task HomeAsync_StaleStatusDoesNotProveReadiness_LetsNativeBackendDecide(string state, bool online)
     {
         printers.Setup(service => service.GetMovementStatusAsync(
                 It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(printerId, online, state));
+        printers.Setup(service => service.SendHomeAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         await using AppDbContext db = CreateContext();
         ActionResult<CommandResult> response = await CreateController(db).HomeAsync(printerId, default);
-        Assert.Equal(409, Assert.IsAssignableFrom<ObjectResult>(response.Result).StatusCode);
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
         Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
-        printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.SendHomeAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.GetMovementStatusAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
     [InlineData("printer_not_homed")]
     [InlineData("printer_travel_limit")]
-    public async Task MoveToAsync_SafetyRejected_ReleasesBarrierWithoutBackendIo(string code)
+    public async Task MoveToAsync_ApplicationSafetyRejected_LetsNativeBackendDecide(string code)
     {
         var safety = new Mock<IPrinterSafetyGuard>();
         safety.Setup(service => service.ValidateObservedManualMoveAsync(
             printerId, It.IsAny<PrinterSafetyMoveRequest>(),
             It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PrinterSafetyValidationResult.Reject(409, code, "Unsafe move."));
+        printers.Setup(service => service.MoveToAsync(
+                printerId, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.BackendBusy);
         await using AppDbContext db = CreateContext();
         PrintersController controller = PrintersControllerControlGuardsTests.CreateController(
             printers, new Mock<IPrinterStatusCacheReader>(), out _, safetyGuard: safety, realActuation: CreateActuation(db));
@@ -697,11 +673,12 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
             printerId, new MoveRequest(1, null, null, null), default);
         ObjectResult error = Assert.IsAssignableFrom<ObjectResult>(response.Result);
         Assert.Equal(409, error.StatusCode);
-        Assert.Equal(code, Assert.IsType<ProblemDetails>(error.Value).Extensions["code"]);
+        Assert.False(Assert.IsType<CommandResult>(error.Value).Success);
+        safety.VerifyNoOtherCalls();
         Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
         printers.Verify(service => service.MoveToAsync(
             It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(),
-            It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -897,6 +874,106 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         Assert.Equal(commandId, state.PhysicalControlCommandId);
         Assert.Equal(attemptId, state.PhysicalControlAttemptId);
         Assert.True(state.PhysicalControlRequiresReconciliation);
+    }
+
+    [Theory]
+    [InlineData("set_temperature")]
+    [InlineData("set_fan_speed")]
+    [InlineData("set_speed_factor")]
+    [InlineData("set_flow_factor")]
+    public async Task MarkDirectUnknownAsync_IdleSetpoint_ReleasesFenceSoNextPresetSucceeds(string operation)
+    {
+        // Issue #3495: an unknown idle set_temperature retained the barrier forever, so the next
+        // Heat preset failed with "Another physical operation owns the printer barrier."
+        await using AppDbContext db = CreateContext();
+        PrinterPhysicalActuationService actuation = CreateActuation(db);
+        PrinterActuationResult first = await actuation.AcquireDirectAsync(printerId, userId.ToString(), operation);
+        Assert.NotNull(first.Lease);
+
+        await actuation.MarkDirectUnknownAsync(first.Lease, "response_lost");
+
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Null(state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        await using AppDbContext nextDb = CreateContext();
+        PrinterActuationResult next = await CreateActuation(nextDb).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+        Assert.True(next.Success);
+    }
+
+    [Theory]
+    [InlineData("set_temperature", "set_temperature", true)]
+    [InlineData("set_fan_speed", "set_temperature", true)]
+    [InlineData("set_speed_factor", "set_temperature", true)]
+    [InlineData("set_flow_factor", "set_temperature", true)]
+    [InlineData("set_temperature", "home", true)]
+    [InlineData("set_temperature", "set_temperature", false)]
+    [InlineData("set_fan_speed", "set_temperature", false)]
+    [InlineData("set_speed_factor", "set_temperature", false)]
+    [InlineData("set_flow_factor", "set_temperature", false)]
+    public async Task AcquireDirectAsync_LeakedUnknownSetpointFence_IsReclaimedWithUnknownAudit(
+        string leakedOperation, string nextOperation, bool settled)
+    {
+        await using AppDbContext db = CreateContext();
+        DateTime started = settled ? DateTime.UtcNow.AddSeconds(-5) : DateTime.UtcNow.AddMinutes(-6);
+        PrinterActuationLease leaked = await SeedBarrierAsync(db, leakedOperation, started);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = settled;
+        await db.SaveChangesAsync();
+
+        PrinterActuationResult acquired = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), nextOperation);
+
+        Assert.True(acquired.Success);
+        Assert.NotNull(acquired.Lease);
+        Assert.NotEqual(leaked.CommandId, acquired.Lease.CommandId);
+        Assert.Equal(acquired.Lease.CommandId, state.PhysicalControlCommandId);
+        Assert.False(state.PhysicalControlRequiresReconciliation);
+        QueueOperationAudit audit = Assert.Single(await db.QueueOperationAudits
+            .Where(row => row.ReasonCode == "direct_setpoint_command_reclaimed").ToListAsync());
+        Assert.Equal(QueueAuditOutcomes.Unknown, audit.Outcome);
+        Assert.Single(await db.QueueDispatchOutbox.Where(row => row.EventType == PrinterPhysicalActuationService.EventTypeStarted).ToListAsync());
+        Assert.False(await db.QueueDispatchOutbox.AnyAsync(row =>
+            row.EventType == PrinterPhysicalActuationService.EventTypeCompleted ||
+            row.EventType == PrinterPhysicalActuationService.EventTypeUnknown));
+    }
+
+    [Theory]
+    [InlineData("in-flight")]
+    [InlineData("attempt-bound")]
+    [InlineData("active-attempt")]
+    [InlineData("active-job-pointer")]
+    [InlineData("active-job")]
+    public async Task AcquireDirectAsync_LiveOrBoundSetpointFence_PreservesOwnership(string condition)
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterActuationLease previous = await SeedBarrierAsync(db, "set_temperature", DateTime.UtcNow,
+            condition == "attempt-bound" ? Guid.NewGuid() : null);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        state.PhysicalControlRequiresReconciliation = condition != "in-flight";
+        if (condition == "active-job-pointer")
+        {
+            state.ActiveJobId = Guid.NewGuid();
+        }
+        else if (condition == "active-attempt")
+        {
+            state.ActiveDispatchAttemptId = Guid.NewGuid();
+        }
+        else if (condition == "active-job")
+        {
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "Active job",
+                AssignedPrinterId = printerId,
+                Status = PrintJobStatus.Printing,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        PrinterActuationResult result = await CreateActuation(db).AcquireDirectAsync(printerId, userId.ToString(), "set_temperature");
+
+        Assert.False(result.Success);
+        Assert.Equal(previous.CommandId, state.PhysicalControlCommandId);
+        Assert.False(await db.QueueOperationAudits.AnyAsync(row => row.ReasonCode == "direct_setpoint_command_reclaimed"));
     }
 
     private async Task AssertBarrierBlocksCompetitorAsync()

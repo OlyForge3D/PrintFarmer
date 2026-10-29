@@ -25,6 +25,10 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     var supportsFilamentLoad: Bool = false
     var supportsFilamentUnload: Bool = false
     var supportsFilamentChange: Bool = false
+    var supportsTemperatureControlDuringPrint: Bool = false
+    var supportsHeaterShutdown: Bool = false
+    var supportsSpeedFactorControl: Bool = false
+    var supportsFlowFactorControl: Bool = false
     var verifiedSafety: PrinterVerifiedSafetyDto?
     var supportsRelativeMovement: Bool { supportsMovement }
     var supportsHotendTemperature: Bool { supportsTemperatureControl }
@@ -73,7 +77,73 @@ extension PrinterBackendCapabilities {
         supportsFilamentLoad = wire.supportsFilamentLoad == true
         supportsFilamentUnload = wire.supportsFilamentUnload == true
         supportsFilamentChange = wire.supportsFilamentChange == true
+        supportsTemperatureControlDuringPrint = wire.supportsTemperatureControlDuringPrint == true
+        supportsHeaterShutdown = wire.supportsHeaterShutdown == true
+        supportsSpeedFactorControl = wire.supportsSpeedFactorControl == true
+        supportsFlowFactorControl = wire.supportsFlowFactorControl == true
         verifiedSafety = wire.verifiedSafety
+    }
+}
+
+// MARK: - Runtime factors
+
+/// Live speed/flow percentage overrides published by backend #3474.
+enum RuntimeFactor: String, CaseIterable, Identifiable, Sendable {
+    case speed, flow
+
+    static let minimumPercent = 1.0
+    static let maximumPercent = 200.0
+    static let stepPercent = 5.0
+    /// Readback precision used to correlate a write with live status.
+    static let readbackTolerance = 0.01
+
+    var id: String { rawValue }
+    var title: String { self == .speed ? "Speed" : "Flow" }
+    var pathComponent: String { "\(rawValue)-factor" }
+
+    /// Mirrors backend `PrinterRuntimeFactorLimits.IsValid`: finite, 1...200, two decimals.
+    static func isValidPercent(_ percent: Double) -> Bool {
+        guard percent.isFinite, (minimumPercent...maximumPercent).contains(percent) else { return false }
+        return Decimal(percent).rounded(2) == Decimal(percent)
+    }
+
+    func isSupported(by capabilities: PrinterBackendCapabilities?) -> Bool {
+        switch self {
+        case .speed: return capabilities?.supportsSpeedFactorControl == true
+        case .flow: return capabilities?.supportsFlowFactorControl == true
+        }
+    }
+
+    func percent(of printer: Printer) -> Double? {
+        let value = self == .speed ? printer.speedFactorPercent : printer.flowFactorPercent
+        guard let value, value.isFinite else { return nil }
+        return value
+    }
+
+    func percent(of status: PrinterStatusDetail) -> Double? {
+        let value = self == .speed ? status.speedFactorPercent : status.flowFactorPercent
+        guard let value, value.isFinite else { return nil }
+        return value
+    }
+
+    /// The next write target one step from the observed readback, kept inside
+    /// the backend write bounds. Readback beyond 200% (never clamped for
+    /// display) can still step down to 200%. Nil when no step is possible.
+    static func steppedPercent(from current: Double?, delta: Double) -> Double? {
+        guard let current, current.isFinite, delta.isFinite, delta != 0 else { return nil }
+        let raw = ((current + delta) * 100).rounded() / 100
+        let next = min(max(raw, minimumPercent), maximumPercent)
+        guard delta > 0 ? next > current : next < current, isValidPercent(next) else { return nil }
+        return next
+    }
+}
+
+private extension Decimal {
+    func rounded(_ scale: Int) -> Decimal {
+        var input = self
+        var output = Decimal()
+        NSDecimalRound(&output, &input, scale, .plain)
+        return output
     }
 }
 
@@ -118,6 +188,10 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsFilamentLoad: Bool?
     let supportsFilamentUnload: Bool?
     let supportsFilamentChange: Bool?
+    var supportsTemperatureControlDuringPrint: Bool?
+    var supportsHeaterShutdown: Bool?
+    var supportsSpeedFactorControl: Bool?
+    var supportsFlowFactorControl: Bool?
     let supportedAxes: [String]?
     var verifiedSafety: PrinterVerifiedSafetyDto?
 }

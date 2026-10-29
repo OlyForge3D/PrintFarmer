@@ -1,5 +1,4 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import clsx from 'clsx';
 import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -13,13 +12,28 @@ import {
   type UseFileBrowserConfig,
 } from '@/features/fileBrowser/types';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
-import { usePrinters } from '@/common/hooks/useApi';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { Modal } from '@/common/components/modals/Modal';
+import { PrinterFileCatalog } from '@/features/files/components/PrinterFileCatalog';
+import { CompactFileCard } from '@/features/files/components/CompactFileCard';
+import { FileActionIconButtons, type FileAction } from '@/features/files/components/FileActions';
+import { FileDate } from '@/features/files/components/FileDate';
+import { FileTypeGlyph } from '@/features/files/components/FileGlyphs';
+import { FileNameButton } from '@/features/files/components/FileNameButton';
+import { FileThumbnail } from '@/features/files/components/FileThumbnail';
+import { LocalFileDetails } from '@/features/files/components/LocalFileDetails';
+import { useFileDetailSelection } from '@/features/files/hooks/useFileDetailSelection';
+import {
+  fileExtension,
+  fileKindFromName,
+  formatSizeLabel,
+  type FileKind,
+} from '@/features/files/utils/fileDisplay';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
@@ -27,7 +41,6 @@ import { TaggingModal } from '@/components/TaggingModal';
 import { apiClient } from '@/services/api';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import {
-  ActivityIcon,
   ClipboardListIcon,
   CubeIcon,
   DeleteIcon,
@@ -40,7 +53,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Badge, Button, Checkbox, TagChip } from '@/common/components/ui';
+import { Button } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -53,7 +66,6 @@ type FileSource = 'model' | 'gcode';
 type PrintablesImportModalComponent = typeof import('@/features/models3d/components/PrintablesImportModal')['PrintablesImportModal'];
 type PrintablesBrowserModalComponent = typeof import('@/features/models3d/components/PrintablesBrowserModal')['PrintablesBrowserModal'];
 type QuickSliceModalComponent = typeof import('@/features/slicer/components/QuickSliceModal')['QuickSliceModal'];
-type HarvestWizardModalComponent = typeof import('@/features/gcode/components/harvest/HarvestWizardModal')['HarvestWizardModal'];
 type QueueGcodeModalComponent = typeof import('@/features/gcode/components/QueueGcodeModal')['QueueGcodeModal'];
 
 const PrintablesImportModal = lazyWithPreload<React.ComponentProps<PrintablesImportModalComponent>, PrintablesImportModalComponent>(
@@ -64,9 +76,6 @@ const PrintablesBrowserModal = lazyWithPreload<React.ComponentProps<PrintablesBr
 );
 const QuickSliceModal = lazyWithPreload<React.ComponentProps<QuickSliceModalComponent>, QuickSliceModalComponent>(
   () => import('@/features/slicer/components/QuickSliceModal').then((module) => ({ default: module.QuickSliceModal })),
-);
-const HarvestWizardModal = lazyWithPreload<React.ComponentProps<HarvestWizardModalComponent>, HarvestWizardModalComponent>(
-  () => import('@/features/gcode/components/harvest/HarvestWizardModal').then((module) => ({ default: module.HarvestWizardModal })),
 );
 const QueueGcodeModal = lazyWithPreload<React.ComponentProps<QueueGcodeModalComponent>, QueueGcodeModalComponent>(
   () => import('@/features/gcode/components/QueueGcodeModal').then((module) => ({ default: module.QueueGcodeModal })),
@@ -117,7 +126,6 @@ const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
   '3d-models': 'models',
   gcode: 'gcode',
 };
-const LEGACY_ACTION_SEGMENTS = new Set(['harvest']);
 const MODEL_FILE_EXTENSIONS = new Set(['3mf', 'stl', 'step', 'stp']);
 const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'bgcode', 'gco', 'g', 'ngc', 'gc']);
 const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
@@ -292,167 +300,31 @@ function toFileItem(file: UnifiedFileRecord): FileItem {
 
 function getFileExtension(file: FileItem): string {
   const model = file.meta?.model3d as Model | undefined;
-  return getNormalizedExtension(file.fileName, model?.fileType).toUpperCase();
+  const gcode = file.meta?.gcode as GcodeFile | undefined;
+  // Display names may omit the extension; fall back to the stored file type.
+  const extension = fileExtension(file.fileName)
+    || getNormalizedExtension(undefined, model?.fileType ?? gcode?.fileType);
+  return extension.toUpperCase();
 }
 
-function getSourceLabel(file: FileItem): string {
-  return file.meta?.gcode ? 'G-Code' : '3D Model';
+function getFileKind(file: FileItem): FileKind {
+  if (file.meta?.gcode) return 'gcode';
+  if (file.meta?.model3d) return 'model';
+  return fileKindFromName(file.fileName);
 }
-
-function formatBytes(bytes?: number) {
-  if (!bytes) {
-    return '—';
-  }
-
-  const kilo = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const sizeIndex = Math.floor(Math.log(bytes) / Math.log(kilo));
-  return `${(bytes / Math.pow(kilo, sizeIndex)).toFixed(1)} ${sizes[sizeIndex]}`;
-}
-
-function buildModelCard(
-  file: FileItem,
-  isSelected: boolean,
-  onToggle: () => void,
-  onOpenModel: (model: Model) => void,
-  onSliceModel: (model: Model) => void,
-  onDeleteModel: (file: FileItem) => void,
-  onTagItem: (target: TaggingTarget) => void,
-  onDownloadModel: (file: FileItem) => void
-) {
-  const model = file.meta?.model3d as Model | undefined;
-  if (!model) {
-    return null;
-  }
-
-  const filterCategory = classifyModel(model);
-  const categoryLabel = filterCategory === 'other' ? 'Other' : '3D Model';
-
-  return (
-    <div
-      className={clsx(
-        'group overflow-hidden rounded-lg border bg-pf-bg-0 transition-all focus-within:ring-2 focus-within:ring-pf-accent',
-        isSelected ? 'border-pf-accent shadow-md' : 'border-pf-border hover:border-pf-accent/50 hover:shadow-md'
-      )}
-    >
-      <div className="relative aspect-square overflow-hidden bg-pf-bg-1">
-        {model.thumbnailUrl ? (
-          <img
-            src={model.thumbnailUrl}
-            alt={model.name}
-            className="h-full w-full object-contain p-2"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-pf-text-secondary">
-            <CubeIcon className="h-12 w-12 opacity-50" />
-          </div>
-        )}
-        <div className="absolute left-2 top-2">
-          <Checkbox
-            aria-label={`Select ${file.fileName}`}
-            checked={isSelected}
-            onChange={onToggle}
-          />
-        </div>
-        <div className="absolute right-2 top-2 flex gap-1">
-          <Badge variant="primary">{categoryLabel}</Badge>
-          <Badge variant="default">{getFileExtension(file)}</Badge>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 p-3">
-        <div className="min-w-0">
-          <h3 className="line-clamp-2 text-sm font-semibold text-pf-text-primary">{model.name}</h3>
-          <p className="mt-1 text-xs text-pf-text-secondary">{getSourceLabel(file)}</p>
-        </div>
-
-        <div className="space-y-1.5 border-t border-pf-border pt-2 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-pf-text-secondary">Size</span>
-            <span className="font-medium text-pf-text-primary">{formatBytes(file.fileSize)}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-pf-text-secondary">Uploaded</span>
-            <span className="font-medium text-pf-text-primary">
-              {file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString() : '—'}
-            </span>
-          </div>
-          {model.tags && model.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {model.tags.slice(0, 3).map((tag) => (
-                <TagChip
-                  key={tag.id}
-                  label={tag.name}
-                  color={tag.color}
-                  truncate
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-t border-pf-border pt-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onDownloadModel(file)}
-            title="Download file"
-          >
-            <DownloadIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onTagItem({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] })}
-            title="Tag file"
-          >
-            <TagIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => onOpenModel(model)}
-            title="Preview file"
-          >
-            <EyeIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            onClick={() => onSliceModel(model)}
-            onFocus={() => void QuickSliceModal.preload()}
-            onPointerEnter={() => void QuickSliceModal.preload()}
-            title="Open quick slice"
-          >
-            <LayersTripleOutlineIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-            onClick={() => onDeleteModel(file)}
-            title="Delete file"
-          >
-            <DeleteIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function FilesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-files-viewmode');
   const { hasPermission } = useAuth();
-  const { data: printers = [] } = usePrinters({ staleTime: 30_000 });
+  const onPrinters = searchParams.get('source') === 'printers';
+  const linkedFileId = onPrinters ? null : searchParams.get('file');
+  const linkedFile = useQuery({
+    queryKey: ['gcode-files', linkedFileId],
+    queryFn: () => apiClient.getGcodeFile(linkedFileId!),
+    enabled: !!linkedFileId,
+  });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
@@ -461,45 +333,6 @@ export function FilesPage() {
   const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
   const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
   const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
-  const [showHarvestModal, setShowHarvestModal] = useState(false);
-
-  // Only poll active harvest operations while the harvest wizard modal is open —
-  // it is the sole consumer of this data and defaults to closed. Use the
-  // dedicated active-operations endpoint so completed history is never fetched.
-  const canExecuteHarvest = hasPermission('gcode_harvest', 'execute');
-  const shouldFetchHarvestOperations = showHarvestModal && canExecuteHarvest;
-
-  // Give every modal open its own query-cache entry (an incrementing epoch in
-  // the query key) so react-query never reuses a response from a previous
-  // open. Without this, the global 30s staleTime means reopening the modal
-  // within that window would reuse the previous open's cached response
-  // without refetching, and `isLoading` (isPending && isFetching) never
-  // re-arms once a query key has resolved once — so the loading gate below
-  // would silently pass through stale conflict data instead of protecting
-  // against it. A fresh key starts with no cached data, so `isLoading` is
-  // correctly true again on every open until that open's fetch resolves.
-  // Derived during render (React's "adjusting state when a prop changes"
-  // pattern) rather than in an effect, so there is no extra render/flash
-  // before the value is available.
-  const [harvestQueryEpoch, setHarvestQueryEpoch] = useState(0);
-  const [prevShowHarvestModal, setPrevShowHarvestModal] = useState(showHarvestModal);
-  if (showHarvestModal !== prevShowHarvestModal) {
-    setPrevShowHarvestModal(showHarvestModal);
-    if (showHarvestModal) {
-      setHarvestQueryEpoch((epoch) => epoch + 1);
-    }
-  }
-
-  const {
-    data: harvestOperations = [],
-    isLoading: isLoadingHarvestOperations,
-  } = useQuery({
-    queryKey: ['files-harvest-operations', harvestQueryEpoch],
-    queryFn: () => apiClient.getAllActiveHarvests(),
-    refetchInterval: shouldFetchHarvestOperations ? 5_000 : false,
-    enabled: shouldFetchHarvestOperations,
-  });
-
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -513,18 +346,10 @@ export function FilesPage() {
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
   const selectedFilter = getFilterValueFromSearchParams(searchParams);
-  const harvestId = searchParams.get('harvest') ?? undefined;
   const printerId = searchParams.get('printer') ?? undefined;
 
   useEffect(() => {
     const legacySegment = location.pathname.replace(/^\/files\/?/, '').split('/')[0];
-
-    // Legacy /files/harvest → open harvest modal at /files
-    if (LEGACY_ACTION_SEGMENTS.has(legacySegment)) {
-      const frame = window.requestAnimationFrame(() => setShowHarvestModal(true));
-      navigate('/files', { replace: true });
-      return () => window.cancelAnimationFrame(frame);
-    }
 
     const normalizedFilter = LEGACY_SEGMENT_TO_FILTER[legacySegment];
     const tabFilter = LEGACY_SEGMENT_TO_FILTER[searchParams.get('tab') ?? ''];
@@ -612,7 +437,6 @@ export function FilesPage() {
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
       filter: query.filter,
-      harvestId,
       printerId,
     }, signal);
 
@@ -625,7 +449,7 @@ export function FilesPage() {
       folders: [],
       currentPath: '/',
     };
-  }, [harvestId, printerId]);
+  }, [printerId]);
 
   const config: UseFileBrowserConfig<UnifiedFileRecord> = useMemo(() => ({
     fetcher,
@@ -646,14 +470,118 @@ export function FilesPage() {
     onViewModeChange: (mode) => setViewMode(mode),
   }), [fetcher, selectedFilter, selectedIds, setViewMode, viewMode]);
 
+  const details = useFileDetailSelection<FileItem>();
+  const openDetails = details.open;
+  const closeDetails = details.close;
+  const activeDetailId = details.selected?.id;
+
+  // One action list per file feeds the card/row icon buttons and the labelled panel buttons.
+  const localActions = useCallback((file: FileItem): FileAction[] => {
+    const gcode = file.meta?.gcode as GcodeFile | undefined;
+    const model = file.meta?.model3d as Model | undefined;
+    const deleteAction: FileAction = {
+      id: 'delete',
+      label: 'Delete file',
+      icon: <DeleteIcon className="h-4 w-4" />,
+      tone: 'danger',
+      onClick: () => {
+        setDeleteTarget(file);
+        setDeleteMode('single');
+      },
+    };
+
+    if (gcode) {
+      return [
+        {
+          id: 'queue',
+          label: 'Queue for printing',
+          icon: <PlayIcon className="h-4 w-4" />,
+          onClick: () => setQueueFile(gcode),
+          onPreload: () => void QueueGcodeModal.preload(),
+        },
+        {
+          id: 'tag',
+          label: 'Tag file',
+          icon: <TagIcon className="h-4 w-4" />,
+          onClick: () => setTaggingTarget({ actualId: gcode.id, objectType: 'GcodeFile', name: gcode.name, tags: gcode.tags ?? [] }),
+        },
+        {
+          id: 'download',
+          label: 'Download file',
+          icon: <DownloadIcon className="h-4 w-4" />,
+          onClick: () => void handleDownloadGcode(file),
+        },
+        {
+          id: 'project',
+          label: 'Add to project',
+          icon: <ClipboardListIcon className="h-4 w-4" />,
+          onClick: () => {
+            setSelectedIds([file.id]);
+            setShowAddToProjectModal(true);
+          },
+        },
+        deleteAction,
+      ];
+    }
+
+    if (!model) {
+      return [];
+    }
+
+    return [
+      {
+        id: 'download',
+        label: 'Download file',
+        icon: <DownloadIcon className="h-4 w-4" />,
+        onClick: () => void handleDownloadModel(file),
+      },
+      {
+        id: 'tag',
+        label: 'Tag file',
+        icon: <TagIcon className="h-4 w-4" />,
+        onClick: () => setTaggingTarget({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] }),
+      },
+      {
+        id: 'preview',
+        label: 'Preview file',
+        icon: <EyeIcon className="h-4 w-4" />,
+        onClick: () => setViewerModel(model),
+      },
+      {
+        id: 'quick-slice',
+        label: 'Quick slice',
+        icon: <LayersTripleOutlineIcon className="h-4 w-4" />,
+        tone: 'primary',
+        onClick: () => setQuickSliceModel(model),
+        onPreload: () => void QuickSliceModal.preload(),
+      },
+      deleteAction,
+    ];
+  }, [handleDownloadGcode, handleDownloadModel]);
+
+  // Same columns and glyphs as the On printers table; the thumbnail sits between the
+  // selection checkbox and the name. Extended metadata lives in the detail panel.
   const modelColumns = useMemo<ColumnDef[]>(() => [
-    { key: 'fileName', label: 'Name', sortable: true },
+    {
+      key: 'thumbnail',
+      label: 'Preview',
+      render: (file) => <FileThumbnail kind={getFileKind(file)} size="row" src={file.thumbnailUrl} />,
+    },
+    {
+      key: 'fileName',
+      label: 'Name',
+      sortable: true,
+      render: (file) => (
+        <FileNameButton name={file.fileName} className="max-w-xs" onOpen={(invoker) => openDetails(file, invoker)} />
+      ),
+    },
     {
       key: 'category',
       label: 'Type',
       render: (file) => (
-        <span className="text-xs font-medium uppercase text-pf-text-secondary">
-          {getFileExtension(file)}
+        <span className="inline-flex items-center gap-1.5 font-medium uppercase text-pf-text-secondary">
+          <FileTypeGlyph kind={getFileKind(file)} decorative />
+          {getFileExtension(file) || '—'}
         </span>
       ),
     },
@@ -662,239 +590,36 @@ export function FilesPage() {
       label: 'Size',
       sortable: true,
       align: 'right',
-      render: (file) => formatBytes(file.fileSize),
+      render: (file) => formatSizeLabel(file.fileSize),
     },
     {
       key: 'uploadedAt',
       label: 'Uploaded',
       sortable: true,
-      render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),
+      render: (file) => <FileDate value={file.uploadedAt} fallback="—" />,
     },
-    {
-      key: 'details',
-      label: 'Details',
-      render: (file) => {
-        const gcode = file.meta?.gcode as GcodeFile | undefined;
-        const model = file.meta?.model3d as Model | undefined;
+  ], [openDetails]);
 
-        if (gcode) {
-          return gcode.extractedPrinterModelName || gcode.requiredMaterial || gcode.extractedMaterial || '—';
-        }
-
-        if (model?.tags?.length) {
-          return `${model.tags.length} tag${model.tags.length === 1 ? '' : 's'}`;
-        }
-
-        return model?.fileType?.toUpperCase() ?? '—';
-      },
-    },
-  ], []);
-
-  const renderItemActions = useCallback((file: FileItem) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    const model = file.meta?.model3d as Model | undefined;
-
-    if (gcode) {
-      return (
-        <>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => setQueueFile(gcode)}
-            onFocus={() => void QueueGcodeModal.preload()}
-            onPointerEnter={() => void QueueGcodeModal.preload()}
-            title="Queue for printing"
-          >
-            <PlayIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => setTaggingTarget({ actualId: gcode.id, objectType: 'GcodeFile', name: gcode.name, tags: gcode.tags ?? [] })}
-            title="Tag file"
-          >
-            <TagIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => handleDownloadGcode(file)}
-            title="Download file"
-          >
-            <DownloadIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              setSelectedIds([file.id]);
-              setShowAddToProjectModal(true);
-            }}
-            title="Add to project"
-          >
-            <ClipboardListIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-            onClick={() => {
-              setDeleteTarget(file);
-              setDeleteMode('single');
-            }}
-            title="Delete file"
-          >
-            <DeleteIcon className="h-4 w-4" />
-          </Button>
-        </>
-      );
-    }
-
-    if (!model) {
-      return null;
-    }
-
-    return (
-      <>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => handleDownloadModel(file)}
-          title="Download file"
-        >
-          <DownloadIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => setTaggingTarget({ actualId: model.id, objectType: 'Model3D', name: model.name, tags: model.tags ?? [] })}
-          title="Tag file"
-        >
-          <TagIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => setViewerModel(model)}
-          title="Preview file"
-        >
-          <EyeIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="primary"
-          onClick={() => setQuickSliceModel(model)}
-          onFocus={() => void QuickSliceModal.preload()}
-          onPointerEnter={() => void QuickSliceModal.preload()}
-          title="Quick slice"
-        >
-          <LayersTripleOutlineIcon className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          className="text-pf-error hover:bg-pf-error/10 hover:text-pf-error"
-          onClick={() => {
-            setDeleteTarget(file);
-            setDeleteMode('single');
-          }}
-          title="Delete file"
-        >
-          <DeleteIcon className="h-4 w-4" />
-        </Button>
-      </>
-    );
-  }, [handleDownloadGcode, handleDownloadModel]);
-
-  const renderMetadata = useCallback((file: FileItem) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    const model = file.meta?.model3d as Model | undefined;
-
-    if (gcode) {
-      return (
-        <>
-          {(gcode.requiredMaterial || gcode.extractedMaterial) && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-pf-text-secondary">Material:</span>
-              <span className="font-medium text-pf-text-primary line-clamp-1">{gcode.requiredMaterial || gcode.extractedMaterial}</span>
-            </div>
-          )}
-          {gcode.extractedPrinterModelName && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-pf-text-secondary">Printer:</span>
-              <span className="font-medium text-pf-text-primary line-clamp-1">{gcode.extractedPrinterModelName}</span>
-            </div>
-          )}
-        </>
-      );
-    }
-
-    if (model?.tags?.length) {
-      return (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-pf-text-secondary">Tags:</span>
-          <span className="font-medium text-pf-text-primary">{model.tags.length}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-pf-text-secondary">Source:</span>
-        <span className="font-medium text-pf-text-primary">{getSourceLabel(file)}</span>
-      </div>
-    );
-  }, []);
+  const renderItemActions = useCallback(
+    (file: FileItem) => <FileActionIconButtons actions={localActions(file)} dense />,
+    [localActions],
+  );
 
   const renderCard = useCallback((file: FileItem, isSelected: boolean, onToggle: () => void) => {
-    const gcode = file.meta?.gcode as GcodeFile | undefined;
-    if (gcode) {
-      return (
-        <div className={clsx('relative h-full rounded-lg transition-all', isSelected && 'ring-2 ring-pf-accent')}>
-          <div className="absolute left-2 top-2 z-10">
-            <Checkbox
-              aria-label={`Select ${file.fileName}`}
-              checked={isSelected}
-              onChange={onToggle}
-            />
-          </div>
-          <GcodeFileCard
-            file={gcode}
-            onDownload={() => handleDownloadGcode(file)}
-            onDelete={() => {
-              setDeleteTarget(file);
-              setDeleteMode('single');
-            }}
-          />
-        </div>
-      );
-    }
-
-    return buildModelCard(
-      file,
-      isSelected,
-      onToggle,
-      setViewerModel,
-      setQuickSliceModel,
-      (selectedFile) => {
-        setDeleteTarget(selectedFile);
-        setDeleteMode('single');
-      },
-      setTaggingTarget,
-      handleDownloadModel
+    const kind = getFileKind(file);
+    return (
+      <CompactFileCard
+        name={file.fileName}
+        thumbnail={<FileThumbnail kind={kind} size="card" src={file.thumbnailUrl} />}
+        meta={formatSizeLabel(file.fileSize)}
+        status={<FileTypeGlyph kind={kind} className="h-3.5 w-3.5" />}
+        actions={localActions(file)}
+        selection={{ checked: isSelected, onToggle }}
+        isActive={activeDetailId === file.id}
+        onOpen={(invoker) => openDetails(file, invoker)}
+      />
     );
-  }, [handleDownloadGcode, handleDownloadModel]);
-
+  }, [activeDetailId, localActions, openDetails]);
   const handleDeleteFiles = useCallback(async (idsToDelete: string[]) => {
     if (!idsToDelete.length) {
       return;
@@ -927,6 +652,9 @@ export function FilesPage() {
     setDeleteTarget(null);
     setShowBulkDeleteConfirm(false);
     setSelectedIds([]);
+    if (activeDetailId && idsToDelete.includes(activeDetailId)) {
+      closeDetails();
+    }
     await handleRefresh();
 
     if (successCount > 0 && failedCount === 0) {
@@ -940,7 +668,7 @@ export function FilesPage() {
     }
 
     toast.error('Failed to delete selected files');
-  }, [handleRefresh]);
+  }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (
     <div className="flex flex-wrap items-center gap-2">
@@ -969,7 +697,7 @@ export function FilesPage() {
           Upload Model
         </Button>
       )}
-      {hasPermission('gcode_harvest', 'create') && (
+      {hasPermission('gcode_library', 'create') && (
         <Button
           type="button"
           variant="secondary"
@@ -978,19 +706,6 @@ export function FilesPage() {
           onClick={() => setShowGcodeUploadModal(true)}
         >
           Upload G-Code
-        </Button>
-      )}
-      {hasPermission('gcode_harvest', 'execute') && (
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          iconLeft={<ActivityIcon className="h-4 w-4" />}
-          onClick={() => setShowHarvestModal(true)}
-          onFocus={() => void HarvestWizardModal.preload()}
-          onPointerEnter={() => void HarvestWizardModal.preload()}
-        >
-          Start Harvest
         </Button>
       )}
     </div>
@@ -1066,26 +781,78 @@ export function FilesPage() {
     <>
       <PageTemplate
         title="Files"
-        subtitle="Browse models and print artifacts together, then narrow the list by file type when you need focus."
+        subtitle="Browse owned local assets or metadata observations on printers. Remote files become local only when you explicitly copy or queue."
         icon={FileIcon}
         actions={headerActions}
       >
-        <div className="min-h-[65vh] min-w-0 overflow-hidden">
-          <FileBrowser
-            ref={fileBrowserRef}
-            config={config}
-            sortOptions={FILE_BROWSER_SORT_OPTIONS}
-            columns={modelColumns}
-            renderItemActions={renderItemActions}
-            renderMetadata={renderMetadata}
-            renderCard={renderCard}
-            filterActions={filterButtons}
-            extraToolbarActions={toolbarActions}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
+        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="File source">
+          {(['local', 'printers'] as const).map(source => (
+            <Button key={source} size="sm"
+              variant={onPrinters === (source === 'printers') ? 'primary' : 'secondary'}
+              aria-pressed={onPrinters === (source === 'printers')}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                if (source === 'printers') next.set('source', 'printers');
+                else next.delete('source');
+                next.delete('printer');
+                next.delete('file');
+                navigate(`/files${next.size ? `?${next.toString()}` : ''}`);
+                setSelectedIds([]);
+                closeDetails();
+              }}>
+              {source === 'local' ? 'Local library' : 'On printers'}
+            </Button>
+          ))}
+        </div>
+        {/* overflow-clip (not hidden) keeps the docked detail panel sticky while clipping overflow. */}
+        <div className="min-h-[65vh] min-w-0 overflow-clip">
+          {onPrinters ? <PrinterFileCatalog /> : (
+            <div className="flex items-start gap-4">
+              <div className="min-w-0 flex-1">
+                <FileBrowser
+                  ref={fileBrowserRef}
+                  config={config}
+                  sortOptions={FILE_BROWSER_SORT_OPTIONS}
+                  columns={modelColumns}
+                  renderItemActions={renderItemActions}
+                  renderCard={renderCard}
+                  filterActions={filterButtons}
+                  extraToolbarActions={toolbarActions}
+                  viewMode={viewMode}
+                  onViewModeChange={setViewMode}
+                  compact
+                />
+              </div>
+              {details.selected && (
+                <LocalFileDetails
+                  key={details.selected.id}
+                  file={details.selected}
+                  kind={getFileKind(details.selected)}
+                  extension={getFileExtension(details.selected)}
+                  actions={localActions(details.selected)}
+                  onClose={closeDetails}
+                />
+              )}
+            </div>
+          )}
         </div>
       </PageTemplate>
+
+      <Modal isOpen={!!linkedFileId} title="Owned local G-code" onClose={() => {
+        const next = new URLSearchParams(searchParams);
+        next.delete('file');
+        navigate(`/files${next.size ? `?${next.toString()}` : ''}`, { replace: true });
+      }}>
+        {linkedFile.isLoading && <p role="status">Loading local asset metadata...</p>}
+        {linkedFile.error && <p role="alert" className="text-pf-error">Failed to load local asset: {linkedFile.error.message}</p>}
+        {linkedFile.data && <GcodeFileCard file={linkedFile.data} onDownload={async () => {
+          try {
+            await apiClient.downloadGcodeFileById(linkedFile.data.id, linkedFile.data.name);
+          } catch (error) {
+            toast.error(`Failed to download: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }} />}
+      </Modal>
 
       <ModelUploadModal
         isOpen={showModelUploadModal}
@@ -1144,25 +911,6 @@ export function FilesPage() {
               setShowPrintablesImportModal(false);
               setSelectedPrintablesUrl(null);
               void handleRefresh();
-            }}
-          />
-        </LazyModalBoundary>
-      )}
-      {showHarvestModal && (
-        <LazyModalBoundary
-          label="harvest wizard"
-          onCancel={() => setShowHarvestModal(false)}
-          onRetry={HarvestWizardModal.retry}
-        >
-          <HarvestWizardModal
-            isOpen={showHarvestModal}
-            onClose={() => setShowHarvestModal(false)}
-            printers={printers}
-            activeHarvests={harvestOperations}
-            isLoadingActiveHarvests={isLoadingHarvestOperations}
-            onComplete={() => {
-              toast.success('Harvest completed');
-              handleRefresh();
             }}
           />
         </LazyModalBoundary>

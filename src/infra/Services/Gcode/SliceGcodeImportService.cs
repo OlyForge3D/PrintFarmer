@@ -51,9 +51,6 @@ public sealed class SliceGcodeImportService(
                 originalFileName: fileName,
                 folderId: folder.Id,
                 virtualDirectory: "/",
-                sourcePrinterId: null,
-                originalPrinterPath: null,
-                thumbnailUrl: null,
                 fileId: null,
                 ct: ct);
 

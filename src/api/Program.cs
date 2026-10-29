@@ -211,7 +211,7 @@ IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 // Farm.Modules.Devices (issue #2043, Phase 15) is the fifth -- OctoPrint API-key
 // authentication, NFC, and cameras (the admin Home Assistant controller had already moved to
 // Farm.Modules.Administration by the time this phase merged -- see Phase 14, issue #2042).
-// Farm.Modules.Gcode (issue #2039, Phase 11) is the sixth -- Gcode/harvest/promotion.
+// Farm.Modules.Gcode (issue #2039, Phase 11) is the sixth -- Gcode library/promotion.
 // Farm.Modules.Identity (issue #2041, Phase 13) is the seventh -- user/role/auth
 // management moved out of the monolith.
 // Farm.Modules.Inventory (issue #2044, Phase 16) is the eighth -- adds the inventory
@@ -564,7 +564,6 @@ app.MapApiModules();
 
 // Public farm hubs require authenticated clients.
 app.MapHub<PrinterHub>("/hubs/printers");
-app.MapHub<HarvestHub>("/hubs/harvest");
 
 // MaintenanceHub is now mapped by MaintenanceApiModule.MapEndpoints() via MapApiModules()
 // above -- see Farm.Modules.Maintenance (issue #2037).
@@ -760,8 +759,6 @@ app.MapGet("/api/debug/db-info", async (
         [nameof(db.SpoolmanConfigs)] = await db.SpoolmanConfigs.CountAsync(ct),
         [nameof(db.GcodeFiles)] = await db.GcodeFiles.CountAsync(ct),
         [nameof(db.PrintJobs)] = await db.PrintJobs.CountAsync(ct),
-        [nameof(db.GcodeHarvestOperations)] = await db.GcodeHarvestOperations.CountAsync(ct),
-        [nameof(db.HarvestDiscoveredFiles)] = await db.HarvestDiscoveredFiles.CountAsync(ct),
         [nameof(db.Users)] = await db.Users.CountAsync(ct),
         [nameof(db.Roles)] = await db.Roles.CountAsync(ct),
         [nameof(db.Resources)] = await db.Resources.CountAsync(ct),

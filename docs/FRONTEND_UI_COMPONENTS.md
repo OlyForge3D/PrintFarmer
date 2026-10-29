@@ -71,6 +71,84 @@ The isolated browser fixture in `e2e/printer-card-density.spec.ts` checks column
 counts with navigation-width space reserved, narrow screens, control overflow,
 and ETA alignment using the real card components without contacting printers.
 
+### Printer sensor controls
+
+Detailed cards and the details sidebar share a borderless
+Name / State / Current / Target temperature table and a Miscellaneous section.
+Primary heaters are labelled Extruder and Heater Bed, matching Mainsail/Fluidd.
+Accessible control names, preset groups, compact readouts and limit messages use
+the same terminology. These display labels do not change the active tool,
+additional extruder identities, API heater keys or control limits.
+Measured minimum/maximum temperatures are not displayed in sensor rows; current
+readings and configured control limits are unchanged.
+Sensor names omit generated Sensor/Heater type subtitles, preserving the actual
+operator-provided name. Humidity uses a water-percent glyph and its own row with
+the reading under Current, including when reported alongside a temperature.
+When a device reports both temperature and humidity, Humidity is an indented
+child row immediately beneath that device. Its accessible header retains the
+source name (for example, Heater Box1 Humidity). Grouping uses the source sensor
+ID, not matching display names; humidity-only devices keep their own named row.
+Miscellaneous contains only descriptor-backed controllable outputs, such as fan
+sliders and binary switches, and is omitted when none exist. Read-only nonthermal
+sensors and the former Other sensors group are hidden. Humidity and pressure on
+thermal sensors remain under Temperatures. Filament sensors are hidden pending
+[enable/disable backend support in #3461](https://github.com/OlyForge3D/PrintFarmer/issues/3461);
+this UI change does not introduce backend commands.
+Primary and additional temperatures share one header and column grid. All sensor
+groups reuse the existing `CollapsibleSection` divider, chevron and uppercase
+header, without a separate border, background or inset. Expansion uses the same
+in-memory disclosure state as neighboring groups; collapsed sensor bodies stay
+mounted but hidden to retain in-flight request locks and deduplication.
+Row glyphs remain visible.
+Nozzle and bed glyphs use the compact card's existing icon variants and colors:
+red nozzle, teal bed, full opacity above 50°C/35°C respectively and muted off
+variants otherwise. Offline, unavailable or missing readings remain muted.
+Glyph state uses current telemetry, even when the sidebar retains the last
+known numeric readout after telemetry disappears.
+These are temperature indicators, not claims that a heater command was applied.
+Labels, readings, environmental measurements and input text use the same 12px
+sans-serif scale as Statistics/Version: secondary normal labels and primary
+medium-weight values, without responsive typography changes.
+Presets use a viewport-bounded, scrollable menu (maximum 240px) with all combined
+and per-heater choices, arrow/Home/End navigation and Escape focus restoration.
+Opening or dismissing the menu never applies a preset.
+Measured values remain telemetry: accepting a command does not change them.
+Unavailable optional readings stay absent; a reported zero remains visible.
+
+Numeric targets submit on Enter or blur, once per edit. Fan sliders preview
+locally and submit on release; keyboard changes submit directly. Same-row
+reset, step, slider and switch actions take precedence over an unsubmitted
+numeric draft. Failed commands show an explicit error and retry action.
+Temperature and percentage fields use 28px boxes with tighter horizontal insets
+and 2px vertical margins, leaving 4px between stacked temperature targets.
+Preset/Cooldown buttons and fan actions retain compact 32px controls without
+expanded touch targets. Preset items use the
+existing menu padding at 28px height; keyboard navigation and visible focus
+remain available. The committed HTML reference uses the same group styling and
+numeric sizing. No coarse-pointer-specific enlargement is applied.
+Primary heater edits send only the edited target, not a stale companion target.
+Their fallback input precision is whole degrees to match the existing `/temps`
+adapter contract. Both surfaces fetch persisted printer capabilities for heater
+maximums, independently of Spoolman; writable sensor bounds take precedence.
+Combined and per-heater presets enforce the same known maximums. An over-limit
+preset is rejected visibly without sending or partially applying its targets;
+targets are never silently clamped.
+When neither source supplies a valid maximum, the affected heater explicitly
+warns that integer commands rely on firmware limits: the primary `/temps`
+endpoint does not enforce an upper bound. Entry and cooldown remain available
+by product decision; the UI does not invent a universally safe maximum.
+
+Controls require the existing permission, connection and capability gates.
+Only descriptors advertising a writable binary output receive a light switch;
+automatic fans remain read-only. Moonraker light discovery and writes are
+deferred backend work, so this UI does not invent light capabilities.
+Motion controls are unchanged.
+
+The isolated `e2e/printer-sensors-polish.spec.ts` fixture exercises the real
+controls at desktop, 360px and 320px widths with hardware access blocked.
+The approved visual reference is
+[`printer-sensors-options.html`](design/printer-sensors-options.html).
+
 ### Button
 
 Standardized button component with consistent variants, sizing, and focus states.

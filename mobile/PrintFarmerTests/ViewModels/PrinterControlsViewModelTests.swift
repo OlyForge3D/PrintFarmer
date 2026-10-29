@@ -58,6 +58,96 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func test_jogRequiresReportedHomingForEachAxisAndDirection() async throws {
+        let model = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await model.loadCapabilities()
+        for homedAxes: String? in [nil, "", "x", "xy", "xZ", "XYZ"] {
+            var update = model.printer
+            update.homedAxes = homedAxes
+            model.handlePrinterUpdate(update)
+            for axis in ["X", "Y", "Z"] {
+                let expected = homedAxes?.uppercased().contains(axis) == true
+                XCTAssertEqual(model.canJog(axis: axis), expected, "\(axis): \(String(describing: homedAxes))")
+                for distance in [-1.0, 1.0] {
+                    mockService.moveCalledWith = nil
+                    await model.jog(axis: axis.lowercased(), distanceMm: distance)
+                    XCTAssertEqual(mockService.moveCalledWith?.axis, expected ? axis : nil)
+                    XCTAssertEqual(mockService.moveCalledWith?.distanceMm, expected ? distance : nil)
+                    XCTAssertNil(model.pendingCommand)
+                    XCTAssertNil(model.lastError, "Unhomed jog attempts are silently refused")
+                    XCTAssertNil(model.commandNotice)
+                }
+            }
+        }
+    }
+
+    func test_homeResponseAloneDoesNotEnableJogAndLostHomingDisablesItAgain() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = ""
+        let model = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await model.loadCapabilities()
+        model.handlePrinterUpdate(printer)
+
+        await model.homeXY()
+        XCTAssertNotNil(mockService.homeXYCalledWith)
+        for axis in ["X", "Y", "Z"] {
+            XCTAssertFalse(model.canJog(axis: axis), "HTTP acceptance does not invent homing")
+            await model.jog(axis: axis, distanceMm: 1)
+        }
+        XCTAssertNil(mockService.moveCalledWith)
+
+        printer.homedAxes = "xy"
+        model.handlePrinterUpdate(printer)
+        XCTAssertTrue(model.canJog(axis: "X"))
+        XCTAssertTrue(model.canJog(axis: "Y"))
+        XCTAssertFalse(model.canJog(axis: "Z"))
+        await model.jog(axis: "X", distanceMm: 1)
+        XCTAssertEqual(mockService.moveCalledWith?.axis, "X")
+
+        printer.homedAxes = nil
+        model.handlePrinterUpdate(printer)
+        mockService.moveCalledWith = nil
+        await model.jog(axis: "X", distanceMm: 1)
+        XCTAssertFalse(model.canJog(axis: "X"))
+        XCTAssertNil(mockService.moveCalledWith, "A previously enabled button cannot bypass lost homing")
+        XCTAssertNil(model.commandNotice)
+    }
+
+    func test_homedJogStillRequiresMovementCapabilitySupportedAxisAndAccess() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = "xyz"
+        let noMovement = PrinterBackendCapabilities(
+            supportsMovement: false, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: false,
+            supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
+        )
+        let xyOnly = PrinterBackendCapabilities(
+            supportsMovement: true, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: false,
+            supportsHoming: true, supportedAxes: ["X", "Y"]
+        )
+        for caps in [noMovement, xyOnly] {
+            let model = try makeViewModel(printer: printer, capabilities: caps)
+            await model.loadCapabilities()
+            XCTAssertFalse(model.canJog(axis: "Z"))
+            mockService.moveCalledWith = nil
+            await model.jog(axis: "Z", distanceMm: 1)
+            XCTAssertNil(mockService.moveCalledWith)
+            XCTAssertNil(model.commandNotice)
+        }
+        let model = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await model.loadCapabilities()
+        for (state, online) in [("printing", true), ("paused", true), ("starting", true), ("idle", false)] {
+            printer.state = state
+            printer.isOnline = online
+            model.handlePrinterUpdate(printer)
+            XCTAssertFalse(model.canJog(axis: "X"))
+            mockService.moveCalledWith = nil
+            await model.jog(axis: "X", distanceMm: 1)
+            XCTAssertNil(mockService.moveCalledWith)
+        }
+    }
+
     func test_directMotionPendingBlocksDuplicatesAndTelemetryCannotCompleteIt() async throws {
         let model = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await model.loadCapabilities()
@@ -78,7 +168,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await command.value
         XCTAssertNil(model.pendingCommand)
         XCTAssertFalse(model.isExecuting)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
     }
 
     func test_directMotionTimeoutIsActionableAndReactivationNeverReplays() async throws {
@@ -119,7 +209,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let commands: [(ControlCommand.Kind, ControlCommand.Section)] = [
             (.preheat(.pla, hotendTarget: 200, bedTarget: 60), .heat),
             (.heater(.hotend, target: 200), .heat),
-            (.heaterTargets(hotend: 200, bed: 60), .heat),
+            (.sensorControl(sensorId: "chamber", quantity: .targetTemperature, value: 45), .heat),
             (.home(axes: ["X", "Y", "Z"]), .motion),
             (.jog(axis: "X", distanceMm: 1), .motion),
             (.moveTo(x: 1, y: 1, z: 1, feedrateMmMin: nil), .motion),
@@ -151,7 +241,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         model.handlePrinterUpdate(printer)
         XCTAssertNil(model.pendingCommand)
         XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
 
         mockService.errorToThrow = NetworkError.timeout
         await model.setHeaterTarget(.hotend, target: 200)
@@ -167,18 +257,20 @@ final class PrinterControlsViewModelTests: XCTestCase {
         model.cancelPendingCommand()
         XCTAssertNil(model.pendingCommand)
         XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertTrue(model.commandNotice?.contains("Physical completion is not confirmed") == true)
+        XCTAssertNil(model.commandNotice, "Success is silent (#3496)")
 
         await model.extrude(distanceMm: 2, speedMmPerSecond: 1)
         XCTAssertEqual(model.feedbackSection, .material)
         XCTAssertTrue(model.commandNotice?.contains("Choose") == true)
     }
 
-    func test_feedbackSection_blockedCommandIsReportedAtItsOrigin() async throws {
+    /// #3548: a blocked command is dropped silently; the control is already disabled.
+    func test_feedbackSection_blockedCommandIsSilent() async throws {
         let model = try makeViewModel(capabilities: Self.fullCaps)
         await model.homeAll()
-        XCTAssertEqual(model.feedbackSection, .motion)
-        XCTAssertEqual(model.lastError?.command.section, .motion)
+        XCTAssertNil(model.feedbackSection)
+        XCTAssertNil(model.lastError)
+        XCTAssertNil(model.commandNotice)
         XCTAssertNil(mockService.homeCalledWith)
     }
 
@@ -205,6 +297,64 @@ final class PrinterControlsViewModelTests: XCTestCase {
     func test_sensorControl_onlyWritableEntriesExposeControls() async throws {
         let model = try await sensorViewModel()
         XCTAssertEqual(model.controllableSensors.map(\.id), ["fan part"])
+    }
+
+    func test_sensorControl_writableDescriptorAllowsCommandWithoutAvailableReadback() async throws {
+        let model = try await sensorViewModel()
+        var printer = model.printer
+        printer.sensors = try JSONDecoder().decode(
+            [PrinterSensor].self,
+            from: Data(Self.sensorJSON.replacingOccurrences(of: "\"available\":true", with: "\"available\":false").utf8)
+        )
+        model.handlePrinterUpdate(printer)
+        await model.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 60)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(mockService.setSensorValueCalledWith?.value, 60)
+        XCTAssertEqual(mockService.setSensorValueCallCount, 1)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertFalse(model.isExecuting)
+        XCTAssertNil(model.commandNotice, "Accepted sensor commands are silent even without readback")
+    }
+
+    func test_sensorControl_sharedLeaseReleasesAfterAcknowledgmentWithoutMatchingReadback() async throws {
+        for available in [false, true] {
+            var printer = try idlePrinter()
+            printer.sensors = try JSONDecoder().decode(
+                [PrinterSensor].self,
+                from: Data(Self.sensorJSON.replacingOccurrences(
+                    of: "\"available\":true", with: "\"available\":\(available)"
+                ).utf8)
+            )
+            let serverID = UUID()
+            let (original, service) = try await leaseOwner(serverID: serverID, printer: printer, sensorControls: true)
+            let (replacement, replacementService) = try await leaseOwner(serverID: serverID, printer: printer, sensorControls: true)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.beforeSetSensorValue = { await barrier.arriveAndWait() }
+
+            let request = Task {
+                await original.setSensorValue(sensorId: "fan part", quantity: .fanSpeed, value: 60)
+            }
+            await barrier.waitUntilArrived()
+            XCTAssertNotNil(original.pendingCommand)
+            XCTAssertNil(original.commandNotice, "Pending sensor commands are silent")
+            XCTAssertTrue(replacement.isExecuting)
+            await replacement.homeAll()
+            XCTAssertNil(replacementService.homeCalledWith, "The HTTP request still owns the shared lease")
+
+            barrier.release()
+            await request.value
+
+            original.handlePrinterUpdate(printer)
+            XCTAssertNil(original.pendingCommand, "Missing or unchanged readback must not retain the accepted request")
+            XCTAssertFalse(original.isExecuting)
+            XCTAssertNil(original.commandNotice, "Accepted sensor commands are silent")
+            XCTAssertFalse(replacement.isExecuting)
+            XCTAssertEqual(original.printer.sensors, printer.sensors, "Acknowledgment must not invent a new observation")
+            XCTAssertEqual(service.setSensorValueCallCount, 1)
+            await replacement.homeAll()
+            XCTAssertNotNil(replacementService.homeCalledWith)
+        }
     }
 
     func test_sensorControl_offGridValueIsRejectedWithoutServiceCall() async throws {
@@ -276,21 +426,25 @@ final class PrinterControlsViewModelTests: XCTestCase {
         return try TestData.decoder.decode(Printer.self, from: json.data(using: .utf8)!)
     }
 
-    private static let fullCaps = PrinterBackendCapabilities(
-        supportsMovement: true,
-        supportsTemperatureControl: true,
-        supportsBedTemperature: true,
-        supportsFanControl: true,
-        supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"],
-        supportsHomingXY: true, supportsHomingZ: true
-    )
+    private static let fullCaps: PrinterBackendCapabilities = {
+        var caps = PrinterBackendCapabilities(
+            supportsMovement: true,
+            supportsTemperatureControl: true,
+            supportsBedTemperature: true,
+            supportsFanControl: true,
+            supportsHoming: true,
+            supportedAxes: ["X", "Y", "Z"],
+            supportsHomingXY: true, supportsHomingZ: true
+        )
+        caps.supportsHeaterShutdown = true
+        return caps
+    }()
 
     // Synthetic field-omission case, not a FlashForge backend profile.
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     private func leaseOwner(
-        serverID: UUID, printer: Printer? = nil, runtimeControls: Bool = false
+        serverID: UUID, printer: Printer? = nil, runtimeControls: Bool = false, sensorControls: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         let printer = try printer ?? idlePrinter()
         let service = MockPrinterService()
@@ -300,6 +454,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         caps.supportsFanSpeedReadback = runtimeControls
         caps.supportsZOffsetAdjustment = runtimeControls
         caps.supportsZOffsetReadback = runtimeControls
+        caps.supportsSensorControl = sensorControls
         caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         service.capabilitiesToReturn = caps
         service.statusToReturn = VerifiedSafetyFixtures.status(
@@ -329,6 +484,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     private func assertNoRoutineDispatch(_ service: MockPrinterService) {
         XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.turnOffHeatersCalledWith)
         XCTAssertNil(service.moveCalledWith)
         XCTAssertNil(service.homeCalledWith)
         XCTAssertNil(service.homeXYCalledWith)
@@ -403,7 +559,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         _ model: PrinterControlsViewModel, services: ServiceContainer, registry: ServerRegistry
     ) {
         model.configureAccess(serverID: model.registeredServerID) { [weak model] in
-            guard let model, AdvancedPrinterControlsAccess.matchesComposition(
+            guard let model, PrinterControlsAccess.matchesComposition(
                 model, selectedServerID: registry.activeServerID, composition: services.printerControlsComposition
             ) else { return "Server composition changed. Reopen this printer." }
             return nil
@@ -636,7 +792,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
     func test_sharedLease_retentionMatchesDirectRequestOrHeaterObservationLifetime() async throws {
         let kinds: [ControlCommand.Kind] = [
             .heater(.hotend, target: 200),
-            .heaterTargets(hotend: 210, bed: 70),
+            .heater(.bed, target: 70),
             .preheat(.pla, hotendTarget: 200, bedTarget: 60),
             .jog(axis: "X", distanceMm: 1),
             .home(axes: ["X", "Y", "Z"]), .home(axes: ["X", "Y"]), .home(axes: ["Z"]),
@@ -654,11 +810,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             switch kind {
             case .heater(let heater, let target):
                 await original.setHeaterTarget(heater, target: target)
-                confirmed.hotendTarget = target
-            case .heaterTargets(let hotend, let bed):
-                await original.setHeaterTargets(hotend: hotend, bed: bed)
-                confirmed.hotendTarget = hotend
-                confirmed.bedTarget = bed
+                if heater == .hotend { confirmed.hotendTarget = target } else { confirmed.bedTarget = target }
             case .preheat(let preset, let hotend, let bed):
                 await original.preheat(preset)
                 confirmed.hotendTarget = hotend
@@ -887,14 +1039,15 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(original.commandNotice, "Request canceled before dispatch. No printer command was sent.")
         await observer.jog(axis: "X", distanceMm: 1)
         XCTAssertNil(observer.pendingCommand)
-        XCTAssertTrue(observer.commandNotice?.contains("Command accepted") == true)
+        XCTAssertNil(observer.commandNotice, "Success is silent (#3496)")
     }
 
     func test_unconfiguredServerAccessHasAnExplicitBlockedReason() async throws {
         var printer = try idlePrinter()
-        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
         var capabilities = Self.fullCaps
-        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
         mockService.capabilitiesToReturn = capabilities
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
         let composition = PrinterControlsComposition(
@@ -906,10 +1059,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         let reason = "Waiting for registered-server access confirmation."
         XCTAssertEqual(model.blockedReason, reason)
-        XCTAssertEqual(model.fanControlUnavailableReason, reason)
         XCTAssertFalse(model.canAdjustRuntimeControls)
-        await model.setFanSpeed(50)
-        XCTAssertNil(mockService.setFanSpeedCalledWith)
+        await model.adjustLiveZOffset(by: 0.01)
+        XCTAssertNil(mockService.adjustZOffsetCalledWith)
     }
 
     func test_sharedLease_missingIdentityFailsClosedAndConfiguredIdentityCannotBeRebound() async throws {
@@ -981,7 +1133,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(replacement.isExecuting)
     }
 
-    func test_missingOrInvalidHeaterMaxima_blockPositiveTargetsAndPresetsButPermitSupportedZero() async throws {
+    func test_missingOrInvalidHeaterMaxima_doNotBlockNativeTargetsOrPresets() async throws {
         for limit in [nil, 0, -1] as [Int?] {
             let printer = try idlePrinter()
             let service = MockPrinterService()
@@ -992,18 +1144,21 @@ final class PrinterControlsViewModelTests: XCTestCase {
             XCTAssertTrue(vm.needsHeaterLimits)
             for heater in Heater.allCases {
                 XCTAssertNil(vm.maximum(for: heater))
-                for value in [1.0, 200, 1e100] {
+                for value in [1.0, 200] {
                     await vm.setHeaterTarget(heater, target: value)
-                    XCTAssertNil(service.setTemperaturesCalledWith)
-                    XCTAssertNotNil(vm.lastError)
-                    XCTAssertNil(vm.pendingCommand)
+                    XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, heater == .hotend ? value : nil)
+                    XCTAssertEqual(service.setTemperaturesCalledWith?.bed, heater == .bed ? value : nil)
+                    XCTAssertNil(vm.lastError)
+                    vm.cancelPendingCommand()
                 }
             }
             for preset in [PreheatPreset.pla, .petg, .abs] {
-                XCTAssertNotNil(vm.preheatBlockedReason(preset))
+                XCTAssertNil(vm.preheatBlockedReason(preset))
                 await vm.preheat(preset)
-                XCTAssertNil(service.setTemperaturesCalledWith)
-                XCTAssertNotNil(vm.lastError)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, preset.hotend)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.bed, preset.bed)
+                XCTAssertNil(vm.lastError)
+                vm.cancelPendingCommand()
             }
             for heater in Heater.allCases {
                 await vm.setHeaterTarget(heater, target: 0)
@@ -1015,12 +1170,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
             XCTAssertNil(vm.preheatBlockedReason(.coolDown))
             await vm.preheat(.coolDown)
             XCTAssertNil(vm.lastError)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
-            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
+            XCTAssertEqual(service.turnOffHeatersCalledWith, vm.printer.id)
         }
     }
 
-    func test_partialMaxima_blockWholePresetWithoutPartialHeaterDispatch() async throws {
+    func test_partialMaxima_allowNativePresetAndRetainKnownLimitValidation() async throws {
         let printer = try idlePrinter()
         let service = MockPrinterService()
         service.capabilitiesToReturn = Self.fullCaps
@@ -1028,7 +1182,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         await vm.preheat(.pla)
-        XCTAssertNil(service.setTemperaturesCalledWith, "A safe hotend does not authorize an unbounded bed")
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 60)
+        vm.cancelPendingCommand()
         await vm.setHeaterTarget(.hotend, target: 280)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 280)
         vm.cancelPendingCommand()
@@ -1078,7 +1234,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.hardwareLoadError)
         XCTAssertTrue(vm.needsHeaterLimits)
         await vm.setHeaterTarget(.hotend, target: 200)
-        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        vm.cancelPendingCommand()
+        service.setTemperaturesCalledWith = nil
         service.detailsToReturn = PrinterDetails(id: printer.id, name: printer.name, backend: printer.backend)
         await vm.loadHardware()
         XCTAssertNil(vm.hardwareLoadError)
@@ -1091,7 +1249,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
     }
 
-    func test_loadingHardware_blocksPositiveTargetsButAllowsZeroAndReadIsSingleFlight() async throws {
+    func test_loadingHardware_doesNotBlockNativeTargetsAndReadIsSingleFlight() async throws {
         let printer = try idlePrinter()
         let base = MockPrinterService()
         base.capabilitiesToReturn = Self.fullCaps
@@ -1106,7 +1264,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.maximum(for: .hotend))
         await vm.loadHardware()
         await vm.preheat(.pla)
-        XCTAssertNil(base.setTemperaturesCalledWith)
+        XCTAssertEqual(base.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertEqual(base.setTemperaturesCalledWith?.bed, 60)
+        vm.cancelPendingCommand()
         await vm.setHeaterTarget(.hotend, target: 0)
         XCTAssertEqual(base.setTemperaturesCalledWith?.hotend, 0)
         vm.cancelPendingCommand()
@@ -1162,13 +1322,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 if heater == .hotend { reported.hotendTarget = target } else { reported.bedTarget = target }
                 vm.handlePrinterUpdate(reported)
                 XCTAssertNil(vm.pendingCommand)
-                XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+                XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
             }
 
         }
     }
 
-    func test_failedOrWrongPrinterLimitsRefresh_doesNotRetainHeatingAuthority() async throws {
+    func test_failedOrWrongPrinterLimitsRefresh_reportsErrorWithoutBlockingNativeHeating() async throws {
         let printer = try idlePrinter()
         let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
@@ -1177,9 +1337,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadHardware()
         XCTAssertNotNil(vm.hardwareLoadError)
         XCTAssertNil(vm.maximum(for: .hotend))
-        await vm.setHeaterTarget(.hotend, target: 200)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
         mockService.errorToThrow = nil
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 1)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+        XCTAssertNil(vm.lastError)
+        vm.cancelPendingCommand()
         mockService.detailsToReturn = PrinterDetails(
             id: UUID(), name: printer.name, backend: printer.backend,
             capabilities: PrinterDetails.controlsLimitsFixture(for: printer).capabilities
@@ -1187,13 +1351,18 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadHardware()
         XCTAssertTrue(vm.hardwareLoadError?.contains("different printer") == true)
         XCTAssertNil(vm.maximum(for: .hotend))
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 1)
         await vm.preheat(.pla)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 2)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, PreheatPreset.pla.hotend)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, PreheatPreset.pla.bed)
+        XCTAssertNil(vm.lastError)
+        vm.cancelPendingCommand()
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
         await vm.loadHardware()
         XCTAssertNil(vm.hardwareLoadError)
         XCTAssertEqual(vm.maximum(for: .hotend), 280)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.setTemperaturesCallCount, 2, "Refreshing limits never replays a command")
     }
 
     func test_coordinatePrecision_rejectsExcessOnEveryAxisAndRelativeJog() async throws {
@@ -1235,7 +1404,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             reported.z = 10
             vm.handlePrinterUpdate(reported)
             XCTAssertNil(vm.pendingCommand)
-            XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+            XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         }
     }
 
@@ -1255,7 +1424,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         barrier.release()
         await command.value
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_freshAbsoluteTelemetryBeforeResponse_cannotConfirmPhysicalCompletion() async throws {
@@ -1284,7 +1453,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await command.value
         XCTAssertNil(vm.pendingCommand)
         XCTAssertNil(vm.lastError)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_delayedCapabilities_surviveInitialStateAndReadinessChanges() async throws {
@@ -1428,9 +1597,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 }
                 XCTAssertNil(vm.pendingCommand)
                 XCTAssertNil(vm.lastError)
-                XCTAssertTrue(vm.commandNotice?.contains("Command accepted") == true)
-                XCTAssertTrue(vm.commandNotice?.contains("Physical completion is not confirmed") == true)
-                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+                XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
                 XCTAssertEqual(vm.printer.homedAxes, "xyz")
             }
         }
@@ -1516,14 +1683,15 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
     }
 
-    func test_failedCommand_clearsStaleAcceptanceNotice() async throws {
+    func test_commandAfterDeactivate_isDroppedSilently() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
         await vm.homeAll()
-        XCTAssertNotNil(vm.commandNotice)
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         vm.deactivate()
         await vm.homeZ()
-        XCTAssertNotNil(vm.lastError)
+        XCTAssertNil(mockService.homeZCalledWith)
+        XCTAssertNil(vm.lastError, "Blocked commands render no text (#3548)")
         XCTAssertNil(vm.commandNotice)
     }
 
@@ -1537,15 +1705,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadCapabilities()
         await vm.moveTo(x: try XCTUnwrap(printer.x), y: 0, z: 10, feedrateMmMin: nil)
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertTrue(vm.commandNotice?.hasPrefix("Command accepted.") == true)
-        XCTAssertTrue(vm.commandNotice?.contains("Physical completion is not confirmed") == true)
-        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
         await vm.jog(axis: "X", distanceMm: 10)
         var moved = printer
         moved.x = (printer.x ?? 0) + 10
         vm.handlePrinterUpdate(moved)
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_freshHomingTelemetryBeforeResponse_keepsSlotThenReportsAcceptance() async throws {
@@ -1565,7 +1731,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         barrier.release()
         await command.value
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Command accepted. Physical completion is not confirmed; check the printer before another action.")
+        XCTAssertNil(vm.commandNotice, "Success is silent (#3496)")
     }
 
     func test_individualHeaters_preserveOmissionAndZero() async throws {
@@ -1580,6 +1746,29 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 75)
         XCTAssertEqual(vm.printer.hotendTemp, try idlePrinter().hotendTemp)
         XCTAssertEqual(vm.printer.bedTarget, try idlePrinter().bedTarget, "HTTP must not manufacture telemetry")
+    }
+
+    /// R3514-B09: with no visible "Stop waiting" action, leaving the detail
+    /// screen is what clears a command whose telemetry never arrives.
+    func test_leavingDetailClearsStuckPendingCommandAndReenablesControls() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNotNil(vm.pendingCommand, "Accepted target with no matching telemetry stays pending")
+        XCTAssertTrue(vm.isExecuting)
+        XCTAssertNil(vm.commandNotice, "Pending is silent (#3496)")
+
+        vm.deactivate()
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertFalse(vm.isExecuting)
+
+        vm.configureAccess(serverID: vm.registeredServerID) { nil }
+        XCTAssertTrue(vm.canControl)
+        XCTAssertFalse(vm.isExecuting)
+        XCTAssertTrue(vm.commandNotice?.contains("Check the machine") == true,
+                      "Released command reports an unknown outcome")
+        await vm.setHeaterTarget(.bed, target: 60)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 60, "Controls accept a new command")
     }
 
     func test_heaters_rejectInvalidValuesAndConfiguredMaxima() async throws {
@@ -1713,9 +1902,56 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.disableMotors()
         XCTAssertEqual(mockService.disableMotorsCalledWith, previous.id)
         XCTAssertNil(vm.pendingCommand, "No motor-state callback exists")
-        XCTAssertTrue(vm.commandNotice?.contains("Motor state is not reported") == true)
-        XCTAssertEqual(vm.printer.homedAxes, previous.homedAxes)
+        XCTAssertNil(vm.commandNotice, "Accepted motor release is silent")
+        XCTAssertNil(vm.printer.homedAxes, "Acceptance invalidates cached homing without inventing motor telemetry")
         XCTAssertEqual(vm.printer.x, previous.x)
+    }
+
+    func test_motorReleaseInvalidatesHomingOnlyOnAcceptanceAndRecoversFromSubsequentTelemetry() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = "xyz"
+        var caps = Self.fullCaps
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: printer, capabilities: caps)
+        await vm.loadCapabilities()
+        mockService.commandResultToReturn = CommandResult(success: false, message: "Release rejected")
+        await vm.disableMotors()
+        XCTAssertEqual(vm.lastError?.message, "Release rejected")
+        XCTAssertEqual(vm.printer.homedAxes, "xyz")
+        XCTAssertTrue(vm.canJog(axis: "X"), "A rejected release must not fabricate a change")
+
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        mockService.beforeDisableMotors = { await barrier.arriveAndWait() }
+        mockService.commandResultToReturn = CommandResult(success: true, message: nil)
+        let release = Task { await vm.disableMotors() }
+        await barrier.waitUntilArrived()
+        vm.handlePrinterUpdate(printer)
+        XCTAssertNotNil(vm.pendingCommand, "Pre-response telemetry must not release single-flight ownership")
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertNil(mockService.moveCalledWith)
+        barrier.release()
+        await release.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertNil(vm.commandNotice)
+        XCTAssertNil(vm.printer.homedAxes)
+        for axis in ["X", "Y", "Z"] {
+            XCTAssertFalse(vm.canJog(axis: axis), "Old homing cannot survive accepted motor release")
+            await vm.jog(axis: axis, distanceMm: 1)
+        }
+        XCTAssertNil(mockService.moveCalledWith)
+
+        printer.homedAxes = nil
+        vm.handlePrinterUpdate(printer)
+        XCTAssertFalse(vm.canJog(axis: "X"), "Unknown telemetry cannot restore homing")
+        printer.homedAxes = "xy"
+        vm.handlePrinterUpdate(printer)
+        XCTAssertTrue(vm.canJog(axis: "X"))
+        XCTAssertTrue(vm.canJog(axis: "Y"))
+        XCTAssertFalse(vm.canJog(axis: "Z"))
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertEqual(mockService.moveCalledWith?.axis, "X")
     }
 
     func test_newCommands_blockAllUnsafeStatesBeforeDispatch() async throws {
@@ -1774,6 +2010,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             await vm.disableMotors()
         }
         XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.turnOffHeatersCalledWith)
         XCTAssertNil(mockService.moveCalledWith)
         XCTAssertNil(mockService.homeCalledWith)
         XCTAssertNil(mockService.homeXYCalledWith)
@@ -2100,8 +2337,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
             XCTAssertFalse(model.canControl)
             XCTAssertNil(model.pendingCommand)
-            XCTAssertNotNil(model.lastError)
+            XCTAssertNil(model.lastError, "Blocked commands render no text (#3548)")
+            XCTAssertNil(model.commandNotice)
             XCTAssertNil(service.setTemperaturesCalledWith)
+            XCTAssertNil(service.turnOffHeatersCalledWith)
             XCTAssertNil(service.homeCalledWith)
             XCTAssertNil(service.homeXYCalledWith)
             XCTAssertNil(service.homeZCalledWith)
@@ -2139,19 +2378,197 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         await vm.preheat(.petg)
 
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 240)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, PreheatPreset.petg.hotend)
         XCTAssertNil(mockService.setTemperaturesCalledWith?.bed, "Bed must be silently dropped when unsupported")
         XCTAssertNil(vm.lastError, "Dropping the bed value must not surface as an error")
     }
 
-    func test_coolDown_omitsBedWhenSupportIsUnconfirmed() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
+    func test_coolDown_hotendOnly_usesHeaterShutdown() async throws {
+        var caps = Self.hotendOnlyCaps
+        caps.supportsHeaterShutdown = true
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
 
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 1)
+        XCTAssertNil(mockService.setTemperaturesCalledWith, "Heater shutdown takes precedence over the 0/0 fallback")
+    }
+
+    func test_coolDown_dispatchesHeaterShutdown() async throws {
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+
+        await vm.preheat(.coolDown)
+
+        XCTAssertEqual(mockService.turnOffHeatersCalledWith, vm.printer.id)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(vm.lastError)
+    }
+
+    func test_coolDown_withoutHeaterShutdown_fallsBackToZeroTargetsWhileIdle() async throws {
+        var caps = Self.fullCaps
+        caps.supportsHeaterShutdown = false
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+
+        XCTAssertFalse(vm.supportsHeaterShutdown)
+        XCTAssertNil(vm.preheatBlockedReason(.coolDown))
+        await vm.preheat(.coolDown)
+
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.printerId, vm.printer.id)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
-        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
+        XCTAssertNil(vm.lastError)
+    }
+
+    /// Cool down is idle-only: starting, printing and paused printers never
+    /// get heaters/off or 0/0, even with heater shutdown and heat-during-print.
+    func test_coolDown_whileStartingPrintingOrPaused_isBlockedWithoutDispatch() async throws {
+        for state in ["starting", "printing", "paused"] {
+            for shutdown in [true, false] {
+                var printer = try idlePrinter()
+                printer.state = state
+                let service = MockPrinterService()
+                var caps = Self.fullCaps
+                caps.supportsHeaterShutdown = shutdown
+                caps.supportsTemperatureControlDuringPrint = true
+                service.capabilitiesToReturn = caps
+                service.detailsToReturn = .controlsLimitsFixture(for: printer)
+                let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+                await vm.loadCapabilities()
+                let label = "\(state) shutdown=\(shutdown)"
+
+                XCTAssertFalse(vm.canRunPreheat(.coolDown), label)
+                XCTAssertEqual(vm.preheatAccessReason(.coolDown), "Controls are locked while a print is active.", label)
+
+                await vm.preheat(.coolDown)
+
+                XCTAssertEqual(service.turnOffHeatersCallCount, 0, label)
+                XCTAssertNil(service.setTemperaturesCalledWith, label)
+                XCTAssertNil(vm.lastError, label)
+            }
+        }
+    }
+
+    func test_coolDown_whileIdle_isAvailable() async throws {
+        for shutdown in [true, false] {
+            var caps = Self.fullCaps
+            caps.supportsHeaterShutdown = shutdown
+            let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+            await vm.loadCapabilities()
+            XCTAssertTrue(vm.canRunPreheat(.coolDown), "shutdown=\(shutdown)")
+            XCTAssertNil(vm.preheatAccessReason(.coolDown), "shutdown=\(shutdown)")
+        }
+    }
+
+    func test_heatDuringPrint_allowedOnlyWhenBackendSupportsIt() async throws {
+        for supported in [false, true] {
+            var printer = try idlePrinter()
+            printer.state = "printing"
+            let service = MockPrinterService()
+            var caps = Self.fullCaps
+            caps.supportsTemperatureControlDuringPrint = supported
+            service.capabilitiesToReturn = caps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+
+            XCTAssertFalse(vm.canControl, "Move/setup stay locked during a print")
+            XCTAssertEqual(vm.supportsHeatDuringPrint, supported)
+
+            await vm.setHeaterTarget(.hotend, target: 210)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, supported ? 210 : nil)
+            vm.cancelPendingCommand()
+            await vm.homeAll()
+            XCTAssertNil(service.homeCalledWith)
+        }
+    }
+
+    /// Heat is idle-only: no preset (row, More menu or Cool down) runs while a
+    /// job is starting, printing or paused, even when the backend supports
+    /// temperature control during a print. The command layer still honours the
+    /// capability for heater targets, though no view offers them mid-print (#3540).
+    func test_heatPresets_blockedMidPrintEvenWithCapability_whileHeaterTargetCommandsApply() async throws {
+        for state in ["starting", "printing", "paused"] {
+            var printer = try idlePrinter()
+            printer.state = state
+            let service = MockPrinterService()
+            var caps = Self.fullCaps
+            caps.supportsTemperatureControlDuringPrint = true
+            service.capabilitiesToReturn = caps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+            XCTAssertTrue(vm.supportsHeatDuringPrint, state)
+
+            for preset in PreheatPreset.allCases {
+                let label = "\(state) \(preset)"
+                XCTAssertFalse(vm.canRunPreheat(preset), label)
+                XCTAssertEqual(vm.preheatAccessReason(preset), "Controls are locked while a print is active.", label)
+                await vm.preheat(preset)
+                XCTAssertNil(service.setTemperaturesCalledWith, label)
+                XCTAssertEqual(service.turnOffHeatersCallCount, 0, label)
+                vm.cancelPendingCommand()
+            }
+
+            if state != "starting" {
+                await vm.setHeaterTarget(.hotend, target: 215)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 215, state)
+                vm.cancelPendingCommand()
+                await vm.setHeaterTarget(.bed, target: 65)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 65, state)
+                vm.cancelPendingCommand()
+            }
+        }
+    }
+
+    func test_presetDefinitions_coverRowMenuAndCoolDown() {
+        XCTAssertEqual(PreheatPreset.rowMaterials + PreheatPreset.menuMaterials + [.coolDown], PreheatPreset.allCases)
+        XCTAssertEqual(PreheatSubgroup.presets, PreheatPreset.rowMaterials + [.coolDown])
+        XCTAssertEqual(PreheatPreset.coolDown.definition, .init(name: "Cool down", hotend: 0, bed: 0))
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            XCTAssertFalse(preset.definition.name.isEmpty, "\(preset)")
+            XCTAssertGreaterThan(preset.hotend, 0, "\(preset)")
+            XCTAssertGreaterThan(preset.bed, 0, "\(preset)")
+            XCTAssertEqual(preset.hotend, preset.definition.hotend, "\(preset)")
+            XCTAssertEqual(preset.bed, preset.definition.bed, "\(preset)")
+        }
+        XCTAssertEqual(Set((PreheatPreset.rowMaterials + PreheatPreset.menuMaterials).map(\.definition.name)).count, 7)
+    }
+
+    /// Every material, including the More menu ones, sends its definition's
+    /// targets while idle.
+    func test_materialPresets_whileIdle_sendDefinitionTargets() async throws {
+        for preset in PreheatPreset.rowMaterials + PreheatPreset.menuMaterials {
+            let printer = try idlePrinter()
+            let service = MockPrinterService()
+            service.capabilitiesToReturn = Self.fullCaps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: 300, bed: 120)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+
+            XCTAssertTrue(vm.canRunPreheat(preset), "\(preset)")
+            XCTAssertNil(vm.preheatBlockedReason(preset), "\(preset)")
+            await vm.preheat(preset)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, preset.definition.hotend, "\(preset)")
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, preset.definition.bed, "\(preset)")
+        }
+    }
+
+    /// More-menu materials above the reported maxima are listed but blocked.
+    func test_menuPresets_aboveReportedMaximum_areBlocked() async throws {
+        let printer = try idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let hotendMax = Int(PreheatPreset.menuMaterials.map(\.hotend).max()!) - 1
+        service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: hotendMax, bed: 200)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        for preset in PreheatPreset.menuMaterials {
+            XCTAssertEqual(vm.preheatBlockedReason(preset) != nil, preset.hotend > Double(hotendMax), "\(preset)")
+        }
     }
 
     func test_allThermalPresetsRejectUnknownAndDeniedSupportWithoutDispatch() async throws {
@@ -2179,16 +2596,16 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
         await vm.preheat(.coolDown)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0)
         XCTAssertNil(vm.pendingCommand)
 
         mockService.errorToThrow = nil
         await vm.loadCapabilities()
         XCTAssertNil(vm.capabilityLoadError)
         XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
-        XCTAssertNil(mockService.setTemperaturesCalledWith, "Capability retry must not replay cooldown")
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 0, "Capability retry must not replay cooldown")
         await vm.preheat(.coolDown)
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
-        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
+        XCTAssertEqual(mockService.turnOffHeatersCallCount, 1)
     }
 
     func test_homeAll_callsHomeWithAllAxes() async throws {
@@ -2327,8 +2744,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         await vm.preheat(.pla)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
-        XCTAssertNotNil(vm.lastError)
-        XCTAssertEqual(vm.lastError?.isRetryable, false)
+        XCTAssertNil(vm.lastError, "Blocked commands render no text (#3548)")
     }
 
     func test_errorMapping_5xx_isRetryable() async throws {
@@ -2416,6 +2832,31 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.lastError?.isRetryable, true)
     }
 
+    func test_commandConnectionFailuresDoNotClaimTheAppHasNoInternet() async throws {
+        let errors: [Error] = [
+            NetworkError.noConnection,
+            URLError(.notConnectedToInternet),
+            URLError(.networkConnectionLost)
+        ]
+        for error in errors {
+            mockService.errorToThrow = nil
+            let model = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+            await model.loadCapabilities()
+            mockService.errorToThrow = error
+            await model.jog(axis: "X", distanceMm: 1)
+
+            XCTAssertEqual(model.lastError?.message, "Command connection failed. Check the printer before retrying.")
+            XCTAssertEqual(model.lastError?.isRetryable, true)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertNil(model.commandNotice)
+            XCTAssertEqual(ConnectionStatusPresentation(status: .connected).label, "Server connected")
+            model.handlePrinterUpdate(model.printer)
+            XCTAssertNotNil(model.lastError, "Healthy telemetry does not establish a failed request's outcome")
+            model.dismissError()
+            XCTAssertNil(model.lastError)
+        }
+    }
+
     func test_dismissError_clearsLastError() async throws {
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
@@ -2485,7 +2926,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Live snapshot forwarding (issue #706 F1 review)
     //
-    // These tests pin the regression where `PrinterControlsSection` only
+    // These tests pin the regression where the legacy controls section only
     // forwarded snapshots that changed `state` or `isOnline`, leaving
     // jog/preheat/home controls jammed after position/temperature-only
     // updates. The fix is a `PrinterControlsUpdateSignal` that captures
@@ -2762,6 +3203,19 @@ final class PrinterControlsViewModelTests: XCTestCase {
         )
     }
 
+    func test_updateSignal_differentWhenOnlyRuntimeFactorsChange() throws {
+        let base = try idlePrinter()
+        for keyPath in [\Printer.speedFactorPercent, \Printer.flowFactorPercent] {
+            var changed = base
+            changed[keyPath: keyPath] = 125
+            XCTAssertNotEqual(
+                PrinterControlsUpdateSignal(printer: base),
+                PrinterControlsUpdateSignal(printer: changed),
+                "Factor-only live updates must reach the controls view model"
+            )
+        }
+    }
+
     func test_updateSignal_differentWhenStateChanges() throws {
         let base = try idlePrinter()
         var printing = base
@@ -2803,25 +3257,41 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let model = try makeViewModel(printer: printer, capabilities: capabilities)
         await model.loadCapabilities()
 
-        await model.setFanSpeed(50)
-        XCTAssertEqual(mockService.setFanSpeedCalledWith?.printerId, printer.id)
-        XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
-        XCTAssertNotNil(model.pendingCommand, "HTTP acceptance does not confirm the printer's fan readback")
-
-        var fanReadback = printer
-        fanReadback.fanSpeedPercent = 50
-        model.handlePrinterUpdate(fanReadback)
-        XCTAssertNil(model.pendingCommand, "The matching fan readback confirms the accepted command")
-
         await model.adjustLiveZOffset(by: 0.01)
         XCTAssertEqual(mockService.adjustZOffsetCalledWith?.printerId, printer.id)
         XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
         XCTAssertNotNil(model.pendingCommand, "HTTP acceptance does not confirm live Z-offset")
 
-        var zReadback = fanReadback
+        var zReadback = printer
         zReadback.liveZOffsetMm = 0.01
         model.handlePrinterUpdate(zReadback)
         XCTAssertNil(model.pendingCommand, "The matching Z-offset readback confirms the accepted command")
+    }
+
+    func test_liveBabystepAcceptsHalfHundredthStepAndRejectsRetiredCoarseStep() async throws {
+        XCTAssertEqual(MaterialControlInput.babystepIncrements, [0.005, 0.01, 0.025, 0.05])
+        var printer = try idlePrinter()
+        printer.state = "printing"
+        printer.liveZOffsetMm = 0.02
+        var capabilities = Self.fullCaps
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
+        let model = try makeViewModel(printer: printer, capabilities: capabilities)
+        await model.loadCapabilities()
+
+        await model.adjustLiveZOffset(by: 0.1)
+        XCTAssertEqual(mockService.adjustZOffsetCallCount, 0, "0.1 mm is no longer a babystep option")
+        XCTAssertNil(mockService.adjustZOffsetCalledWith)
+
+        await model.adjustLiveZOffset(by: -0.005)
+        XCTAssertEqual(mockService.adjustZOffsetCallCount, 1)
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, -0.005)
+        XCTAssertNotNil(model.pendingCommand)
+
+        var readback = printer
+        readback.liveZOffsetMm = 0.015
+        model.handlePrinterUpdate(readback)
+        XCTAssertNil(model.pendingCommand, "A 3-decimal readback must confirm a 0.005 mm babystep")
     }
 
     func test_runtimeEndpointFailuresRemainVisibleToTheOperator() async throws {
@@ -2835,12 +3305,6 @@ final class PrinterControlsViewModelTests: XCTestCase {
         capabilities.supportsZOffsetReadback = true
         let model = try makeViewModel(printer: printer, capabilities: capabilities)
         await model.loadCapabilities()
-
-        mockService.errorToThrow = NetworkError.serverError(503)
-        await model.setFanSpeed(50)
-        XCTAssertTrue(model.lastError?.message.localizedCaseInsensitiveContains("server error") == true)
-        XCTAssertEqual(model.lastError?.isRetryable, true)
-        XCTAssertNil(model.pendingCommand)
 
         mockService.errorToThrow = NetworkError.serverError(502)
         await model.adjustLiveZOffset(by: 0.01)
@@ -2864,18 +3328,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
             await model.loadCapabilities()
             XCTAssertTrue(model.canAdjustRuntimeControls, "\(state) permits only these documented runtime adjustments.")
 
-            await model.setFanSpeed(50)
-            XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
-            XCTAssertNotNil(model.pendingCommand)
-            var fanReadback = printer
-            fanReadback.fanSpeedPercent = 50
-            model.handlePrinterUpdate(fanReadback)
-            XCTAssertNil(model.pendingCommand)
-
             await model.adjustLiveZOffset(by: 0.01)
             XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
             XCTAssertNotNil(model.pendingCommand)
-            var zOffsetReadback = fanReadback
+            var zOffsetReadback = printer
             zOffsetReadback.liveZOffsetMm = 0.01
             model.handlePrinterUpdate(zOffsetReadback)
             XCTAssertNil(model.pendingCommand)
@@ -2899,11 +3355,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
         access.isAllowed = false
         model.refreshAccess()
-        await model.setFanSpeed(50)
         await model.adjustLiveZOffset(by: 0.01)
 
         XCTAssertFalse(model.canAdjustRuntimeControls)
-        XCTAssertEqual(mockService.setFanSpeedCallCount, 0)
         XCTAssertEqual(mockService.adjustZOffsetCallCount, 0)
     }
 
@@ -2919,50 +3373,335 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let model = try makeViewModel(printer: printer, capabilities: capabilities)
         await model.loadCapabilities()
 
-        await model.setFanSpeed(50)
-        for value in [25.0, 45.0] {
-            var report = printer
-            report.fanSpeedPercent = value
-            model.handlePrinterUpdate(report)
-            XCTAssertNotNil(model.pendingCommand, "Same or nonmatching fan values cannot confirm a command.")
-        }
-        var unknownFan = printer
-        unknownFan.fanSpeedPercent = nil
-        model.handlePrinterUpdate(unknownFan)
-        XCTAssertNotNil(model.pendingCommand, "Unknown readback cannot confirm a command.")
-        var matchingFan = printer
-        matchingFan.fanSpeedPercent = 50
-        model.handlePrinterUpdate(matchingFan)
-        XCTAssertNil(model.pendingCommand)
-
         await model.adjustLiveZOffset(by: 0.01)
         for value in [0.0, 0.005] {
-            var report = matchingFan
+            var report = printer
             report.liveZOffsetMm = value
             model.handlePrinterUpdate(report)
             XCTAssertNotNil(model.pendingCommand, "Same or nonmatching Z-offset values cannot confirm a command.")
         }
-        var unknownZOffset = matchingFan
+        var unknownZOffset = printer
         unknownZOffset.liveZOffsetMm = nil
         model.handlePrinterUpdate(unknownZOffset)
         XCTAssertNotNil(model.pendingCommand, "Unknown Z-offset readback cannot confirm a command.")
-        var matchingZOffset = matchingFan
+        var matchingZOffset = printer
         matchingZOffset.liveZOffsetMm = 0.01
         model.handlePrinterUpdate(matchingZOffset)
         XCTAssertNil(model.pendingCommand)
     }
 
-    func test_runtimeCancellationRetainsSharedLeaseUntilDispatchedFanRequestSettles() async throws {
+    // MARK: - Runtime speed/flow factors (#3476)
+
+    private func factorPrinter(state: String = "printing", speed: Double? = 100, flow: Double? = 98) throws -> Printer {
         var printer = try idlePrinter()
-        printer.fanSpeedPercent = 25
+        printer.state = state
+        printer.speedFactorPercent = speed
+        printer.flowFactorPercent = flow
+        return printer
+    }
+
+    private static func factorCaps(speed: Bool = true, flow: Bool = true) -> PrinterBackendCapabilities {
+        var caps = fullCaps
+        caps.supportsSpeedFactorControl = speed
+        caps.supportsFlowFactorControl = flow
+        return caps
+    }
+
+    func test_runtimeFactorStepDispatchesTargetAndClearsOnlyAfterChangedMatchingReadback() async throws {
+        let printer = try factorPrinter()
+        let model = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
+        await model.loadCapabilities()
+        XCTAssertTrue(model.canStepRuntimeFactor(.speed, by: RuntimeFactor.stepPercent))
+
+        await model.stepRuntimeFactor(.speed, by: RuntimeFactor.stepPercent)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.first?.printerId, printer.id)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.first?.factor, .speed)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.first?.percent, 105)
+        XCTAssertNotNil(model.pendingCommand, "HTTP acceptance does not confirm the speed factor")
+        XCTAssertEqual(model.runtimeFactorPercent(.speed), 100, "No optimistic local value")
+
+        var unchanged = printer
+        unchanged.flowFactorPercent = 99
+        model.handlePrinterUpdate(unchanged)
+        XCTAssertNotNil(model.pendingCommand, "A flow-only change cannot confirm a speed command")
+
+        var wrong = unchanged
+        wrong.speedFactorPercent = 110
+        model.handlePrinterUpdate(wrong)
+        XCTAssertNotNil(model.pendingCommand, "A nonmatching speed readback cannot confirm the command")
+
+        var readback = wrong
+        readback.speedFactorPercent = 105
+        model.handlePrinterUpdate(readback)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(model.runtimeFactorPercent(.speed), 105)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.map(\.factor), [.speed], "Speed must not write flow")
+
+        await model.stepRuntimeFactor(.flow, by: -RuntimeFactor.stepPercent)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.last?.factor, .flow)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.last?.percent, 94)
+    }
+
+    func test_runtimeFactorHiddenAndSilentWhenCapabilityAbsentFalseOrReadbackUnknown() async throws {
+        // Capabilities never loaded: fail closed.
+        let unloaded = try makeViewModel(printer: try factorPrinter(), capabilities: Self.factorCaps())
+        XCTAssertFalse(unloaded.supportsRuntimeFactor(.speed))
+        XCTAssertFalse(unloaded.supportsRuntimeFactor(.flow))
+        await unloaded.stepRuntimeFactor(.speed, by: 5)
+        await unloaded.setRuntimeFactor(.flow, percent: 100)
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+
+        // Capability false for one factor only.
+        let partial = try makeViewModel(printer: try factorPrinter(), capabilities: Self.factorCaps(speed: true, flow: false))
+        await partial.loadCapabilities()
+        XCTAssertTrue(partial.supportsRuntimeFactor(.speed))
+        XCTAssertFalse(partial.supportsRuntimeFactor(.flow))
+        XCTAssertEqual(partial.runtimeFactorUnavailableReason(.flow), "Flow control is not supported on this printer.")
+        XCTAssertFalse(partial.canStepRuntimeFactor(.flow, by: 5))
+        await partial.stepRuntimeFactor(.flow, by: 5)
+        await partial.setRuntimeFactor(.flow, percent: 100)
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+        XCTAssertEqual(partial.lastError?.isRetryable, false)
+
+        // Supported but readback unknown: never treated as 100.
+        let unknown = try makeViewModel(printer: try factorPrinter(speed: nil, flow: nil), capabilities: Self.factorCaps())
+        await unknown.loadCapabilities()
+        XCTAssertNil(unknown.runtimeFactorPercent(.speed))
+        XCTAssertEqual(unknown.runtimeFactorUnavailableReason(.speed), "Speed readback is unknown; controls are disabled.")
+        XCTAssertFalse(unknown.canStepRuntimeFactor(.speed, by: 5))
+        await unknown.stepRuntimeFactor(.speed, by: 5)
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+    }
+
+    func test_runtimeFactorRejectsInvalidInputAndRespectsVerifiedBounds() async throws {
+        let model = try makeViewModel(printer: try factorPrinter(speed: 200, flow: 1), capabilities: Self.factorCaps())
+        await model.loadCapabilities()
+        XCTAssertFalse(model.canStepRuntimeFactor(.speed, by: 5), "200% is the verified maximum")
+        XCTAssertFalse(model.canStepRuntimeFactor(.flow, by: -5), "1% is the verified minimum")
+        await model.stepRuntimeFactor(.speed, by: 5)
+        await model.stepRuntimeFactor(.flow, by: -5)
+        for invalid in [0, 200.01, 1.234, -5, .nan, .infinity] {
+            await model.setRuntimeFactor(.speed, percent: invalid)
+            XCTAssertEqual(model.lastError?.isRetryable, false)
+        }
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+        XCTAssertTrue(model.canStepRuntimeFactor(.speed, by: -5))
+        XCTAssertTrue(model.canStepRuntimeFactor(.flow, by: 5))
+    }
+
+    func test_runtimeFactorPreventsDuplicateAndCrossFactorWritesWhilePending() async throws {
+        let model = try makeViewModel(printer: try factorPrinter(), capabilities: Self.factorCaps())
+        await model.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetRuntimeFactor = { await barrier.arriveAndWait() }
+        let first = Task { await model.stepRuntimeFactor(.speed, by: 5) }
+        await barrier.waitUntilArrived()
+
+        XCTAssertFalse(model.canStepRuntimeFactor(.speed, by: 5))
+        XCTAssertFalse(model.canStepRuntimeFactor(.flow, by: 5))
+        await model.stepRuntimeFactor(.speed, by: 5)
+        await model.stepRuntimeFactor(.flow, by: 5)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1)
+
+        barrier.release()
+        await first.value
+        XCTAssertNotNil(model.pendingCommand)
+        await model.stepRuntimeFactor(.speed, by: 5)
+        XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, "Unconfirmed command still blocks repeat taps")
+    }
+
+    func test_runtimeFactorFailuresSurfaceWithoutFalseSuccessAndRecover() async throws {
+        let cases: [(Error?, CommandResult, String, Bool)] = [
+            (NetworkError.serverError(501), .init(success: true, message: nil), "not supported by this printer", false),
+            (NetworkError.serverError(503), .init(success: true, message: nil), "Check the printer before retrying", true),
+            (NetworkError.conflict(nil), .init(success: true, message: nil), "busy", false),
+            (NetworkError.clientError(400, nil), .init(success: true, message: nil), "rejected", false),
+            (NetworkError.forbidden, .init(success: true, message: nil), "Access denied", false),
+            (nil, .init(success: false, message: "Printer refused"), "Printer refused", false),
+        ]
+        for (error, result, expected, retryable) in cases {
+            mockService.reset()
+            let model = try makeViewModel(printer: try factorPrinter(), capabilities: Self.factorCaps())
+            await model.loadCapabilities()
+            mockService.errorToThrow = error
+            mockService.commandResultToReturn = result
+
+            await model.stepRuntimeFactor(.flow, by: 5)
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1)
+            XCTAssertTrue(model.lastError?.message.contains(expected) == true, "\(expected): \(model.lastError?.message ?? "nil")")
+            XCTAssertEqual(model.lastError?.isRetryable, retryable, expected)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertEqual(model.runtimeFactorPercent(.flow), 98, "A failed edit never overwrites the confirmed value")
+            XCTAssertEqual(model.runtimeFactorPercent(.speed), 100)
+
+            mockService.errorToThrow = nil
+            mockService.commandResultToReturn = .init(success: true, message: nil)
+            if case NetworkError.serverError(501)? = error {
+                XCTAssertFalse(model.supportsRuntimeFactor(.flow), "501 hides the unsupported factor")
+                XCTAssertTrue(model.supportsRuntimeFactor(.speed), "501 for flow leaves speed untouched")
+                await model.stepRuntimeFactor(.flow, by: 5)
+                XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, "No further writes after 501")
+                continue
+            }
+            await model.stepRuntimeFactor(.flow, by: 5)
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 2, "Recovery: the next tap dispatches")
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.map(\.factor), [.flow, .flow])
+        }
+    }
+
+    func test_runtimeFactorGuardsPermissionsConnectivityAndPrinterState() async throws {
+        for state in ["printing", "paused"] {
+            mockService.reset()
+            let model = try makeViewModel(printer: try factorPrinter(state: state), capabilities: Self.factorCaps())
+            await model.loadCapabilities()
+            XCTAssertTrue(model.canStepRuntimeFactor(.speed, by: 5), state)
+            await model.stepRuntimeFactor(.speed, by: 5)
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, state)
+        }
+
+        mockService.reset()
+        var offline = try factorPrinter()
+        offline.isOnline = false
+        let offlineModel = try makeViewModel(printer: offline, capabilities: Self.factorCaps())
+        await offlineModel.loadCapabilities()
+        XCTAssertFalse(offlineModel.canStepRuntimeFactor(.speed, by: 5))
+        XCTAssertNotNil(offlineModel.runtimeFactorUnavailableReason(.speed))
+        await offlineModel.stepRuntimeFactor(.speed, by: 5)
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+
+        let access = AccessGate()
+        let revoked = try makeViewModel(
+            printer: try factorPrinter(state: "paused"),
+            capabilities: Self.factorCaps(),
+            accessCheck: { access.isAllowed ? nil : "Registered server access was revoked." }
+        )
+        await revoked.loadCapabilities()
+        access.isAllowed = false
+        revoked.refreshAccess()
+        XCTAssertFalse(revoked.canStepRuntimeFactor(.flow, by: 5))
+        await revoked.stepRuntimeFactor(.flow, by: 5)
+        XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty)
+    }
+
+    func test_runtimeFactorBlockedOutsidePrintingOrPaused() async throws {
+        // #3496: Tune (Speed/Flow) is print-only; idle printers keep the known value but send nothing.
+        for state in ["idle", "ready", "complete", "cancelled", "starting"] {
+            mockService.reset()
+            let model = try makeViewModel(printer: try factorPrinter(state: state), capabilities: Self.factorCaps())
+            await model.loadCapabilities()
+            XCTAssertTrue(model.supportsRuntimeFactor(.speed), "\(state): row stays visible")
+            XCTAssertEqual(model.runtimeFactorPercent(.speed), 100, "\(state): value is still known")
+            for factor in RuntimeFactor.allCases {
+                XCTAssertNotNil(model.runtimeFactorUnavailableReason(factor), state)
+                XCTAssertFalse(model.canStepRuntimeFactor(factor, by: 5), state)
+                XCTAssertFalse(model.canStepRuntimeFactor(factor, by: -5), state)
+                await model.stepRuntimeFactor(factor, by: 5)
+                model.cancelPendingCommand()
+                await model.setRuntimeFactor(factor, percent: 120)
+                model.cancelPendingCommand()
+            }
+            XCTAssertTrue(mockService.setRuntimeFactorCalls.isEmpty, "\(state): no native requests are sent")
+            XCTAssertNil(model.pendingCommand, state)
+        }
+    }
+
+    func test_runtimeFactorLiveStatusReconcilesExternalChangesMissingTelemetryAndReconnects() async throws {
+        let printer = try factorPrinter()
+        let model = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
+        await model.loadCapabilities()
+
+        var external = printer
+        external.speedFactorPercent = 150
+        external.flowFactorPercent = 87.5
+        model.handlePrinterUpdate(external)
+        XCTAssertEqual(model.runtimeFactorPercent(.speed), 150)
+        XCTAssertEqual(model.runtimeFactorPercent(.flow), 87.5)
+
+        var dropped = external
+        dropped.speedFactorPercent = nil
+        model.handlePrinterUpdate(dropped)
+        XCTAssertNil(model.runtimeFactorPercent(.speed), "Missing telemetry stays unknown, never 100")
+        XCTAssertFalse(model.canStepRuntimeFactor(.speed, by: 5))
+        XCTAssertTrue(model.canStepRuntimeFactor(.flow, by: 5))
+
+        var reconnected = dropped
+        reconnected.speedFactorPercent = 120
+        model.handlePrinterUpdate(reconnected)
+        XCTAssertEqual(model.runtimeFactorPercent(.speed), 120)
+        XCTAssertTrue(model.canStepRuntimeFactor(.speed, by: 5))
+    }
+
+    func test_runtimeFactorLateResponseAfterServerSwitchCannotConfirmOrReport() async throws {
+        let outcomes: [(String, Error?)] = [("success", nil), ("failure", NetworkError.serverError(503))]
+        for (label, lateError) in outcomes {
+            mockService.reset()
+            let printer = try factorPrinter()
+            let original = try makeViewModel(printer: printer, capabilities: Self.factorCaps())
+            await original.loadCapabilities()
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            mockService.beforeSetRuntimeFactor = { await barrier.arriveAndWait() }
+            let request = Task { await original.stepRuntimeFactor(.speed, by: 5) }
+            await barrier.waitUntilArrived()
+
+            // Switch to a replacement model for a different registered server.
+            let replacementService = MockPrinterService()
+            replacementService.capabilitiesToReturn = Self.factorCaps()
+            replacementService.detailsToReturn = .controlsLimitsFixture(for: printer)
+            let replacementServerID = UUID()
+            XCTAssertNotEqual(replacementServerID, original.registeredServerID)
+            original.configureAccess(serverID: replacementServerID) { nil }
+            let replacement = PrinterControlsViewModel.configuredForTests(
+                printerService: replacementService, printer: printer, serverID: replacementServerID
+            )
+            await replacement.loadCapabilities()
+            XCTAssertTrue(replacement.canStepRuntimeFactor(.speed, by: 5), label)
+            let before = (
+                speed: replacement.runtimeFactorPercent(.speed),
+                flow: replacement.runtimeFactorPercent(.flow),
+                notice: replacement.commandNotice
+            )
+
+            mockService.errorToThrow = lateError
+            barrier.release()
+            await request.value
+
+            XCTAssertNil(original.pendingCommand, label)
+            XCTAssertFalse(original.commandNotice?.contains("confirmed") == true, label)
+            XCTAssertFalse(
+                original.lastError?.message.contains("Check the printer before retrying") == true,
+                "\(label): a late failure is not reported as this request's error"
+            )
+            var lateReadback = printer
+            lateReadback.speedFactorPercent = 105
+            original.handlePrinterUpdate(lateReadback)
+            XCTAssertEqual(original.runtimeFactorPercent(.speed), 100, "\(label): retired model ignores late readback")
+            XCTAssertNil(original.pendingCommand, label)
+
+            XCTAssertEqual(replacement.runtimeFactorPercent(.speed), before.speed, label)
+            XCTAssertEqual(replacement.runtimeFactorPercent(.flow), before.flow, label)
+            XCTAssertNil(replacement.pendingCommand, label)
+            XCTAssertEqual(replacement.commandNotice, before.notice, label)
+            XCTAssertNil(replacement.lastError, label)
+            XCTAssertTrue(replacementService.setRuntimeFactorCalls.isEmpty, label)
+            XCTAssertEqual(mockService.setRuntimeFactorCalls.count, 1, label)
+        }
+    }
+
+    func test_runtimeCancellationRetainsSharedLeaseUntilDispatchedZOffsetRequestSettles() async throws {
+        var printer = try idlePrinter()
+        printer.liveZOffsetMm = 0
         let serverID = UUID()
         let (original, service) = try await leaseOwner(
             serverID: serverID, printer: printer, runtimeControls: true
         )
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
-        service.beforeSetFanSpeed = { await barrier.arriveAndWait() }
-        let request = Task { await original.setFanSpeed(50) }
+        service.beforeAdjustZOffset = { await barrier.arriveAndWait() }
+        let request = Task { await original.adjustLiveZOffset(by: 0.01) }
         await barrier.waitUntilArrived()
 
         let (replacement, replacementService) = try await leaseOwner(
@@ -2974,8 +3713,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNotNil(original.pendingCommand)
         XCTAssertTrue(original.isExecuting)
 
-        await replacement.setFanSpeed(75)
-        XCTAssertEqual(replacementService.setFanSpeedCallCount, 0, "Another view must not bypass the registered-printer lease.")
+        await replacement.adjustLiveZOffset(by: 0.025)
+        XCTAssertEqual(replacementService.adjustZOffsetCallCount, 0, "Another view must not bypass the registered-printer lease.")
 
         barrier.release()
         await request.value
@@ -2983,21 +3722,22 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(original.isExecuting)
         XCTAssertTrue(original.commandNotice?.contains("outcome is unknown") == true)
 
-        await replacement.setFanSpeed(75)
-        XCTAssertEqual(replacementService.setFanSpeedCallCount, 1, "The lease releases only after the HTTP result settles.")
+        await replacement.adjustLiveZOffset(by: 0.025)
+        XCTAssertEqual(replacementService.adjustZOffsetCallCount, 1, "The lease releases only after the HTTP result settles.")
     }
 
     func test_runtimeHttpReadStartedBeforeCommandCannotConfirmMatchingLaterResponse() async throws {
         let clock = SafetyTestClock()
         var printer = try idlePrinter()
         printer.state = "printing"
-        printer.fanSpeedPercent = 25
+        printer.liveZOffsetMm = 0
         var capabilities = Self.fullCaps
-        capabilities.supportsFanSpeedReadback = true
+        capabilities.supportsZOffsetAdjustment = true
+        capabilities.supportsZOffsetReadback = true
         mockService.capabilitiesToReturn = capabilities
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
         let initialStatus = VerifiedSafetyFixtures.status(
-            id: printer.id, at: clock.now(), state: "printing", fanSpeedPercent: 25
+            id: printer.id, at: clock.now(), state: "printing", liveZOffsetMm: 0
         )
         mockService.statusToReturn = initialStatus
         let model = PrinterControlsViewModel.configuredForTests(
@@ -3010,15 +3750,15 @@ final class PrinterControlsViewModelTests: XCTestCase {
         addTeardownBlock { statusBarrier.close(); commandBarrier.close() }
         mockService.beforeSafetyStatus = { await statusBarrier.arriveAndWait() }
         let staleMatchingStatus = VerifiedSafetyFixtures.status(
-            id: printer.id, at: clock.now(), state: "printing", fanSpeedPercent: 50
+            id: printer.id, at: clock.now(), state: "printing", liveZOffsetMm: 0.01
         )
         mockService.statusToReturn = staleMatchingStatus
         let staleRead = Task { await model.refreshSafetyEvidence(refreshDiscovery: false) }
         await statusBarrier.waitUntilArrived()
 
         clock.advance(1)
-        mockService.beforeSetFanSpeed = { await commandBarrier.arriveAndWait() }
-        let command = Task { await model.setFanSpeed(50) }
+        mockService.beforeAdjustZOffset = { await commandBarrier.arriveAndWait() }
+        let command = Task { await model.adjustLiveZOffset(by: 0.01) }
         await commandBarrier.waitUntilArrived()
         statusBarrier.release()
         await staleRead.value
@@ -3041,14 +3781,6 @@ final class PrinterControlsViewModelTests: XCTestCase {
         capabilities.supportsZOffsetReadback = true
         let model = try makeViewModel(printer: printer, capabilities: capabilities)
         await model.loadCapabilities()
-        mockService.commandResultToReturn = CommandResult(success: false, message: "Fan request rejected")
-
-        await model.setFanSpeed(50)
-
-        XCTAssertEqual(mockService.setFanSpeedCalledWith?.speedPercent, 50)
-        XCTAssertEqual(model.lastError?.message, "Fan request rejected")
-        XCTAssertNil(model.pendingCommand, "Rejected commands must not wait for telemetry")
-
         mockService.commandResultToReturn = CommandResult(success: false, message: "Z-offset request rejected")
         await model.adjustLiveZOffset(by: 0.01)
 
@@ -3057,25 +3789,27 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(model.pendingCommand, "Rejected commands must not wait for telemetry")
     }
 
-    func test_runtimeAdjustmentsRejectInvalidInputAndUnknownReadback() async throws {
+    func test_runtimeAdjustmentsPermitRelativeWriteWithoutReadbackAndRejectInvalidInput() async throws {
         var printer = try idlePrinter()
         printer.fanSpeedPercent = nil
-        printer.liveZOffsetMm = nil
+        printer.liveZOffsetMm = 0
         var capabilities = Self.fullCaps
         capabilities.supportsFanSpeedReadback = true
         capabilities.supportsZOffsetAdjustment = true
-        capabilities.supportsZOffsetReadback = true
+        capabilities.supportsZOffsetReadback = false
         let model = try makeViewModel(printer: printer, capabilities: capabilities)
         await model.loadCapabilities()
 
-        await model.setFanSpeed(101)
-        XCTAssertNil(mockService.setFanSpeedCalledWith)
-        XCTAssertNotNil(model.lastError)
-        model.dismissError()
-
         await model.adjustLiveZOffset(by: 0.01)
-        XCTAssertNil(mockService.adjustZOffsetCalledWith)
+        XCTAssertEqual(mockService.adjustZOffsetCalledWith?.offsetMm, 0.01)
         XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.commandNotice, "Accepted Z-offset commands are silent even without readback")
+        mockService.adjustZOffsetCalledWith = nil
+        for delta in [Double.nan, .infinity, 0, 0.2, -0.3] {
+            await model.adjustLiveZOffset(by: delta)
+            XCTAssertNil(mockService.adjustZOffsetCalledWith)
+            XCTAssertNotNil(model.lastError)
+        }
     }
 }
 
@@ -3222,8 +3956,8 @@ final class GuardedMaterialControlsTests: XCTestCase {
         }
     }
 
-    func test_absoluteMoveRejectsUnknownUnsupportedOrStaleVerifiedEvidence() async throws {
-        for variant in 0..<17 {
+    func test_absoluteMoveDoesNotRequireGeometryOrFreshHomingEvidence() async throws {
+        for variant in 0..<16 {
             let (model, service) = try await fixture()
             switch variant {
             case 0: service.capabilitiesToReturn?.verifiedSafety = nil
@@ -3242,34 +3976,31 @@ final class GuardedMaterialControlsTests: XCTestCase {
             case 13: service.capabilitiesToReturn?.verifiedSafety?.positioning.travelEnvelopeMm.value?.minimum.x = 1000
             case 14: service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.source = nil
             case 15: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.observedAtUtc = Date().addingTimeInterval(60)
-            default:
-                var limited = PrinterBackendCapabilities(
-                    supportsMovement: true, supportsTemperatureControl: true,
-                    supportsBedTemperature: true, supportsFanControl: false,
-                    supportsHoming: true, supportedAxes: ["X", "Y"]
-                )
-                limited.supportsAbsoluteMovement = true
-                limited.verifiedSafety = VerifiedSafetyFixtures.discovery()
-                service.capabilitiesToReturn = limited
+            default: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.observedAtUtc = Date().addingTimeInterval(60)
             }
             await model.refreshSafetyEvidence()
-            XCTAssertNotNil(model.absoluteMoveBlockedReason(x: 20, y: 30, z: 10), "\(variant)")
+            XCTAssertNil(model.absoluteMoveBlockedReason(x: 20, y: 30, z: 10), "\(variant)")
             await model.moveTo(x: 20, y: 30, z: 10, feedrateMmMin: nil)
-            XCTAssertNil(service.moveToCalledWith, "\(variant)")
-            XCTAssertNotNil(model.lastError, "\(variant)")
+            XCTAssertEqual(service.moveToCalledWith?.x, 20, "\(variant)")
+            XCTAssertNil(model.lastError, "\(variant)")
             XCTAssertNil(model.pendingCommand, "\(variant)")
         }
     }
 
-    func test_absoluteMoveChecksEffectiveEnvelopeClearanceAndManualPrecision() async throws {
+    func test_absoluteMoveLeavesTravelLimitsToFirmwareButRetainsPrecisionValidation() async throws {
         let (model, service) = try await fixture()
         for point in [
             SafetyVector3Dto(x: -111, y: 30, z: 10), .init(x: 191, y: 30, z: 10),
             .init(x: 20, y: -71, z: 10), .init(x: 20, y: 131, z: 10),
-            .init(x: 20, y: 30, z: 100), .init(x: 20, y: 30, z: -0.9),
-            .init(x: 1.2345, y: 30, z: 10), .init(x: .nan, y: 30, z: 10)
+            .init(x: 20, y: 30, z: 100), .init(x: 20, y: 30, z: -0.9)
         ] {
             await model.moveTo(x: point.x, y: point.y, z: point.z, feedrateMmMin: nil)
+            XCTAssertEqual(service.moveToCalledWith?.x, point.x)
+            XCTAssertNil(model.lastError)
+        }
+        service.moveToCalledWith = nil
+        for x in [1.2345, Double.nan, .infinity] {
+            await model.moveTo(x: x, y: nil, z: nil, feedrateMmMin: nil)
             XCTAssertNil(service.moveToCalledWith)
             XCTAssertNotNil(model.lastError)
         }
@@ -3307,6 +4038,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
                     XCTAssertEqual(service.extrudeCalledWith?.feedrateMmPerMinute, speed * 60)
                     XCTAssertNil(model.lastError)
                     XCTAssertNil(model.pendingCommand)
+                    XCTAssertNil(model.commandNotice, "Accepted extrusion commands are silent")
                 }
             }
         }
@@ -3315,7 +4047,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertTrue(service.bindToolheadSpoolCalls.isEmpty)
     }
 
-    func test_missingStaleFutureColdNonfiniteAndTargetOnlyEvidenceCannotAuthorizeMaterial() async throws {
+    func test_missingStaleFutureColdNonfiniteAndTargetOnlyEvidenceDoNotBlockManualMaterial() async throws {
         for variant in 0..<11 {
             let (model, service) = try await fixture()
             switch variant {
@@ -3335,11 +4067,11 @@ final class GuardedMaterialControlsTests: XCTestCase {
             }
             service.statusToReturn?.safetyTelemetry?.targetHotendTemperatureC.value = 300
             await model.refreshSafetyEvidence()
-            XCTAssertNotNil(model.extrusionBlockedReason, "\(variant)")
+            XCTAssertNil(model.extrusionBlockedReason, "\(variant)")
             await model.extrude(distanceMm: -25, speedMmPerSecond: 5)
             for operation in PhysicalFilamentOperation.allCases { await model.performFilament(operation) }
-            XCTAssertNil(service.extrudeCalledWith, "\(variant)")
-            XCTAssertTrue(service.physicalFilamentCalls.isEmpty, "\(variant)")
+            XCTAssertEqual(service.extrudeCalledWith?.distanceMm, -25, "\(variant)")
+            XCTAssertEqual(service.physicalFilamentCalls, ["load", "unload", "change"], "\(variant)")
         }
         let (model, service) = try await fixture()
         service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 205
@@ -3347,19 +4079,19 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertNil(model.extrusionBlockedReason, "Exact verified minimum is permitted")
     }
 
-    func test_loadUnloadUse220FloorWhenBackendMinimumIsUnknown() async throws {
+    func test_loadUnloadAndChangeDoNotRequireMaterialMinimum() async throws {
         let (model, service) = try await fixture()
         service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.state = .unknown
         await model.refreshSafetyEvidence()
 
         XCTAssertNil(model.filamentBlockedReason(.load))
         XCTAssertNil(model.filamentBlockedReason(.unload))
-        XCTAssertNotNil(model.filamentBlockedReason(.change))
+        XCTAssertNil(model.filamentBlockedReason(.change))
 
         service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = 219
         await model.refreshSafetyEvidence()
-        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true)
-        XCTAssertTrue(model.filamentBlockedReason(.unload)?.contains("220") == true)
+        XCTAssertNil(model.filamentBlockedReason(.load))
+        XCTAssertNil(model.filamentBlockedReason(.unload))
     }
 
     func test_observerDiscoveryReadSupersedesInFlightStatusOnlyBackfill() async throws {
@@ -3433,16 +4165,14 @@ final class GuardedMaterialControlsTests: XCTestCase {
                        "Only the replacement observer may claim the single-flight read")
         XCTAssertEqual(service.getStatusCalledWith, model.printer.id,
                        "Replacement observer's immediate read must not be dropped by a cancelled one")
-        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("220") == true,
-                      "Replacement observer's immediate read must publish fresh evidence")
+        XCTAssertEqual(model.safetyStatus?.safetyTelemetry?.measuredHotendTemperatureC.value, 219,
+                       "Replacement observer's immediate read must publish fresh evidence")
     }
 
-    func test_loadUnloadUseHigherOf220AndVerifiedMinimum() async throws {
-        for (reportedMinimum, measured, expectedBlocked) in [
-            (180.0, 219.0, true),
-            (180.0, 220.0, false),
-            (240.0, 239.0, true),
-            (240.0, 240.0, false),
+    func test_loadUnloadDoNotDuplicateFirmwareTemperatureChecks() async throws {
+        for (reportedMinimum, measured) in [
+            (180.0, 219.0), (180.0, 220.0),
+            (240.0, 239.0), (240.0, 240.0),
         ] {
             let (model, service) = try await fixture()
             service.capabilitiesToReturn?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.value =
@@ -3450,22 +4180,22 @@ final class GuardedMaterialControlsTests: XCTestCase {
             service.statusToReturn?.safetyTelemetry?.measuredHotendTemperatureC.value = measured
             await model.refreshSafetyEvidence()
 
-            XCTAssertEqual(model.filamentBlockedReason(.load) != nil, expectedBlocked)
-            XCTAssertEqual(model.filamentBlockedReason(.unload) != nil, expectedBlocked)
+            XCTAssertNil(model.filamentBlockedReason(.load))
+            XCTAssertNil(model.filamentBlockedReason(.unload))
         }
     }
 
-    func test_verifiedSupportOverridesOptimisticLegacyFlagsAndRetainsPartialFacts() async throws {
+    func test_operationFlagsNotSafetyEvidenceControlManualFilamentAvailability() async throws {
         let (model, service) = try await fixture()
         service.capabilitiesToReturn?.verifiedSafety?.operations.filamentLoad.support = .unsupported
         service.capabilitiesToReturn?.verifiedSafety?.operations.filamentChange.support = .unknown
         await model.refreshSafetyEvidence()
-        XCTAssertTrue(model.filamentBlockedReason(.load)?.contains("unsupported") == true)
-        XCTAssertTrue(model.filamentBlockedReason(.change)?.contains("unknown") == true)
+        XCTAssertNil(model.filamentBlockedReason(.load))
+        XCTAssertNil(model.filamentBlockedReason(.change))
         await model.performFilament(.load)
         await model.performFilament(.change)
         await model.performFilament(.unload)
-        XCTAssertEqual(service.physicalFilamentCalls, ["unload"], "Partial discovery still enables proven facts")
+        XCTAssertEqual(service.physicalFilamentCalls, ["load", "change", "unload"])
     }
 
     private func reachAdjustment(_ model: PrinterControlsViewModel, _ service: MockPrinterService) async throws {
@@ -3510,6 +4240,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertEqual(service.saveZOffsetCalledWith?.saveToFirmware, true)
         XCTAssertEqual(service.saveZOffsetCalledWith?.offsetMm, 0.12)
         XCTAssertEqual(model.calibrationStep, .done)
+        XCTAssertNil(model.commandNotice, "Accepted firmware save is silent")
         await model.saveCalibration()
         XCTAssertEqual(service.saveZOffsetCallCount, 1)
         XCTAssertNil(service.setActiveSpoolCalledWith)
@@ -3803,7 +4534,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertNil(try decoder.decode(PrinterStatusDetail.self, from: encoder.encode(status)).safetyTelemetry)
     }
 
-    func test_dispatchRechecksTemperatureAgeAfterButtonAvailability() async throws {
+    func test_manualCommandsRemainAvailableAfterSafetyTemperatureSampleExpires() async throws {
         let (original, service) = try await fixture()
         let clock = SafetyTestClock()
         service.statusToReturn = VerifiedSafetyFixtures.status(id: original.printer.id, at: clock.now())
@@ -3813,13 +4544,13 @@ final class GuardedMaterialControlsTests: XCTestCase {
         await model.loadCapabilities()
         XCTAssertNil(model.extrusionBlockedReason)
         clock.advance(16)
-        XCTAssertNotNil(model.extrusionBlockedReason)
+        XCTAssertNil(model.extrusionBlockedReason)
         await model.extrude(distanceMm: 10, speedMmPerSecond: 1)
         await model.performFilament(.load)
-        XCTAssertNil(service.extrudeCalledWith)
-        XCTAssertNil(service.loadFilamentCalledWith)
+        XCTAssertEqual(service.extrudeCalledWith?.distanceMm, 10)
+        XCTAssertEqual(service.loadFilamentCalledWith, model.printer.id)
         await model.refreshSafetyEvidence()
-        XCTAssertNotNil(model.extrusionBlockedReason, "A repeated response must not renew its old sample timestamp")
+        XCTAssertNil(model.extrusionBlockedReason)
     }
 
     func test_calibrationWorkflowLeaseBlocksOtherOwnersBetweenPhysicalRequests() async throws {
@@ -3840,7 +4571,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertEqual(service.loadFilamentCalledWith, model.printer.id)
     }
 
-    func test_measuredColdHotUnknownAndCachedValuesNeverReplaceMissingSafetyEvidence() async throws {
+    func test_manualExtrusionDoesNotRequireMaterialTemperatureOrSafetyEvidence() async throws {
         let (model, service) = try await fixture()
         service.capabilitiesToReturn?.verifiedSafety = nil
         await model.refreshSafetyEvidence()
@@ -3848,14 +4579,13 @@ final class GuardedMaterialControlsTests: XCTestCase {
             var update = model.printer
             update.hotendTemp = measured
             update.hotendTarget = 280
-            // Existing spoolInfo is deliberately retained: assignment is not proof.
             model.handlePrinterUpdate(update)
-            XCTAssertNotNil(model.extrusionBlockedReason)
+            XCTAssertNil(model.extrusionBlockedReason)
             await model.extrude(distanceMm: 10, speedMmPerSecond: 5)
-            XCTAssertNil(service.extrudeCalledWith)
-            XCTAssertNotNil(model.lastError)
+            XCTAssertEqual(service.extrudeCalledWith?.distanceMm, 10)
+            XCTAssertNil(model.lastError)
             await model.extrude(distanceMm: -100, speedMmPerSecond: 10)
-            XCTAssertNil(service.extrudeCalledWith)
+            XCTAssertEqual(service.extrudeCalledWith?.distanceMm, -100)
             XCTAssertNil(model.pendingCommand)
         }
         XCTAssertNil(service.setActiveSpoolCalledWith)
@@ -3872,8 +4602,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
             await model.performFilament(operation)
             XCTAssertNil(model.lastError)
             XCTAssertNil(model.pendingCommand, "No nonexistent physical-loaded telemetry is awaited")
-            XCTAssertTrue(model.commandNotice?.contains("request accepted") == true)
-            XCTAssertTrue(model.commandNotice?.contains("verify physical completion") == true)
+            XCTAssertNil(model.commandNotice, "Accepted \(operation.rawValue) commands are silent")
         }
         XCTAssertEqual(service.physicalFilamentCalls, ["load", "unload", "change"])
         XCTAssertEqual(service.loadFilamentCalledWith, model.printer.id)
@@ -4151,7 +4880,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         service.errorToThrow = nil
         await model.setHeaterTarget(.hotend, target: 200)
         XCTAssertNil(service.setTemperaturesCalledWith)
-        XCTAssertTrue(model.commandNotice?.contains("Cancel calibration") == true)
+        XCTAssertNil(model.commandNotice, "#3548: a command blocked by calibration is refused silently")
         model.cancelCalibration()
         await model.setHeaterTarget(.hotend, target: 200)
         XCTAssertNotNil(service.setTemperaturesCalledWith)

@@ -13,6 +13,10 @@ struct PrinterStatusUpdate: Codable, Sendable {
     var totalLayers: Int? = nil
     var fanSpeedPercent: Double? = nil
     var liveZOffsetMm: Double? = nil
+    /// Runtime overrides in percent; nil (absent or explicit null) clears a stale value.
+    var speedFactorPercent: Double? = nil
+    var flowFactorPercent: Double? = nil
+    var activeExtruderId: String? = nil
     /// Nil means the update did not report sensors (keep cache); `[]` replaces it.
     var sensors: [PrinterSensor]? = nil
     let jobName: String?

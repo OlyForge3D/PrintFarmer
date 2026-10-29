@@ -90,10 +90,6 @@ describe('table row hover behavior (#1088, #1109)', () => {
         'common/components/Table/SelectableRow.tsx',
         "isSelected ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'",
       ],
-      [
-        'features/gcode/components/harvest/IndexedFilesList.tsx',
-        "selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'",
-      ],
     ];
 
     it.each(sites)('%s branches hover against selection', (file, ternary) => {

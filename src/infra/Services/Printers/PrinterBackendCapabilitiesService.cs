@@ -31,6 +31,13 @@ public class PrinterBackendCapabilitiesService(
         return printer == null ? null : await CreateCapabilitiesDtoAsync(printer, ct);
     }
 
+    /// <inheritdoc />
+    public async Task<PrinterBackendCapabilitiesDto?> GetControlCapabilitiesAsync(Guid printerId, CancellationToken ct)
+    {
+        Printer? printer = await _repo.FindByIdAsync(printerId, ct);
+        return printer is null ? null : await CreateCapabilitiesDtoAsync(printer, ct, discoverSafety: false);
+    }
+
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetAllAsync(CancellationToken ct)
     {
         List<Printer> printers = await _repo.GetAllAsync(ct);
@@ -64,7 +71,8 @@ public class PrinterBackendCapabilitiesService(
     /// </summary>
     private async Task<PrinterBackendCapabilitiesDto> CreateCapabilitiesDtoAsync(
         Printer printer,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool discoverSafety = true)
     {
         var backend = (PrinterBackend)printer.Backend;
         BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
@@ -111,9 +119,9 @@ public class PrinterBackendCapabilitiesService(
             latestStatus is { IsOnline: true, LiveZOffsetMm: { } liveZOffsetMm } &&
             double.IsFinite(liveZOffsetMm);
 
-        PrinterVerifiedSafetyDto verifiedSafety =
-            await GetVerifiedSafetyAsync(printer, backend, ct);
-
+        PrinterVerifiedSafetyDto verifiedSafety = discoverSafety
+            ? await GetVerifiedSafetyAsync(printer, backend, ct)
+            : PrinterVerifiedSafetyDto.Unknown(source: "interactive.native-controls");
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
             PrinterName: printer.Name,
@@ -132,23 +140,23 @@ public class PrinterBackendCapabilitiesService(
             SupportsFilamentControl: (capabilities & BackendCapabilities.FilamentControl) == BackendCapabilities.FilamentControl,
             SupportsObjectExclusion: (capabilities & BackendCapabilities.ObjectExclusion) == BackendCapabilities.ObjectExclusion)
         {
-            // Relative jog still lacks a verified per-printer safety contract.
-            // Absolute movement is projected only from authoritative discovery.
-            SupportsRelativeMovement = false,
-            SupportsAbsoluteMovement =
-                verifiedSafety.Operations.AbsoluteMovement.Support ==
-                VerifiedSafetySupport.Supported,
+            // Interactive controls use native transport support. Verified safety remains
+            // separate evidence for automated workflows, not a manual-command prerequisite.
+            SupportsRelativeMovement = movement,
+            SupportsAbsoluteMovement = movement && controls.SupportsAbsoluteMovement,
 
             SupportsDisableMotors = controls.SupportsDisableMotors && controlClient is ISupportsMotorControl,
             SupportsExtrusion = controls.SupportsExtrusion && controlClient is ISupportsExtrusionControl,
             SupportsZOffset = true,
-            SupportsZOffsetAdjustment =
-                controlClient is ISupportsZOffsetAdjustment && supportsZOffsetReadback,
-            SupportsFanControl =
-                controlClient is ISupportsFanControl && supportsFanReadback,
+            SupportsZOffsetAdjustment = controlClient is ISupportsZOffsetAdjustment,
+            SupportsFanControl = controlClient is ISupportsFanControl,
             SupportsFanSpeedReadback = supportsFanReadback,
+            SupportsSpeedFactorControl = controlClient is ISupportsRuntimeFactorControl,
+            SupportsFlowFactorControl = controlClient is ISupportsRuntimeFactorControl,
             SupportsSensorTelemetry = controlClient is ISupportsSensorTelemetry,
             SupportsSensorControl = controlClient is ISupportsSensorControl,
+            SupportsTemperatureControlDuringPrint = temperature && controls.SupportsTemperatureControlDuringPrint,
+            SupportsHeaterShutdown = controlClient is ISupportsHeaterShutdown,
             SupportsZOffsetReadback = supportsZOffsetReadback,
 
             // SAVE_CONFIG does not persist SET_GCODE_OFFSET; M851/M500 is not universal
@@ -162,18 +170,9 @@ public class PrinterBackendCapabilitiesService(
             SupportsHotendTemperature = temperature && controls.SupportsHotendTemperature,
             SupportsBedTemperature = temperature && controls.SupportsBedTemperature,
 
-            // Moonraker calls configurable LOAD_FILAMENT/UNLOAD_FILAMENT/M600 macros.
-            // No per-printer macro discovery exists here; preserve the legacy broad flag
-            // without presenting it as evidence those individual commands are configured.
-            SupportsFilamentLoad =
-                verifiedSafety.Operations.FilamentLoad.Support ==
-                VerifiedSafetySupport.Supported,
-            SupportsFilamentUnload =
-                verifiedSafety.Operations.FilamentUnload.Support ==
-                VerifiedSafetySupport.Supported,
-            SupportsFilamentChange =
-                verifiedSafety.Operations.FilamentChange.Support ==
-                VerifiedSafetySupport.Supported,
+            SupportsFilamentLoad = controlClient is ISupportsFilamentControl,
+            SupportsFilamentUnload = controlClient is ISupportsFilamentControl,
+            SupportsFilamentChange = controlClient is ISupportsFilamentControl,
             SupportedAxes = movement ? controls.SupportedAxes.ToArray() : [],
             VerifiedSafety = verifiedSafety,
         };

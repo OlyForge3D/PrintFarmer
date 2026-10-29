@@ -29,13 +29,13 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// tests and callers without coverage keep the material-only behaviour.
 /// </para>
 /// </remarks>
-public class DispatchScorer(
+public partial class DispatchScorer(
     AppDbContext db,
     ILogger<DispatchScorer> logger,
     IOperatorFeatureGate? featureGate = null,
     IFilamentCoverageService? coverageService = null,
     IFilamentFallbackGroupResolver? fallbackService = null,
-    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin, IJobCompatibilitySummarizer
+    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin, IJobCompatibilitySummarizer, IPrinterFileTargetValidator
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;

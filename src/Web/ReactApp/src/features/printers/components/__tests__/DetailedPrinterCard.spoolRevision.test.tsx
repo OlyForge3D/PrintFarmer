@@ -10,6 +10,8 @@ import {
   type PrinterSpoolInfo,
 } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({ useAuth: () => ({ hasPermission: () => true }) }));
+
 // Verifies the revision-guard resilience for the single-spool card controls:
 //  (a) a printer object lacking `rowVersion` (compact list DTO) no longer
 //      produces a silent no-op — the controls are disabled with an explanation;

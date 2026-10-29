@@ -178,11 +178,10 @@ const MANUAL_CHUNK_GROUPS: Array<[string, string[]]> = [
     '@opentelemetry/semantic-conventions',
     '@opentelemetry/exporter-trace-otlp-http',
     '@opentelemetry/auto-instrumentations-web',
-    '@opentelemetry/instrumentation-fetch',
-    '@opentelemetry/sdk-trace-web',
+    '@opentelemetry/core',
+    '@opentelemetry/instrumentation',
+    '@opentelemetry/sdk-trace',
     '@opentelemetry/resources',
-    '@opentelemetry/instrumentation-user-interaction',
-    '@opentelemetry/instrumentation-xml-http-request',
   ]],
   // React Query — used by nearly every page. Splitting it out
   // shrinks per-route chunks. react-query-devtools is left in the
@@ -215,11 +214,10 @@ const createConfig = (gitHash: string, buildTime: string) => ({
       '@opentelemetry/semantic-conventions',
       '@opentelemetry/exporter-trace-otlp-http',
       '@opentelemetry/auto-instrumentations-web',
-      '@opentelemetry/instrumentation-fetch',
-      '@opentelemetry/sdk-trace-web',
-      '@opentelemetry/resources',
-      '@opentelemetry/instrumentation-user-interaction',
-      '@opentelemetry/instrumentation-xml-http-request'
+      '@opentelemetry/core',
+      '@opentelemetry/instrumentation',
+      '@opentelemetry/sdk-trace',
+      '@opentelemetry/resources'
     ]
   },
   server: {

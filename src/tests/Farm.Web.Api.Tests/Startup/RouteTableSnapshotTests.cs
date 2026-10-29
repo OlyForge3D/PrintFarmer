@@ -216,18 +216,22 @@ public sealed class RouteTableSnapshotTests
     [Fact]
     public async Task RouteTable_ReportsHubMethodRequirementDataThatSignalRDoesNotEnforce()
     {
-        using RouteTopologyWebApplicationFactory factory = RouteTopologyWebApplicationFactory.SlicerEnabled();
+        IEnumerable<string> actual = await BuildHubMethodLinesAsync(
+            typeof(RequirementDataTestHub),
+            "hubs/test",
+            CreatePolicyProvider(_ => { }));
 
-        string[] actual = await BuildRouteTableAsync(
-            factory.Services.GetRequiredService<EndpointDataSource>(),
-            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>());
+        // SignalR evaluates IAuthorizeData, but not a method's IAuthorizationRequirementData.
+        _ = actual.Should().ContainSingle()
+            .Which.Should().Be(
+                $"INVOKE /hubs/test#TestAsync -> hub-method:{DescribeType(typeof(RequirementDataTestHub))}.TestAsync " +
+                "[effective=authenticated] [unenforced-requirement-data=permission:maintenance:admin]");
+    }
 
-        // SignalR's hub dispatcher evaluates only the IAuthorizeData on a hub method; a
-        // [RequirePermission] there contributes the default policy, not its permission requirement.
-        _ = actual.Should().ContainSingle(line =>
-                line.StartsWith("INVOKE /hubs/harvest#BroadcastFileProgressAsync ", StringComparison.Ordinal))
-            .Which.Should().EndWith(
-                "[effective=authenticated] [unenforced-requirement-data=permission:gcode_harvest:admin]");
+    private sealed class RequirementDataTestHub : Hub
+    {
+        [RequirePermission("maintenance:admin")]
+        public Task TestAsync() => Task.CompletedTask;
     }
 
     [Fact]

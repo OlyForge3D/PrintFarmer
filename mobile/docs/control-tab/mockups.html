@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Printer detail · Control tab — four directions</title>
+<style>
+  :root {
+    --page: #08101f; --surface: #0e1729; --inset: #16213a; --panel: #0c1424; --modal: #101a2e;
+    --border: #243250; --border-strong: #3d4f72; --border-subtle: #192340;
+    --text: #e8eef8; --text-2: #a0aec8; --text-3: #8090ab;
+    --accent: #14b8a6; --accent-text: #2dd4bf; --accent-deep: #0f766e;
+    --printing-bg: #082f49; --printing-text: #7dd3fc;
+    --online-bg: #052e2b; --online-text: #5eead4;
+    --idle-bg: #1c2742; --idle-text: #a0aec8;
+    --error-bg: #450a0a; --error-text: #fca5a5;
+    --r: 8px; --r-sm: 6px;
+    --sans: Inter, -apple-system, system-ui, sans-serif;
+    --display: "Space Grotesk", -apple-system, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050a14; color: var(--text); font: 14px/1.45 var(--sans); padding: 48px 32px 96px; }
+  header.doc { max-width: 1180px; margin: 0 auto 40px; }
+  header.doc h1 { font: 700 30px/1.15 var(--display); margin-bottom: 10px; }
+  header.doc p { color: var(--text-2); max-width: 74ch; }
+  header.doc ul { margin: 14px 0 0 18px; color: var(--text-2); }
+  header.doc li { margin: 4px 0; }
+  section.dir { max-width: 1180px; margin: 0 auto 72px; border-top: 1px solid var(--border); padding-top: 28px; }
+  section.dir h2 { font: 700 22px/1.2 var(--display); margin-bottom: 6px; }
+  section.dir > p { color: var(--text-2); max-width: 78ch; margin-bottom: 8px; }
+  .tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 78ch; margin: 12px 0 28px; font-size: 13px; color: var(--text-2); }
+  .tradeoffs b { color: var(--text); display: block; margin-bottom: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  figure { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  figcaption { color: var(--text-3); font-size: 12px; text-align: center; max-width: 320px; }
+
+  .phone { width: 320px; height: 690px; border-radius: 44px; background: var(--page); border: 10px solid #1a2233; position: relative; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 1px #2a3448; }
+  .sb { height: 40px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font: 600 12px var(--sans); flex: none; }
+  .island { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); width: 92px; height: 24px; background: #000; border-radius: 14px; }
+  .nav { padding: 2px 14px 8px; flex: none; }
+  .nav .back { color: var(--accent-text); font-size: 13px; }
+  .nav .title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+  .nav h3 { font: 700 18px/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 14px 0; background: var(--inset); border-radius: var(--r); padding: 2px; flex: none; }
+  .tabs span { text-align: center; font-size: 12px; font-weight: 600; padding: 6px 0; border-radius: var(--r-sm); color: var(--text-2); }
+  .tabs span.on { background: var(--border-strong); color: var(--text); }
+  .body { flex: 1; overflow: hidden; padding: 12px 14px 0; display: flex; flex-direction: column; gap: 12px; }
+  .estop { flex: none; padding: 10px 14px 20px; border-top: 1px solid var(--border-subtle); background: var(--page); }
+  .estop button { width: 100%; min-height: 44px; border-radius: var(--r); border: 1px solid #7f1d1d; background: var(--error-bg); color: var(--error-text); font: 700 14px var(--sans); }
+
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-sm); white-space: nowrap; flex: none; }
+  .pill.idle { background: var(--online-bg); color: var(--online-text); }
+  .pill.print { background: var(--printing-bg); color: var(--printing-text); }
+  .pill.stale { background: var(--idle-bg); color: var(--idle-text); }
+  .label { font-size: 11px; font-weight: 600; color: var(--text-2); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .muted { color: var(--text-3); font-size: 12px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+  .btn { min-height: 44px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--inset); color: var(--text); font: 600 13px var(--sans); display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; }
+  .btn.sel { border-color: var(--accent); color: var(--accent-text); background: #0b2a2a; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .lock { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r); background: var(--inset); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+  .lock b { color: var(--text); font-weight: 600; }
+
+  .jog { display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 6px; }
+  .jog div { border-radius: var(--r); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font: 600 13px var(--sans); }
+  .jog .blank { background: transparent; border: none; }
+  .jog .home { color: var(--accent-text); font-size: 11px; }
+  .zcol { display: grid; grid-template-rows: repeat(3, 48px); gap: 6px; width: 56px; }
+  .zcol div { border-radius: var(--r); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font: 600 13px var(--sans); }
+  .zcol .zl { background: transparent; border: none; color: var(--text-2); font-size: 11px; }
+  .step { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--inset); border-radius: var(--r); padding: 2px; }
+  .step span { text-align: center; font: 600 12px var(--mono); padding: 8px 0; border-radius: var(--r-sm); color: var(--text-2); }
+  .step span.on { background: var(--border-strong); color: var(--text); }
+  .pos { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--text-2); }
+  .pos b { color: var(--text); font-weight: 500; }
+
+  .tune { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); }
+  .tune:last-child { border-bottom: none; }
+  .stepper { display: flex; gap: 6px; align-items: center; }
+  .stepper span { width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--inset); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .stepper span.val { width: 56px; border: none; background: none; font-family: var(--mono); font-weight: 500; }
+
+  .scrim { position: absolute; inset: 0; background: rgba(2,6,14,.62); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--modal); border-top: 1px solid var(--border-strong); border-radius: 14px 14px 0 0; padding: 8px 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+  .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 0 auto 4px; }
+  .tile { min-height: 64px; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; justify-content: space-between; }
+  .tile .t { font-weight: 600; font-size: 13px; }
+  .tile .s { font-size: 11px; color: var(--text-3); }
+
+  .glabel { font-size: 11px; font-weight: 600; color: var(--text-3); padding: 0 4px 6px; }
+  .glist { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+  .gi { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+  .gi:last-child { border-bottom: none; }
+  .gi .r { color: var(--text-2); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .gi.act { color: var(--accent-text); font-weight: 600; }
+  .gi.dis { color: var(--text-3); }
+  .chev { color: var(--text-3); }
+  .seg { display: flex; gap: 4px; }
+  .seg span { font: 600 11px var(--sans); padding: 6px 9px; border-radius: var(--r-sm); background: var(--inset); border: 1px solid var(--border); color: var(--text-2); }
+  .seg span.on { border-color: var(--accent); color: var(--accent-text); }
+</style>
+</head>
+<body>
+
+<header class="doc">
+  <h1>Control tab: four directions</h1>
+  <p>These mockups replace the current Control panel stack: Preheat, Motion with an "Advanced motion" disclosure, Runtime adjustments, then a "Safety checks" disclosure. All four directions follow the same rules:</p>
+  <ul>
+    <li>There is no temperature section. Live temperatures stay on the Status tab and in the card header only.</li>
+    <li>Home XY, Home Z, Motors off and Z-offset are always visible. They are not collapsed into "Advanced".</li>
+    <li>Status never says "Unknown". It says what is true, for example "Not reported · 2 min".</li>
+    <li>Corner radius is 8 px or less. Only the teal accent is used, color always comes with text, touch targets are at least 44 pt, and the E-stop stays pinned.</li>
+  </ul>
+</header>
+
+<!-- A -->
+<section class="dir">
+  <h2>A · State-driven</h2>
+  <p>The page shows only what can act right now. When the printer is idle, you get setup tasks in order: heat, then move, then calibrate. While it is printing, setup collapses into a single lock note and the page becomes live tuning. Nothing is hidden behind a disclosure.</p>
+  <div class="tradeoffs"><div><b>Strength</b>The smallest cognitive load, and it matches the existing lockout rule, so the page reads as deliberate.</div><div><b>Risk</b>The layout changes when the state changes, so operators have to learn two pages instead of one.</div></div>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Voron 2.4 · Bay 3</h3><span class="pill idle">● Idle</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div>
+            <div class="label" style="margin-bottom:6px">Preheat</div>
+            <div class="grid3"><div class="btn sel">PLA</div><div class="btn">PETG</div><div class="btn">ABS</div></div>
+            <div class="muted" style="margin-top:6px">Heating nozzle to <span class="num">215°</span>, bed to <span class="num">60°</span></div>
+          </div>
+          <div>
+            <div class="label" style="margin-bottom:6px">Move</div>
+            <div style="display:flex; gap:14px; align-items:center">
+              <div class="jog"><div class="blank"></div><div>Y+</div><div class="blank"></div><div>X−</div><div class="home">Home</div><div>X+</div><div class="blank"></div><div>Y−</div><div class="blank"></div></div>
+              <div class="zcol"><div>Z+</div><div class="zl">Z</div><div>Z−</div></div>
+            </div>
+            <div class="step" style="margin-top:8px"><span>0.1</span><span class="on">1</span><span>10</span><span>50</span></div>
+            <div class="pos" style="margin-top:6px"><span>X <b>120.0</b></span><span>Y <b>118.5</b></span><span>Z <b>10.00</b></span></div>
+          </div>
+          <div class="grid3"><div class="btn">Home XY</div><div class="btn">Home Z</div><div class="btn">Motors off</div></div>
+          <div class="btn" style="justify-content:space-between"><span>Calibrate Z-offset</span><span class="num muted">−1.420</span></div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Idle: heat, move and calibrate in one scroll. Machine actions sit directly below the jog pad.</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Voron 2.4 · Bay 3</h3><span class="pill print">▶ Printing 42%</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div class="lock"><span>❚❚</span><div><b>Motion and heating are locked while printing.</b><br>To change them, pause or stop the job on the Status tab.</div></div>
+          <div>
+            <div class="label" style="margin-bottom:6px">Live tuning</div>
+            <div class="panel">
+              <div class="tune"><span>Speed</span><div class="stepper"><span>−</span><span class="val">100%</span><span>+</span></div></div>
+              <div class="tune"><span>Flow</span><div class="stepper"><span>−</span><span class="val">98%</span><span>+</span></div></div>
+              <div class="tune"><span>Part fan</span><div class="stepper"><span>−</span><span class="val">80%</span><span>+</span></div></div>
+              <div class="tune"><span>Z babystep</span><div class="stepper"><span>−</span><span class="val">+0.02</span><span>+</span></div></div>
+            </div>
+            <div class="muted" style="margin-top:6px">Babystep moves <span class="num">0.01 mm</span> per tap.</div>
+          </div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Printing: the lock note explains why setup is gone, and tuning becomes the whole page.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- B -->
+<section class="dir">
+  <h2>B · Instrument panel with Move, Heat and Tune segments</h2>
+  <p>A segmented control splits the tab into three focused instruments, so each segment fits on one screen with no scrolling. The position readout is a fixed header, like a machine DRO. While printing, Move and Heat stay visible but are marked locked, and the panel opens on Tune.</p>
+  <div class="tradeoffs"><div><b>Strength</b>The layout is stable and predictable, nothing scrolls, and there is room for each instrument.</div><div><b>Risk</b>It adds a second level of tabs under Status / Control / Info. Home and Preheat are one tap further away.</div></div>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Prusa MK4 · Bay 1</h3><span class="pill stale">○ Not reported · 2 min</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div class="panel" style="display:grid;grid-template-columns:repeat(3,1fr);padding:10px 0;text-align:center">
+            <div><div class="label">X</div><div class="num" style="font-size:18px">120.0</div></div>
+            <div style="border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)"><div class="label">Y</div><div class="num" style="font-size:18px">118.5</div></div>
+            <div><div class="label">Z</div><div class="num" style="font-size:18px">10.00</div></div>
+          </div>
+          <div class="tabs" style="margin:0"><span class="on">Move</span><span>Heat</span><span>Tune</span></div>
+          <div style="display:flex; gap:14px; justify-content:center; align-items:center">
+            <div class="jog"><div class="blank"></div><div>Y+</div><div class="blank"></div><div>X−</div><div class="home">Home</div><div>X+</div><div class="blank"></div><div>Y−</div><div class="blank"></div></div>
+            <div class="zcol"><div>Z+</div><div class="zl">Z</div><div>Z−</div></div>
+          </div>
+          <div class="step"><span>0.1</span><span class="on">1</span><span>10</span><span>50</span></div>
+          <div class="grid3"><div class="btn">Home XY</div><div class="btn">Home Z</div><div class="btn">Motors off</div></div>
+          <div class="muted">The last reading is 2 min old, so commands may not reach the printer.</div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Move segment. The stale-connection state replaces "Unknown" with when the printer was last seen.</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Prusa MK4 · Bay 1</h3><span class="pill print">▶ Printing 42%</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div class="panel" style="display:grid;grid-template-columns:repeat(3,1fr);padding:10px 0;text-align:center">
+            <div><div class="label">X</div><div class="num" style="font-size:18px">84.2</div></div>
+            <div style="border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)"><div class="label">Y</div><div class="num" style="font-size:18px">131.7</div></div>
+            <div><div class="label">Z</div><div class="num" style="font-size:18px">4.20</div></div>
+          </div>
+          <div class="tabs" style="margin:0"><span style="color:var(--text-3)">Move · locked</span><span style="color:var(--text-3)">Heat · locked</span><span class="on">Tune</span></div>
+          <div class="panel">
+            <div class="tune"><span>Speed</span><div class="stepper"><span>−</span><span class="val">100%</span><span>+</span></div></div>
+            <div class="tune"><span>Flow</span><div class="stepper"><span>−</span><span class="val">98%</span><span>+</span></div></div>
+            <div class="tune"><span>Part fan</span><div class="stepper"><span>−</span><span class="val">80%</span><span>+</span></div></div>
+            <div class="tune"><span>Z babystep</span><div class="stepper"><span>−</span><span class="val">+0.02</span><span>+</span></div></div>
+          </div>
+          <div class="muted">Move and Heat unlock when the job is paused or finished.</div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Printing: the locked segments say so in words, not just by dimming.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- C -->
+<section class="dir">
+  <h2>C · Action tiles with a jog sheet</h2>
+  <p>The tab is a grid of named, one-tap jobs. Fine positioning opens a bottom sheet within thumb reach, so the jog pad only takes up the screen while you are using it. Each tile shows its current value as a subtitle.</p>
+  <div class="tradeoffs"><div><b>Strength</b>The tab is the easiest to scan, the most one-handed, and the easiest to extend with new actions.</div><div><b>Risk</b>Jogging costs one extra tap, and operators who jog constantly may find the sheet slower.</div></div>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Bambu X1C · Bay 6</h3><span class="pill idle">● Idle</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div class="grid2">
+            <div class="tile"><span class="t">Home all</span><span class="s">Last homed 4 min ago</span></div>
+            <div class="tile"><span class="t">Preheat</span><span class="s">PLA · <span class="num">215° / 60°</span></span></div>
+            <div class="tile" style="border-color:var(--accent)"><span class="t" style="color:var(--accent-text)">Move axes</span><span class="s num">X120 Y118 Z10</span></div>
+            <div class="tile"><span class="t">Z-offset</span><span class="s num">−1.420 mm</span></div>
+            <div class="tile"><span class="t">Motors off</span><span class="s">Steppers on</span></div>
+            <div class="tile"><span class="t">Load filament</span><span class="s">AMS slot 2 · PETG</span></div>
+          </div>
+          <div class="label" style="margin-top:4px">Part fan</div>
+          <div class="grid3"><div class="btn">Off</div><div class="btn sel">50%</div><div class="btn">100%</div></div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Idle: six named actions. Each subtitle shows the current machine state, so you don't need a separate readout.</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Bambu X1C · Bay 6</h3><span class="pill idle">● Idle</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body"><div class="grid2"><div class="tile"></div><div class="tile"></div><div class="tile"></div><div class="tile"></div></div></div>
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font:700 16px var(--display)">Move axes</span><span style="color:var(--accent-text);font-weight:600;font-size:13px">Done</span></div>
+          <div class="pos"><span>X <b>120.0</b></span><span>Y <b>118.5</b></span><span>Z <b>10.00</b></span></div>
+          <div style="display:flex; gap:14px; justify-content:center; align-items:center">
+            <div class="jog"><div class="blank"></div><div>Y+</div><div class="blank"></div><div>X−</div><div class="home">Home</div><div>X+</div><div class="blank"></div><div>Y−</div><div class="blank"></div></div>
+            <div class="zcol"><div>Z+</div><div class="zl">Z</div><div>Z−</div></div>
+          </div>
+          <div class="step"><span>0.1</span><span class="on">1</span><span>10</span><span>50</span></div>
+          <div class="grid2"><div class="btn">Home XY</div><div class="btn">Home Z</div></div>
+          <div class="btn">Go to position…</div>
+        </div>
+      </div>
+      <figcaption>The jog sheet: position, pad, step size, homing and absolute moves, all within thumb reach.</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Bambu X1C · Bay 6</h3><span class="pill print">▶ Printing 42%</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body">
+          <div class="grid2">
+            <div class="tile"><span class="t">Speed</span><span class="s num">100% · Standard</span></div>
+            <div class="tile"><span class="t">Part fan</span><span class="s num">80%</span></div>
+            <div class="tile"><span class="t">Z babystep</span><span class="s num">+0.02 mm</span></div>
+            <div class="tile"><span class="t">Flow</span><span class="s num">98%</span></div>
+          </div>
+          <div class="lock"><span>❚❚</span><div><b>Home, Move, Preheat and Motors off are locked while printing.</b> Pause the job to use them.</div></div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Printing: the tiles change to tuning actions, and one note lists exactly what is locked.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- D -->
+<section class="dir">
+  <h2>D · Native grouped list</h2>
+  <p>A grouped list in the style of iOS Settings, with named sections: Heat, Motion, Calibration and Live tuning. It works with VoiceOver and Dynamic Type without extra effort, and every action is a full-width row of at least 44 pt. The jog pad is a pushed screen behind "Jog axes".</p>
+  <div class="tradeoffs"><div><b>Strength</b>The cheapest to build and the most accessible, and it reads as a native, professional iOS app.</div><div><b>Risk</b>It is the least distinctive option. It looks like Settings rather than an instrument panel.</div></div>
+  <div class="row">
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Ender 3 S1 · Bay 2</h3><span class="pill idle">● Idle</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body" style="gap:14px">
+          <div><div class="glabel">Heat</div><div class="glist">
+            <div class="gi"><span>Preheat</span><div class="seg"><span class="on">PLA</span><span>PETG</span><span>Off</span></div></div>
+          </div></div>
+          <div><div class="glabel">Motion</div><div class="glist">
+            <div class="gi act"><span>Home all axes</span></div>
+            <div class="gi"><span>Jog axes</span><span class="r"><span class="num">X120 Y118 Z10</span><span class="chev">›</span></span></div>
+            <div class="gi"><span>Go to position</span><span class="chev">›</span></div>
+            <div class="gi"><span>Disable motors</span><span class="r">Steppers on</span></div>
+          </div></div>
+          <div><div class="glabel">Calibration</div><div class="glist">
+            <div class="gi"><span>Z-offset</span><span class="r"><span class="num">−1.420 mm</span><span class="chev">›</span></span></div>
+            <div class="gi"><span>Safety checks</span><span class="r" style="color:var(--online-text)">● All passed<span class="chev">›</span></span></div>
+          </div></div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Idle: Safety checks becomes a named row with a status summary instead of a trailing disclosure.</figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="island"></div>
+        <div class="sb"><span>9:41</span><span>5G</span></div>
+        <div class="nav"><div class="back">‹ Printers</div><div class="title"><h3>Ender 3 S1 · Bay 2</h3><span class="pill print">▶ Printing 42%</span></div></div>
+        <div class="tabs"><span>Status</span><span class="on">Control</span><span>Info</span></div>
+        <div class="body" style="gap:14px">
+          <div><div class="glabel">Live tuning</div><div class="glist">
+            <div class="gi"><span>Speed</span><div class="stepper"><span>−</span><span class="val">100%</span><span>+</span></div></div>
+            <div class="gi"><span>Part fan</span><div class="stepper"><span>−</span><span class="val">80%</span><span>+</span></div></div>
+            <div class="gi"><span>Z babystep</span><div class="stepper"><span>−</span><span class="val">+0.02</span><span>+</span></div></div>
+          </div></div>
+          <div><div class="glabel">Motion</div><div class="glist">
+            <div class="gi dis"><span>Home all axes</span><span class="r">Locked while printing</span></div>
+            <div class="gi dis"><span>Jog axes</span><span class="r">Locked while printing</span></div>
+          </div></div>
+          <div class="muted" style="padding:0 4px">Pause the job on the Status tab to use motion and heat controls.</div>
+        </div>
+        <div class="estop"><button>■ Emergency stop</button></div>
+      </div>
+      <figcaption>Printing: Live tuning moves to the top, and the locked rows stay in place with the reason inline.</figcaption>
+    </figure>
+  </div>
+</section>
+
+</body>
+</html>

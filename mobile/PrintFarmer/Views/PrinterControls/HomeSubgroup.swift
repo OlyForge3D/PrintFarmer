@@ -10,12 +10,6 @@ struct HomeSubgroup: View {
 
     @ObservedObject var viewModel: PrinterControlsViewModel
 
-    /// Transient caption shown when the user taps a disabled control on a
-    /// touch-only device (where `.help()` doesn't fire). Mirrors the pattern
-    /// used in `PreheatSubgroup`.
-    @State private var disabledTapMessage: String?
-
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Returns true when the entire subgroup must be removed from layout
@@ -135,13 +129,6 @@ struct HomeSubgroup: View {
                         .disabled(isDisabled || (anyPending && !isZPending))
                     }
                 }
-
-                if let message = disabledTapMessage {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .transition(.opacity)
-                }
             }
         }
     }
@@ -161,7 +148,7 @@ struct HomeSubgroup: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(isAllPending ? Color.pfAssigned : Color.clear, lineWidth: 1.5)
         )
-        .disabled((isDisabled && !shouldRevealDisabledTooltipOnTap) || (anyPending && !isAllPending))
+        .disabled(isDisabled || (anyPending && !isAllPending))
         .disabledControlStyle(isDisabled: isDisabled && !isAllPending)
         .errorBorderHighlight(isActive: isErrored(matching: ["X", "Y", "Z"]))
         .accessibilityLabel(
@@ -172,7 +159,6 @@ struct HomeSubgroup: View {
         .accessibilityHint(accessibilityHint(hasError: isErrored(matching: ["X", "Y", "Z"]), idleHint: String(localized: "Homes X, Y, and Z.", comment: "VoiceOver idle hint Home All per spec §4.1")))
         .accessibilityValue(accessibilityValue(isPending: isAllPending, hasError: isErrored(matching: ["X", "Y", "Z"])))
         .accessibilityAddTraits(isAllPending ? .updatesFrequently : .isButton)
-        .help(viewModel.blockedReason ?? "")
     }
 
     @ViewBuilder
@@ -228,36 +214,11 @@ struct HomeSubgroup: View {
         .accessibilityHint(accessibilityHint(hasError: hasError, idleHint: idleHint))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : .isButton)
-        .help(viewModel.blockedReason ?? "")
     }
 
-    // MARK: - Disabled-tap reveal
-
-    private var shouldRevealDisabledTooltipOnTap: Bool {
-        horizontalSizeClass != .regular
-    }
-
-    /// Wraps the real action with the disabled-tap reveal: if the printer
-    /// can't be controlled, surface `blockedReason` as a transient caption
-    /// instead of dispatching the command. Mirrors `PreheatSubgroup`.
+    /// Unavailable controls are disabled without explanatory text (#3548).
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl else {
-            let message = viewModel.blockedReason
-                ?? String(localized: "Controls are unavailable.", comment: "Fallback when blockedReason is nil")
-            withAnimation(.easeInOut(duration: 0.15)) {
-                disabledTapMessage = message
-            }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if disabledTapMessage == message {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        disabledTapMessage = nil
-                    }
-                }
-            }
-            return
-        }
-        disabledTapMessage = nil
+        guard viewModel.canControl else { return }
         action()
     }
 
@@ -270,7 +231,9 @@ struct HomeSubgroup: View {
         if viewModel.isPrintingOrPaused {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        if let reason = viewModel.blockedReason { return reason }
+        if !viewModel.canControl {
+            return String(localized: "Unavailable.", comment: "VoiceOver disabled hint")
+        }
         return idleHint
     }
 

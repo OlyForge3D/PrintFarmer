@@ -5,17 +5,19 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.HostedServices;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Farm.Slicer.Module.Tests.Security;
 
 public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDisposable
 {
-    private readonly CustomWebApplicationFactory _factory = new();
+    private readonly WorkerBoundaryFactory _factory = new();
     private readonly Guid _claimToken = Guid.NewGuid();
     private HttpClient _firstWorkerClient = null!;
     private HttpClient _secondWorkerClient = null!;
@@ -23,6 +25,8 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDispo
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
+        _ = _factory.Services.GetServices<IHostedService>()
+            .Should().NotContain(service => service is JobTimeoutScannerHostedService);
         _firstWorkerClient = await _factory.CreateWorkerClientAsync(
             workerName: "First Worker",
             username: "first-worker-user",
@@ -224,7 +228,8 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDispo
         Worker firstWorker = await GetWorkerAsync(_firstWorkerClient);
         SliceJob job = await AddProcessingJobAsync(firstWorker);
         Artifact artifact = await AddArtifactAsync(job, firstWorker);
-        await SetLeaseExpirationAsync(job.Id, DateTime.UtcNow.AddMinutes(-1));
+        DateTime expiredAt = DateTime.UtcNow.AddMinutes(-1);
+        await SetLeaseExpirationAsync(job.Id, expiredAt);
 
         HttpResponseMessage progress = await _firstWorkerClient.PostAsJsonAsync(
             $"/api/slice/{job.Id}/progress",
@@ -254,10 +259,93 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDispo
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         SliceJob unchanged = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == job.Id);
         _ = unchanged.Status.Should().Be(SliceJobStatus.Processing);
+        _ = unchanged.WorkerId.Should().Be(firstWorker.Id);
+        _ = unchanged.ClaimToken.Should().Be(_claimToken);
+        _ = unchanged.ClaimedAt.Should().Be(job.ClaimedAt);
+        _ = unchanged.LeaseToken.Should().Be(job.LeaseToken);
+        _ = unchanged.LeaseFence.Should().Be(job.LeaseFence);
+        _ = unchanged.LeaseExpiresAt.Should().Be(expiredAt);
         _ = unchanged.ProgressPercent.Should().Be(0);
+        _ = unchanged.ProgressMessage.Should().BeNull();
         _ = unchanged.ResultFileUrl.Should().BeNull();
         _ = unchanged.ErrorMessage.Should().BeNull();
         _ = (await db.Artifacts.CountAsync(value => value.JobId == job.Id)).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("progress")]
+    [InlineData("complete")]
+    [InlineData("fail")]
+    [InlineData("renew-lease")]
+    [InlineData("model")]
+    [InlineData("artifacts")]
+    public async Task WorkerEndpoints_ScannerRecoversExpiredLease_RejectsPreviousWorkerWithoutMutation(
+        string endpoint)
+    {
+        Worker firstWorker = await GetWorkerAsync(_firstWorkerClient);
+        SliceJob job = await AddProcessingJobAsync(firstWorker);
+        Artifact artifact = await AddArtifactAsync(job, firstWorker);
+        await SetLeaseExpirationAsync(job.Id, DateTime.UtcNow.AddMinutes(-1));
+
+        // Recovery is explicit: the host must not race either side of the lease boundary.
+        using JobTimeoutScannerHostedService scanner =
+            ActivatorUtilities.CreateInstance<JobTimeoutScannerHostedService>(_factory.Services);
+        await scanner.ProcessStuckJobsOnceAsync();
+
+        SliceJob recovered;
+        Artifact[] recoveredArtifacts;
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            recovered = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == job.Id);
+            recoveredArtifacts = await db.Artifacts.AsNoTracking()
+                .Where(value => value.JobId == job.Id).ToArrayAsync();
+        }
+
+        _ = recovered.Status.Should().Be(SliceJobStatus.Queued);
+        _ = recovered.WorkerId.Should().BeNull();
+        _ = recovered.ClaimToken.Should().BeNull();
+        _ = recovered.ClaimedAt.Should().BeNull();
+        _ = recovered.LeaseToken.Should().BeNull();
+        _ = recovered.LeaseExpiresAt.Should().BeNull();
+        _ = recovered.LeaseFence.Should().Be(job.LeaseFence);
+        _ = recovered.RetryCount.Should().Be(1);
+        _ = recovered.ProgressPercent.Should().Be(0);
+        _ = recovered.ProgressMessage.Should().BeNull();
+        _ = recovered.ResultFileUrl.Should().BeNull();
+        _ = recovered.ErrorMessage.Should().BeNull();
+        _ = recovered.CompletedAt.Should().BeNull();
+        _ = recoveredArtifacts.Should().ContainSingle().Which.Should().BeEquivalentTo(artifact);
+
+        using HttpRequestMessage request = new(
+            endpoint == "model" ? HttpMethod.Get : HttpMethod.Post,
+            $"/api/slice/{job.Id}/{endpoint}")
+        {
+            Content = endpoint switch
+            {
+                "progress" => JsonContent.Create(
+                    new SliceJobProgressUpdateRequest { ProgressPercent = 75, ProgressMessage = "stale" }),
+                "complete" => JsonContent.Create(
+                    new CompleteSliceJobRequest { PrimaryArtifactId = artifact.Id }),
+                "fail" => JsonContent.Create(new FailSliceJobRequest("stale")),
+                "renew-lease" => JsonContent.Create(new RenewLeaseRequest { LeaseDurationSeconds = 300 }),
+                "model" => null,
+                "artifacts" => CreateGcodeUpload(),
+                _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, "Unknown worker endpoint"),
+            },
+        };
+        using HttpResponseMessage response = await _firstWorkerClient.SendAsync(request);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden, endpoint);
+        await using AsyncServiceScope verificationScope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext verificationDb =
+            verificationScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob unchanged = await verificationDb.SliceJobs.AsNoTracking()
+            .SingleAsync(value => value.Id == job.Id);
+        _ = unchanged.Should().BeEquivalentTo(recovered);
+        _ = (await verificationDb.Artifacts.AsNoTracking()
+            .Where(value => value.JobId == job.Id).ToArrayAsync())
+            .Should().BeEquivalentTo(recoveredArtifacts);
     }
 
     [Fact]
@@ -477,5 +565,19 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime, IDispo
         content.Add(new StringContent(Convert.ToHexString(SHA256.HashData(bytes))), "sha256");
         content.Add(new StringContent(bytes.LongLength.ToString(System.Globalization.CultureInfo.InvariantCulture)), "sizeBytes");
         return content;
+    }
+
+    private sealed class WorkerBoundaryFactory : CustomWebApplicationFactory
+    {
+        protected override void ConfigureTestServices(IServiceCollection services)
+        {
+            // These tests own lease timing; all other hosted services remain registered.
+            foreach (ServiceDescriptor descriptor in services.Where(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService) &&
+                descriptor.ImplementationType == typeof(JobTimeoutScannerHostedService)).ToArray())
+            {
+                _ = services.Remove(descriptor);
+            }
+        }
     }
 }

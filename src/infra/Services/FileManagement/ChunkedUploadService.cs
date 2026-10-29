@@ -668,8 +668,7 @@ public sealed class ChunkedUploadService(
                 return null;
             }
 
-            using StreamReader reader = new(filePath, Encoding.UTF8);
-            string gcodeContent = await reader.ReadToEndAsync(ct);
+            string gcodeContent = await BinaryGcodeReader.ReadFileAsTextAsync(filePath, ct);
 
             return string.IsNullOrWhiteSpace(gcodeContent) ? null : await _metadataExtractor.ExtractMetadataAsync(gcodeContent);
         }

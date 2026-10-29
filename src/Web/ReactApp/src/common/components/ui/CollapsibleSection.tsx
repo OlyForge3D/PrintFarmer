@@ -18,6 +18,8 @@ interface CollapsibleSectionProps {
   collapsedTitle?: string;
   /** When true, hides the title row below the line when expanded (useful when content has its own inline headers) */
   hideExpandedTitle?: boolean;
+  /** Preserve in-flight control state while hiding collapsed content. */
+  keepMounted?: boolean;
 }
 
 /**
@@ -36,6 +38,7 @@ export function CollapsibleSection({
   expanded: controlledExpanded,
   collapsedTitle,
   hideExpandedTitle,
+  keepMounted = false,
 }: CollapsibleSectionProps) {
   const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
   const isControlled = controlledExpanded !== undefined;
@@ -97,10 +100,12 @@ export function CollapsibleSection({
               </div>
             </div>
           )}
-          <div id={panelId} role="region" aria-labelledby={headingId}>
-            {children}
-          </div>
         </>
+      )}
+      {(isExpanded || keepMounted) && (
+        <div id={panelId} role="region" aria-labelledby={headingId} hidden={!isExpanded}>
+          {children}
+        </div>
       )}
     </section>
   );

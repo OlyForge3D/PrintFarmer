@@ -58,7 +58,7 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
 
         list.StatusCode.Should().Be(HttpStatusCode.NotFound);
         download.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        delete.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        delete.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _printers.Verify(service => service.GetFileListAsync(
             It.IsAny<Guid>(),
             It.IsAny<CancellationToken>()), Times.Never);
@@ -73,7 +73,7 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task DeletePrinterFile_Authorized_UsesBarrierAndWritesTypedAudit()
+    public async Task DeletePrinterFile_QueueWriterCannotBypassExplicitDeletePermission()
     {
         Guid actorId = Guid.NewGuid();
         Guid printerId = await SeedAuthorizedPrinterAsync();
@@ -92,11 +92,11 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         };
         HttpResponseMessage response = await client.SendAsync(deleteRequest);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _printers.Verify(service => service.DeletePrinterFileAsync(
             printerId,
             "reviewed.gcode",
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Never);
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         PrinterDispatchState state = await db.PrinterDispatchStates
@@ -105,11 +105,11 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         state.PhysicalControlRequiresReconciliation.Should().BeFalse();
         (await db.QueueOperationAudits.CountAsync(audit =>
             audit.PrinterId == printerId &&
-            audit.Operation == QueueAuditOperations.PrinterFileDelete)).Should().Be(2);
+            audit.Operation == QueueAuditOperations.PrinterFileDelete)).Should().Be(0);
     }
 
     [Fact]
-    public async Task DeletePrinterFile_BackendException_IsRedactedAndFencesSubsequentActuation()
+    public async Task DeletePrinterFile_ExplicitDeleteAndManageStillRequireSafeIntent_NoLegacyBackendCall()
     {
         Guid actorId = Guid.NewGuid();
         Guid printerId = await SeedAuthorizedPrinterAsync();
@@ -120,6 +120,8 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
             .ThrowsAsync(new InvalidOperationException(
                 "secret=/private/path?token=do-not-return"));
         using HttpClient client = CreateOperatorClient(actorId);
+        client.DefaultRequestHeaders.Remove("X-Test-Permissions");
+        client.DefaultRequestHeaders.Add("X-Test-Permissions", PrintFarmerPermissions.PrinterFiles.Delete);
 
         using HttpRequestMessage deleteRequest = new(
             HttpMethod.Delete,
@@ -129,10 +131,11 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         };
         HttpResponseMessage response = await client.SendAsync(deleteRequest);
 
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().NotContain("private");
         body.Should().NotContain("token");
+        body.Should().Contain("safe_delete_intent_required");
 
         using HttpRequestMessage retryRequest = new(
             HttpMethod.Delete,
@@ -147,8 +150,10 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         PrinterDispatchState state = await db.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
-        state.PhysicalControlCommandId.Should().NotBeNull();
-        state.PhysicalControlRequiresReconciliation.Should().BeTrue();
+        state.PhysicalControlCommandId.Should().BeNull();
+        state.PhysicalControlRequiresReconciliation.Should().BeFalse();
+        _printers.Verify(service => service.DeletePrinterFileAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private HttpClient CreateOperatorClient(Guid actorId)

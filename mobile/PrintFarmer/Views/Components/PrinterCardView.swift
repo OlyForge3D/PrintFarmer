@@ -213,6 +213,11 @@ struct PrinterCardPresentation {
         printer.isOnline && ["printing", "paused"].contains(printer.state?.lowercased() ?? "")
     }
 
+    /// Offline takes precedence: an offline printer is never "ready", even if its bed still needs clearing.
+    var isReadyToHarvest: Bool {
+        isPendingReady && printer.isOnline
+    }
+
     var hasFailureJobContext: Bool {
         guard failureReason != nil,
               printer.isOnline,
@@ -240,7 +245,7 @@ struct PrinterCardPresentation {
 
     var stateLabel: String {
         if failureReason != nil { return "Failure suspected" }
-        if isPendingReady { return "Bed clear" }
+        if isReadyToHarvest { return "Bed clear?" }
         if !printer.isOnline { return "Offline" }
         if printer.inMaintenance { return "Maintenance" }
         switch printer.state?.lowercased() {
@@ -255,7 +260,7 @@ struct PrinterCardPresentation {
 
     var accent: Color {
         if failureReason != nil { return .pfError }
-        if isPendingReady { return .pfAssigned }
+        if isReadyToHarvest { return .pfAssigned }
         if !printer.isOnline { return .pfTextSecondary }
         if printer.inMaintenance { return .pfMaintenance }
         switch printer.state?.lowercased() {
@@ -267,9 +272,14 @@ struct PrinterCardPresentation {
     }
 
     var jobLabel: String {
-        if isPendingReady { return "Finished · Clear bed to continue" }
-        guard isActiveJob || hasFailureJobContext else { return "Ready for the next job" }
-        return printer.jobName ?? printer.fileName ?? "Job name unavailable"
+        if !printer.isOnline { return "Offline" }
+        if isReadyToHarvest { return "Ready to harvest" }
+        if isActiveJob || hasFailureJobContext {
+            return printer.jobName ?? printer.fileName ?? "Job name unavailable"
+        }
+        if printer.inMaintenance { return "In maintenance" }
+        if printer.state?.lowercased() == "error" { return "Error" }
+        return "Ready to seed"
     }
 
     var progressLabel: String {
@@ -296,8 +306,8 @@ struct PrinterCardPresentation {
             }
             parts.append(etaLabel)
         }
-        parts.append("Nozzle \(printer.hotendTemp.map(\.temperatureFormatted) ?? "unavailable")")
-        parts.append("Bed \(printer.bedTemp.map(\.temperatureFormatted) ?? "unavailable")")
+        parts.append("Nozzle \(printer.hotendTemp.map(\.temperatureFormatted) ?? "not reported")")
+        parts.append("Bed \(printer.bedTemp.map(\.temperatureFormatted) ?? "not reported")")
         if let spool = printer.spoolInfo, spool.hasActiveSpool {
             parts.append("Filament \(spool.material ?? "loaded")")
         } else {

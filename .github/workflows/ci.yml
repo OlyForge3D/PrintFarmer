@@ -307,6 +307,12 @@ jobs:
       - name: Install tooling dependencies
         run: npm ci
 
+      - name: Enforce authoritative SDK selection
+        run: node scripts/ci/check-dotnet-sdk.mjs
+
+      - name: Test SDK drift controls
+        run: node --test scripts/ci/tests/test-dotnet-sdk.mjs
+
       - name: Install shellcheck
         run: |
           sudo apt-get update -qq
@@ -463,7 +469,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Restore .NET (for dependency-license inventory)
         working-directory: src
@@ -498,7 +507,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Require a suppressor-aware formatter (SDK >= 10.0.200)
         working-directory: src
@@ -594,7 +606,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Restore .NET
         working-directory: src
@@ -989,7 +1004,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Install dotnet-ef
         run: |
@@ -1091,7 +1109,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Resolve test build artifact
         id: test-build-artifact
@@ -1240,7 +1261,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Verify selected SDK
+        run: python3 scripts/dotnet-sdk.py verify
 
       - name: Install dotnet-ef
         run: |
@@ -1268,6 +1292,13 @@ jobs:
         with:
           name: Farm.Migrations.SqlServer
           path: src/migrations/Farm.Migrations.SqlServer/bin/Debug/net10.0
+
+      - name: Download infrastructure provider test build
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        uses: actions/download-artifact@v8
+        with:
+          name: Farm.Infrastructure.Tests
+          path: src/tests/Farm.Infrastructure.Tests/bin/Debug/net10.0
 
       # The local restore above regenerates portable `obj/` metadata for EF.
       # These project-scoped artifacts supply only the compiled outputs; no
@@ -1337,6 +1368,73 @@ jobs:
             --logger "trx;LogFileName=provider-tests.trx" \
             --results-directory TestResults
 
+      - name: Run populated catalog upgrades on both production providers
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        working-directory: src
+        run: |
+          set -euo pipefail
+          assembly=tests/Farm.Infrastructure.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Infrastructure.Tests.dll
+          test -f "$assembly"
+          dotnet test "$assembly" \
+            --filter "FullyQualifiedName~PrinterFileCatalogPersistenceTests&Category=DbHeavy" \
+            --settings ./vstest.runsettings \
+            --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini \
+            --logger "trx;LogFileName=catalog-provider-tests.trx" \
+            --results-directory TestResults
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("TestResults/catalog-provider-tests.trx").getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          results = root.findall(f"{ns}Results/{ns}UnitTestResult")
+          if len(results) != 2 or any(r.get("outcome") != "Passed" for r in results):
+              raise SystemExit("Expected two passing populated catalog provider cases, with no skips")
+          for provider in ("postgres", "sqlserver"):
+              if not any(provider in r.get("testName", "").lower() for r in results):
+                  raise SystemExit(f"Missing catalog provider case: {provider}")
+          print("Catalog populated PostgreSQL and SQL Server upgrades: 2 passed, 0 skipped")
+          PY
+
+      - name: Run maintenance analytics on both production providers
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        working-directory: src
+        run: |
+          set -euo pipefail
+          assembly=tests/Farm.Infrastructure.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Infrastructure.Tests.dll
+          test -f "$assembly"
+          dotnet test "$assembly" \
+            --filter "FullyQualifiedName~MaintenanceAnalyticsProviderTests&Category=Docker" \
+            --settings ./vstest.runsettings \
+            --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini \
+            --logger "trx;LogFileName=maintenance-provider-tests.trx" \
+            --results-directory TestResults
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("TestResults/maintenance-provider-tests.trx").getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          expected = {
+              "Analytics_PostgreSQL_PreservesResultsWithoutMaterializingEntities",
+              "Analytics_SqlServer_PreservesResultsWithoutMaterializingEntities",
+          }
+          definitions = {
+              test.get("id"): test.find(f"{ns}TestMethod")
+              for test in root.findall(f"{ns}TestDefinitions/{ns}UnitTest")
+          }
+          results = root.findall(f"{ns}Results/{ns}UnitTestResult")
+          actual = []
+          for result in results:
+              method = definitions.get(result.get("testId"))
+              if method is None or method.get("className") != (
+                  "Farm.Infrastructure.Tests.Repositories.Maintenance.MaintenanceAnalyticsProviderTests"
+              ) or result.get("outcome") != "Passed":
+                  raise SystemExit("Expected passing maintenance analytics provider fixture results, with no skips")
+              actual.append(method.get("name"))
+          if len(actual) != 2 or set(actual) != expected:
+              raise SystemExit(f"Missing or unexpected maintenance analytics provider cases: {actual}")
+          print("Maintenance analytics PostgreSQL and SQL Server: 2 passed, 0 skipped")
+          PY
+
       - name: Assert non-zero provider test execution
         working-directory: src
         run: |
@@ -1376,7 +1474,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: dotnet-test-results-provider
-          path: src/TestResults/provider-tests.trx
+          path: |
+            src/TestResults/provider-tests.trx
+            src/TestResults/catalog-provider-tests.trx
+            src/TestResults/maintenance-provider-tests.trx
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------

@@ -28,11 +28,13 @@ interface MovementControlSectionProps {
   printerZ?: number;
   homedAxes?: string;
   hotendTemp?: number;
-  extrudeMinTemp: number;
   
   // Flags
   movementActionPending: boolean;
   canMove: boolean;
+  canHomeAll?: boolean;
+  canHomeXY?: boolean;
+  canHomeZ?: boolean;
   canDisableMotors: boolean;
   canSetStep: boolean;
   canManualMove: boolean;
@@ -66,9 +68,11 @@ export function MovementControlSection({
   printerY,
   printerZ,
   homedAxes,
-  extrudeMinTemp,
   movementActionPending,
   canMove,
+  canHomeAll = canMove,
+  canHomeXY = canMove,
+  canHomeZ = canMove,
   canDisableMotors,
   canSetStep,
   canManualMove,
@@ -108,7 +112,7 @@ export function MovementControlSection({
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canHomeAll}
                 onClick={() => onHome()}
                 title="Home all axes"
                 padSize="small"
@@ -144,7 +148,7 @@ export function MovementControlSection({
                 ◀
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canHomeXY}
                 onClick={() => onHome('xy')}
                 title="Home X/Y"
                 padSize="small"
@@ -186,7 +190,7 @@ export function MovementControlSection({
                 Z+
               </MotionControlButton>
               <MotionControlButton
-                disabled={movementActionPending || !canMove}
+                disabled={movementActionPending || !canHomeZ}
                 onClick={() => onHome('z')}
                 title="Home Z"
                 padSize="small"
@@ -236,7 +240,7 @@ export function MovementControlSection({
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrude}
                   onClick={() => onExtrude('extrude')}
-                  title={`Extrude filament (min ${extrudeMinTemp}°C)`}
+                  title="Extrude filament"
                   aria-label={`Extrude ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >
@@ -246,7 +250,7 @@ export function MovementControlSection({
                 <ControlPadButton
                   disabled={movementActionPending || !canExtrude}
                   onClick={() => onExtrude('retract')}
-                  title={`Retract filament (min ${extrudeMinTemp}°C)`}
+                  title="Retract filament"
                   aria-label={`Retract ${extrudeStep}mm at ${extrudeSpeed}mm/s`}
                   padSize="small"
                 >

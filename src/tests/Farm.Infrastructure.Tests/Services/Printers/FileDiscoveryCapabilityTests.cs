@@ -19,7 +19,7 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Services.Printers;
 
 /// <summary>
-/// Focused unit tests for GcodeHarvestService file discovery capability checks.
+/// Focused unit tests for printer file-list capability checks.
 /// Verifies the exact issue: TryGetFileListClient returns true but client doesn't implement ISupportsFileList.
 /// </summary>
 public class FileDiscoveryCapabilityTests

@@ -202,6 +202,7 @@ public sealed class PrinterAggregate
             ExtruderTemperature = 23.4;
             BedTemperature = 22.1;
             _sensors.Reset();
+            _sensors.SetMultipleExtruders(Mmu.Mode == MmuMode.SnapmakerU1);
             Position = [120.0, 120.0, 5.0, 0.0];
             HomedAxes = "xyz";
             AbsoluteCoordinates = true;
@@ -466,7 +467,7 @@ public sealed class PrinterAggregate
     ///   <item><c>FIRMWARE_RESTART</c> / <c>RESTART</c> — recovery: Klippy state -&gt; "ready", print job cleared back to "standby", homed axes cleared (a real MCU reboot loses homing). Also bypasses the ready gate — this is the recovery path itself.</item>
     ///   <item><c>EXCLUDE_OBJECT NAME=...</c> — adds to <see cref="ExcludedObjects"/> (existing behavior).</item>
     ///   <item><c>G28</c>, <c>G28 X Y</c>, <c>G28 Z</c> — homes the specified axes (all three when bare) into <see cref="HomedAxes"/> and updates <see cref="Position"/>; still refused with <see cref="PrinterBusyException"/> while printing.</item>
-    ///   <item><c>M104 S...</c> / <c>M140 S...</c> — set <see cref="ExtruderTarget"/> / <see cref="BedTarget"/>.</item>
+    ///   <item><c>M104 S...</c> / <c>M140 S...</c> — set the active extruder target / <see cref="BedTarget"/>.</item>
     ///   <item><c>G91 G0 X.. Y.. Z.. F..</c> followed by a bare <c>G90</c> (relative move, <c>MoveAsync</c>'s shape), plus separate <c>G90</c> and <c>G0 X.. Y.. Z.. F..</c> lines (absolute move, <c>MoveToAsync</c>'s shape) — both update <see cref="Position"/> and <see cref="AbsoluteCoordinates"/>.</item>
     /// </list>
     /// <b>Documented fidelity boundary:</b> <c>M84</c> (disable motors), <c>LOAD_FILAMENT</c>,
@@ -506,6 +507,14 @@ public sealed class PrinterAggregate
                 // real Moonraker's 503 "Klippy is not connected" behavior.
                 RequireKlippyReady();
 
+                if (trimmed.Equals("TURN_OFF_HEATERS", StringComparison.OrdinalIgnoreCase))
+                {
+                    ExtruderTarget = 0;
+                    BedTarget = 0;
+                    _sensors.TurnOffHeaters();
+                    continue;
+                }
+
                 if (trimmed.StartsWith("SET_HEATER_TEMPERATURE ", StringComparison.OrdinalIgnoreCase))
                 {
                     Dictionary<string, string> parameters = KlipperSensorFixture.ParseParameters(trimmed);
@@ -519,7 +528,7 @@ public sealed class PrinterAggregate
                     {
                         if (!double.TryParse(targetText, System.Globalization.NumberStyles.Float,
                                 System.Globalization.CultureInfo.InvariantCulture, out double target) ||
-                            !double.IsFinite(target) || target < 0)
+                            !double.IsFinite(target) || target < 0 || target > (heater == "extruder" ? 300 : 120))
                         {
                             throw new GcodeParameterException("Expected a finite, non-negative heater target.");
                         }
@@ -562,7 +571,21 @@ public sealed class PrinterAggregate
 
                 if (TryParseSValue(trimmed, "M104", out double hotendTarget))
                 {
-                    ExtruderTarget = hotendTarget;
+                    if (Mmu.Mode == MmuMode.SnapmakerU1 && Mmu.SnapmakerU1ActiveToolheadIndex > 0)
+                    {
+                        string command = string.Create(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            $"SET_HEATER_TEMPERATURE HEATER=extruder{Mmu.SnapmakerU1ActiveToolheadIndex} TARGET={hotendTarget:R}");
+                        if (!_sensors.TrySendGcode(command))
+                        {
+                            throw new GcodeParameterException("The active extruder does not support a temperature target.");
+                        }
+                    }
+                    else
+                    {
+                        ExtruderTarget = hotendTarget;
+                    }
+
                     continue;
                 }
 
@@ -645,6 +668,18 @@ public sealed class PrinterAggregate
                 // ---- Qidibox gate control macros (PrintersController's mmu/gate-action) ----
                 if (Regex.IsMatch(trimmed, @"^T(\d+)$", RegexOptions.IgnoreCase))
                 {
+                    if (Mmu.Mode == MmuMode.SnapmakerU1)
+                    {
+                        if (!int.TryParse(trimmed.AsSpan(1), System.Globalization.CultureInfo.InvariantCulture, out int index) ||
+                            index is < 0 or > 3)
+                        {
+                            throw new GcodeParameterException("Expected a configured tool from T0 to T3.");
+                        }
+
+                        Mmu.SnapmakerU1ActiveToolheadIndex = index;
+                        continue;
+                    }
+
                     ApplyQidiboxLoadLocked(trimmed);
                     continue;
                 }
@@ -689,6 +724,7 @@ public sealed class PrinterAggregate
     private void ApplyFirmwareRestartLocked()
     {
         _sensors.Reset();
+        _sensors.SetMultipleExtruders(Mmu.Mode == MmuMode.SnapmakerU1);
         KlippyState = "ready";
         KlippyStateMessage = "Printer is ready and A okay!";
         PrintState = "standby";
@@ -1233,6 +1269,7 @@ public sealed class PrinterAggregate
         lock (_stateLock)
         {
             Mmu.Mode = mode;
+            _sensors.SetMultipleExtruders(mode == MmuMode.SnapmakerU1);
         }
     }
 }

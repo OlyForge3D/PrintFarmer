@@ -171,11 +171,6 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
                 .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
                 .ExecuteDeleteAsync(ct);
 
-            // Remove GcodeHarvestOperation records for this printer
-            await _db.GcodeHarvestOperations
-                .Where(h => h.PrinterId == trackedPrinter.Id)
-                .ExecuteDeleteAsync(ct);
-
             // Remove MaintenanceLog records for this printer BEFORE alerts and schedules.
             // MaintenanceLog.PrinterId is Restrict (not Cascade), so logs must be deleted
             // explicitly before removing the printer. Logs are deleted first because they can

@@ -230,7 +230,7 @@ public sealed class PrinterSensorNormalizerTests
     [Theory]
     [InlineData("missing", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.UnknownSensor)]
     [InlineData("FAN", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.UnknownSensor)]
-    [InlineData("offline", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.SensorUnavailable)]
+    [InlineData("offline", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.Valid)]
     [InlineData("hotend", PrinterSensorQuantity.FanSpeed, 50, PrinterSensorControlValidationCode.ReadOnly)]
     [InlineData("fan", PrinterSensorQuantity.TargetTemperature, 50, PrinterSensorControlValidationCode.UnsupportedQuantity)]
     [InlineData("fan", PrinterSensorQuantity.FanSpeed, double.NaN, PrinterSensorControlValidationCode.InvalidValue)]
@@ -262,6 +262,48 @@ public sealed class PrinterSensorNormalizerTests
             AdvertisedSensors(), "fan", PrinterSensorQuantity.FanSpeed, PrinterSensorValue.FromBoolean(true));
 
         Assert.Equal(PrinterSensorControlValidationCode.InvalidValue, result.Code);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1e-9, false)]
+    [InlineData(-1e-9, false)]
+    [InlineData(5, false)]
+    [InlineData(10, true)]
+    [InlineData(65, true)]
+    [InlineData(66, false)]
+    public void ValidateControl_PositiveMinimumHeater_AllowsOnlyOffOrHeatingInterval(double target, bool accepted)
+    {
+        PrinterSensorDto heater = new("heater_generic chamber", "Chamber", PrinterSensorKind.Chamber)
+        {
+            Writable = [new(PrinterSensorQuantity.TargetTemperature, 10, 65, null, PrinterSensorUnit.Celsius) { AllowZero = true }],
+        };
+
+        Assert.Equal(accepted, PrinterSensorNormalizer.ValidateControl(
+            [heater], heater.Id, PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(target)).IsValid);
+        Assert.False(PrinterSensorNormalizer.ValidateControl(
+            [heater with { Writable = [heater.Writable[0] with { AllowZero = false }] }],
+            heater.Id, PrinterSensorQuantity.TargetTemperature, PrinterSensorValue.FromNumber(0)).IsValid);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ValidateControl_Enabled_AcceptsOnlyBoolean(bool enabled)
+    {
+        PrinterSensorDto sensor = new("filament_switch_sensor runout", "Runout", PrinterSensorKind.FilamentRunout)
+        {
+            Writable = [new(PrinterSensorQuantity.Enabled, 0, 1, 1, PrinterSensorUnit.None)],
+        };
+
+        Assert.True(PrinterSensorNormalizer.ValidateControl(
+            [sensor], sensor.Id, PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)).IsValid);
+        Assert.False(PrinterSensorNormalizer.ValidateControl(
+            [sensor], sensor.Id, PrinterSensorQuantity.Enabled, PrinterSensorValue.FromNumber(enabled ? 1 : 0)).IsValid);
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(
+            new PrinterSensorSetRequest(PrinterSensorQuantity.Enabled, PrinterSensorValue.FromBoolean(enabled)), WebJson));
+        Assert.Equal("Enabled", json.RootElement.GetProperty("quantity").GetString());
+        Assert.Equal(enabled, json.RootElement.GetProperty("value").GetBoolean());
     }
 
     [Fact]

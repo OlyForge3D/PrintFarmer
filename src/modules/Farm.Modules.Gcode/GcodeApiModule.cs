@@ -1,8 +1,10 @@
-﻿using Farm.Modules.Abstractions;
+﻿using Farm.Infrastructure.Services.Gcode.PrinterFiles;
+using Farm.Modules.Abstractions;
 using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Modules.Gcode.Services.Gcode.Safety;
 using Farm.Web.Api.Services.Gcode.Safety;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,10 +16,8 @@ namespace Farm.Modules.Gcode;
 /// <summary>
 /// Vertical-slice module for gcode file management (issue #2039, epic #2019). Owns the
 /// <see cref="Farm.Modules.Gcode.Controllers.GcodeFilesController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeLibraryController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodePromotionsController"/>,
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestController"/>, and
-/// <see cref="Farm.Modules.Gcode.Controllers.GcodeHarvestDiagnosticsController"/> controllers, the
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodeLibraryController"/> and
+/// <see cref="Farm.Modules.Gcode.Controllers.GcodePromotionsController"/> controllers, the
 /// gcode library/upload/safety-validation services, artifact-to-gcode promotion and its
 /// reconciler, and the file-consistency audit background service. Phase 11 of the Farm.Web.Api
 /// decomposition epic (see docs/MODULE_MIGRATION_PATTERN.md). Namespaces were renamed
@@ -34,15 +34,47 @@ public sealed class GcodeApiModule : IApiModule
     /// <inheritdoc />
     public void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Gcode library service: queries, retrieval, deletion of harvested gcode files.
+        // Gcode library service: queries, retrieval, deletion of owned gcode files.
         _ = services.AddScoped<IGcodeFilesService, GcodeFilesService>();
+        _ = services.AddScoped<IPrinterFileAccessService, PrinterFileAccessService>();
+        _ = services.AddScoped<IPrinterFileLeaseCoordinator, PrinterFileLeaseCoordinator>();
+        _ = services.AddScoped<PrinterFileCatalogService>();
+        _ = services.AddSingleton(sp =>
+        {
+            IWebHostEnvironment environment = sp.GetRequiredService<IWebHostEnvironment>();
+            string directory = Path.GetFullPath(Path.Join(environment.ContentRootPath, "App_Data", "printer-file-previews"));
+            if (!string.IsNullOrEmpty(environment.WebRootPath) &&
+                directory.StartsWith(
+                    Path.GetFullPath(environment.WebRootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Printer preview cache must be outside the web root.");
+            }
+
+            return new PrinterFilePreviewCache(directory);
+        });
+        _ = services.AddScoped<PrinterFileContentService>();
+        _ = services.AddHostedService<PrinterFileIndexWorker>();
+        _ = services.AddScoped<PrinterFileCopyService>();
+        _ = services.AddScoped<IPrinterFileCopyService>(sp => sp.GetRequiredService<PrinterFileCopyService>());
+        _ = services.AddScoped<IPrinterFileLibraryIngest>(sp =>
+            (IPrinterFileLibraryIngest)sp.GetRequiredService<IGcodeFilesService>());
+        _ = services.AddScoped<PrinterFileCopyProcessor>();
+        _ = services.AddHostedService<PrinterFileCopyWorker>();
+        _ = services.AddScoped<PrinterFileQueueService>();
+        _ = services.AddScoped<IPrinterFileDeleteService, PrinterFileDeleteService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterFileQueueAdmission,
+            Farm.Infrastructure.Services.Queue.JobQueueService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IPrinterFileTargetValidator,
+            Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
+        _ = services.AddHostedService<PrinterFileQueueWorker>();
 
         // Gcode safety validation (thermal/geometry sanity checks ahead of print dispatch).
         services.TryAddSingleton<IGcodeSafetyValidator, GcodeSafetyValidator>();
 
         // Infrastructure-owned processing seam: bridges the infra IGcodeFileProcessingService
         // abstraction to this module's concrete IGcodeFilesService so callers outside this
-        // module (e.g. harvest completion) can process gcode without a compile-time reference
+        // module (e.g. slice import) can process gcode without a compile-time reference
         // into Farm.Modules.Gcode.
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService>(sp =>
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<IGcodeFilesService>());
@@ -53,9 +85,6 @@ public sealed class GcodeApiModule : IApiModule
         // Farm.Modules.Gcode.
         _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter>(sp =>
             (Farm.Infrastructure.Services.Interfaces.IGcodeFileDeleter)sp.GetRequiredService<IGcodeFilesService>());
-
-        // Harvest completion event broadcasting over SignalR.
-        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, SignalRHarvestEventBroadcaster>();
 
         // Gcode upload settings, backed by the persisted ISettingsService store.
         _ = services.AddScoped<Farm.Infrastructure.Services.Interfaces.IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();

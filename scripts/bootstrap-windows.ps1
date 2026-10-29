@@ -85,7 +85,8 @@ if (-not (Test-IsElevated)) {
     $global:AllowPerCommandElevation = $false
 }
 
-$REQ_DOTNET_VERSION = $env:DOTNET_VERSION -or '10.0.101'
+. (Join-Path $PSScriptRoot 'dotnet-sdk.ps1')
+$REQ_DOTNET_VERSION = Get-ApprovedDotnetSdkVersion
 # Default to Node 24 major LTS for frontend toolchain
 $REQ_NODE_MAJOR = $env:NODE_VERSION -or '24'
 
@@ -97,17 +98,6 @@ Write-Info "Checking Chocolatey availability..."
 
 if ($haveWinget) {
     Write-Info "winget found — using winget to install packages"
-    try {
-        Write-Info "Installing .NET SDK (9.x)"
-        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
-            Invoke-RunElevated -Command 'winget' -ExtraArgs @('install','--id','Microsoft.DotNet.SDK.9','-e','--accept-package-agreements','--accept-source-agreements','-h')
-        } else {
-            winget install --id Microsoft.DotNet.SDK.9 -e --accept-package-agreements --accept-source-agreements -h
-        }
-    } catch {
-        Write-Warn "winget install of .NET SDK failed; will try fallback installer"
-    }
-
     try {
         Write-Info "Installing Node.js $REQ_NODE_MAJOR"
         if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
@@ -158,21 +148,24 @@ if ($haveWinget) {
     }
 }
 
-# Verify dotnet presence; fallback to dotnet-install.ps1 from Microsoft if missing
-if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    Write-Info ".NET SDK not found or not on PATH — attempting manual install"
+# Other SDKs may be installed; only the exact approved SDK satisfies global.json.
+$selectedSdk = ''
+if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+    Push-Location (Join-Path $PSScriptRoot '..')
+    try { $selectedSdk = & dotnet --version 2>$null } finally { Pop-Location }
+}
+if ($selectedSdk -ne $REQ_DOTNET_VERSION) {
+    Write-Info "Installing approved .NET SDK $REQ_DOTNET_VERSION from global.json"
     # Use the official dotnet-install script (PowerShell)
     $installScriptUrl = 'https://dot.net/v1/dotnet-install.ps1'
     $tmp = Join-Path $env:TEMP 'dotnet-install.ps1'
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $installScriptUrl -OutFile $tmp -ErrorAction Stop
-        if (-not (Test-IsElevated) -and $global:AllowPerCommandElevation) {
-            Write-Info "Running dotnet-install.ps1 elevated"
-            Invoke-RunElevated -Command 'powershell' -ExtraArgs @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$tmp`"",'-Version',$REQ_DOTNET_VERSION)
-        } else {
-            powershell -NoProfile -ExecutionPolicy Bypass -File $tmp -Version $REQ_DOTNET_VERSION
-        }
-        Write-Success ".NET install attempted via dotnet-install.ps1"
+        $installDir = Join-Path $HOME '.dotnet'
+        & $tmp -Version $REQ_DOTNET_VERSION -InstallDir $installDir
+        if (-not $?) { throw 'dotnet-install.ps1 failed' }
+        $env:DOTNET_ROOT = $installDir
+        $env:PATH = "$installDir;$env:PATH"
     } catch {
         Write-Warn "Automatic dotnet install failed: $_"
         Write-Warn "Please install .NET SDK ${REQ_DOTNET_VERSION} manually from https://dotnet.microsoft.com/download/dotnet/10.0"
@@ -180,9 +173,8 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     } finally {
         if (Test-Path $tmp) { Remove-Item $tmp -Force }
     }
-} else {
-    Write-Info "dotnet already installed: $(dotnet --info 2>$null | Select-Object -First 1)"
 }
+Assert-ApprovedDotnetSdk
 
 # Verify Node
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {

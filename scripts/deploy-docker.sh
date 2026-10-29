@@ -62,8 +62,8 @@ if [[ -f "$VERSIONS_FILE" ]]; then
     export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION ORCASLICER_SHA256 BUILD_VERBOSITY
 fi
 
-# Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
-DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
+# Runtime display version is independent of the exact compiler SDK.
+DOTNET_MAJOR_VERSION="${ASPNET_TAG%%-*}"
 
 # Default flags
 DRY_RUN=false
@@ -215,7 +215,7 @@ fi
 # Note: SDK_TAG and ASPNET_TAG are sourced from container-versions.conf
 # Update that file to change .NET versions for future migrations
 declare -a DOCKER_IMAGES_CONFIG=(
-    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG:-10.0-noble}-upgraded"
+    "mcr.microsoft.com/dotnet/sdk:${SDK_TAG}|Dockerfile.base-sdk|mcr.microsoft.com/dotnet/sdk:${SDK_TAG}-upgraded"
     "mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}|Dockerfile.base-aspnet|mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG:-10.0-noble}-upgraded"
     "ubuntu:${UBUNTU_TAG:-24.04}|Dockerfile.base-ubuntu|ubuntu:${UBUNTU_TAG:-24.04}-upgraded"
     "node:${NODE_TAG:-24-alpine}|Dockerfile.base-node|node:${NODE_TAG:-24-alpine}-upgraded"
@@ -1552,7 +1552,7 @@ pull_base_images() {
     print_header "📥 Pulling Base Container Images"
 
     print_info "Pulling essential images for PrintFarmer core services:"
-    print_info "  - .NET SDK $DOTNET_MAJOR_VERSION (multi-stage builds during deployment)"
+    print_info "  - .NET SDK $DOTNET_SDK_VERSION (multi-stage builds during deployment)"
     print_info "  - .NET ASP.NET $DOTNET_MAJOR_VERSION (API runtime)"
     print_info "  - Node.js 24 Alpine (React frontend)"
     print_info "  - PostgreSQL 16 Alpine (database)"
@@ -2041,7 +2041,7 @@ build_base_images() {
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
         # Prepare build command with optional platform
-        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust")
+        local build_cmd=(docker build -f "$docker_dir/$dockerfile" -t "$upgraded_image" --label="printfarmer-precache=true" --build-arg "CACHE_BUST=$cache_bust" --build-arg "SDK_TAG=$SDK_TAG")
 
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
@@ -3100,7 +3100,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -3268,11 +3268,47 @@ load_previous_config() {
     return 1
 }
 
+validate_http_bind_address() {
+    if [ "${BIND_ADDRESS+x}" != "x" ] && [ -f "${ENV_FILE:-.env}" ]; then
+        BIND_ADDRESS="$(get_kv_from_file "${ENV_FILE:-.env}" "BIND_ADDRESS" || true)"
+    fi
+    BIND_ADDRESS="${BIND_ADDRESS:-0.0.0.0}"
+
+    local ipv4_pattern='^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$'
+    if ! [[ "$BIND_ADDRESS" =~ $ipv4_pattern ]]; then
+        print_error "BIND_ADDRESS must be an IPv4 address."
+        return 1
+    fi
+
+    local -a octets
+    local octet
+    IFS=. read -r -a octets <<< "$BIND_ADDRESS"
+    for octet in "${octets[@]}"; do
+        if [ "$octet" -gt 255 ]; then
+            print_error "BIND_ADDRESS must be an IPv4 address."
+            return 1
+        fi
+    done
+    export BIND_ADDRESS
+}
+
+http_probe_host() {
+    if [ "${INSTALLER_LAB:-false}" = "true" ] && [ "${HTTP_ONLY:-false}" = "true" ]; then
+        printf '%s\n' localhost
+        return
+    fi
+    case "${BIND_ADDRESS:-0.0.0.0}" in
+        0.0.0.0|127.0.0.1) printf '%s\n' localhost ;;
+        *) printf '%s\n' "$BIND_ADDRESS" ;;
+    esac
+}
+
 # Save current configuration for future use
 save_deployment_config() {
     print_header "💾 Saving Deployment Configuration"
 
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
+    validate_http_bind_address || return 1
     resolve_webauthn_configuration || return 1
 
     local bootstrap_secret="${PFARM__Setup__BootstrapSecret:-}"
@@ -3342,6 +3378,7 @@ NETWORK_RANGES=$(printf '%q' "$NETWORK_RANGES")
 NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
+BIND_ADDRESS=$BIND_ADDRESS
 SERVER_HOST=${SERVER_HOST:-localhost}
 
 # Passkey / WebAuthn configuration is derived from the current network settings
@@ -3589,16 +3626,12 @@ check_dotnet_sdk() {
     print_info "Checking for .NET SDK..."
 
     if command -v dotnet &> /dev/null; then
-        DOTNET_VERSION=$(dotnet --version 2>/dev/null || echo "unknown")
-        print_success ".NET SDK found: $DOTNET_VERSION"
-
-        # Check if version meets minimum requirement (uses DOTNET_MAJOR_VERSION from config)
-        local major_ver="${DOTNET_MAJOR_VERSION%%.*}"  # Extract just the major number (e.g., "10")
-        if [[ "$DOTNET_VERSION" =~ ^${major_ver}\. ]] || [[ "$DOTNET_VERSION" =~ ^[1-9][0-9]+\. ]]; then
-            print_success ".NET SDK version is compatible"
+        DOTNET_VERSION=$(cd "$REPO_ROOT" && dotnet --version 2>/dev/null) || DOTNET_VERSION="unavailable"
+        if [[ "$DOTNET_VERSION" == "$DOTNET_SDK_VERSION" ]]; then
+            print_success ".NET SDK selected: $DOTNET_VERSION (global.json)"
         else
             print_warning ".NET SDK version $DOTNET_VERSION detected"
-            print_warning "PrintFarmer requires .NET $DOTNET_MAJOR_VERSION or later"
+            print_warning "Local builds require exactly SDK $DOTNET_SDK_VERSION from global.json"
             print_info "Docker builds will still work, but local development may have issues"
         fi
     else
@@ -3651,8 +3684,8 @@ install_dotnet_sdk() {
     chmod +x "$install_script"
     print_success "Installation script downloaded"
 
-    # Install .NET SDK (required version from container-versions.conf)
-    print_info "Installing .NET SDK $DOTNET_MAJOR_VERSION..."
+    # Install the exact SDK approved in global.json.
+    print_info "Installing .NET SDK $DOTNET_SDK_VERSION..."
     print_info "This may take a few minutes..."
 
     if [ "$OS" = "windows" ]; then
@@ -3664,8 +3697,8 @@ install_dotnet_sdk() {
     fi
 
     # Run installation script
-    if ./"$install_script" --channel "$DOTNET_MAJOR_VERSION" --install-dir "$HOME/.dotnet"; then
-        print_success ".NET SDK $DOTNET_MAJOR_VERSION installed successfully"
+    if ./"$install_script" --version "$DOTNET_SDK_VERSION" --install-dir "$HOME/.dotnet"; then
+        print_success ".NET SDK $DOTNET_SDK_VERSION installed successfully"
 
         # Add to PATH for current session
         export PATH="$HOME/.dotnet:$PATH"
@@ -3686,8 +3719,7 @@ install_dotnet_sdk() {
 
         # Verify installation
         if command -v dotnet &> /dev/null; then
-            DOTNET_VERSION=$(dotnet --version)
-            print_success "Verified: .NET SDK $DOTNET_VERSION is now available"
+            "$PYTHON_CMD" "$REPO_ROOT/scripts/dotnet-sdk.py" verify || return 1
         else
             print_warning "Installation completed but 'dotnet' command not found in PATH"
             print_info "You may need to start a new terminal session"
@@ -3918,6 +3950,7 @@ find_next_free_port() {
 # Validate configuration & enforce safe constraints (ports, scaling, numeric values)
 validate_configuration() {
     print_header "🧪 Validating Configuration"
+    validate_http_bind_address || return 1
 
     : "${ENABLE_DISTRIBUTED_SLICING:=false}"
     : "${ENABLE_ORCA_WORKER:=no}"
@@ -4220,7 +4253,7 @@ configure_networking() {
 
     echo
     echo -e "${BLUE}Configure external access:${NC}"
-    prompt_with_default "HTTP port for local-only web access:" "8080" "HTTP_PORT"
+    prompt_with_default "HTTP port for web access:" "8080" "HTTP_PORT"
 
     # Warn about port 80 requiring elevated privileges
     if [ "$HTTP_PORT" = "80" ] && [ "$OS" = "linux" ]; then
@@ -4228,7 +4261,7 @@ configure_networking() {
         print_info "If containers fail to start, consider using port 8080 or run with: sudo docker compose ..."
     fi
 
-    prompt_with_default "HTTPS port for secure LAN access (0 for local-only HTTP):" "8443" "HTTPS_PORT"
+    prompt_with_default "HTTPS port for secure web access (0 to disable):" "8443" "HTTPS_PORT"
 
     prompt_with_default "API port (for direct API access):" "5245" "API_PORT"
 }
@@ -4865,6 +4898,7 @@ generate_env_file() {
 
     # Set default env file if not already set
     ENV_FILE="${ENV_FILE:-.env}"
+    validate_http_bind_address || return 1
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
@@ -5085,7 +5119,7 @@ ORCASLICER_CONTAINER_DIGEST=$ORCASLICER_CONTAINER_DIGEST
 # If not set by config file, these defaults are used
 # Using Ubuntu 24.04 (Noble) with glibc 2.39 for AssimpNetter native library compatibility
 # Check for upgraded images and use them if available (appends -upgraded suffix)
-SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "${SDK_TAG:-10.0-noble}")
+SDK_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/sdk" "$SDK_TAG")
 ASPNET_TAG=$(resolve_image_tag "mcr.microsoft.com/dotnet/aspnet" "${ASPNET_TAG:-10.0-noble}")
 NODE_TAG=$(resolve_image_tag "node" "${NODE_TAG:-24-alpine}")
 NGINX_TAG=$(resolve_image_tag "nginx" "${NGINX_TAG:-alpine}")
@@ -5117,6 +5151,7 @@ PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
+BIND_ADDRESS=$BIND_ADDRESS
 # API_URL for health checks (used by ComprehensiveHealthCheck to probe internal endpoints)
 # This must be a valid loopback address that can be reached from within the container
 API_URL=http://localhost:5245
@@ -5428,7 +5463,6 @@ VITE_API_BASE_URL=/api
 
 # SignalR hub URL - relative path routes through Nginx
 VITE_SIGNALR_PRINTERS_URL=/hubs/printers
-VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 EOF
     print_success "React production environment configured: $react_dir/.env.production"
 }
@@ -6459,7 +6493,8 @@ check_nginx_proxy() {
         return 0
     fi
 
-    local proxy_host="localhost"
+    local proxy_host
+    proxy_host="$(http_probe_host)"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port/api/healthz"
     print_info "Verifying nginx proxy forwards /api to API: $proxy_url"
@@ -6469,16 +6504,16 @@ check_nginx_proxy() {
     local retries=${PROXY_VERIFY_RETRIES:-6}
     local interval=${PROXY_VERIFY_INTERVAL:-5}
     local attempt=1
+    local proxy_response
 
     while [ $attempt -le $retries ]; do
-        if curl -sf --max-time 3 "$proxy_url" >/tmp/_proxy_check 2>/dev/null; then
-            if grep -q '"status"' /tmp/_proxy_check || grep -q '^OK$' /tmp/_proxy_check; then
+        if proxy_response=$(curl -sf --max-time 3 "$proxy_url" 2>/dev/null); then
+            if [[ "$proxy_response" == *'"status"'* ]] || grep -q '^OK$' <<< "$proxy_response"; then
                 print_success "✓ nginx proxy appears to forward /api to API (HTTP ${proxy_port})"
-                rm -f /tmp/_proxy_check || true
                 return 0
             else
                 print_info "  Proxy returned non-JSON/OK response (attempt ${attempt}/${retries})"
-                sed -n '1,40p' /tmp/_proxy_check || true
+                printf '%s\n' "$proxy_response" | sed -n '1,40p'
             fi
         else
             print_info "  No response from proxy (attempt ${attempt}/${retries})"
@@ -7088,7 +7123,9 @@ verify_deployment() {
         return 0
     fi
 
-    local api_url="http://localhost:$HTTP_PORT"
+    local proxy_host
+    proxy_host="$(http_probe_host)"
+    local api_url="http://$proxy_host:$HTTP_PORT"
     if [ "$ARCHITECTURE" = "microservices" ]; then
         local direct_api_url="http://localhost:$API_PORT"
     fi
@@ -7264,8 +7301,6 @@ verify_deployment() {
         fi
     fi
 
-    # HTTP is loopback-only, regardless of the configured LAN/WebAuthn hostname.
-    local proxy_host="localhost"
     local proxy_port=${HTTP_PORT:-8080}
     local proxy_url="http://$proxy_host:$proxy_port"
 
@@ -7321,7 +7356,7 @@ verify_deployment() {
         run_api_diagnostics "🩺 API Health Diagnostics"
         print_warning "⚠️  Some health checks failed. Services may still be initializing."
         print_info "Wait a few moments and check manually:"
-        print_info "  • Health: curl http://localhost:$HTTP_PORT/health | jq"
+        print_info "  • Health: curl http://$proxy_host:$HTTP_PORT/health | jq"
         print_info "  • Logs:   docker compose --env-file $ENV_FILE logs -f"
         echo
         return 1
@@ -7380,22 +7415,44 @@ display_final_info() {
     fi
 
     echo -e "${GREEN}Access URLs:${NC}"
-    echo -e "${BLUE}  🌐 Local-only HTTP: http://localhost:$HTTP_PORT${NC}"
+    local http_bind_address="${BIND_ADDRESS:-0.0.0.0}"
+    if [ "${INSTALLER_LAB:-false}" = "true" ] && [ "${HTTP_ONLY:-false}" = "true" ]; then
+        http_bind_address="127.0.0.1"
+    fi
+    local http_local_only=false
+    local http_host="$http_bind_address"
+    case "$http_bind_address" in
+        127.*)
+            http_local_only=true
+            http_host="$(http_probe_host)"
+            echo -e "${BLUE}  🌐 Local-only HTTP: http://$http_host:$HTTP_PORT${NC}"
+            ;;
+        *)
+            if [ "$http_bind_address" = "0.0.0.0" ]; then
+                http_host="$SERVER_HOST"
+            fi
+            echo -e "${BLUE}  🌐 Web Interface (HTTP): http://$http_host:$HTTP_PORT${NC}"
+            ;;
+    esac
     echo -e "${BLUE}  🔑 Passkeys: ${WebAuthn__Origin}${NC}"
 
     if [ "$tls_enabled" = true ]; then
         echo -e "${BLUE}  🔒 Web Interface (LAN, HTTPS): https://$SERVER_HOST:$HTTPS_PORT${NC}"
         echo -e "${BLUE}  ❤️  Health Check (HTTPS): https://$SERVER_HOST:$HTTPS_PORT/healthz${NC}"
-        print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it. HTTP /install-ca is host-local."
+        print_info "For private-CA HTTPS, transfer only deploy/nginx/certs/ca.cer through a trusted channel and verify it before trusting it."
     else
-        print_warning "TLS is disabled: local-only HTTP on 127.0.0.1:$HTTP_PORT; no LAN access. Enable HTTPS with a valid certificate for LAN access."
+        if [ "$http_local_only" = true ]; then
+            print_warning "TLS is disabled: local-only HTTP on $http_bind_address:$HTTP_PORT; no LAN access."
+        else
+            print_warning "TLS is disabled: HTTP is available on $http_bind_address:$HTTP_PORT. Use HTTPS to protect credentials in transit."
+        fi
     fi
 
     if [ "$ARCHITECTURE" = "microservices" ]; then
         echo -e "${BLUE}  🔧 Direct API (local-only): http://localhost:$API_PORT${NC}"
     fi
 
-    echo -e "${BLUE}  ❤️  Health Check (local-only): http://localhost:$HTTP_PORT/healthz${NC}"
+    echo -e "${BLUE}  ❤️  Health Check (HTTP): http://$http_host:$HTTP_PORT/healthz${NC}"
 
     # Show pgAdmin URL if enabled
     if [ "$ENABLE_PGADMIN" = "true" ] && [ "$DRY_RUN" != "true" ]; then
@@ -7459,7 +7516,7 @@ display_final_info() {
             echo -e "${BLUE}  4. Rebuild and restart:${NC}"
             echo -e "     docker compose --env-file $ENV_FILE up -d --build api"
             echo -e "${BLUE}  5. Check health manually (wait 30s then):${NC}"
-            echo -e "     curl http://localhost:$HTTP_PORT/health | jq"
+            echo -e "     curl http://$(http_probe_host):$HTTP_PORT/health | jq"
         fi
 
         # Port 80 specific troubleshooting
@@ -7478,8 +7535,13 @@ display_final_info() {
             if [ "$tls_enabled" = true ]; then
                 echo -e "${BLUE}  • Ensure firewall allows HTTPS port $HTTPS_PORT for intended clients${NC}"
             fi
-            echo -e "${BLUE}  • HTTP port $HTTP_PORT and direct API port $API_PORT are local-only; opening firewall ports does not enable LAN access${NC}"
-            echo -e "${BLUE}  • Test from server: curl http://localhost:$HTTP_PORT/healthz${NC}"
+            if [ "$http_local_only" = false ]; then
+                echo -e "${BLUE}  • Ensure firewall allows HTTP port $HTTP_PORT for intended clients; HTTPS is recommended${NC}"
+            else
+                echo -e "${BLUE}  • HTTP port $HTTP_PORT is local-only; opening firewall ports does not enable LAN access${NC}"
+            fi
+            echo -e "${BLUE}  • Direct API port $API_PORT is local-only${NC}"
+            echo -e "${BLUE}  • Test from server: curl http://$(http_probe_host):$HTTP_PORT/healthz${NC}"
             echo -e "${BLUE}  • Check Docker networks: docker network ls${NC}"
         fi
         echo

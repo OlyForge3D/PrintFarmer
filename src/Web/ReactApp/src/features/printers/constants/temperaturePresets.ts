@@ -1,4 +1,5 @@
-import type { TempTargets } from '@/types/api';
+import type { PrinterCapabilitiesDto, PrinterSensor, TempTargets } from '@/types/api';
+import { primaryHeaterLimits } from '@/features/printers/utils/additionalPrinterSensors';
 
 export interface MaterialTemperaturePreset {
   label: string;
@@ -6,6 +7,11 @@ export interface MaterialTemperaturePreset {
   hotend: number;
   bed: number;
 }
+
+export const HEATER_LABELS = {
+  hotend: 'Extruder',
+  bed: 'Heater Bed',
+} as const;
 
 export const materialPresets: MaterialTemperaturePreset[] = [
   { label: 'ABS', value: 'ABS', hotend: 250, bed: 100 },
@@ -38,8 +44,27 @@ export function getPresetTargets(preset: string): TempTargets | null {
   return { hotend: match.hotend, bed: match.bed };
 }
 
-/** Default minimum hotend temperature (°C) for extrusion when material is unknown. Matches PLA. */
-export const DEFAULT_EXTRUDE_MIN_TEMP = 210;
+export function temperatureTargetLimitError(
+  targets: Partial<TempTargets>,
+  sensors: PrinterSensor[] | undefined,
+  capabilities: Pick<PrinterCapabilitiesDto, 'maxHotendTemp' | 'maxBedTemp'> | undefined,
+  activeExtruderId?: string | null,
+): string | undefined {
+  for (const [heater, label, persistedMax] of [
+    ['hotend', HEATER_LABELS.hotend, capabilities?.maxHotendTemp],
+    ['bed', HEATER_LABELS.bed, capabilities?.maxBedTemp],
+  ] as const) {
+    const target = targets[heater];
+    const { min, max, allowZero } = primaryHeaterLimits(sensors, heater, persistedMax, activeExtruderId);
+    if (target !== undefined && !(allowZero && target === 0) && target < min) {
+      return `${label} target ${target}°C is below minimum ${min}°C. Nothing sent.`;
+    }
+    if (target !== undefined && max !== undefined && target > max) {
+      return `${label} target ${target}°C exceeds maximum ${max}°C. Nothing sent.`;
+    }
+  }
+  return undefined;
+}
 
 /** Selectable extrusion distances in mm. */
 export const EXTRUDE_DISTANCE_OPTIONS = [10, 25, 50, 100] as const;
@@ -52,15 +77,3 @@ export const EXTRUDE_SPEED_OPTIONS = [1, 5, 10] as const;
 
 /** Default extrusion speed in mm/s. */
 export const DEFAULT_EXTRUDE_SPEED_MMS = 5;
-
-/**
- * Returns the minimum hotend temperature required before extruding for a given material.
- * Falls back to DEFAULT_EXTRUDE_MIN_TEMP (210 °C / PLA) when the material is unknown.
- */
-export function getExtrudeMinTemp(material?: string): number {
-  if (material) {
-    const targets = getPresetTargets(material);
-    if (targets && targets.hotend > 0) return targets.hotend;
-  }
-  return DEFAULT_EXTRUDE_MIN_TEMP;
-}

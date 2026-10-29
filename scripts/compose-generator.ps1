@@ -83,6 +83,8 @@ if ($Help) {
 
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptDir 'dotnet-sdk.ps1')
+$SdkTag = Get-ApprovedDotnetSdkTag
 $DockerDir = $ScriptDir
 $TemplatesDir = Join-Path $DockerDir "docker" "compose-templates"
 $OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
@@ -148,7 +150,7 @@ try {
     $BaseContent = Get-Content -Path $BaseTemplate -Raw
     
     # Combine: common first (for anchors), then base content
-    $CombinedContent = $CommonContent + "`n" + $BaseContent
+    $CombinedContent = ($CommonContent + "`n" + $BaseContent).Replace('${SDK_TAG}', $SdkTag)
     
     # CRITICAL: Convert relative volume mount paths to absolute paths for Windows Docker compatibility
     # Docker on Windows needs absolute paths for volume mounts or they won't resolve correctly

@@ -42,7 +42,7 @@ export function getPrinterSupport(
 ): PrinterSupport {
   return {
     supportsControlOperations: backendCapabilities?.supportsControlOperations ?? defaults?.supportsControlOperations ?? true,
-    supportsMovement: backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? true,
+    supportsMovement: backendCapabilities?.supportsRelativeMovement ?? backendCapabilities?.supportsMovement ?? defaults?.supportsMovement ?? true,
     supportsTemperatureControl: backendCapabilities?.supportsTemperatureControl ?? defaults?.supportsTemperatureControl ?? true,
     supportsHistory: backendCapabilities?.supportsHistory ?? defaults?.supportsHistory ?? true,
     supportsFileList: backendCapabilities?.supportsFileList ?? defaults?.supportsFileList ?? true,
@@ -105,9 +105,9 @@ export function canSetTemperatures(args: { isOnline: boolean; isEnabled?: boolea
   return isEnabled && args.isOnline && args.support.supportsTemperatureControl;
 }
 
-export function canCooldown(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; support: PrinterSupport }): boolean {
+export function canCooldown(args: { isOnline: boolean; isEnabled?: boolean; isPrinting: boolean; supportsHeaterShutdown?: boolean; support: PrinterSupport }): boolean {
   const isEnabled = args.isEnabled ?? true;
-  return isEnabled && args.isOnline && args.support.supportsTemperatureControl && !args.isPrinting;
+  return isEnabled && args.isOnline && args.support.supportsTemperatureControl && (!args.isPrinting || args.supportsHeaterShutdown === true);
 }
 
 export function canOpenFiles(args: { isOnline: boolean; isEnabled?: boolean; support: PrinterSupport }): boolean {

@@ -59,7 +59,6 @@ struct PrinterDetailView: View {
     @State private var showsEjectConfirmation = false
     @State private var showsFilamentLoadConfirmation = false
     @State private var showsFilamentUnloadConfirmation = false
-    @State private var showsSafetyChecks = false
     @State private var printPreviewImage: UIImage?
     @State private var printPreviewPath: String?
     @State private var directSnapshotLoadFailedFor: UUID?
@@ -70,6 +69,7 @@ struct PrinterDetailView: View {
     // The command owner outlives page visibility and access changes.
     @State private var controlsViewModel: PrinterControlsViewModel?
     @State private var controlsComposition: PrinterControlsComposition?
+    @State private var cameraReloadToken = 0
     @State private var safetyObservationTask: Task<Void, Never>?
     @State private var safetyObservationPanel: PrinterDetailPanel?
 
@@ -114,12 +114,6 @@ struct PrinterDetailView: View {
                 emergencyStopFillsAvailableWidth: fillsWidth,
                 onSelect: { kind in handleRunAction(kind) }
             )
-            if !printer.isOnline {
-                Text("Printer offline. Use the physical safety switch if needed.")
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .frame(maxWidth: .infinity, alignment: fillsWidth ? .center : .trailing)
         .padding(.horizontal)
@@ -133,10 +127,6 @@ struct PrinterDetailView: View {
             scenePhase: scenePhase,
             selectedPanel: selectedPanel
         )
-    }
-
-    private var statusHeroHeight: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 180 : 156
     }
 
     init(printerId: UUID) {
@@ -343,11 +333,8 @@ struct PrinterDetailView: View {
 
             Spacer(minLength: 12)
 
-            if let baseURL = serverRegistry.activeServer?.baseURL {
-                Link(
-                    destination: baseURL.appendingPathComponent("printers")
-                        .appendingPathComponent(printerId.uuidString.lowercased())
-                ) {
+            if let nativeWebURL = viewModel.nativeWebURL {
+                Link(destination: nativeWebURL) {
                     Text("Open in web ↗")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextSecondary)
@@ -356,6 +343,7 @@ struct PrinterDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("printer.detail.web")
+                .accessibilityHint("Opens the printer's native web interface.")
             }
         }
         .padding(.horizontal, 16)
@@ -377,6 +365,12 @@ struct PrinterDetailView: View {
                     hasCache: true
                 )
             }
+            if viewModel.isCachedRefreshFailed {
+                PrinterDetailStaleRefreshBanner {
+                    let task = Task { await viewModel.loadPrinter() }
+                    activeTasks.append(task)
+                }
+            }
             Group {
                 if let printer = viewModel.printer {
                     printerContent(printer)
@@ -397,12 +391,26 @@ struct PrinterDetailView: View {
                 }
             }
         }
+        // Replays parked deep-link intents whenever the printer becomes
+        // confirmed: cached→canonical, or error→Retry success (#3528 B02/B06).
+        .onChange(of: viewModel.printer != nil && !viewModel.isShowingCachedPrinter) { _, isConfirmed in
+            guard isConfirmed else { return }
+            let task = Task { await consumePendingRouterIntents() }
+            activeTasks.append(task)
+        }
     }
 
     private func configureDetail() async {
         let generation = services.activeServerGeneration
         await services.awaitActiveServerSettled()
-        guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
+        // #3507: render the settled server's last-known printer immediately.
+        if let cached = services.printerSummaryCache.printer(id: printerId, generation: generation) {
+            viewModel.seedCachedPrinter(cached)
+        }
 
         let composition = services.printerControlsComposition
         controlsComposition = composition
@@ -421,7 +429,12 @@ struct PrinterDetailView: View {
             jobService: services.jobService,
             maintenanceService: services.maintenanceService
         )
+        viewModel.configureAutoDispatch(services.autoPrintService)
         await viewModel.loadPrinter()
+        guard !Task.isCancelled, services.activeServerGeneration == generation else {
+            viewModel.clearCachedPrinter()
+            return
+        }
         if let printer = viewModel.printer {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
@@ -435,10 +448,21 @@ struct PrinterDetailView: View {
             await viewModel.loadFilamentCommandCapabilities()
         }
         viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
+        await consumePendingRouterIntents()
+    }
 
+    /// Deep-link intents stay parked on the router until the printer is
+    /// confirmed; the confirmation transition replays them (#3528 B02/B06).
+    private func consumePendingRouterIntents() async {
+        guard !viewModel.isShowingCachedPrinter, viewModel.printer != nil else { return }
         if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
-            await viewModel.prepareReadyConfirmation()
+            // Clear before awaiting so a concurrent replay cannot stage twice;
+            // restore it if preparation could not be staged.
             router.pendingNFCReadyPrinterId = nil
+            let staged = await viewModel.prepareReadyConfirmation()
+            if !staged, router.pendingNFCReadyPrinterId == nil {
+                router.pendingNFCReadyPrinterId = pendingId
+            }
         }
         if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
             router.pendingFilamentSwap = nil
@@ -546,7 +570,7 @@ struct PrinterDetailView: View {
         PrinterDetailFilamentActionMapping.actions(
             printerID: printer.id,
             hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
-            isPerformingAction: viewModel.isPerformingAction,
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             nfcAvailable: services.nfcService?.isAvailable ?? false,
             isOnline: printer.isOnline,
             printerState: printer.state
@@ -587,7 +611,7 @@ struct PrinterDetailView: View {
 
     private func physicalFilamentCommandBlockedReason(load: Bool) -> String? {
         guard canStartPrinterCommand else {
-            return "Queue.Start permission is required to use physical filament controls."
+            return "Requires Queue.Start permission."
         }
         return viewModel.physicalFilamentCommandBlockedReason(for: load ? .load : .unload)
     }
@@ -602,14 +626,12 @@ struct PrinterDetailView: View {
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.detail.filament.extruder.heading")
                 Spacer(minLength: 8)
-                if viewModel.isActivelyPrinting {
-                    Text("Unavailable while printing")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .accessibilityIdentifier("printer.detail.filament.printingLockout")
-                }
             }
-            HStack(spacing: 12) {
+            // Stacks at accessibility sizes so neither label truncates.
+            let buttonLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 12))
+            buttonLayout {
                 Button {
                     showsFilamentLoadConfirmation = true
                 } label: {
@@ -634,12 +656,6 @@ struct PrinterDetailView: View {
                 .accessibilityHint(unloadReason ?? "Requests a physical filament unload without changing its assignment.")
                 .accessibilityIdentifier("printer.detail.filament.unload")
             }
-
-            if !viewModel.isActivelyPrinting, let reason = loadReason ?? unloadReason {
-                Text(reason)
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
         }
         .padding(.top, 4)
         .accessibilityElement(children: .contain)
@@ -648,10 +664,8 @@ struct PrinterDetailView: View {
 
     @MainActor
     private func dispatchPhysicalFilamentCommand(load: Bool) {
-        if let reason = physicalFilamentCommandBlockedReason(load: load) {
-            viewModel.actionError = reason
-            return
-        }
+        // Gated silently; the disabled button is the only signal (#3548).
+        guard physicalFilamentCommandBlockedReason(load: load) == nil else { return }
         UIImpactFeedbackGenerator(style: load ? .medium : .heavy).impactOccurred()
         let task = Task {
             if load {
@@ -666,13 +680,14 @@ struct PrinterDetailView: View {
     // MARK: - Main Content
 
     private func controlsAvailable(for printer: Printer) -> Bool {
-        AdvancedPrinterControlsAccess.isEntryVisible(
-            isEnabled: serverRegistry.advancedPrinterControlsEnabled,
-            for: printer
+        PrinterControlsAccess.isEntryVisible(
+            for: printer,
+            hasControlsOwner: controlsViewModel?.printer.id == printer.id
         )
     }
 
-    /// A read-only/offline visit never fetches setup capabilities. Once built,
+    /// An offline visit fetches setup capabilities only for Moonraker printers,
+    /// which always build the owner for durable motion (#2678). Once built,
     /// retain the owner through tab, connectivity and preference transitions.
     @MainActor
     private func ensureControlsOwnerIfAvailable(for printer: Printer) async {
@@ -683,7 +698,8 @@ struct PrinterDetailView: View {
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
-                || (printer.backend == .moonraker && serverRegistry.advancedPrinterControlsEnabled)
+                || printer.backend == .moonraker,
+            isPrinterConfirmed: !viewModel.isShowingCachedPrinter
         ) else { return }
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
@@ -747,6 +763,7 @@ struct PrinterDetailView: View {
             filament: { filamentPage(printer) },
             queue: {
                 ScrollView { queueSection(printer).padding().padding(.bottom, 32) }
+                    .background(Color.pfBackground)
             }
         )
         // Construction remains authorization-gated even though both pages exist.
@@ -754,6 +771,11 @@ struct PrinterDetailView: View {
             await ensureControlsOwnerIfAvailable(for: printer)
         }
         .onChange(of: controlsComposition?.identity) { _, _ in
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            activeTasks.append(task)
+        }
+        .onChange(of: viewModel.isShowingCachedPrinter) { _, isCached in
+            guard !isCached else { return }
             let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
             activeTasks.append(task)
         }
@@ -785,12 +807,13 @@ struct PrinterDetailView: View {
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    cameraSection(printer)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    cameraSection(
+                        printer,
+                        maxMediaHeight: PrinterDetailCameraLayout.maximumHeight(containerHeight: geometry.size.height)
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 8) {
                         currentJobBlock(printer)
-                        temperatureSection(printer)
-                        PrinterSensorsReadout(sensors: printer.sensors)
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(
@@ -803,6 +826,7 @@ struct PrinterDetailView: View {
                 .accessibilityIdentifier("printer.detail.status.content")
             }
             .accessibilityIdentifier("printer.detail.status.scroll")
+            .background(Color.pfBackground)
         }
     }
 
@@ -813,7 +837,8 @@ struct PrinterDetailView: View {
             onAction: { handleFilamentAction($0) },
             showsAllActions: true,
             spoolDetailsByID: spoolLookup.spoolsByID,
-            spoolLookupMessage: spoolLookup.statusMessage
+            spoolLookupMessage: spoolLookup.statusMessage,
+            isSpoolLookupPending: spoolLookup.isAwaitingResult
         )
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -824,6 +849,7 @@ struct PrinterDetailView: View {
             .padding()
             .padding(.bottom, 32)
         }
+        .background(Color.pfBackground)
     }
 
     /// Observe the persistent owner, never construct one inside a pager child.
@@ -831,37 +857,19 @@ struct PrinterDetailView: View {
     private func controlsPage(_ printer: Printer) -> some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
                     if !controlsAvailable(for: printer) {
-                        controlsUnavailable(printer)
+                        PrinterDetailControlsUnavailable()
                     } else if let controlsViewModel {
-                        PrinterSetupControlsContent(
-                            printer: printer,
-                            viewModel: controlsViewModel,
-                            usesColumns: PrinterDetailLayout.usesColumns(
-                                width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
-                            ),
-                            showsMaterial: false,
-                            showsRuntimeAdjustments: true,
-                            usesHeaterSteppers: true,
-                            isPrinterDetailControl: true
-                        )
-                        DisclosureGroup(isExpanded: safetyChecksExpanded) {
+                        PrinterInstrumentPanelControls(printer: printer, viewModel: controlsViewModel)
+                        if controlsViewModel.safetyReadError != nil {
                             safetyRefresh(controlsViewModel)
-                        } label: {
-                            Label("Safety checks", systemImage: "checkmark.shield")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color.pfTextPrimary)
-                                .frame(minHeight: 44, alignment: .leading)
+                                .padding(12)
+                                .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .padding(.horizontal, 12)
-                        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("printer.detail.safety.disclosure")
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
-                        Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
-                            .font(.footnote)
+                        reconnectToControl()
                     } else {
                         ProgressView("Loading controls...")
                     }
@@ -871,45 +879,30 @@ struct PrinterDetailView: View {
                     width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                 ) ? 24 : 16)
                 .padding(.top, 16)
-                .padding(.bottom, 22)
+                // Keeps the last control above the Emergency Stop inset.
+                .padding(.bottom, 22 + PrinterDetailLayout.emergencyStopClearance)
             }
-            .background(Color.pfBackgroundTertiary)
+            .background(Color.pfBackground)
         }
     }
 
-    private func controlsUnavailable(_ printer: Printer) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "lock.fill")
-                .foregroundStyle(Color.pfTextSecondary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Controls unavailable")
-                    .font(.subheadline.weight(.semibold))
-                if !printer.isOnline {
-                    Text("Reconnect to use setup controls.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                } else if !serverRegistry.advancedPrinterControlsEnabled {
-                    HStack(spacing: 4) {
-                        Text("Printer controls are off.")
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
-                        NavigationLink(value: AppDestination.settings) {
-                            Text("Settings")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .accessibilityIdentifier("printer.detail.control.settings")
-                    }
-                } else {
-                    Text("Setup controls are unavailable for this printer.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                }
+    /// Short empty state when the server connection has not settled.
+    private func reconnectToControl() -> some View {
+        VStack(spacing: 12) {
+            Text("Reconnect to control")
+                .font(.subheadline.weight(.semibold))
+            Button("Reconnect") {
+                let task = Task { await configureDetail() }
+                activeTasks.append(task)
             }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("printer.detail.control.reconnect")
         }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("printer.detail.control.unavailable")
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.detail.control.reconnectState")
     }
 
     private func safetyRefresh(_ owner: PrinterControlsViewModel) -> some View {
@@ -917,16 +910,6 @@ struct PrinterDetailView: View {
             let task = Task { await owner.refreshSafetyEvidence() }
             activeTasks.append(task)
         }
-    }
-
-    private var safetyChecksExpanded: Binding<Bool> {
-        Binding(
-            get: {
-                showsSafetyChecks
-                    || controlsViewModel?.safetyReadError != nil
-            },
-            set: { if controlsViewModel?.safetyReadError == nil { showsSafetyChecks = $0 } }
-        )
     }
 
     /// Eject clears assignment and requests physical unload; Unassign only
@@ -937,17 +920,14 @@ struct PrinterDetailView: View {
             PrinterDetailBorderedDestructiveButton(kind: .eject) {
                 showsEjectConfirmation = true
             }
-            .disabled(viewModel.isPerformingAction)
+            .disabled(!viewModel.canEjectFilament)
             .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
+            .accessibilityHint(viewModel.canEjectFilament ? "" : "Available when the printer is online and idle.")
             .accessibilityIdentifier("printer.detail.filament.ejectFilament")
             .confirmationDialog("Eject filament?", isPresented: $showsEjectConfirmation, titleVisibility: .visible) {
                 Button("Eject", role: .destructive) {
-                    guard viewModel.printer?.isOnline == true, !viewModel.isActivelyPrinting else {
-                        viewModel.actionError = "The printer must be online and idle to eject filament."
-                        return
-                    }
+                    guard let task = viewModel.confirmEjectFilament() else { return }
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    let task = Task { await viewModel.ejectFilament() }
                     activeTasks.append(task)
                 }
                 Button("Cancel", role: .cancel) {}
@@ -964,7 +944,9 @@ struct PrinterDetailView: View {
             isOnline: printer.isOnline,
             isPrinting: viewModel.isPrinting,
             isPaused: viewModel.isPaused,
-            isPerformingAction: viewModel.isPerformingAction,
+            // #3507: run actions wait for canonical data; Emergency Stop
+            // ignores this input and stays available.
+            isPerformingAction: viewModel.isPerformingAction || viewModel.isShowingCachedPrinter,
             pendingKinds: viewModel.pendingRunActionKinds
         )
     }
@@ -998,26 +980,36 @@ struct PrinterDetailView: View {
     private func currentJobBlock(_ printer: Printer) -> some View {
         let jobName = printer.fileName ?? printer.jobName ?? viewModel.currentJob?.jobName
         VStack(alignment: .leading, spacing: 8) {
-            if viewModel.isActivelyPrinting || jobName != nil {
+            if viewModel.showsCurrentJob {
                 currentJobHeading(printer, jobName: jobName)
 
-                if let progress = printer.progress, progress.isFinite {
-                    PrintProgressBar(progress: min(max(progress, 0), 1), height: 6)
+                // Progress (bar here, percent in the heading) shows only while
+                // actively printing; an idle job shows neither.
+                if viewModel.isActivelyPrinting, let progress = printer.progress, progress.isFinite {
+                    PrintProgressBar(progress: min(max(progress, 0), 1), showLabel: false, height: 6)
                         .accessibilityIdentifier("printer.detail.job.progress")
                 }
 
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
+                            layerFact(printer)
                         }
                     } else {
                         HStack(alignment: .top, spacing: 8) {
-                            statusFact("Left", value: viewModel.formattedTimeRemaining ?? "Unknown")
-                            statusFact("Done at", value: viewModel.formattedEtaClock ?? "Unknown")
-                            statusFact("Layer", value: viewModel.layerLabel(for: printer))
+                            if let remaining = viewModel.formattedTimeRemaining {
+                                statusFact("Left", value: remaining)
+                            }
+                            if let eta = viewModel.formattedEtaClock {
+                                statusFact("Done at", value: eta)
+                            }
+                            layerFact(printer)
                         }
                     }
                 }
@@ -1026,19 +1018,27 @@ struct PrinterDetailView: View {
                 Text("No active print")
                     .font(.subheadline)
                     .foregroundStyle(Color.pfTextSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
+                    .accessibilityIdentifier("printer.detail.job.empty")
             }
             PrinterRunActionBar(
                 presentation: statusActions(for: printer),
                 onSelect: { kind in handleRunAction(kind) }
             )
+            // Labels never outgrow the job headline, which caps at xxxLarge.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
-        .padding(.horizontal, 2)
         .accessibilityIdentifier("printer.detail.job")
     }
 
     @ViewBuilder
     private func currentJobHeading(_ printer: Printer, jobName: String?) -> some View {
-        let progress = printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+        let progress = viewModel.isActivelyPrinting
+            ? printer.progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+            : nil
         let progressLabel = progress.map {
             "Print progress \(Int(($0 * 100).rounded())) percent"
         }
@@ -1082,7 +1082,16 @@ struct PrinterDetailView: View {
         )
     }
 
-    private func statusFact(_ title: String, value: String) -> some View {
+    /// Omitted when the printer reports no layer data, instead of a "--" cell.
+    @ViewBuilder
+    private func layerFact(_ printer: Printer) -> some View {
+        let layer = viewModel.layerLabel(for: printer)
+        if layer != PrinterDetailViewModel.missingValuePlaceholder {
+            statusFact("Layer", value: layer)
+        }
+    }
+
+    private func statusFact(_ title: String, value: String, spokenValue: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
@@ -1092,6 +1101,7 @@ struct PrinterDetailView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .accessibilityLabel(spokenValue ?? value)
         }
         .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1131,13 +1141,6 @@ struct PrinterDetailView: View {
                 if !following.isEmpty {
                     queueSectionHeader("Then", count: following.count)
                     ForEach(following) { job in compactQueueRow(job) }
-                }
-                if !queued.isEmpty {
-                    Text("Reorder in the Queue tab.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .padding(.horizontal, 4)
-                        .accessibilityIdentifier("printer.detail.queue.reorderNote")
                 }
             }
         }
@@ -1253,6 +1256,7 @@ struct PrinterDetailView: View {
             .tint(Color.pfSuccess)
             .disabled(!printer.isOnline || !viewModel.isIdle
                       || viewModel.isDispatching || viewModel.isPerformingAction
+                      || viewModel.isShowingCachedPrinter
                       || job.job.rowVersion?.isEmpty != false)
             .disabled(!(authViewModel.currentUser?.permissions.contains("queue:start") == true
                         || authViewModel.currentUser?.roles.contains("farm_admin") == true))
@@ -1294,117 +1298,106 @@ struct PrinterDetailView: View {
         .operatorCard()
     }
 
-    // MARK: - Temperatures
-
-    private func temperatureSection(_ printer: Printer) -> some View {
-        // Prefer printer temps (from CompletePrinterDto), fall back to statusDetail
-        // (from /status endpoint). PrusaLink's PrinterDto omits temps but /status has them.
-        let hotend = printer.hotendTemp ?? viewModel.statusDetail?.hotendTemp
-        let hotendTgt = printer.hotendTarget ?? viewModel.statusDetail?.hotendTarget
-        let bed = printer.bedTemp ?? viewModel.statusDetail?.bedTemp
-        let bedTgt = printer.bedTarget ?? viewModel.statusDetail?.bedTarget
-
-        return PrinterDetailTemperatureStrip(
-            hotend: .init(measured: hotend, target: hotendTgt, isOnline: printer.isOnline),
-            bed: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline),
-            compact: true
-        )
-    }
-
     // MARK: - Camera Snapshot
 
-    private func cameraSection(_ printer: Printer) -> some View {
+    private func cameraSection(_ printer: Printer, maxMediaHeight: CGFloat) -> some View {
         let hasCamera = hasUsableCamera(for: printer)
         let previewPath = viewModel.currentJobThumbnailUrl
         let previewRequest = "\(printer.id.uuidString)|\(printer.state ?? "")|\(previewPath ?? "")|\(hasCamera)"
-        return ZStack(alignment: .top) {
-            Group {
-                if !hasCamera {
-                    if let printPreviewImage, printPreviewPath == previewPath {
-                        Image(uiImage: printPreviewImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .accessibilityLabel("Current print preview")
-                    } else {
-                        noCameraPlaceholder()
-                    }
-                } else {
-                    cameraPreview(printer)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        let previewImage = !hasCamera && printPreviewPath == previewPath ? printPreviewImage : nil
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Camera")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
-                if viewModel.canShowLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
-                    Text(viewModel.showLivestream && viewModel.canShowLivestream ? "LIVE" : "SNAPSHOT")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(viewModel.showLivestream && viewModel.canShowLivestream ? .white : Color.pfTextSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            viewModel.showLivestream && viewModel.canShowLivestream ? Color.red : Color.pfBorder,
-                            in: Capsule()
-                        )
-                }
+                Text(previewImage != nil ? "Print preview" : "Camera")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("printer.detail.camera.title")
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                if viewModel.canShowLivestream {
-                    Button {
-                        withAnimation { viewModel.showLivestream.toggle() }
-                    } label: {
-                        Image(systemName: viewModel.showLivestream ? "photo" : "video.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
-                    .accessibilityIdentifier("printer.detail.camera.livetoggle")
+                if !hasCamera, previewImage == nil {
+                    // Collapsed: no empty media card when there is nothing to show.
+                    Text("No camera available")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .padding(.trailing, 8)
+                        .accessibilityIdentifier("printer.detail.camera.unavailable")
                 }
 
                 if viewModel.cameraPreviewMode != .unsupported,
-                   viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil || viewModel.cameraPreviewMode == .snapshotPolling {
+                   viewModel.snapshotData != nil || printer.cameraSnapshotUrl != nil
+                    || viewModel.cameraPreviewMode == .snapshotPolling
+                    || (viewModel.showLivestream && viewModel.canShowLivestream) {
                     Button {
                         viewModel.rotateCameraView()
                     } label: {
                         Image(systemName: "rotate.right")
                             .font(.subheadline.weight(.semibold))
                             .frame(width: 44, height: 44)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Rotate camera view")
-                    
-                    if !viewModel.showLivestream || viewModel.cameraPreviewMode == .snapshotPolling {
-                        Button {
+                    .accessibilityIdentifier("printer.detail.camera.rotate")
+
+                    // Same header in every mode: live refresh reconnects the stream.
+                    let refreshesStream = viewModel.showLivestream && viewModel.canShowLivestream
+                        && viewModel.cameraPreviewMode != .snapshotPolling
+                    Button {
+                        if refreshesStream {
+                            cameraReloadToken += 1
+                        } else {
                             let task = Task { _ = await viewModel.refreshSnapshot() }
                             activeTasks.append(task)
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(width: 44, height: 44)
-                                .background(.ultraThinMaterial, in: Circle())
                         }
-                        .disabled(viewModel.isLoadingSnapshot)
-                        .accessibilityLabel("Refresh camera snapshot")
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .disabled(!refreshesStream && viewModel.isLoadingSnapshot)
+                    .accessibilityLabel(refreshesStream ? "Reconnect camera stream" : "Refresh camera snapshot")
+                    .accessibilityIdentifier("printer.detail.camera.refresh")
                 }
             }
-            .padding(8)
+            .frame(minHeight: 44)
+            .padding(.leading, 12)
+            .padding(.trailing, 4)
             .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.detail.camera.header")
+
+            if !hasCamera {
+                if let previewImage {
+                    Image(uiImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(
+                            aspect: PrinterDetailCameraLayout.aspectRatio(imageSize: previewImage.size, rotation: 0),
+                            maxHeight: maxMediaHeight
+                        ))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("Current print preview")
+                        .accessibilityIdentifier("printer.detail.camera.media")
+                }
+            } else {
+                cameraPreview(printer, maxMediaHeight: maxMediaHeight)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("printer.detail.camera.media")
+                    .overlay(alignment: .bottomTrailing) { cameraModeToggle() }
+            }
         }
-        .frame(height: statusHeroHeight)
-        .clipped()
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            previewImage.flatMap(PrinterDetailCameraLayout.surfaceColor(of:)).map(Color.init(uiColor:)) ?? Color.pfCard,
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.pfBorder, lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.hero")
         .task(id: previewRequest) {
             await loadPrintPreview(printer: printer, path: previewPath, hasCamera: hasCamera)
@@ -1415,14 +1408,35 @@ struct PrinterDetailView: View {
         }
     }
 
+    /// Live/snapshot switch sits on the media so the header stays identical in every mode.
+    @ViewBuilder
+    private func cameraModeToggle() -> some View {
+        if viewModel.canShowLivestream {
+            Button {
+                withAnimation { viewModel.showLivestream.toggle() }
+            } label: {
+                Image(systemName: viewModel.showLivestream ? "photo" : "video.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .contentShape(Circle())
+            }
+            .padding(8)
+            .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
+            .accessibilityLabel(viewModel.showLivestream ? "Switch to snapshot" : "Switch to livestream")
+            .accessibilityIdentifier("printer.detail.camera.livetoggle")
+        }
+    }
+
     private func hasUsableCamera(for printer: Printer) -> Bool {
         if viewModel.snapshotData != nil { return true }
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
-            return viewModel.showLivestream
-                ? resolvedCameraURL(printer.cameraStreamUrl) != nil
-                    || CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
-                : CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
+            // A stream-only camera stays mounted in snapshot mode so the
+            // live/snapshot toggle on the media remains reachable.
+            let streamReachable = (viewModel.showLivestream || viewModel.canShowLivestream)
+                && resolvedCameraURL(printer.cameraStreamUrl) != nil
+            return streamReachable || CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl)
         case .snapshotPolling, .directSnapshot:
             return viewModel.cameraPreviewMode == .snapshotPolling
                 ? printer.isOnline
@@ -1461,7 +1475,7 @@ struct PrinterDetailView: View {
     }
 
     @ViewBuilder
-    private func cameraPreview(_ printer: Printer) -> some View {
+    private func cameraPreview(_ printer: Printer, maxMediaHeight: CGFloat) -> some View {
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
             #if canImport(UIKit)
@@ -1481,20 +1495,30 @@ struct PrinterDetailView: View {
                 MJPEGStreamContainer(
                     url: streamUrl,
                     rotation: viewModel.cameraRotation,
+                    maxHeight: maxMediaHeight,
                     credentials: { [apiClient = services.apiClient] in
                         await apiClient?.currentCameraCredentials()
                     }
                 )
+                .id(cameraReloadToken)
+            } else if printer.cameraAccessMode == .streamOnly,
+                      viewModel.canShowLivestream,
+                      !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
             } else if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
                 noCameraPlaceholder()
             }
             #else
-            if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+            if printer.cameraAccessMode == .streamOnly,
+               viewModel.canShowLivestream,
+               !viewModel.showLivestream {
+                streamOnlySnapshotPreview(printer: printer, maxMediaHeight: maxMediaHeight)
+            } else if let data = viewModel.snapshotData {
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
@@ -1503,7 +1527,7 @@ struct PrinterDetailView: View {
             #endif
         case .snapshotPolling:
             if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if viewModel.isLoadingSnapshot {
                 loadingSnapshotPlaceholder()
             } else {
@@ -1511,7 +1535,7 @@ struct PrinterDetailView: View {
             }
         case .directSnapshot:
             if let data = viewModel.snapshotData {
-                snapshotImage(from: data)
+                snapshotImage(from: data, maxHeight: maxMediaHeight)
             } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
                 authenticatedSnapshotImage(printerId: printer.id)
             } else {
@@ -1524,22 +1548,52 @@ struct PrinterDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func streamOnlySnapshotPreview(printer: Printer, maxMediaHeight: CGFloat) -> some View {
+        if let data = viewModel.snapshotData {
+            snapshotImage(from: data, maxHeight: maxMediaHeight)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else if CameraURLResolver.isSnapshotReference(printer.cameraSnapshotUrl) {
+            authenticatedSnapshotImage(printerId: printer.id)
+                .overlay(alignment: .bottomLeading) { liveViewPausedBadge() }
+        } else {
+            liveViewPausedPlaceholder()
+        }
+    }
+
     #if canImport(UIKit)
-    private func snapshotImage(from data: Data) -> some View {
+    private func snapshotImage(from data: Data, maxHeight: CGFloat) -> some View {
         Group {
             if let uiImage = UIImage(data: data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .rotationEffect(.degrees(Double(viewModel.cameraRotation)))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                let rotation = viewModel.cameraRotation
+                let quarterTurn = PrinterDetailCameraLayout.isQuarterTurn(rotation)
+                let aspect = PrinterDetailCameraLayout.aspectRatio(imageSize: uiImage.size, rotation: rotation)
+                Color.clear
+                    .aspectRatio(aspect, contentMode: .fit)
+                    .frame(maxWidth: PrinterDetailCameraLayout.maximumWidth(aspect: aspect, maxHeight: maxHeight))
+                    .overlay {
+                        GeometryReader { geometry in
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(
+                                    width: quarterTurn ? geometry.size.height : geometry.size.width,
+                                    height: quarterTurn ? geometry.size.width : geometry.size.height
+                                )
+                                .rotationEffect(.degrees(Double(rotation)))
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                        }
+                    }
+                    .clipped()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.pfCard)
             } else {
                 snapshotUnavailable()
             }
         }
     }
     #else
-    private func snapshotImage(from data: Data) -> some View {
+    private func snapshotImage(from data: Data, maxHeight: CGFloat) -> some View {
         snapshotUnavailable()
     }
     #endif
@@ -1576,6 +1630,27 @@ struct PrinterDetailView: View {
         }
         .frame(height: 120)
         .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedPlaceholder() -> some View {
+        liveViewPausedLabel()
+            .frame(height: 120)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func liveViewPausedBadge() -> some View {
+        liveViewPausedLabel()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(8)
+    }
+
+    private func liveViewPausedLabel() -> some View {
+        Text("Live view paused")
+            .font(.subheadline)
+            .foregroundStyle(Color.pfTextSecondary)
+            .accessibilityIdentifier("printer.detail.camera.livepaused")
     }
 
     private func unsupportedCameraPlaceholder() -> some View {
@@ -1711,57 +1786,15 @@ private extension View {
     }
 }
 
-// MARK: - Sensors & Fans readout
-
-/// Read-only grouped sensor/fan readouts for the Status page. Renders nothing
-/// when the printer reports no sensors (older servers or unsupported backends).
-struct PrinterSensorsReadout: View {
-    let sensors: [PrinterSensor]
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var visibleSensors: [PrinterSensor] {
-        sensors.filter { !PrinterSensorFormatting.isHidden($0) }
-    }
-
+/// Offline Control page: controls are hidden with no visible lockout banner
+/// (#3548). VoiceOver keeps a short hint.
+struct PrinterDetailControlsUnavailable: View {
     var body: some View {
-        if !visibleSensors.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(PrinterSensorGroup.allCases, id: \.self) { group in
-                    let items = visibleSensors.filter { PrinterSensorGroup.group(for: $0) == group }
-                    if !items.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(group.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.pfTextSecondary)
-                                .accessibilityAddTraits(.isHeader)
-                            ForEach(items) { row($0) }
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .operatorCard()
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("printer.detail.sensors")
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ sensor: PrinterSensor) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        layout {
-            Text(PrinterSensorFormatting.displayName(sensor.displayName))
-                .font(.subheadline)
-            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-            Text(PrinterSensorFormatting.summary(sensor))
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(sensor.available ? Color.primary : Color.pfTextSecondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PrinterSensorFormatting.accessibilityLabel(sensor))
-        .accessibilityIdentifier("printer.detail.sensor.\(sensor.id)")
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+            .accessibilityElement()
+            .accessibilityLabel("Controls")
+            .accessibilityHint("Available when the printer is online.")
+            .accessibilityIdentifier("printer.detail.control.unavailable")
     }
 }

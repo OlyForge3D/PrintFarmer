@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AuthViewModel.self) private var authViewModel
-    @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ThemeManager.self) private var themeManager
@@ -80,31 +79,6 @@ struct SettingsView: View {
                         LabeledContent("API URL", value: "Not configured")
                     }
 
-                }
-
-                Section {
-                    Toggle(
-                        "Enable Advanced Printer Controls",
-                        isOn: Binding(
-                            get: { serverRegistry.advancedPrinterControlsEnabled },
-                            set: { enabled in
-                                serverRegistry.setAdvancedPrinterControlsEnabled(enabled)
-                                if !enabled {
-                                    router.revokeAdvancedPrinterControlsAccess()
-                                }
-                            }
-                        )
-                    )
-                    .disabled(serverRegistry.activeServerID == nil)
-                    .accessibilityIdentifier("settings.advancedPrinterControls")
-                } header: {
-                    Text("Printer Safety")
-                } footer: {
-                    Text(
-                        "For the active server only. Jog, preheat, home, z-offset, and disable motors "
-                            + "can move or heat a printer unexpectedly. Misuse may damage the printer "
-                            + "or ruin a print. Leave this off unless you understand the risks."
-                    )
                 }
 
                 Section("About") {

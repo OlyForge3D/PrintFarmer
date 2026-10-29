@@ -48,7 +48,27 @@ do not gain an invented snapshot endpoint.
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
+### Moonraker temperature and sensor controls
+
+The primary Hotend follows the active physical tool; additional extruders retain
+their own target controls. Manual targets and presets remain editable during printing
+and pause. Cooldown explicitly turns off all
+heaters, not just the active nozzle and bed. Filament-monitor enable switches,
+raw gas resistance, measured temperature extrema and authenticated fallback
+telemetry share the [sensor contract](./docs/API.md#printer-sensors-and-fans).
+The web UI hides filament sensors (including monitoring switches) and empty
+sensor sections; the underlying API remains available.
+
 ### Moonraker motion controls
+
+The shared API also exposes independent runtime speed and flow overrides for
+Moonraker, with bounded writes and authoritative nullable readback. Web **Tuning**
+sliders use native backend capability rather than a printing-only gate and send once when a drag or keyboard
+adjustment ends, without Apply buttons. Both the detailed printer card and sidebar
+use collapsible **Tuning** and **Materials** groups; Materials contains the
+printer's filament slots or single-spool details. Collapsing a group preserves
+pending controls and does not send a command. See the
+[runtime factor API contract](./docs/API.md#runtime-speed-and-flow-overrides).
 
 Homing, jogging, and absolute movement use direct POST requests to the existing
 `/home`, `/homexy`, `/homez`, `/move`, and `/moveto` printer routes. A successful
@@ -71,11 +91,15 @@ Absolute GO requires explicit, finite X, Y, and Z targets in millimeters.
 Empty, untouched fields are not errors, and current-position labels do not fill
 in omitted targets.
 
-Manual Jog/MoveTo does not require an automated workflow's minimum-clearance
-value, which Moonraker cannot authoritatively discover. Fresh XYZ homing,
-position/frame and travel-envelope checks still apply, as do Klipper's configured
-rules. Automated clearance-protected workflows retain their stricter policy.
-This does not enable unhomed-axis movement or out-of-envelope recovery moves.
+Interactive controls follow each backend's native commands without PrintFarmer
+geometry, homing, temperature-readiness, or telemetry-freshness preflight.
+Klipper or the selected firmware decides whether a command is executable.
+Relative jogging does not require absolute-position support. Missing readback
+remains unknown but does not disable an otherwise supported control. Filament
+commands do not automatically heat or wait; configure native macros when that
+behavior is wanted. Permissions, valid inputs, request coordination and explicit
+errors remain. Automated and calibration workflows keep their separate checks.
+See the [interactive control contract](./docs/API.md#direct-manual-motion).
 
 **Coordinated upgrade required:** stop all old API instances and workers before
 backing up and applying the provider migrations; mixed old/new writers are not
@@ -106,9 +130,12 @@ cd PrintFarmer
 ```
 
 Open **http://localhost:8080** on the deployment host (or your configured
-HTTP port). HTTP is local-only; LAN clients must use
-**https://SERVER_HOST:8443** with a valid, trusted certificate and the configured
-HTTPS port. `HTTPS_PORT=0` or HTTP-only lab mode leaves no LAN listener.
+HTTP port), or **http://SERVER_HOST:8080** from your LAN. The Docker deployment
+script publishes HTTP on all interfaces by default; set `BIND_ADDRESS=127.0.0.1`
+to restrict it. This IPv4 binding is saved for later redeploys. Prefer
+**https://SERVER_HOST:8443** with a valid, trusted
+certificate to protect credentials in transit. `HTTPS_PORT=0` disables only
+HTTPS; explicit HTTP-only lab mode remains local-only.
 For private-CA bootstrap, transfer the public CA through a trusted channel;
 see [iPhone / iPad HTTPS trust](./docs/DEPLOYMENT.md#iphone--ipad-https-trust).
 
@@ -177,7 +204,8 @@ Database: SQLite / PostgreSQL / SQL Server
 ### Technology Stack
 
 **Backend:**
-- ASP.NET Core 10 (.NET SDK 10.0)
+- ASP.NET Core 10 (exact .NET SDK selected by [`global.json`](./global.json);
+  see [SDK installation](./docs/DOTNET_SDK_INSTALLATION.md))
 - Entity Framework Core (multi-database ORM)
 - SignalR (real-time WebSocket communication)
 - Refit (type-safe HTTP clients)
@@ -366,6 +394,10 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 **What works on ARM64:**
 - ✅ Full printer fleet management (add, remove, monitor, control)
 - ✅ G-code file upload and print job queuing
+- ✅ Metadata-only printer-file discovery in Files, with explicit local Copy and
+  stage-before-Queue actions, plus durable PrusaLink display names, sizes, and
+  native print metadata independent of thumbnail caching
+  ([catalog API and safety policy](docs/PRINTER_FILE_CATALOG_API.md#durable-printer-file-catalog))
 - ✅ Real-time printer status via SignalR
 - ✅ Auto-dispatch and bed-clear confirmation
 - ✅ Network discovery and Spoolman integration

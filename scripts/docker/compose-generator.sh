@@ -132,17 +132,6 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # finds it, but invoking it prints "Python was not found; run without
 # arguments to install from the Microsoft Store..." and exits non-zero. Try
 # each candidate in order and confirm it can actually run before accepting it.
-resolve_python_cmd() {
-    local candidate
-    for candidate in python3 python py; do
-        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
 PYTHON_CMD="$(resolve_python_cmd || true)"
 
 postgres_connection_has_password() {
@@ -1034,6 +1023,7 @@ generate_compose() {
     fi
 
     if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+        sed -i 's/${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80/127.0.0.1:${HTTP_PORT:-8080}:80/' "$compose_file"
         sed -i '/^[[:space:]]*- "${HTTPS_PORT:-8443}:443"[[:space:]]*$/d' "$compose_file"
         # HTTP-only lab installs never provision TLS certs, so the certs bind
         # mount on frontend/nginx-proxy would reference a directory that is
@@ -1165,8 +1155,8 @@ if start is not None:
 open(path,'w').write('\n'.join(txt) + '\n')
 PY
 
-    if [[ "${HTTPS_PORT-}" == "0" ]]; then
-        log_warning "HTTPS_PORT=0: local-only HTTP on 127.0.0.1:${HTTP_PORT:-8080}; no LAN access. Enable HTTPS with a valid certificate for LAN access."
+    if [[ "${HTTPS_PORT-}" == "0" && ! ( "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ) ]]; then
+        log_warning "HTTPS_PORT=0: TLS is disabled; HTTP uses BIND_ADDRESS (default 0.0.0.0). Use HTTPS to protect credentials in transit."
     fi
     
     return 0

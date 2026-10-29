@@ -70,4 +70,7 @@ public record CompletePrinterDto(
     double? LiveZOffsetMm = null,
 
     // Presentation-only: show the filament box external spool slot.
-    bool ShowExternalSpool = false);
+    bool ShowExternalSpool = false,
+    string? ActiveExtruderId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null);

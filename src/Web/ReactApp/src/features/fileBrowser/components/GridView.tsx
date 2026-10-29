@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Checkbox } from '@/common/components/ui';
 import { type FileItem } from '../types';
+import { COMPACT_FILE_GRID_CLASS } from '../fileBrowserStyles';
 
 interface GridViewProps {
   files: FileItem[];
@@ -15,6 +16,8 @@ interface GridViewProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   isBusy?: boolean;
+  /** Dense auto-fill grid for small cards (shared with the printer catalog). */
+  compact?: boolean;
 }
 
 const formatBytes = (bytes?: number) => {
@@ -37,6 +40,7 @@ export const GridView = ({
   totalPages,
   onPageChange,
   isBusy,
+  compact = false,
 }: GridViewProps) => {
   const isAllSelected = selectedIds.length > 0 && selectedIds.length === files.length;
   const isMixed = selectedIds.length > 0 && selectedIds.length !== files.length;
@@ -70,7 +74,7 @@ export const GridView = ({
             <p className="text-sm">No files found</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className={compact ? COMPACT_FILE_GRID_CLASS : 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'}>
             {files.map((file) => {
               const isSelected = selectedIds.includes(file.id);
 

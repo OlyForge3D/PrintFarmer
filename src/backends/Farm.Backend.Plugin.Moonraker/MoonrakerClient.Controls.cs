@@ -8,15 +8,17 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl
+public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISupportsMotorControl, ISupportsExtrusionControl, ISupportsMmuControl, ISupportsZOffsetCalibration, ISupportsFanControl, ISupportsZOffsetAdjustment, ISupportsSensorControl, ISupportsHeaterShutdown, ISupportsRuntimeFactorControl
 {
     public PrinterControlCapabilities ControlCapabilities { get; } = new()
     {
+        SupportsAbsoluteMovement = true,
         SupportsHoming = true,
         SupportsHomingXY = true,
         SupportsHomingZ = true,
         SupportsHotendTemperature = true,
         SupportsBedTemperature = true,
+        SupportsTemperatureControlDuringPrint = true,
         SupportsDisableMotors = true,
         SupportsExtrusion = true,
         SupportedAxes = Array.AsReadOnly(new[] { "x", "y", "z" }),
@@ -28,11 +30,31 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
     public Task<bool> SetFanSpeedAsync(string baseUrl, int speedPercent, PrinterCredential? credential, CancellationToken ct = default) =>
         SendControlScriptAsync(baseUrl, MoonrakerSensorMapper.BuildPartFanCommand(speedPercent), credential, ct);
 
+    /// <inheritdoc />
+    public Task<bool> SetSpeedFactorAsync(string baseUrl, double percent, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, BuildRuntimeFactorCommand("M220", percent), credential, ct);
+
+    /// <inheritdoc />
+    public Task<bool> SetFlowFactorAsync(string baseUrl, double percent, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, BuildRuntimeFactorCommand("M221", percent), credential, ct);
+
+    private static string BuildRuntimeFactorCommand(string command, double percent)
+    {
+        if (!PrinterRuntimeFactorLimits.IsValid(percent))
+        {
+            throw new ArgumentOutOfRangeException(nameof(percent));
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{command} S{percent:0.##}");
+    }
+
+    /// <inheritdoc />
+    public Task<bool> TurnOffHeatersAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default) =>
+        SendControlScriptAsync(baseUrl, "TURN_OFF_HEATERS", credential, ct);
+
     /// <summary>
-    /// Targeted Klipper sensor/fan write (issue #3407). The printer's live object list and, for
-    /// temperature targets, its configured <c>min_temp</c>/<c>max_temp</c> are re-read before any
-    /// G-code is built, so only a currently discovered, safely named, writable object with an
-    /// in-range value is ever commanded. Anything else is rejected without sending G-code.
+    /// Sends a typed, safely named native sensor command. Klipper validates the object's
+    /// existence and configured limits without an additional discovery round-trip.
     /// </summary>
     public async Task<bool> SetSensorValueAsync(
         string baseUrl,
@@ -42,83 +64,11 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         PrinterCredential? credential,
         CancellationToken ct = default)
     {
-        if (!MoonrakerSensorMapper.IsSafeObjectName(sensorId))
-        {
-            _logger.LogWarning("Rejected Moonraker sensor write: unsafe sensor id");
-            return false;
-        }
-
-        HashSet<string>? objects;
-        Dictionary<string, MoonrakerSectionSettings> settings = new(StringComparer.OrdinalIgnoreCase);
-        using (CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
-        {
-            timeout.CancelAfter(_timeouts.StatusPollTimeout);
-            Uri root = new(baseUrl.TrimEnd('/') + "/");
-
-            using HttpRequestMessage objectsRequest = CreateSafetyDiscoveryRequest(new Uri(root, "printer/objects/list"), credential);
-            using HttpResponseMessage objectsResponse = await _http.SendAsync(objectsRequest, timeout.Token).ConfigureAwait(false);
-            if (!objectsResponse.IsSuccessStatusCode)
-            {
-                _logger.LogWarning(
-                    "Rejected Moonraker sensor write to {SensorId}: object list returned {StatusCode}",
-                    sensorId,
-                    (int)objectsResponse.StatusCode);
-                return false;
-            }
-
-            using (JsonDocument? objectsDocument = await TryParseSensorDiscoveryAsync(objectsResponse, sensorId, timeout.Token).ConfigureAwait(false))
-            {
-                objects = objectsDocument is not null &&
-                    objectsDocument.RootElement.ValueKind == JsonValueKind.Object &&
-                    objectsDocument.RootElement.TryGetProperty("result", out JsonElement result) &&
-                    MoonrakerSubscriptionService.TryReadObjectNames(result, out List<string> names)
-                        ? new HashSet<string>(names, StringComparer.Ordinal)
-                        : null;
-            }
-
-            if (objects is null)
-            {
-                _logger.LogWarning("Rejected Moonraker sensor write to {SensorId}: malformed object list", sensorId);
-                return false;
-            }
-
-            if (quantity == PrinterSensorQuantity.TargetTemperature)
-            {
-                using HttpRequestMessage settingsRequest = CreateSafetyDiscoveryRequest(
-                    new Uri(root, "printer/objects/query?configfile=settings"),
-                    credential);
-                using HttpResponseMessage settingsResponse = await _http.SendAsync(settingsRequest, timeout.Token).ConfigureAwait(false);
-                if (!settingsResponse.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning(
-                        "Rejected Moonraker sensor write to {SensorId}: config query returned {StatusCode}",
-                        sensorId,
-                        (int)settingsResponse.StatusCode);
-                    return false;
-                }
-
-                using JsonDocument? settingsDocument = await TryParseSensorDiscoveryAsync(settingsResponse, sensorId, timeout.Token).ConfigureAwait(false);
-                if (settingsDocument is null)
-                {
-                    return false;
-                }
-
-                if (settingsDocument.RootElement.ValueKind == JsonValueKind.Object &&
-                    settingsDocument.RootElement.TryGetProperty("result", out JsonElement settingsResult) &&
-                    settingsResult.TryGetProperty("status", out JsonElement status) &&
-                    status.TryGetProperty("configfile", out JsonElement configfile) &&
-                    configfile.TryGetProperty("settings", out JsonElement settingsElement))
-                {
-                    settings = MoonrakerSensorMapper.ReadSettings(settingsElement);
-                }
-            }
-        }
-
-        string? command = MoonrakerSensorMapper.TryBuildCommand(sensorId, quantity, value, objects, settings);
+        string? command = MoonrakerSensorMapper.TryBuildNativeCommand(sensorId, quantity, value);
         if (command is null)
         {
             _logger.LogWarning(
-                "Rejected Moonraker sensor write to {SensorId}: {Quantity}={Value} is not a supported, in-range write for a discovered object",
+                "Rejected Moonraker sensor write to {SensorId}: {Quantity}={Value} is not a valid typed control",
                 sensorId,
                 quantity,
                 value);
@@ -126,21 +76,6 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         }
 
         return await SendControlScriptAsync(baseUrl, command, credential, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>Parses a sensor-write discovery response, failing closed on non-JSON bodies such as proxy error pages.</summary>
-    private async Task<JsonDocument?> TryParseSensorDiscoveryAsync(HttpResponseMessage response, string sensorId, CancellationToken ct)
-    {
-        try
-        {
-            await using Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-        }
-        catch (JsonException)
-        {
-            _logger.LogWarning("Rejected Moonraker sensor write to {SensorId}: discovery response was not valid JSON", sensorId);
-            return null;
-        }
     }
 
     public Task<bool> AdjustZOffsetAsync(string baseUrl, decimal offsetMm, PrinterCredential? credential, CancellationToken ct = default)
@@ -224,23 +159,34 @@ public partial class MoonrakerClient : ISupportsPrinterControlCapabilities, ISup
         return SendControlScriptAsync(baseUrl, script, credential, ct);
     }
 
-    private Task<bool> SetControlTemperaturesAsync(string baseUrl, double? hotend, double? bed, PrinterCredential? credential, CancellationToken ct)
+    private async Task<bool> SetControlTemperaturesAsync(string baseUrl, double? hotend, double? bed, PrinterCredential? credential, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (hotend is null && bed is null)
+        {
+            return true;
+        }
+
+        if ((hotend is double hotendTarget && (!double.IsFinite(hotendTarget) || hotendTarget < 0)) ||
+            (bed is double bedTarget && (!double.IsFinite(bedTarget) || bedTarget < 0)))
+        {
+            _logger.LogWarning("Rejected Moonraker temperature write: targets must be finite and nonnegative");
+            return false;
+        }
+
         List<string> commands = [];
-        if (hotend is not null)
+        if (hotend is double nozzle)
         {
-            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M104 S{hotend:0}"));
+            // M104 follows the active extruder at execution time, without a stale tool snapshot.
+            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M104 S{nozzle:0.##}"));
         }
 
-        if (bed is not null)
+        if (bed is double plate)
         {
-            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M140 S{bed:0}"));
+            commands.Add(string.Create(CultureInfo.InvariantCulture, $"M140 S{plate:0.##}"));
         }
 
-        return commands.Count == 0
-            ? Task.FromResult(true)
-            : SendControlScriptAsync(baseUrl, string.Join("\n", commands), credential, ct);
+        return await SendControlScriptAsync(baseUrl, string.Join("\n", commands), credential, ct).ConfigureAwait(false);
     }
 
     private async Task<bool> SendControlScriptAsync(string baseUrl, string script, PrinterCredential? credential, CancellationToken ct)

@@ -12,6 +12,8 @@ public interface ISupportsPrinterControlCapabilities
 /// <summary>Fine-grained transport support; verified safety is discovered separately for each printer.</summary>
 public sealed record PrinterControlCapabilities
 {
+    public bool SupportsAbsoluteMovement { get; init; }
+
     public bool SupportsHoming { get; init; }
 
     public bool SupportsHomingXY { get; init; }
@@ -21,6 +23,8 @@ public sealed record PrinterControlCapabilities
     public bool SupportsHotendTemperature { get; init; }
 
     public bool SupportsBedTemperature { get; init; }
+
+    public bool SupportsTemperatureControlDuringPrint { get; init; }
 
     public bool SupportsDisableMotors { get; init; }
 

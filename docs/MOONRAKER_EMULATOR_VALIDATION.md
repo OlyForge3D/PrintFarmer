@@ -234,6 +234,25 @@ The supported command subset is `SET_FAN_SPEED FAN=auxiliary SPEED=0.5`,
 `SET_FILAMENT_SENSOR SENSOR=runout ENABLE=0` (also `SENSOR=encoder`).
 `SET_HEATER_TEMPERATURE` also updates the existing `extruder` and `heater_bed`
 targets, just like their legacy `M104`/`M140` paths.
+
+`M104` addresses the active extruder at command execution, including a preceding
+`T0`-`T3` selection in the same script in Snapmaker U1 mode. Its zero target
+cools only that tool; other nozzle and bed targets remain unchanged. Indexed
+extruders retain their configured temperature limits.
+Snapmaker U1 mode additionally exposes independent `extruder1`, `extruder2` and
+`extruder3` objects, with `T0`-`T3` selecting `toolhead.extruder`. Their heating
+minimum is 10 Celsius, with maxima 290, 280 and 270 Celsius respectively; zero
+is accepted separately as off. The primary `extruder` maximum is 300 Celsius
+and the bed maximum is 120 Celsius. All limits appear in `configfile.settings`.
+`TURN_OFF_HEATERS` clears every extruder, bed and generic heater target without
+changing automatic or temperature-fan controls. Ordinary zero targets remain
+local to their addressed heater.
+
+Object queries support Moonraker's recommended `POST /printer/objects/query`
+with an `objects` JSON body as well as GET query strings. Null field selections
+return all fields; empty arrays return no fields; unknown objects/fields are
+omitted. An empty POST object selection returns an empty status.
+
 Names and values are required; optional upstream parameters, templates, PID,
 thermal/tachometer physics, motion-sensor pulse timing and runout macros are not
 simulated. A command changes its target/requested speed or enabled flag, not

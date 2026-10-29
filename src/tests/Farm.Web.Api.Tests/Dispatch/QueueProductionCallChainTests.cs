@@ -102,6 +102,61 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         GC.SuppressFinalize(this);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CatalogPinnedDispatch_VerifiesTheExactUploadStreamBeforeAnySend(bool sameSizeCorruption)
+    {
+        string storageRoot = Path.Join(AppContext.BaseDirectory, $"catalog-pin-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
+        try
+        {
+            await using AppDbContext db = CreateContext();
+            Fixture fixture = await SeedStandardJobAsync(db);
+            PrintJob job = await db.PrintJobs.SingleAsync(x => x.Id == fixture.JobId);
+            GcodeFile file = await db.GcodeFiles.SingleAsync(x => x.Id == fixture.GcodeId);
+            file.CalibrationAttemptId = null;
+            file.CalibrationOrchestrationId = null;
+            file.CalibrationProjectId = null;
+            file.CalibrationManifestSha256 = null;
+            file.SourceArtifactId = null;
+            file.SourceSliceJobId = null;
+            file.ContentSha256 = null;
+            file.IsImmutable = false;
+            file.PromotedAtUtc = null;
+            job.GcodeContentSha256 = AuthoritativeGcodeSha256;
+            job.PinnedGcodeFileSizeBytes = AuthoritativeGcodeBytes.Length;
+            await db.SaveChangesAsync();
+            string etag = Convert.ToBase64String(job.RowVersion!);
+            byte[] corrupt = sameSizeCorruption
+                ? Enumerable.Repeat((byte)'X', AuthoritativeGcodeBytes.Length).ToArray()
+                : "M112\n"u8.ToArray();
+            await File.WriteAllBytesAsync(Path.Join(storageRoot, "gcode", file.FileName), corrupt);
+            var printers = new Mock<IPrintersService>();
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageRoot);
+            PrintJobManagementService management = CreateManagementService(db, printers.Object, storage.Object,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            JobQueueController controller = CreateJobQueueController(management,
+                Mock.Of<IBedClearAcknowledgementService>(), db);
+            controller.Request.Headers.IfMatch = $"\"{etag}\"";
+            IActionResult response = await controller.DispatchJobAsync(fixture.JobId);
+            QueuedPrintJobDto result = Assert.IsType<QueuedPrintJobDto>(Assert.IsAssignableFrom<ObjectResult>(response).Value);
+            result.DispatchResult!.ErrorCode.Should().Be(sameSizeCorruption ? "gcode_byte_hash_mismatch" : "gcode_size_mismatch");
+            printers.Verify(x => x.UploadAndStartPrintAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(), It.IsAny<CancellationToken>()), Times.Never);
+            db.ChangeTracker.Clear();
+            PrintJob saved = await db.PrintJobs.SingleAsync(x => x.Id == fixture.JobId);
+            saved.Status.Should().NotBe(PrintJobStatus.Printing);
+            saved.GcodeContentSha256.Should().Be(AuthoritativeGcodeSha256);
+            saved.PinnedGcodeFileSizeBytes.Should().Be(AuthoritativeGcodeBytes.Length);
+        }
+        finally
+        {
+            Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
     // =========================================================================
     // Start paths
     // =========================================================================

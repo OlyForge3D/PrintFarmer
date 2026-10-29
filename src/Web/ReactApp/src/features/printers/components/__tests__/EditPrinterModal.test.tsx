@@ -43,6 +43,14 @@ vi.mock('@/features/printers/components/PrinterCamerasSection', () => ({
   PrinterCamerasSection: () => null,
 }));
 
+// Discovery controls fetch on their own; covered by PrinterFileDiscoverySection.test.tsx.
+// The stand-in only records where (and for which printer) the modal mounts it.
+vi.mock('@/features/printers/components/PrinterFileDiscoverySection', () => ({
+  PrinterFileDiscoverySection: ({ printerId }: { printerId: string }) => (
+    <div data-testid="file-discovery-section" data-printer-id={printerId} />
+  ),
+}));
+
 vi.mock('@/features/cameras/hooks/usePrinterCameras', () => ({
   usePrinterCameras: (...args: unknown[]) => mockUsePrinterCameras(...args),
 }));
@@ -130,6 +138,23 @@ describe('EditPrinterModal', () => {
     await waitFor(() => {
       expect(saveButton).toBeEnabled();
     });
+  });
+
+  it('mounts per-printer file discovery inside the edit form immediately before Cameras', async () => {
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const files = await screen.findByTestId('file-discovery-section');
+    expect(files).toHaveAttribute('data-printer-id', 'printer-1');
+    expect(files.closest('form')).toHaveAttribute('id', 'edit-printer-form');
+    const camerasSection = screen.getByRole('heading', { name: 'Cameras' }).closest('div.border-t');
+    expect(files.nextElementSibling).toBe(camerasSection);
   });
 
   it('displays the configured server URL', async () => {

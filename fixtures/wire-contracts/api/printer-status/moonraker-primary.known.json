@@ -1,0 +1,41 @@
+{
+  "id": "f45aad7e-284f-46c4-b75c-fef81be0409a",
+  "isOnline": true,
+  "state": "Idle",
+  "speedFactorPercent": null,
+  "flowFactorPercent": null,
+  "hotendTemp": 213,
+  "bedTemp": 60,
+  "hotendTarget": 220,
+  "bedTarget": 65,
+  "activeExtruderId": "extruder3",
+  "sensors": [
+    {
+      "id": "extruder3",
+      "displayName": "Extruder 3",
+      "kind": "Nozzle",
+      "readings": [
+        {
+          "quantity": "Temperature",
+          "value": 213,
+          "unit": "Celsius"
+        },
+        {
+          "quantity": "TargetTemperature",
+          "value": 220,
+          "unit": "Celsius"
+        }
+      ],
+      "available": true,
+      "writable": [
+        {
+          "quantity": "TargetTemperature",
+          "min": 10,
+          "max": 270,
+          "unit": "Celsius",
+          "allowZero": true
+        }
+      ]
+    }
+  ]
+}

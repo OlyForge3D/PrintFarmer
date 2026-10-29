@@ -302,15 +302,29 @@
         "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "39462edbbafd4f4286966fbd4ccff61453a853c41828f7114364881b1a10b8bc",
+        "contentSha256": "f78fbe104090c8dad65390659ff1fb508b3db167b307dc16a3f11188c5bb2850",
         "reason": "Synthetic printer credentials test endpoint redaction."
       },
       {
         "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
-        "contentSha256": "d0a8b86f0072001a7dec25cdd3f2055d0f75eda1d1b3ca087a2896cdd7b869a0",
+        "contentSha256": "e42e916c2e6f74b1386ddd3ea1ffb8a4ba839030ab01ac33342b75e7ee6c87d0",
         "reason": "Synthetic printer URL tests removal of embedded credentials from computed URLs."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "d0059160055f82d5aa8ab0f2a5d89dafc805f11758bda3b2c134534b9631c81b",
+        "contentSha256": "e42e916c2e6f74b1386ddd3ea1ffb8a4ba839030ab01ac33342b75e7ee6c87d0",
+        "reason": "Synthetic HTTPS printer URL tests canonical detail serialization strips embedded credentials."
+      },
+      {
+        "path": "mobile/PrintFarmerTests/ViewModels/PrinterDetailViewModelTests.swift",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
+        "contentSha256": "9ec64473bab5987a3173b02e5e22255132c492c69f3fc8eb86387319cd5b8a0a",
+        "reason": "Synthetic printer URL tests the iOS native web link rejects embedded credentials."
       }
     ]
   },

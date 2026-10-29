@@ -219,13 +219,13 @@ public sealed class DispatchClaimService(
             return artifactGate;
         }
 
-        if (job.JobKind == JobKind.FilamentCalibration)
+        if (job.JobKind == JobKind.FilamentCalibration || job.PinnedGcodeFileSizeBytes.HasValue)
         {
             if (_integrityVerifier is null)
             {
                 DispatchClaimResult unavailable = DispatchClaimResult.Fail(
                     "gcode_byte_verifier_unavailable",
-                    "Stored-byte integrity verification is unavailable; calibration dispatch fails closed.");
+                    "Stored-byte integrity verification is unavailable; pinned-content dispatch fails closed.");
                 await WriteDeniedAuditAsync(request, unavailable, job, dispatchState, ct);
                 return unavailable;
             }

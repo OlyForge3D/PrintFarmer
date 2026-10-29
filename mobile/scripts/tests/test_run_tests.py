@@ -310,6 +310,16 @@ class EventTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    # Tests asserting a non-timeout outcome use these budgets only as hang detectors.
+    # The shared post-test idle window deliberately spans attempt teardown and the
+    # retry relaunch (test_idle_deadline_continues_across_attempt_restart), so it
+    # must absorb a cold interpreter exec of the stub, which exceeds 0.2s on macOS
+    # hosts. Timeout behaviour is proved separately with explicit tight budgets.
+    OUTCOME_INVOCATION_TIMEOUT = 30
+    OUTCOME_FINALIZATION_TIMEOUT = 10
+    TIGHT_INVOCATION_TIMEOUT = 1.5
+    TIGHT_FINALIZATION_TIMEOUT = 0.3
+
     def setUp(self):
         self.directory = Path("build/runner-tests") / uuid.uuid4().hex
         self.directory.mkdir(parents=True)
@@ -339,6 +349,7 @@ class RunnerTests(unittest.TestCase):
             "marker.write_text(str(attempt+1))\n"
             "def interrupt(sig, frame):\n"
             "    (bundle/'flushed').write_text('interrupted')\n"
+            "    time.sleep(float(os.environ.get('RUNNER_TEST_FLUSH_DELAY', '0')))\n"
             "    sys.exit(0)\n"
             "signal.signal(signal.SIGINT, interrupt)\n"
             "def emit(name):\n"
@@ -361,7 +372,7 @@ class RunnerTests(unittest.TestCase):
             "                if os.environ['RUNNER_TEST_RETRY_STATUS'] in ('Failure','Failed'):\n"
             "                    emit('RUNNER_TEST_ISSUE')\n"
             "            else:\n"
-            "                time.sleep(0.35 if mode=='long-body' else 0.06)\n"
+            "                time.sleep(float(os.environ.get('RUNNER_TEST_BODY_SECONDS', '0.06')))\n"
             "                emit('RUNNER_TEST_FINISH')\n"
             "                if mode.startswith('retry'):\n"
             "                    if mode!='retry-no-issue': emit('RUNNER_TEST_ISSUE')\n"
@@ -392,7 +403,9 @@ class RunnerTests(unittest.TestCase):
         shutil.rmtree(self.directory)
 
     def invoke(self, mode, status="Success", retry_failed_tests=False,
-               retry_status="Success", extra_environment=None):
+               retry_status="Success", extra_environment=None, *,
+               invocation_timeout=OUTCOME_INVOCATION_TIMEOUT,
+               finalization_timeout=OUTCOME_FINALIZATION_TIMEOUT, flush_seconds=0.1):
         marker = self.directory / "attempt-count"
         marker.unlink(missing_ok=True)
         environment = {
@@ -415,8 +428,9 @@ class RunnerTests(unittest.TestCase):
         }
         with patch.dict(os.environ, environment), patch("sys.stdout", new=io.StringIO()):
             code = runner.run(
-                self.arguments, invocation_timeout=1.5, finalization_timeout=0.3,
-                flush_seconds=0.1, poll_seconds=0.01, executable=str(self.stub),
+                self.arguments, invocation_timeout=invocation_timeout,
+                finalization_timeout=finalization_timeout,
+                flush_seconds=flush_seconds, poll_seconds=0.01, executable=str(self.stub),
                 retry_failed_tests=retry_failed_tests,
             )
         summary = json.loads(self.bundle.with_suffix(".timing.json").read_text())
@@ -477,8 +491,10 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(
             self.bundle.with_name("Results-first.timing.json").exists()
         )
-        self.assertEqual(summary["invocation_budget_seconds"], 1.5)
-        self.assertEqual(summary["finalization_budget_seconds"], 0.3)
+        self.assertEqual(summary["invocation_budget_seconds"],
+                         self.OUTCOME_INVOCATION_TIMEOUT)
+        self.assertEqual(summary["finalization_budget_seconds"],
+                         self.OUTCOME_FINALIZATION_TIMEOUT)
 
     def test_unexpected_full_shard_retry_is_rejected_and_retained(self):
         self.bundle = self.directory / "FullShard.xcresult"
@@ -632,15 +648,23 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.invoke("success", status="Failure")[0], 65)
 
     def test_post_test_timeout_flushes_artifacts_but_stays_failed(self):
-        code, summary = self.invoke("hang")
+        code, summary = self.invoke(
+            "hang", extra_environment={"RUNNER_TEST_FLUSH_DELAY": "0.2"},
+            invocation_timeout=5, finalization_timeout=2.5, flush_seconds=2,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [0])
         self.assertEqual(summary["termination_reason"], "post-test-timeout")
-        self.assertTrue((self.bundle / "flushed").exists())
-        self.assertLess(summary["post_last_test_seconds"], 0.5)
+        self.assertEqual((self.bundle / "flushed").read_text(), "interrupted")
+        self.assertEqual(summary["flush_seconds_included"], 2)
+        self.assertEqual(summary["finalization_budget_seconds"], 2.5)
+        self.assertLess(summary["post_last_test_seconds"], 3)
 
     def test_hard_stop_bounds_unresponsive_process_and_descendant(self):
-        code, summary = self.invoke("ignore-interrupt")
+        code, summary = self.invoke(
+            "ignore-interrupt", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+            finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["xcodebuild_exit_codes"], [-signal.SIGKILL])
         self.assertLess(summary["post_last_test_seconds"], 0.5)
@@ -656,11 +680,21 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(not state or state.startswith("Z"), state)
 
     def test_active_body_longer_than_finalization_budget_is_not_interrupted(self):
-        self.assertEqual(self.invoke("long-body")[0], 0)
+        # The body outlasts the idle budget; the post-body teardown is in-process only.
+        code, summary = self.invoke(
+            "long-body", extra_environment={"RUNNER_TEST_BODY_SECONDS": "1.5"},
+            finalization_timeout=1,
+        )
+        self.assertEqual(code, 0)
+        self.assertGreater(summary["invocation_seconds"],
+                           summary["finalization_budget_seconds"])
         self.assertFalse((self.bundle / "flushed").exists())
 
     def test_missing_events_hit_separate_invocation_bound(self):
-        code, summary = self.invoke("no-events")
+        code, summary = self.invoke(
+            "no-events", invocation_timeout=self.TIGHT_INVOCATION_TIMEOUT,
+            finalization_timeout=self.TIGHT_FINALIZATION_TIMEOUT,
+        )
         self.assertEqual(code, 124)
         self.assertEqual(summary["termination_reason"], "invocation-timeout")
         self.assertIsNone(summary["post_last_test_seconds"])
@@ -672,24 +706,32 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.invoke("incomplete")[0], 70)
 
     def test_cancellation_stays_nonzero_after_graceful_flush(self):
-        code, summary = self.invoke("cancel")
+        code, summary = self.invoke(
+            "cancel", extra_environment={"RUNNER_TEST_FLUSH_DELAY": "0.2"},
+            invocation_timeout=5, finalization_timeout=2.5, flush_seconds=2,
+        )
         self.assertEqual(code, 143)
+        self.assertEqual(summary["xcodebuild_exit_codes"], [0])
         self.assertEqual(summary["termination_reason"], "cancelled")
-        self.assertTrue((self.bundle / "flushed").exists())
+        self.assertEqual((self.bundle / "flushed").read_text(), "interrupted")
 
     def test_ci_shell_commands_keep_selectors_artifacts_and_pipeline_exit(self):
         mobile = SCRIPT.parents[1]
         workflow = (mobile.parent / ".github/workflows/ios-pr-ci.yml").read_text()
-        (self.directory / "scripts").symlink_to(mobile / "scripts", target_is_directory=True)
-        (self.directory / "PrintFarmerUITests").symlink_to(
-            mobile / "PrintFarmerUITests", target_is_directory=True,
-        )
         cases = (
             (
                 "Run unit tests",
                 None,
                 "build/TestResults",
                 "-only-testing:PrintFarmerTests",
+                "other-failure",
+                42,
+            ),
+            (
+                "Run unit tests",
+                None,
+                "build/TestResults",
+                "-only-testing:PrintFarmerTests/PrinterFilamentSectionTests",
                 "other-failure",
                 42,
             ),
@@ -730,8 +772,16 @@ class RunnerTests(unittest.TestCase):
                 65,
             ),
         )
-        for step, key, stem, selectors, mode, expected in cases:
-            with self.subTest(step=step, key=key):
+        for index, (step, key, stem, selectors, mode, expected) in enumerate(cases):
+            with self.subTest(step=step, key=key, selectors=selectors):
+                directory = self.directory / f"workflow-case-{index}"
+                directory.mkdir()
+                (directory / "scripts").symlink_to(
+                    mobile / "scripts", target_is_directory=True,
+                )
+                (directory / "PrintFarmerUITests").symlink_to(
+                    mobile / "PrintFarmerUITests", target_is_directory=True,
+                )
                 block = workflow.split(f"      - name: {step}\n", 1)[1]
                 block = block.split("\n      - name:", 1)[0]
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
@@ -739,13 +789,14 @@ class RunnerTests(unittest.TestCase):
                     shell = shell.replace("${{ matrix.key }}", key)
                     shell = shell.replace("${{ matrix.shard }}", key.rsplit("-", 1)[1])
                     shell = shell.replace("$SELECTORS", selectors)
-                (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
+                (directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {
                     **os.environ,
+                    "UNIT_TEST_SELECTOR": selectors.removeprefix("-only-testing:"),
                     "PATH": str(self.stub.parent.resolve()) + os.pathsep + os.environ["PATH"],
                     "SIMULATOR_UDID": "test-device",
                     "RUNNER_TEST_MARKER": str(
-                        (self.directory / "workflow-attempt-count").resolve()
+                        (directory / "workflow-attempt-count").resolve()
                     ),
                     "RUNNER_TEST_MODE": mode,
                     "RUNNER_TEST_STATUS": "Failure" if mode == "failed" else "Success",
@@ -760,15 +811,20 @@ class RunnerTests(unittest.TestCase):
                     "RUNNER_TEST_END": event("invocationFinished"),
                 }
                 result = subprocess.run(
-                    ["bash", "-c", shell], cwd=self.directory, env=environment,
+                    ["bash", "-c", shell], cwd=directory, env=environment,
                     capture_output=True, text=True, timeout=10,
                 )
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                bundle = self.directory / f"{stem}.xcresult"
+                bundle = directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
                 self.assertNotIn("-retry-tests-on-failure", args)
                 self.assertIn("test-without-building", args)
                 expected_selectors = selectors.split()
+                if step == "Run unit tests":
+                    self.assertEqual(
+                        [arg for arg in args if arg.startswith("-only-testing:")],
+                        expected_selectors,
+                    )
                 if key is not None and key.endswith("-1") and step == "Run XCUI shard":
                     self.assertNotIn(
                         "-only-testing:PrintFarmerUITests/LoginFlowUITests",
@@ -778,7 +834,7 @@ class RunnerTests(unittest.TestCase):
                 for selector in expected_selectors:
                     self.assertIn(selector, args)
                 for suffix in (".log", ".events.jsonl", ".timing.json"):
-                    self.assertTrue((self.directory / f"{stem}{suffix}").exists())
+                    self.assertTrue((directory / f"{stem}{suffix}").exists())
                 upload = workflow.split(f"      - name: {step}\n", 1)[1]
                 upload = upload.split("uses: actions/upload-artifact@v7", 1)[1]
                 upload = upload.split("retention-days:", 1)[0]
@@ -788,7 +844,7 @@ class RunnerTests(unittest.TestCase):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
                 if key is not None:
                     self.assertTrue(
-                        (self.directory / f"{stem}-first.timing.json").exists()
+                        (directory / f"{stem}-first.timing.json").exists()
                     )
                     self.assertIn(f"mobile/{stem}-first.timing.json", upload)
                     for suffix in (

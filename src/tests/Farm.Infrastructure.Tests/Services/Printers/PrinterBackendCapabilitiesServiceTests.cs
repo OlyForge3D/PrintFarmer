@@ -21,6 +21,43 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 
 public class PrinterBackendCapabilitiesServiceTests
 {
+    [Fact]
+    public async Task GetControlCapabilitiesAsync_NativeControls_DoesNotQueryVerifiedSafety()
+    {
+        var printer = new Printer { Id = Guid.NewGuid(), Backend = (int)PrinterBackend.Moonraker };
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsFilamentControl>();
+        client.As<ISupportsFanControl>();
+        client.As<ISupportsZOffsetAdjustment>();
+        var discovery = client.As<ISupportsVerifiedSafetyDiscovery>();
+        discovery.Setup(value => value.DiscoverVerifiedSafetyAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Discovery must not be a manual-command prerequisite."));
+        client.As<ISupportsPrinterControlCapabilities>().SetupGet(value => value.ControlCapabilities)
+            .Returns(new PrinterControlCapabilities { SupportsAbsoluteMovement = true });
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, Mock.Of<IBackendCapabilityFactory>(), clients.Object);
+
+        PrinterBackendCapabilitiesDto result = Assert.IsType<PrinterBackendCapabilitiesDto>(
+            await service.GetControlCapabilitiesAsync(printer.Id, default));
+
+        Assert.True(result.SupportsRelativeMovement);
+        Assert.True(result.SupportsAbsoluteMovement);
+        Assert.True(result.SupportsFanControl);
+        Assert.True(result.SupportsZOffsetAdjustment);
+        Assert.True(result.SupportsFilamentLoad);
+        Assert.True(result.SupportsFilamentUnload);
+        Assert.True(result.SupportsFilamentChange);
+        Assert.False(result.SupportsFanSpeedReadback);
+        Assert.False(result.SupportsZOffsetReadback);
+        discovery.Verify(value => value.DiscoverVerifiedSafetyAsync(
+            It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(PrinterBackend.Moonraker, true, true, true, true, true, true)]
     [InlineData(PrinterBackend.OctoPrint, true, true, true, false, true, false)]
@@ -81,14 +118,19 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.Equal(gcode, dto.SupportsDisableMotors);
         Assert.Equal(homing ? new[] { "x", "y", "z" } : [], dto.SupportedAxes);
         Assert.True(dto.SupportsZOffset);
-        Assert.False(dto.SupportsRelativeMovement);
-        Assert.False(dto.SupportsAbsoluteMovement);
+        Assert.Equal(homing, dto.SupportsRelativeMovement);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsAbsoluteMovement);
         Assert.False(dto.SupportsZOffsetFirmwareSave);
-        Assert.False(dto.SupportsFilamentLoad);
-        Assert.False(dto.SupportsFilamentUnload);
-        Assert.False(dto.SupportsFilamentChange);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFilamentLoad);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFilamentUnload);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFilamentChange);
         Assert.Equal(sensorTelemetry, dto.SupportsSensorTelemetry);
         Assert.Equal(sensorControl, dto.SupportsSensorControl);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsSpeedFactorControl);
+        Assert.Equal(backend == PrinterBackend.Moonraker, dto.SupportsFlowFactorControl);
+        using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsSpeedFactorControl").GetBoolean());
+        Assert.Equal(backend == PrinterBackend.Moonraker, json.RootElement.GetProperty("supportsFlowFactorControl").GetBoolean());
         Assert.Equal(
             VerifiedSafetyDiscoveryState.Unavailable,
             dto.VerifiedSafety.Discovery.State);
@@ -105,7 +147,7 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
-    public async Task GetByPrinterIdAsync_FanAndZOffsetRequireFreshReadbacks()
+    public async Task GetByPrinterIdAsync_FanAndZOffsetWrites_DoNotRequireReadbacks()
     {
         Guid printerId = Guid.NewGuid();
         var backendClient = new Mock<IBackendClient>();
@@ -134,9 +176,9 @@ public class PrinterBackendCapabilitiesServiceTests
         PrinterBackendCapabilitiesDto unknown = (await service.GetByPrinterIdAsync(
             printerId,
             CancellationToken.None))!;
-        Assert.False(unknown.SupportsFanControl);
+        Assert.True(unknown.SupportsFanControl);
         Assert.False(unknown.SupportsFanSpeedReadback);
-        Assert.False(unknown.SupportsZOffsetAdjustment);
+        Assert.True(unknown.SupportsZOffsetAdjustment);
         Assert.False(unknown.SupportsZOffsetReadback);
 
         PrinterStatusDto liveStatus = new(
@@ -390,14 +432,77 @@ public class PrinterBackendCapabilitiesServiceTests
                     printerId,
                     CancellationToken.None));
 
-        Assert.True(result.SupportsAbsoluteMovement);
-        Assert.True(result.SupportsFilamentLoad);
-        Assert.True(result.SupportsFilamentUnload);
+        Assert.False(result.SupportsAbsoluteMovement); // safety evidence is not a transport implementation
+        Assert.False(result.SupportsRelativeMovement); // no movement client
+        Assert.False(result.SupportsFilamentLoad);
+        Assert.False(result.SupportsFilamentUnload);
         Assert.False(result.SupportsFilamentChange);
         Assert.Equal(
             VerifiedSafetyFactState.Unknown,
             result.VerifiedSafety.Extrusion.MinimumSafeMeasuredHotendTemperatureC.State);
         Assert.Same(discovered, result.VerifiedSafety);
+    }
+
+    [Theory]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Supported, true)]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Unknown, true)]
+    [InlineData(PrinterBackend.Moonraker, VerifiedSafetySupport.Unsupported, true)]
+    [InlineData(PrinterBackend.OctoPrint, VerifiedSafetySupport.Supported, false)]
+    [InlineData(PrinterBackend.PrusaLink, VerifiedSafetySupport.Supported, false)]
+    public async Task GetByPrinterIdAsync_ManualMovement_FollowsNativeTransportNotSafetyEvidence(
+        PrinterBackend backend,
+        VerifiedSafetySupport absoluteSupport,
+        bool expectedAbsolute)
+    {
+        PrinterVerifiedSafetyDto discovered = PrinterVerifiedSafetyDto.Unknown(
+            discoveryState: VerifiedSafetyDiscoveryState.Verified) with
+        {
+            Operations = PrinterVerifiedSafetyDto.Unknown().Operations with
+            {
+                AbsoluteMovement = new VerifiedSafetyOperationCapabilityDto(
+                    absoluteSupport, "test.discovery", DateTime.UtcNow),
+            },
+        };
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsPrinterControlCapabilities>()
+            .SetupGet(value => value.ControlCapabilities)
+            .Returns(new PrinterControlCapabilities
+            {
+                SupportsAbsoluteMovement = expectedAbsolute,
+                SupportsHoming = true,
+                SupportsHomingXY = true,
+                SupportsHomingZ = true,
+                SupportedAxes = ["x", "y", "z"],
+            });
+        client.As<ISupportsVerifiedSafetyDiscovery>()
+            .Setup(value => value.DiscoverVerifiedSafetyAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(discovered);
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(backend)).Returns(client.Object);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)backend,
+            ServerUrl = "http://printer.local",
+            BackendPort = 7125,
+            FrontendPort = 80,
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object, Mock.Of<IBackendCapabilityFactory>(), clients.Object);
+
+        PrinterBackendCapabilitiesDto result = Assert.IsType<PrinterBackendCapabilitiesDto>(
+            await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
+
+        Assert.True(result.SupportsRelativeMovement);
+        Assert.Equal(expectedAbsolute, result.SupportsAbsoluteMovement);
+        Assert.Equal(["x", "y", "z"], result.SupportedAxes);
     }
 
     [Fact]
@@ -468,9 +573,9 @@ public class PrinterBackendCapabilitiesServiceTests
                 printerId,
                 CancellationToken.None))!;
 
-        Assert.True(firstResult.SupportsFilamentLoad);
-        Assert.True(cachedAcrossScope.SupportsFilamentLoad);
-        Assert.False(refreshed.SupportsFilamentLoad);
+        Assert.Equal(VerifiedSafetySupport.Supported, firstResult.VerifiedSafety.Operations.FilamentLoad.Support);
+        Assert.Equal(VerifiedSafetySupport.Supported, cachedAcrossScope.VerifiedSafety.Operations.FilamentLoad.Support);
+        Assert.Equal(VerifiedSafetySupport.Unknown, refreshed.VerifiedSafety.Operations.FilamentLoad.Support);
         client.As<ISupportsVerifiedSafetyDiscovery>().Verify(value =>
             value.DiscoverVerifiedSafetyAsync(
                 "http://printer.local:7125",
@@ -566,6 +671,15 @@ public class PrinterBackendCapabilitiesServiceTests
             await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
 
         Assert.True(result.SupportsAbsoluteMovement);
+        // Issue #3494: verified Klipper geometry must enable relative jog for mobile Move controls.
+        Assert.True(result.SupportsRelativeMovement);
+        Assert.True(result.SupportsHoming);
+        Assert.Equal(["x", "y", "z"], result.SupportedAxes);
+        using (JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web))))
+        {
+            Assert.True(json.RootElement.GetProperty("supportsRelativeMovement").GetBoolean());
+        }
+
         Assert.Equal(VerifiedSafetyFactState.Verified, result.VerifiedSafety.Positioning.TravelEnvelopeMm.State);
         Assert.Equal(new SafetyVector3Dto(225, 232, 230), result.VerifiedSafety.Positioning.TravelEnvelopeMm.Value!.Maximum);
         Assert.Equal(new SafetyVector3Dto(0, 0, 0), result.VerifiedSafety.Positioning.CoordinateOriginMm.Value);
