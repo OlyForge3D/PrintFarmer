@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { InfoTooltip } from '@/common/components/ui/InfoTooltip';
 import type { PrinterFileCatalogEntry, PrinterFileCatalogSource } from '@/types/api';
 import { FileDate } from '@/features/files/components/FileDate';
 import { FileDetailPanel, type FileDetailRow } from '@/features/files/components/FileDetailPanel';
@@ -21,6 +22,9 @@ import {
   isCollectingState,
   parseProviderModified,
 } from '@/features/files/utils/fileDisplay';
+
+const LOCAL_COPY_NOTE = 'Not proof of current remote byte equality.';
+const LISTING_ONLY_NOTE = 'Listing only: authenticated local staging is not supported by this backend.';
 
 interface PrinterFileDetailsProps {
   entry: PrinterFileCatalogEntry;
@@ -69,7 +73,12 @@ export function PrinterFileDetails({ entry, source, actions, onClose }: PrinterF
     { label: 'Size', value: formatSizeLabel(entry.sizeBytes ?? (hasDurableDetails ? undefined : preview?.sizeBytes)) },
     { label: 'Modified', value: <PrinterFileModified value={entry.modifiedValue} /> },
     { label: 'Path', value: `${entry.storageRoot}/${entry.relativePath}`, mono: true },
-    { label: 'Source', value: entry.printerName },
+    { label: 'Source', value: source && !source.supportsCopy ? (
+      <span className="inline-flex items-center gap-1">
+        {entry.printerName}
+        <InfoTooltip label="Listing only" content={LISTING_ONLY_NOTE} className="left-auto right-0" />
+      </span>
+    ) : entry.printerName },
     { label: 'Print time', value: metadataLoading ? pending
       : printTime === 0 ? '0 s' : printTime == null && metadataCollecting ? collectingValue
         : printTime == null && hasNativeDetails ? 'Unknown' : formatPrintSeconds(printTime) },
@@ -106,15 +115,18 @@ export function PrinterFileDetails({ entry, source, actions, onClose }: PrinterF
   return (
     <FileDetailPanel title={entry.displayName} onClose={onClose} preview={previewNode} rows={rows} actions={actions}>
       {entry.localCopies.length > 0 && (
-        <ul aria-label="Local copies" className="space-y-1 text-xs">
-          {entry.localCopies.map((local) => (
-            <li key={`${local.gcodeFileId}-${local.capturedAtUtc}`}>
-              <Link to={`/files?type=gcode&file=${encodeURIComponent(local.gcodeFileId)}`} className="text-pf-accent underline">Local copy</Link>
-              {' · '}<FileDate value={local.capturedAtUtc} />
-              {' · '}{local.verification === 'UnverifiedSnapshot' ? 'Captured snapshot' : local.verification}
-            </li>
-          ))}
-        </ul>
+        <div className="flex items-start gap-1 text-xs">
+          <ul aria-label="Local copies" className="min-w-0 flex-1 space-y-1">
+            {entry.localCopies.map((local) => (
+              <li key={`${local.gcodeFileId}-${local.capturedAtUtc}`}>
+                <Link to={`/files?type=gcode&file=${encodeURIComponent(local.gcodeFileId)}`} className="text-pf-accent underline">Local copy</Link>
+                {' · '}<FileDate value={local.capturedAtUtc} />
+                {' · '}{local.verification === 'UnverifiedSnapshot' ? 'Captured snapshot' : local.verification}
+              </li>
+            ))}
+          </ul>
+          <InfoTooltip label="About local copies" content={LOCAL_COPY_NOTE} className="left-auto right-0" />
+        </div>
       )}
       <PrinterPrintSettings metadata={metadata} status={settingsStatus} savedAtUtc={entry.detailsFetchedAtUtc} />
     </FileDetailPanel>

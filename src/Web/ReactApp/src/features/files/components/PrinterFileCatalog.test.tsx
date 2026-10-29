@@ -792,7 +792,9 @@ describe('Printer file catalog', () => {
     await user.click(name);
     const panel = screen.getByRole('dialog', { name: 'part.gcode' });
     expect(detailValue(panel, 'Path')).toHaveTextContent('gcodes/Parts/part.gcode');
-    expect(detailValue(panel, 'Source')).toHaveTextContent('Source printer');
+    expect(detailValue(panel, 'Source')).toHaveTextContent(/^Source printer$/);
+    expect(within(panel).queryByRole('button', { name: 'Listing only' })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('list', { name: 'Local copies' })).not.toBeInTheDocument();
     expect(detailValue(panel, 'Type')).toHaveTextContent('G-code file (GCODE)');
     expect(within(detailValue(panel, 'Status')).getAllByRole('listitem').map(item => item.textContent))
       .toEqual(['Available', 'Stale']);
@@ -928,6 +930,7 @@ describe('Printer file catalog', () => {
       ...entry, storageRoot: 'usb', relativePath: 'PART~1.BGC',
       displayName: 'Long descriptive part with full settings.bgcode', sizeBytes: 4096,
       detailsFetchedAtUtc: '2026-10-27T12:00:00Z', metadata, metadataState: 'Ready',
+      localCopies: [{ gcodeFileId: 'g-1', capturedAtUtc: '2026-10-27T13:00:00Z', verification: 'UnverifiedSnapshot' }],
     };
     mocks.catalog.mockResolvedValue({
       ...catalog, items: [nativeEntry],
@@ -943,6 +946,14 @@ describe('Printer file catalog', () => {
     expect(detailValue(panel, 'Size')).toHaveTextContent(/^4 KB$/);
     expect(detailValue(panel, 'Print time')).toHaveTextContent(/^1h 30m$/);
     expect(detailValue(panel, 'Layer height')).toHaveTextContent(/^0.2 mm$/);
+    const listingOnly = within(detailValue(panel, 'Source')).getByRole('button', { name: 'Listing only' });
+    expect(document.getElementById(listingOnly.getAttribute('aria-describedby')!)).toHaveTextContent(
+      /^Listing only: authenticated local staging is not supported by this backend\.$/);
+    const localCopies = within(panel).getByRole('list', { name: 'Local copies' });
+    expect(within(localCopies).getByRole('link', { name: 'Local copy' })).toHaveAttribute('href', '/files?type=gcode&file=g-1');
+    const aboutCopies = within(panel).getByRole('button', { name: 'About local copies' });
+    expect(document.getElementById(aboutCopies.getAttribute('aria-describedby')!)).toHaveTextContent(
+      /^Not proof of current remote byte equality\.$/);
     expect(within(panel).getByText(/Saved in catalog/)).toHaveTextContent(
       `Saved in catalog ${new Date(nativeEntry.detailsFetchedAtUtc!).toLocaleDateString()}`);
     const section = within(panel).getByRole('region', { name: 'Print settings' });
