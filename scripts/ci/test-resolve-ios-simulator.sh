@@ -355,7 +355,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-for name, count in [('ios-pr-ci', 3), ('ci', 1), ('testflight-beta', 1)]:
+for name, count in [('ios-pr-ci', 4), ('ci', 1), ('testflight-beta', 1)]:
     text = (root / f'.github/workflows/{name}.yml').read_text()
     assert text.count('runs-on: macos-26') == count, name
     assert text.count('XCODE_PATH="/Applications/Xcode_26.6.app"') == count, name

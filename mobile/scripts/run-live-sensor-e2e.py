@@ -20,7 +20,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 MOBILE = REPO / "mobile"
 SRC = REPO / "src"
-DEVELOPER_DIR = Path("/Applications/Xcode-26.6.0.app/Contents/Developer")
+# CI runners install the same approved Xcode under a different bundle name;
+# main() still rejects anything other than Xcode 26.6 build 17F113.
+DEVELOPER_DIR = Path(os.environ.get(
+    "PRINTFARM_SENSOR_E2E_DEVELOPER_DIR",
+    "/Applications/Xcode-26.6.0.app/Contents/Developer",
+))
 API_URL = "http://localhost:5245"
 MOONRAKER_URL = "http://127.0.0.1:7125"
 TEST_NAME = (
