@@ -389,14 +389,18 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
         hasSensorReading(status, printerId, 'fan_generic auxiliary', 'FanSpeed', 68)
       ), { timeout: 10_000 }).toBe(true);
       // Humidity is asserted in transport/cache only; temperature remains the visible UI proof.
+      // M112 changes Klippy state without resetting the emulator sensor fixture.
       const shutdownResponse = await request.post(
-        `${getMoonrakerEmulatorUrl('ready')}/__emulator/printer/scenario`,
-        { data: { scenario: 'shutdown' } },
+        `${getMoonrakerEmulatorUrl('ready')}/printer/gcode/script`,
+        { data: { script: 'M112' } },
       );
-      expect(shutdownResponse.ok(), 'Moonraker must accept the existing Klippy shutdown scenario').toBe(true);
-      await expect.poll(() => observerStatuses.some(({ status }) =>
-        hasUnavailableSensorSnapshot(status)
-      ), { timeout: 10_000 }).toBe(true);
+      expect(shutdownResponse.ok(), 'Moonraker must accept M112 without resetting sensor readings').toBe(true);
+      const latestObserverStatus = () =>
+        [...observerStatuses].reverse().find(({ status }) => status.id === printerId);
+      await expect.poll(() => {
+        const latest = latestObserverStatus();
+        return latest !== undefined && hasUnavailableSensorSnapshot(latest.status);
+      }, { timeout: 10_000 }).toBe(true);
       expect(signalRStatuses).toHaveLength(primaryStatusCountWhileDisconnected);
 
     } finally {
@@ -425,27 +429,29 @@ test.describe('Printer Sensor Delivery — Moonraker', () => {
       () => printerSockets.length,
       { timeout: 20_000 },
     ).toBeGreaterThan(firstReconnectSocketIndex);
-    await expect.poll(() => signalRStatuses.some(({ socketIndex, target, status }) =>
-      socketIndex >= firstReconnectSocketIndex &&
-      (target === 'printerstatusesreplayed' || target === 'printerupdated') &&
-      hasUnavailableSensorSnapshot(status)
-    ), { timeout: 20_000 }).toBe(true);
-    const unavailableFrame = signalRStatuses.find(({ socketIndex, target, status }) =>
-      socketIndex >= firstReconnectSocketIndex &&
-      (target === 'printerstatusesreplayed' || target === 'printerupdated') &&
-      hasUnavailableSensorSnapshot(status)
-    );
+    const latestReconnectFrame = () =>
+      [...signalRStatuses].reverse().find(({ socketIndex, status }) =>
+        socketIndex >= firstReconnectSocketIndex && status.id === printerId
+      );
+    await expect.poll(() => {
+      const latest = latestReconnectFrame();
+      return latest !== undefined &&
+        (latest.target === 'printerstatusesreplayed' || latest.target === 'printerupdated') &&
+        hasUnavailableSensorSnapshot(latest.status);
+    }, { timeout: 20_000 }).toBe(true);
+    const unavailableFrame = latestReconnectFrame();
     expect(unavailableFrame).toBeDefined();
-    expect(['printerstatusesreplayed', 'printerupdated']).toContain(unavailableFrame?.target);
 
     await expect.poll(async () =>
       hasUnavailableSensorSnapshot(await readCachedStatus())
     , { timeout: 10_000 }).toBe(true);
-    const unavailableCacheObservation = (await readPrimaryCacheObservations()).find(observation =>
-      hasUnavailableSensorSnapshot(observation.status) &&
-      hasUnavailableSensorSnapshot(observation.cachedStatus)
+    const primaryCacheObservations = await readPrimaryCacheObservations();
+    const unavailableCacheObservation = [...primaryCacheObservations].reverse().find(
+      observation => isRecord(observation.status) && observation.status.id === printerId
     );
     expect(unavailableCacheObservation).toBeDefined();
+    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.status)).toBe(true);
+    expect(hasUnavailableSensorSnapshot(unavailableCacheObservation?.cachedStatus)).toBe(true);
     expect(unavailableCacheObservation?.status).toEqual(unavailableFrame?.status);
     expect(unavailableCacheObservation?.cachedStatus).toEqual(unavailableCacheObservation?.status);
     expectCachedFanState(unavailableCacheObservation?.cachedStatus, 68, false);
