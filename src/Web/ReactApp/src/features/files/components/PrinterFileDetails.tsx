@@ -76,7 +76,7 @@ export function PrinterFileDetails({ entry, source, actions, onClose }: PrinterF
     { label: 'Source', value: source && !source.supportsCopy ? (
       <span className="inline-flex items-center gap-1">
         {entry.printerName}
-        <InfoTooltip label="Listing only" content={LISTING_ONLY_NOTE} className="left-auto right-0" />
+        <InfoTooltip label="Listing only" content={LISTING_ONLY_NOTE} className="left-auto! right-0" />
       </span>
     ) : entry.printerName },
     { label: 'Print time', value: metadataLoading ? pending
@@ -125,7 +125,7 @@ export function PrinterFileDetails({ entry, source, actions, onClose }: PrinterF
               </li>
             ))}
           </ul>
-          <InfoTooltip label="About local copies" content={LOCAL_COPY_NOTE} className="left-auto right-0" />
+          <InfoTooltip label="About local copies" content={LOCAL_COPY_NOTE} className="left-auto! right-0" />
         </div>
       )}
       <PrinterPrintSettings metadata={metadata} status={settingsStatus} savedAtUtc={entry.detailsFetchedAtUtc} />
