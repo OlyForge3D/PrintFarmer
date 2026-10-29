@@ -35,6 +35,12 @@ public sealed class ProfileTaskCheckServiceTests
 
     public ProfileTaskCheckServiceTests()
     {
+        _machineModelProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _machineProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _catalogService.Setup(c => c.GetProfileTaskModelsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         // Wire up scope factory → scope → provider chain
         _scopeFactory.Setup(f => f.CreateScope()).Returns(_scope.Object);
         _scope.Setup(s => s.ServiceProvider).Returns(_scopeProvider.Object);
@@ -152,7 +158,7 @@ public sealed class ProfileTaskCheckServiceTests
         await service.CheckPrintersForMissingProfilesAsync(CancellationToken.None);
 
         _machineModelProfileRepo.Verify(
-            r => r.GetByPrinterModelIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -165,17 +171,15 @@ public sealed class ProfileTaskCheckServiceTests
         SetupWorkers(1);
         SetupPrinters(new Printer { Id = Guid.NewGuid(), ModelId = modelId });
 
-        _machineModelProfileRepo.Setup(r => r.GetByPrinterModelIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new MachineModelProfile { Id = Guid.NewGuid(), PrinterModelId = modelId });
-        _machineProfileRepo.Setup(r => r.HasAnyForPrinterModelAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+        _machineModelProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([modelId]);
 
         ProfileTaskCheckService service = CreateService();
 
         await service.CheckPrintersForMissingProfilesAsync(CancellationToken.None);
 
         _taskService.Verify(
-            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskDto>(), It.IsAny<CancellationToken>()),
+            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskBatchDto>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -186,17 +190,15 @@ public sealed class ProfileTaskCheckServiceTests
         SetupWorkers(1);
         SetupPrinters(new Printer { Id = Guid.NewGuid(), ModelId = modelId });
 
-        _machineModelProfileRepo.Setup(r => r.GetByPrinterModelIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((MachineModelProfile?)null);
-        _machineProfileRepo.Setup(r => r.HasAnyForPrinterModelAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        _machineProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([modelId]);
 
         ProfileTaskCheckService service = CreateService();
 
         await service.CheckPrintersForMissingProfilesAsync(CancellationToken.None);
 
         _taskService.Verify(
-            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskDto>(), It.IsAny<CancellationToken>()),
+            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskBatchDto>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -208,17 +210,15 @@ public sealed class ProfileTaskCheckServiceTests
         Guid modelId = Guid.NewGuid();
         SetupWorkers(1);
         SetupPrinters(new Printer { Id = Guid.NewGuid(), ModelId = modelId });
-        SetupNoProfiles(modelId);
-
-        _catalogService.Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PrinterModelDto(modelId, "Unknown", Guid.NewGuid()));
+        _catalogService.Setup(c => c.GetProfileTaskModelsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ProfileTaskModelDto(modelId, "Unknown", "Unknown")]);
 
         ProfileTaskCheckService service = CreateService();
 
         await service.CheckPrintersForMissingProfilesAsync(CancellationToken.None);
 
         _taskService.Verify(
-            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskDto>(), It.IsAny<CancellationToken>()),
+            t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskBatchDto>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -229,17 +229,10 @@ public sealed class ProfileTaskCheckServiceTests
     {
         Guid modelId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
-        Guid mfgId = Guid.NewGuid();
         SetupWorkers(1);
         SetupPrinters(new Printer { Id = printerId, ModelId = modelId });
-        SetupNoProfiles(modelId);
-
-        _catalogService.Setup(c => c.GetModelByIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PrinterModelDto(modelId, "CORE One", mfgId));
-        _catalogService.Setup(c => c.GetManufacturerByIdAsync(mfgId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ManufacturerDto(mfgId, "Prusa"));
-        _taskService.Setup(t => t.HasPendingProfileImportTaskAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+        _catalogService.Setup(c => c.GetProfileTaskModelsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ProfileTaskModelDto(modelId, "CORE One", "Prusa")]);
 
         ProfileTaskCheckService service = CreateService();
 
@@ -247,9 +240,9 @@ public sealed class ProfileTaskCheckServiceTests
 
         _taskService.Verify(
             t => t.CreateOrUpdateProfileImportTaskAsync(
-                It.Is<CreateProfileImportTaskDto>(dto =>
+                It.Is<CreateProfileImportTaskBatchDto>(dto =>
                     dto.PrinterModelId == modelId &&
-                    dto.PrinterId == printerId &&
+                    dto.PrinterIds.SequenceEqual(new[] { printerId }) &&
                     dto.PrinterModelName == "CORE One" &&
                     dto.ManufacturerName == "Prusa"),
                 It.IsAny<CancellationToken>()),
@@ -285,11 +278,69 @@ public sealed class ProfileTaskCheckServiceTests
         await service.CheckPrintersForMissingProfilesAsync(CancellationToken.None);
 
         _machineModelProfileRepo.Verify(
-            r => r.GetByPrinterModelIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
     // --- Helper methods ---
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(1000, 1)]
+    [InlineData(1000, 100)]
+    public async Task CheckPrintersForMissingProfilesAsync_ManyPrinters_UpsertsCompleteGroupsOnce(int printerCount, int modelCount)
+    {
+        Guid[] models = Enumerable.Range(0, modelCount).Select(_ => Guid.NewGuid()).ToArray();
+        Printer[] printers = Enumerable.Range(0, printerCount)
+            .Select(i => new Printer { Id = Guid.NewGuid(), ModelId = models[i % modelCount] }).ToArray();
+        SetupWorkers(1);
+        SetupPrinters(printers);
+        _catalogService.Setup(c => c.GetProfileTaskModelsAsync(
+                It.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(models)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(models.Select(id => new ProfileTaskModelDto(id, "MK4", "Prusa")).ToArray());
+        List<CreateProfileImportTaskBatchDto> requests = [];
+        _taskService.Setup(t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskBatchDto>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateProfileImportTaskBatchDto, CancellationToken>((dto, _) => requests.Add(dto));
+
+        await CreateService().CheckPrintersForMissingProfilesAsync(CancellationToken.None);
+
+        Assert.Equal(modelCount, requests.Count);
+        foreach (CreateProfileImportTaskBatchDto request in requests)
+        {
+            Assert.True(request.PrinterIds.ToHashSet().SetEquals(printers.Where(p => p.ModelId == request.PrinterModelId).Select(p => p.Id)));
+        }
+
+        _machineModelProfileRepo.Verify(r => r.GetPrinterModelIdsWithProfilesAsync(
+            It.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(models)), It.IsAny<CancellationToken>()), Times.Once);
+        _machineProfileRepo.Verify(r => r.GetPrinterModelIdsWithProfilesAsync(
+            It.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(models)), It.IsAny<CancellationToken>()), Times.Once);
+        _catalogService.Verify(c => c.GetProfileTaskModelsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Once);
+        _catalogService.Verify(c => c.GetModelByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _taskService.Verify(t => t.HasPendingProfileImportTaskAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _taskService.Verify(t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CheckPrintersForMissingProfilesAsync_MixedCoverage_ResolvesOnlyMissingAndSkipsAbsentCatalogModels()
+    {
+        Guid[] models = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+        SetupWorkers(1);
+        SetupPrinters(models.Select(id => new Printer { Id = Guid.NewGuid(), ModelId = id }).ToArray());
+        _machineModelProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([models[0]]);
+        _machineProfileRepo.Setup(r => r.GetPrinterModelIdsWithProfilesAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([models[1]]);
+        _catalogService.Setup(c => c.GetProfileTaskModelsAsync(
+                It.Is<IEnumerable<Guid>>(ids => ids.ToHashSet().SetEquals(models.Skip(2))), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new(models[2], "MK4", "Unknown"), new(models[3], "uNkNoWn Model", "Unknown")]);
+
+        await CreateService().CheckPrintersForMissingProfilesAsync(CancellationToken.None);
+
+        _taskService.Verify(t => t.CreateOrUpdateProfileImportTaskAsync(
+            It.Is<CreateProfileImportTaskBatchDto>(dto => dto.PrinterModelId == models[2] && dto.ManufacturerName == "Unknown"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _taskService.Verify(t => t.CreateOrUpdateProfileImportTaskAsync(It.IsAny<CreateProfileImportTaskBatchDto>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
 
     private void SetupWorkers(int count)
     {
@@ -306,11 +357,4 @@ public sealed class ProfileTaskCheckServiceTests
             .ReturnsAsync(printers.ToList());
     }
 
-    private void SetupNoProfiles(Guid modelId)
-    {
-        _machineModelProfileRepo.Setup(r => r.GetByPrinterModelIdAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((MachineModelProfile?)null);
-        _machineProfileRepo.Setup(r => r.HasAnyForPrinterModelAsync(modelId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-    }
 }
