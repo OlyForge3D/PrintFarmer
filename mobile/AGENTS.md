@@ -51,6 +51,12 @@ For all unit tests use `-only-testing:PrintFarmerTests`; select
 with `export IOS_SIMULATOR_DEVICE_FAMILY=iPad` inside the subshell for separate
 iPad-host evidence; never reuse iPhone results as iPad certification.
 
+PR CI preserves the full iPhone unit suite and adds a focused
+`Filament accessibility (iPad)` unit leg using the same approved toolchain.
+Its `ios-filament-ipad-results` artifact retains the result bundle, runner logs,
+events/timing and ten AX1–AX5 card attachments at 320/700pt with destination
+metadata. The eight XCUI shards run after both unit legs succeed.
+
 For environmental drift, compare identical test/reference blobs with the same
 pinned Xcode, runtime/build, host family, scale and locale. Not every failure is
 environmental; investigate XCUI failures separately. Preserve strictness,
