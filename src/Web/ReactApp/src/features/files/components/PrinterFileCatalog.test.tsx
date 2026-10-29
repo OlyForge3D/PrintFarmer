@@ -218,7 +218,7 @@ describe('Printer file catalog', () => {
     expect(screen.getByRole('button', { name: 'Force refresh all online printers' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /automatic discovery/i })).not.toBeInTheDocument();
     expect(mocks.catalog).toHaveBeenCalledWith({ printerId: undefined, search: undefined,
-      availability: undefined, stale: undefined, page: 1, pageSize: 25 }, expect.any(AbortSignal));
+      page: 1, pageSize: 25 }, expect.any(AbortSignal));
     expect(mocks.refresh).not.toHaveBeenCalled();
     expect(mocks.enabled).not.toHaveBeenCalled();
     expect(mocks.copy).not.toHaveBeenCalled();
@@ -468,11 +468,11 @@ describe('Printer file catalog', () => {
     const user = userEvent.setup();
     renderCatalog();
     await user.click(await screen.findByRole('checkbox', { name: 'Select all files on this page' }));
-    if (change === 'filter') await user.selectOptions(screen.getByRole('combobox', { name: 'Freshness' }), 'fresh');
+    if (change === 'filter') await user.type(screen.getByRole('textbox', { name: 'Path search' }), 'part');
     else await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
     expect(screen.queryByRole('group', { name: 'Selected files' })).not.toBeInTheDocument();
-    if (change === 'filter') await user.selectOptions(screen.getByRole('combobox', { name: 'Freshness' }), '');
+    if (change === 'filter') await user.clear(screen.getByRole('textbox', { name: 'Path search' }));
     else await user.click(screen.getByRole('button', { name: 'Previous' }));
     expect(await screen.findByRole('checkbox', { name: 'Select part.gcode' })).not.toBeChecked();
   });
@@ -675,11 +675,31 @@ describe('Printer file catalog', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  it('keeps filters in the canonical URL and sends them to authorized server search', async () => {
+  it('sends remaining URL filters to server search without applying removed availability or freshness filters', async () => {
     renderCatalog('/files?source=printers&printer=source&remoteSearch=part&availability=Missing&freshness=stale&remotePage=2');
     await waitFor(() => expect(mocks.catalog).toHaveBeenCalledWith({
-      printerId: 'source', search: 'part', availability: 'Missing', stale: true, page: 2, pageSize: 25,
+      printerId: 'source', search: 'part', page: 2, pageSize: 25,
     }, expect.any(AbortSignal)));
+  });
+
+  it.each(['explorer', 'grid'])('groups printer, search, view and refresh controls in one responsive toolbar in %s mode', async mode => {
+    localStorage.setItem('printfarmer-printer-files-viewmode', mode);
+    renderCatalog();
+    const toolbar = screen.getByRole('group', { name: 'Printer file controls' });
+    expect(toolbar).toHaveClass('flex', 'flex-wrap', 'items-end');
+    expect(within(toolbar).getByRole('combobox', { name: 'Printer' })).toBeVisible();
+    expect(within(toolbar).getByRole('textbox', { name: 'Path search' })).toBeVisible();
+    expect(within(toolbar).getByRole('button', { name: 'Explorer view' })).toBeVisible();
+    expect(within(toolbar).getByRole('button', { name: 'Grid view' })).toBeVisible();
+    expect(await within(toolbar).findByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
+    expect(screen.queryByText('Availability', { selector: 'label' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Freshness', { selector: 'label' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Availability' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Freshness' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Select a file to see its preview, details and actions.')).not.toBeInTheDocument();
+    if (mode === 'grid') {
+      expect(within(toolbar).getByRole('checkbox', { name: 'Select all files on this page' })).toBeVisible();
+    }
   });
 
   it('Copy posts one explicit durable intent and never queues', async () => {

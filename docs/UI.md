@@ -50,7 +50,10 @@ Main overview page showing all printers with real-time status.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one or several selected files. Add
   `&printer=<printerId>` to scope the catalog to one printer. Filters appear
-  directly without a duplicate source heading and description.
+  directly without a duplicate source heading and description. **Printer** and
+  **Path search** share a responsive toolbar with the view buttons and refresh.
+  Availability and freshness remain file metadata, not filter dropdowns;
+  old `availability` and `freshness` URL parameters do not filter this view.
 
 **Local library** and **On printers** use the shared themed tabs. The selected
 source stays URL-driven, and only its content is mounted.

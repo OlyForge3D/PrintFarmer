@@ -13,7 +13,7 @@ import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import { apiClient } from '@/services/api';
 import { generateUUID } from '@/utils/uuid';
-import type { PrinterFileAvailability, PrinterFileCatalogEntry } from '@/types/api';
+import type { PrinterFileCatalogEntry } from '@/types/api';
 import { PrinterFileDeleteControl, type PrinterFileDeleteIntent } from '@/features/files/components/PrinterFileDeleteControl';
 import { PrinterFileBulkActions } from '@/features/files/components/PrinterFileBulkActions';
 import { CompactFileCard } from '@/features/files/components/CompactFileCard';
@@ -98,11 +98,6 @@ export function PrinterFileCatalog() {
   const search = params.get('remoteSearch') ?? '';
   const requestedPage = Number(params.get('remotePage') ?? '1');
   const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-  const rawAvailability = params.get('availability');
-  const availability: PrinterFileAvailability | undefined =
-    rawAvailability === 'Available' || rawAvailability === 'Missing' || rawAvailability === 'Deleted'
-      ? rawAvailability : undefined;
-  const freshness = params.get('freshness') ?? '';
   const operationId = params.get('operation') ?? '';
   const canRead = hasPermission('printer_files', 'read');
   const { data: destinations = [] } = usePrinters({ enabled: canRead });
@@ -111,7 +106,7 @@ export function PrinterFileCatalog() {
   const { viewMode, setViewMode } = useViewModePreference(VIEW_MODE_STORAGE_KEY);
   const details = useFileDetailSelection<string>();
   // Filters and paging change what is listed, so any change starts a fresh selection.
-  const selectionScope = JSON.stringify([printerId, search, availability ?? '', freshness, page]);
+  const selectionScope = JSON.stringify([printerId, search, page]);
   const [selection, setSelection] = useState<Selection>(() => ({ scope: selectionScope, ids: NO_IDS }));
   if (selection.scope !== selectionScope) setSelection({ scope: selectionScope, ids: NO_IDS });
 
@@ -125,10 +120,9 @@ export function PrinterFileCatalog() {
     });
   };
   const catalog = useQuery({
-    queryKey: ['printer-file-catalog', printerId, search, availability, freshness, page],
+    queryKey: ['printer-file-catalog', printerId, search, page],
     queryFn: ({ signal }) => apiClient.getPrinterFileCatalog({
-      printerId: printerId || undefined, search: search || undefined, availability,
-      stale: freshness ? freshness === 'stale' : undefined, page, pageSize: PAGE_SIZE,
+      printerId: printerId || undefined, search: search || undefined, page, pageSize: PAGE_SIZE,
     }, signal),
     enabled: canRead,
     refetchInterval: query => query.state.data?.scans.some(scan => scan.isScanning)
@@ -351,27 +345,35 @@ export function PrinterFileCatalog() {
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <FormField label="Printer" htmlFor="catalog-printer">
+      <div role="group" aria-label="Printer file controls" className="flex flex-wrap items-end gap-3">
+        <FormField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
           <Select id="catalog-printer" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
             <option value="">All authorized printers</option>
             {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
           </Select>
         </FormField>
-        <FormField label="Path search" htmlFor="catalog-search">
+        <FormField label="Path search" htmlFor="catalog-search" className="min-w-0 flex-1 basis-48">
           <Input id="catalog-search" value={search} maxLength={200} onChange={event => changeFilter('remoteSearch', event.target.value)} />
         </FormField>
-        <FormField label="Availability" htmlFor="catalog-availability">
-          <Select id="catalog-availability" value={availability ?? ''} onChange={event => changeFilter('availability', event.target.value)}>
-            <option value="">All observations</option><option value="Available">Available</option>
-            <option value="Missing">Missing</option><option value="Deleted">Deleted</option>
-          </Select>
-        </FormField>
-        <FormField label="Freshness" htmlFor="catalog-freshness">
-          <Select id="catalog-freshness" value={freshness} onChange={event => changeFilter('freshness', event.target.value)}>
-            <option value="">Any freshness</option><option value="fresh">Recently seen</option><option value="stale">Stale</option>
-          </Select>
-        </FormField>
+        <div className="ml-auto flex items-center gap-1">
+          {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
+          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+          {manageableSources.length > 0 && (
+            <Button
+              type="button"
+              size="md"
+              variant="secondary"
+              aria-label={REFRESH_ALL_LABEL}
+              title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+              explainedDisabled
+              disabled={refreshTargets.length === 0 || refreshBusy}
+              aria-busy={refreshBusy}
+              className="px-3"
+              iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
+              onClick={() => refreshAll.mutate(refreshTargets)}
+            />
+          )}
+        </div>
       </div>
       {catalog.isLoading && <div role="status"><Spinner /> Loading observations</div>}
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}
@@ -383,30 +385,6 @@ export function PrinterFileCatalog() {
       />
       {catalog.data && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              {viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-              <p className="text-xs text-pf-text-secondary">Select a file to see its preview, details and actions.</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-              {manageableSources.length > 0 && (
-                <Button
-                  type="button"
-                  size="md"
-                  variant="secondary"
-                  aria-label={REFRESH_ALL_LABEL}
-                  title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
-                  explainedDisabled
-                  disabled={refreshTargets.length === 0 || refreshBusy}
-                  aria-busy={refreshBusy}
-                  className="px-3"
-                  iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
-                  onClick={() => refreshAll.mutate(refreshTargets)}
-                />
-              )}
-            </div>
-          </div>
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
               {catalog.data.items.length === 0 ? (
