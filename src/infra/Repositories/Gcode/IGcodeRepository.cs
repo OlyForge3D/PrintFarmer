@@ -36,6 +36,15 @@ public interface IGcodeRepository
     Task<GcodeFile?> GetByIdWithIncludesAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves tracked G-code files for a set of IDs with the same related entities as
+    /// <see cref="GetByIdWithIncludesAsync"/>. IDs are queried in bounded chunks so large
+    /// selections stay below provider parameter limits. Missing IDs are omitted.
+    /// </summary>
+    /// <param name="ids">Distinct file IDs to load.</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    Task<List<GcodeFile>> GetByIdsWithIncludesAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct);
+
+    /// <summary>
     /// Finds a G-code file by its SHA256 file hash (used for deduplication detection).
     /// </summary>
     /// <param name="hash">The SHA256 hash of the file (hexadecimal string)</param>

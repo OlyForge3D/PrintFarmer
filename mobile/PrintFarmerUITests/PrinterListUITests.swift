@@ -155,8 +155,13 @@ class RootTitleAlignmentUITests: PrintFarmerUITestCase {
     private func verifyFarmChipRow(window: CGRect, title: (frame: CGRect, inNavigationBar: Bool)) {
         let filters = app.descendants(matching: .any)["farm.filters"]
         let first = app.buttons["farm.filter.All"]
-        let last = app.buttons["farm.filter.Idle"]
-        XCTAssertTrue(first.waitForExistence(timeout: 5) && last.exists, "Farm filter chips must render")
+        let filterButtons = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "farm.filter.")
+        )
+        XCTAssertTrue(first.waitForExistence(timeout: 5), "Farm filter chips must render")
+        XCTAssertGreaterThan(filterButtons.count, 1, "Farm filter chips must render")
+        let last = filterButtons.element(boundBy: filterButtons.count - 1)
+        XCTAssertTrue(last.exists, "The final Farm filter chip must render")
 
         if expectsFarmChipOverflow && !title.inNavigationBar {
             XCTAssertGreaterThan(
@@ -242,6 +247,51 @@ final class RootTitleAlignmentLargeTypeUITests: RootTitleAlignmentUITests {
     }
 
     override var expectsFarmChipOverflow: Bool { true }
+
+    func testFilamentFilterChipsScrollOnOneLineAtLargeType() {
+        let window = app.windows.firstMatch.frame
+        let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
+        XCTAssertTrue(filament.exists, "Filament must be reachable")
+        filament.tap()
+
+        let filters = app.descendants(matching: .any)["inventory.filters"]
+        let first = app.buttons["inventory.filter.all"]
+        let filterButtons = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "inventory.filter.")
+        )
+        XCTAssertTrue(first.waitForExistence(timeout: 8), "Filament filter chips must render")
+        XCTAssertGreaterThan(filterButtons.count, 1, "Filament filter chips must render")
+        let last = filterButtons.element(boundBy: filterButtons.count - 1)
+        XCTAssertTrue(last.exists, "The final Filament filter chip must render")
+        XCTAssertEqual(
+            first.frame.midY,
+            last.frame.midY,
+            accuracy: 1,
+            "Large-type Filament filters should stay on one row; first=\(first.frame) last=\(last.frame)"
+        )
+        XCTAssertGreaterThanOrEqual(filters.frame.minX, window.minX - 0.5)
+        XCTAssertLessThanOrEqual(filters.frame.maxX, window.maxX + 0.5)
+
+        if app.staticTexts["navigation.title"].exists {
+            XCTAssertGreaterThan(
+                last.frame.maxX,
+                filters.frame.maxX,
+                "The compact Filament chip row should scroll when its filters overflow"
+            )
+            XCTAssertLessThan(
+                last.frame.minX,
+                filters.frame.maxX,
+                "The final Filament chip should peek into the compact viewport"
+            )
+            let firstMinX = first.frame.minX
+            filters.swipeLeft()
+            XCTAssertLessThan(
+                first.frame.minX,
+                firstMinX - 16,
+                "Swiping the Filament filter row should scroll its chips"
+            )
+        }
+    }
 }
 
 /// The cold-offline launch mounts the DashboardView fallback NavigationStack,

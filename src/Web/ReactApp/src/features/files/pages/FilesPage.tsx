@@ -39,6 +39,7 @@ import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { TaggingModal } from '@/components/TaggingModal';
 import { apiClient } from '@/services/api';
+import { deleteLocalLibraryFiles, describeLocalLibraryDelete } from '@/features/files/utils/localLibraryBulkDelete';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import {
   ClipboardListIcon,
@@ -626,48 +627,21 @@ export function FilesPage() {
     }
 
     setIsDeleting(true);
-    let successCount = 0;
-    let failedCount = 0;
-
-    for (const id of idsToDelete) {
-      const parsed = fromPrefixedId(id);
-      if (!parsed) {
-        failedCount++;
-        continue;
+    try {
+      const summary = await deleteLocalLibraryFiles(idsToDelete, apiClient, fromPrefixedId);
+      setDeleteTarget(null);
+      setShowBulkDeleteConfirm(false);
+      // Blocked, failed and unknown items stay selected so the user can review or retry them.
+      setSelectedIds((current) => current.filter((id) => !summary.removedIds.has(id)));
+      if (activeDetailId && summary.removedIds.has(activeDetailId)) {
+        closeDetails();
       }
-
-      try {
-        if (parsed.source === 'model') {
-          await apiClient.deleteModel3dFile(parsed.actualId);
-        } else {
-          await apiClient.deleteGcodeFile(parsed.actualId);
-        }
-        successCount++;
-      } catch {
-        failedCount++;
-      }
+      const { level, message } = describeLocalLibraryDelete(summary);
+      toast[level](message);
+    } finally {
+      setIsDeleting(false);
+      await handleRefresh();
     }
-
-    setIsDeleting(false);
-    setDeleteTarget(null);
-    setShowBulkDeleteConfirm(false);
-    setSelectedIds([]);
-    if (activeDetailId && idsToDelete.includes(activeDetailId)) {
-      closeDetails();
-    }
-    await handleRefresh();
-
-    if (successCount > 0 && failedCount === 0) {
-      toast.success(`Deleted ${successCount} file${successCount === 1 ? '' : 's'}`);
-      return;
-    }
-
-    if (successCount > 0) {
-      toast.warning(`Deleted ${successCount} file${successCount === 1 ? '' : 's'}, ${failedCount} failed`);
-      return;
-    }
-
-    toast.error('Failed to delete selected files');
   }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (

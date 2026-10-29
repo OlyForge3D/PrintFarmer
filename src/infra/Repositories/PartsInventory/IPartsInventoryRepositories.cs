@@ -76,5 +76,12 @@ public interface IPartOutputMappingRepository
     /// </summary>
     Task DeleteDirectMappingsForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Set-based variant of <see cref="DeleteDirectMappingsForGcodeFileAsync"/> for several files,
+    /// executed in bounded ID chunks. Only direct <c>GcodeFileId</c> mappings are deleted;
+    /// <c>PrintProjectFileId</c> mappings are untouched.
+    /// </summary>
+    Task DeleteDirectMappingsForGcodeFilesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct = default);
+
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

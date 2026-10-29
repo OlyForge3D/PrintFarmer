@@ -1842,6 +1842,88 @@ validation, storage, cancellation, or database commit fails.
 
 The updated ETag is also returned in the `ETag` response header.
 
+### Bulk Delete Local-Library Files
+
+The Files page sends at most one bulk request per source. It never replays
+single deletes after an unknown transport outcome.
+
+```http
+DELETE /api/3d-models
+Content-Type: application/json
+
+{ "ids": ["model-uuid-1", "model-uuid-2"] }
+```
+
+```http
+DELETE /api/gcode-files
+Content-Type: application/json
+
+{ "fileIds": ["gcode-uuid-1", "gcode-uuid-2"] }
+```
+
+| Route | Permission | Empty list |
+|---|---|---|
+| `DELETE /api/3d-models` | `slicer_engines:admin` | `400 Bad Request` |
+| `DELETE /api/gcode-files` | `gcode_library:admin` | `400 Bad Request` |
+
+Both routes return `200 OK` with the existing count fields plus an additive
+`results` array. That array contains one entry per distinct requested ID, in
+request order:
+
+```json
+{
+  "deleted": 1,
+  "errors": 1,
+  "total": 2,
+  "results": [
+    { "id": "model-uuid-1", "status": "Deleted" },
+    { "id": "model-uuid-2", "status": "NotFound" }
+  ]
+}
+```
+
+The G-code route returns `{ "deleted", "totalRequested", "results" }`, where
+`totalRequested` is the distinct ID count.
+
+| `status` | Meaning |
+|---|---|
+| `Deleted` | Record and stored files removed |
+| `DeletedCleanupIncomplete` | Record removed; stored-file cleanup did not finish |
+| `NotFound` | No deletable record exists |
+| `Blocked` | Intentionally not deleted |
+| `Failed` | Delete did not take effect; record retained |
+| `Unknown` | Server cannot prove whether the delete took effect |
+
+The optional `reason` is one of `ActiveJobs`, `UnsafePath`, `StorageFailed`,
+`DatabaseFailed`, `FilesRemovedRecordRetained`, `CommitOutcomeUnknown`,
+`FileCleanupFailed`, or `ThumbnailCleanupFailed`. Reasons never contain
+storage paths or exception text.
+
+Source-specific semantics:
+
+- **G-code:** The service loads the files, counts active jobs, and clears
+  historical job references with set-based queries. It then removes all
+  eligible records in one owned transaction and deletes the stored files after
+  the commit. A file used by active queue jobs is `Blocked` (`ActiveJobs`)
+  without blocking the other files. Direct part-output mappings are removed;
+  project-file mappings cascade as before. A failed save rolls back and keeps
+  every stored file. An exception from the commit call itself is reported as
+  `Unknown` (`CommitOutcomeUnknown`).
+- **3D models:** The service loads valid models with one chunked query.
+  Missing or invalid IDs are `NotFound`. Each model then keeps the existing
+  single-delete order: it removes the stored files first, then removes and
+  saves the record. Saves happen one model at a time because file deletion
+  cannot join a database transaction. The operation is not cancelled when the
+  client disconnects. A storage failure retains the record
+  (`Failed`/`StorageFailed`). A database failure after the files are removed
+  is `Failed` (`FilesRemovedRecordRetained`). After a save failure the record
+  is re-read; if it still cannot be resolved, the result is `Unknown`
+  (`CommitOutcomeUnknown`).
+
+Query-count evidence comes from SQLite in-memory tests only: G-code bulk delete
+issues 3 SELECTs and 1 commit for 1, 10, or 100 files. That evidence does not
+establish production-provider latency.
+
 ## Settings API
 
 The settings API is served by `UnifiedSettingsController` under `/api/settings`. It
