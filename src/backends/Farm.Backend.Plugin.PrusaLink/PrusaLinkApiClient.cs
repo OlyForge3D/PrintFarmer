@@ -40,6 +40,7 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PrusaLinkApiClient> _logger;
     private readonly bool _ownsHttpClient;
+    private readonly TimeProvider _timeProvider;
 
     // Cache digest state by the complete credential pair. A password hash is not a safe
     // identity key because collisions could reuse another credential's Authorization state.
@@ -58,9 +59,11 @@ public partial class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
     internal PrusaLinkApiClient(
         HttpClient httpClient,
         ILogger<PrusaLinkApiClient> logger,
-        bool ownsHttpClient)
+        bool ownsHttpClient,
+        TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _transport = new BackendHttpTransport(httpClient);
         _logger = logger;
         _ownsHttpClient = ownsHttpClient;
