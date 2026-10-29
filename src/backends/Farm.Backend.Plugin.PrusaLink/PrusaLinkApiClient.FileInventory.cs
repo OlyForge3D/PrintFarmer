@@ -12,7 +12,7 @@ public partial class PrusaLinkApiClient
         string baseUrl, PrinterCredential? credential = null,
         PrinterFileInventoryOptions? options = null, CancellationToken ct = default)
     {
-        using PrinterFileInventorySession scan = new(options, ct);
+        using PrinterFileInventorySession scan = new(options, _timeProvider, ct);
         try
         {
             using JsonDocument storageDocument = await ReadInventoryDocumentAsync(
