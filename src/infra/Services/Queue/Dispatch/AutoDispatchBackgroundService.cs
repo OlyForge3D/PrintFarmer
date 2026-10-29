@@ -35,6 +35,8 @@ public sealed class AutoDispatchBackgroundService(
     private readonly HashSet<Guid> _claimedJobs = [];
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
+    internal const int ConsecutiveContentionErrorThreshold = 3;
+    private int _consecutiveScanContentionFailures;
 
     /// <inheritdoc />
     public override void Dispose()
@@ -49,7 +51,7 @@ public sealed class AutoDispatchBackgroundService(
 
         try
         {
-            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+            await RunDurableScanAsync(stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -75,7 +77,7 @@ public sealed class AutoDispatchBackgroundService(
                             // Expected: the periodic durable scan won this wait.
                         }
 
-                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                        await RunDurableScanAsync(stoppingToken);
                         continue;
                     }
 
@@ -197,6 +199,52 @@ public sealed class AutoDispatchBackgroundService(
             }
 
             await Task.WhenAll(activeWorkers);
+        }
+    }
+
+    /// <summary>
+    /// Runs one durable reconciliation scan. Classified provider lock contention (#3604) is
+    /// logged and deferred to the next <see cref="DurableScanInterval"/>: the scan only reads
+    /// and re-queues wake-up hints, so skipping one cannot violate dispatch ownership, and
+    /// letting it escape would stop the host under the default
+    /// <c>BackgroundServiceExceptionBehavior.StopHost</c>. Every other failure still propagates.
+    /// </summary>
+    internal async Task RunDurableScanAsync(CancellationToken ct)
+    {
+        try
+        {
+            await ReconcileStartupEligiblePrintersAsync(ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested
+            && DispatchTransientDatabaseFailure.IsTransientContention(ex))
+        {
+            int failures = ++_consecutiveScanContentionFailures;
+            if (failures >= ConsecutiveContentionErrorThreshold)
+            {
+                logger.LogError(
+                    ex,
+                    "[AutoDispatch] Durable reconciliation scan blocked by database lock contention for {ConsecutiveFailures} consecutive scans; retrying in {RetryInterval}",
+                    failures,
+                    DurableScanInterval);
+            }
+            else
+            {
+                logger.LogWarning(
+                    ex,
+                    "[AutoDispatch] Durable reconciliation scan hit transient database lock contention (consecutive failure {ConsecutiveFailures}); retrying in {RetryInterval}",
+                    failures,
+                    DurableScanInterval);
+            }
+
+            return;
+        }
+
+        if (_consecutiveScanContentionFailures > 0)
+        {
+            logger.LogInformation(
+                "[AutoDispatch] Durable reconciliation scan recovered after {ConsecutiveFailures} contention failure(s)",
+                _consecutiveScanContentionFailures);
+            _consecutiveScanContentionFailures = 0;
         }
     }
 
