@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Filament Dynamic Type (#3535, #3536)** — Remaining amount and job demand
+  stack without a separator when space is limited. Spool names scale through
+  accessibility text sizes, with the reel above the text and actions below it
+  so names and controls do not compete for horizontal space.
+
 - **Filament loading flash (#3565)** — Opening the Filament tab no longer
   briefly reports unknown spool amounts before the inventory lookup finishes.
   Completed missing-data and lookup-failure states remain visible.
