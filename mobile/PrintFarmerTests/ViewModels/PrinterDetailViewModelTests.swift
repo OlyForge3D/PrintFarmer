@@ -96,7 +96,7 @@ final class PrinterSensorLiveStateTests: XCTestCase {
         let liveHumidityPrinter = try XCTUnwrap(model.printer)
         record("sensor-only humidity update", printer: liveHumidityPrinter, connection: hub.connectionState)
 
-        try await postControl("/stop-api", payload: [:], configuration: configuration)
+        _ = try await postControl("/stop-api", payload: [:], configuration: configuration)
         try await waitForConnectionState(.reconnecting, on: hub)
         let disconnectedPrinter = try XCTUnwrap(model.printer)
         XCTAssertTrue(disconnectedPrinter.isOnline)
@@ -110,7 +110,7 @@ final class PrinterSensorLiveStateTests: XCTestCase {
         XCTAssertFalse(hasHumidity(67.4, in: retainedWhileDisconnected))
         record("emulator mutated while API is stopped", printer: retainedWhileDisconnected, connection: hub.connectionState)
 
-        try await postControl("/start-api", payload: [:], configuration: configuration)
+        _ = try await postControl("/start-api", payload: [:], configuration: configuration)
         try await waitForConnectionState(.connected, on: hub)
         try await waitForPrinterState("Reconnect recovery publishes fresh humidity while sensor remains unavailable") {
             self.hasHumidity(67.4, in: $0) && $0.isOnline && self.sensor(in: $0)?.available == false
