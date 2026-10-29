@@ -12,6 +12,10 @@ public interface IModel3DFileService
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Model3DDto>> ListModelsAsync(CancellationToken ct);
 
+    /// <summary>Retrieves only the fields needed by the 3D model picker.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Model3DPickerDto>> ListPickerModelsAsync(CancellationToken ct);
+
     /// <summary>Lists all 3D model folders recursively for building a folder tree structure.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<List<Model3DEntryDto>> ListAllFoldersAsync(CancellationToken ct);

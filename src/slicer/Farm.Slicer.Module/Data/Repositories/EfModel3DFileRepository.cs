@@ -64,6 +64,22 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<Model3DPickerProjection>> ListValidPickerAsync(CancellationToken ct)
+    {
+        return await _db.Models3D
+            .AsNoTracking()
+            .Where(m => m.IsValid)
+            .OrderByDescending(m => m.UploadedAt)
+            .Select(m => new Model3DPickerProjection(
+                m.Id,
+                m.Name,
+                m.FileName,
+                m.FileFormat,
+                m.UploadedAt))
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<List<Model3D>> ListValidByFolderAsync(Guid folderId, CancellationToken ct)
     {
         return await _db.Models3D

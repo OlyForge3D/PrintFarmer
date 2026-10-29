@@ -47,7 +47,7 @@ import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig 
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
 import type { Model3DBasic } from '../components/job/types';
-import type { ModelListItem } from '@/types/models';
+import type { Model3DPickerItem, ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Card, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
@@ -240,17 +240,16 @@ function getProcessLayerHeight(profile: OrcaProcessProfile): number {
 const MODELS_LIST_BASIC_QUERY_KEY = ['modelsListBasic'];
 
 async function fetchModelsListBasic(): Promise<ModelListItem[]> {
-  const response = await apiClient.get<unknown[]>('/3d-models');
-  return response.data.map(obj => {
-    const m = obj as { id: string; name?: string; fileName?: string; displayName?: string; originalFileName?: string; fileFormat?: number; uploadedAt?: string; uploadedAtUtc?: string };
-    const displayName = m.name || m.originalFileName || m.displayName || m.fileName || 'model';
+  const response = await apiClient.get<Model3DPickerItem[]>('/3d-models/picker');
+  return response.data.map(m => {
+    const displayName = m.name || m.fileName || 'model';
     return {
       id: m.id,
       fileName: m.fileName || displayName,
       originalFileName: displayName,
-      fileFormat: m.fileFormat ?? 0,
-      uploadedAt: m.uploadedAt ?? m.uploadedAtUtc ?? ''
-    } as ModelListItem;
+      fileType: m.fileType,
+      uploadedAt: m.uploadedAt,
+    };
   });
 }
 
