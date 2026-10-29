@@ -3,16 +3,15 @@ import type { PrinterFilamentTool, PrinterPrintMetadata } from '@/types/api';
 const DEGREES_C = '\u00b0C';
 
 /**
- * Supplied-only native fields listed after the grouped print settings. Fields the grouped
- * settings already read (slicer, sliced-for model, temperatures, nozzle, infill, supports,
- * filament totals, tools) are deliberately absent so no value is shown twice.
+ * Supplied-only native fields listed after the grouped print settings. Fields shown elsewhere
+ * (print time and layer height in the detail rows; slicer, sliced-for model, temperatures,
+ * nozzle, infill, supports, filament totals and tools in the grouped settings) are absent or
+ * suppressed by `printerMetadataRows` so no value is shown twice.
  */
 const fields = [
   { key: 'profile', label: 'Profile' },
-  { key: 'printTimeSeconds', label: 'Reported print time', unit: 's' },
   { key: 'estimatedPrintTimeSeconds', label: 'Estimated print time', unit: 's' },
   { key: 'estimatedPrintTimeNormalMode', label: 'Normal-mode estimate' },
-  { key: 'layerHeightMm', label: 'Native layer height', unit: 'mm' },
   { key: 'maxLayerZMm', label: 'Maximum layer Z', unit: 'mm' },
   { key: 'brimWidthMm', label: 'Brim width', unit: 'mm' },
   { key: 'supportMaterial', label: 'Support material' },
@@ -72,11 +71,44 @@ function formatValue(value: string | number | boolean | string[] | number[], uni
   return unit ? `${value} ${unit}` : value;
 }
 
-/** Omit unknown fields, but keep explicit zero/false and every tool's original position. */
+/** Per-tool fields whose every entry is already shown by the matching single-value field. */
+const perToolSummaries = {
+  bedTemperaturePerToolC: 'bedTemperatureC',
+  nozzleTemperaturePerToolC: 'nozzleTemperatureC',
+  nozzleDiameterPerToolMm: 'nozzleDiameterMm',
+  filamentTypePerTool: 'filamentType',
+  filamentUsedPerToolMm: 'filamentUsedMm',
+  filamentUsedPerToolG: 'filamentUsedG',
+  filamentUsedPerToolCm3: 'filamentUsedCm3',
+  filamentCostPerTool: 'filamentCost',
+} satisfies Partial<Record<keyof PrinterPrintMetadata, keyof PrinterPrintMetadata>>;
+
+/** Per-tool fields the filament tool cards already show (material and mass used). */
+const toolCardFields = new Set<keyof PrinterPrintMetadata>(['filamentTypePerTool', 'filamentUsedPerToolG']);
+
+function repeatsSummary(metadata: PrinterPrintMetadata, key: keyof PrinterPrintMetadata): boolean {
+  const summaryKey = (perToolSummaries as Partial<Record<keyof PrinterPrintMetadata, keyof PrinterPrintMetadata>>)[key];
+  if (!summaryKey) return false;
+  const values = metadata[key];
+  const summary = metadata[summaryKey];
+  return Array.isArray(values) && values.length > 0 && summary != null && values.every((value) => value === summary);
+}
+
+/**
+ * Omit unknown fields and any value already shown elsewhere in the panel, but keep explicit
+ * zero/false and every tool's original position.
+ */
 export function printerMetadataRows(metadata: PrinterPrintMetadata | null | undefined) {
+  if (!metadata) return [];
+  const hasToolCards = filamentToolRows(metadata).length > 0;
   return fields.flatMap(({ key, label, unit }) => {
-    const value = metadata?.[key];
-    return value == null ? [] : [{ label, value: formatValue(value, unit) }];
+    const value = metadata[key];
+    if (value == null) return [];
+    // The detail rows show the reported print time, or this estimate when none was reported.
+    if (key === 'estimatedPrintTimeSeconds' && (metadata.printTimeSeconds == null || value === metadata.printTimeSeconds)) return [];
+    if (hasToolCards && toolCardFields.has(key)) return [];
+    if (repeatsSummary(metadata, key)) return [];
+    return [{ label, value: formatValue(value, unit) }];
   });
 }
 

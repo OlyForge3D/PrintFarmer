@@ -105,25 +105,18 @@ export function PrinterFileDetails({ entry, source, actions, onClose }: PrinterF
 
   return (
     <FileDetailPanel title={entry.displayName} onClose={onClose} preview={previewNode} rows={rows} actions={actions}>
-      <PrinterPrintSettings metadata={metadata} status={settingsStatus} savedAtUtc={entry.detailsFetchedAtUtc} />
-      <div className="space-y-1 border-t border-pf-border pt-3 text-xs">
-        <h3 className="font-semibold text-pf-text-primary">Captured local copies</h3>
-        {entry.localCopies.length === 0 ? <p className="text-pf-text-secondary">None captured</p> : (
-          <ul className="space-y-1">
-            {entry.localCopies.map((local) => (
-              <li key={`${local.gcodeFileId}-${local.capturedAtUtc}`}>
-                <Link to={`/files?type=gcode&file=${encodeURIComponent(local.gcodeFileId)}`} className="text-pf-accent underline">Local copy</Link>
-                {' · '}<FileDate value={local.capturedAtUtc} />
-                {' · '}{local.verification === 'UnverifiedSnapshot' ? 'Captured snapshot' : local.verification}
-              </li>
-            ))}
-          </ul>
-        )}
-        {entry.localCopies.length > 0 && <p className="text-pf-text-secondary">Not proof of current remote byte equality.</p>}
-      </div>
-      {source && !source.supportsCopy && (
-        <p className="text-xs text-pf-text-secondary">Listing only: authenticated local staging is not supported by this backend.</p>
+      {entry.localCopies.length > 0 && (
+        <ul aria-label="Local copies" className="space-y-1 text-xs">
+          {entry.localCopies.map((local) => (
+            <li key={`${local.gcodeFileId}-${local.capturedAtUtc}`}>
+              <Link to={`/files?type=gcode&file=${encodeURIComponent(local.gcodeFileId)}`} className="text-pf-accent underline">Local copy</Link>
+              {' · '}<FileDate value={local.capturedAtUtc} />
+              {' · '}{local.verification === 'UnverifiedSnapshot' ? 'Captured snapshot' : local.verification}
+            </li>
+          ))}
+        </ul>
       )}
+      <PrinterPrintSettings metadata={metadata} status={settingsStatus} savedAtUtc={entry.detailsFetchedAtUtc} />
     </FileDetailPanel>
   );
 }

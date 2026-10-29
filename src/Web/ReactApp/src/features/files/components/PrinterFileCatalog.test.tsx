@@ -957,28 +957,29 @@ describe('Printer file catalog', () => {
       expect(detailValue(section, label).textContent).toBe(value);
     }
 
-    const table = within(section).getByRole('table', { name: 'Filament by tool' });
-    expect(within(table).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Tool', 'Color', 'Material', 'Used']);
-    const [, first, second] = within(table).getAllByRole('row');
-    expect(within(first).getByRole('rowheader')).toHaveTextContent(/^Tool 1 \(T0\)$/);
-    expect(within(first).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#FF0000', 'PLA', '3 g']);
+    const tools = within(section).getByRole('list', { name: 'Filament by tool' });
+    expect(within(section).queryByRole('table')).not.toBeInTheDocument();
+    const [first, second] = within(tools).getAllByRole('listitem');
+    expect(first).toHaveTextContent(/^Tool 1 \(T0\), color #FF0000, PLA3 g$/);
+    expect(first).toHaveAttribute('title', '#FF0000');
     expect(within(first).getByTestId('tool-color-swatch')).toHaveStyle({ backgroundColor: '#FF0000' });
-    expect(within(second).getByRole('rowheader')).toHaveTextContent(/^Tool 2 \(T1\)$/);
-    expect(within(second).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#00FF00', 'PETG', '1 g']);
+    expect(second).toHaveTextContent(/^Tool 2 \(T1\), color #00FF00, PETG1 g$/);
+    // Cards sit at the very end of the section, after every reported field.
+    expect(section.lastElementChild).toBe(tools);
 
-    const other = within(section).getByRole('region', { name: 'Other reported fields' });
+    expect(within(section).queryByText('Other reported fields')).not.toBeInTheDocument();
+    expect(within(section).queryByText(/Only supplied fields are shown/)).not.toBeInTheDocument();
+    const other = section;
     const expected = [
       ['Profile', '0.20mm QUALITY'],
-      ['Reported print time', '5400 s'], ['Estimated print time', '5460 s'],
-      ['Normal-mode estimate', '1h 31m'], ['Native layer height', '0.2 mm'],
+      ['Estimated print time', '5460 s'],
+      ['Normal-mode estimate', '1h 31m'],
       ['Maximum layer Z', '80 mm'], ['Brim width', '5 mm'],
       ['Support material', '1'], ['Ironing', '0'],
       ['Bed temperature per tool', 'Tool 1: 60 \u00b0C; Tool 2: 65 \u00b0C'],
       ['Nozzle temperature per tool', 'Tool 1: 215 \u00b0C; Tool 2: 220 \u00b0C'],
       ['Nozzle diameter per tool', 'Tool 1: 0.4 mm; Tool 2: 0.6 mm'],
-      ['Filament type per tool', 'Tool 1: PLA; Tool 2: PETG'],
       ['Filament length per tool', 'Tool 1: 800 mm; Tool 2: 400 mm'],
-      ['Filament mass per tool', 'Tool 1: 3 g; Tool 2: 1 g'],
       ['Filament volume', '3 cm\u00b3'], ['Filament volume per tool', 'Tool 1: 2 cm\u00b3; Tool 2: 1 cm\u00b3'],
       ['Filament cost', '0.12 (currency unspecified)'],
       ['Filament cost per tool', 'Tool 1: 0.09 (currency unspecified); Tool 2: 0.03 (currency unspecified)'],
@@ -990,10 +991,15 @@ describe('Printer file catalog', () => {
       ['Quiet-mode progress reporting', 'No'], ['Quiet-mode remaining-time reporting', 'Yes'],
       ['Layer information present', 'Yes'],
     ];
-    // 51 native fields: 14 grouped settings + tools table read 18 of them, the other 33 are listed once.
+    // 51 native fields: detail rows, 14 grouped settings and tool cards read 22 of them; the other
+    // 29 are listed once. No label or value pair may appear twice anywhere in the panel.
     expect(Object.keys(metadata)).toHaveLength(51);
-    expect(expected).toHaveLength(33);
-    expect(within(other).getAllByRole('term')).toHaveLength(33);
+    expect(expected).toHaveLength(29);
+    const terms = within(panel).getAllByRole('term').map((term) => term.textContent);
+    expect(new Set(terms).size).toBe(terms.length);
+    for (const label of ['Reported print time', 'Native layer height', 'Filament type per tool', 'Filament mass per tool']) {
+      expect(terms).not.toContain(label);
+    }
     expect(within(section).getAllByRole('term')).toHaveLength(settings.length + expected.length);
     for (const [label, value] of expected) {
       expect(detailValue(other, label).textContent).toBe(value);
@@ -1129,13 +1135,12 @@ describe('Printer file catalog', () => {
     expect(within(section).queryByText('Support type', { selector: 'dt' })).not.toBeInTheDocument();
     expect(within(section).queryByRole('region', { name: 'Other reported fields' })).not.toBeInTheDocument();
 
-    const table = within(section).getByRole('table', { name: 'Filament by tool' });
-    const [, first, second] = within(table).getAllByRole('row');
-    expect(within(first).getByRole('rowheader')).toHaveTextContent(/^Tool 1$/);
-    expect(within(first).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['#FF8800AA', '—Unknown', '0 g']);
-    expect(within(second).getByRole('rowheader')).toHaveTextContent(/^Tool 3$/);
+    const tools = within(section).getByRole('list', { name: 'Filament by tool' });
+    const [first, second] = within(tools).getAllByRole('listitem');
+    expect(first).toHaveTextContent(/^Tool 1, color #FF8800AA, 0 g$/);
     // A non-literal color is unknown: no inline style, dashed placeholder swatch only.
-    expect(within(second).getAllByRole('cell').map(cell => cell.textContent)).toEqual(['—Unknown', 'TPU', '—Unknown']);
+    expect(second).toHaveTextContent(/^Tool 3, color unknown, TPU—Unknown$/);
+    expect(second).not.toHaveAttribute('title');
     expect(within(second).getByTestId('tool-color-swatch')).not.toHaveAttribute('style');
     expect(within(second).getByTestId('tool-color-swatch')).toHaveClass('border-dashed');
   });
