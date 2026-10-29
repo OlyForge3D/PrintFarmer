@@ -322,6 +322,48 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .CountAsync(ct);
     }
 
+    public async Task<Dictionary<Guid, int>> CountActiveJobsUsingGcodesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeFileIds);
+        Dictionary<Guid, int> counts = [];
+        foreach (Guid[] chunk in gcodeFileIds.Distinct().Chunk(GcodeIdChunkSize))
+        {
+            var rows = await _db.PrintJobs
+                .Where(j => j.GcodeFileId != null && chunk.Contains(j.GcodeFileId.Value) &&
+                           (j.Status == PrintJobStatus.Queued ||
+                            j.Status == PrintJobStatus.Assigned ||
+                            PrintJobOccupancy.Statuses.Contains(j.Status)))
+                .GroupBy(j => j.GcodeFileId!.Value)
+                .Select(g => new { GcodeFileId = g.Key, Count = g.Count() })
+                .ToListAsync(ct);
+            foreach (var row in rows)
+            {
+                counts[row.GcodeFileId] = row.Count;
+            }
+        }
+
+        return counts;
+    }
+
+    public async Task ClearGcodeFileReferencesAsync(IReadOnlyCollection<Guid> gcodeFileIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeFileIds);
+        foreach (Guid[] chunk in gcodeFileIds.Distinct().Chunk(GcodeIdChunkSize))
+        {
+            List<PrintJob> jobs = await _db.PrintJobs
+                .Where(j => j.GcodeFileId != null && chunk.Contains(j.GcodeFileId.Value))
+                .ToListAsync(ct);
+
+            foreach (PrintJob job in jobs)
+            {
+                job.GcodeFileId = null;
+            }
+        }
+    }
+
+    // Keeps each IN-list well below SQL Server's 2100-parameter limit.
+    private const int GcodeIdChunkSize = 500;
+
     public async Task ClearGcodeFileReferencesAsync(Guid gcodeFileId, CancellationToken ct)
     {
         List<PrintJob> jobs = await _db.PrintJobs

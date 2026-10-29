@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
@@ -989,67 +990,76 @@ public partial class GcodeFilesService(
     }
 
     /// <summary>
-    /// Deletes one or more G-code files by ID from the virtual file system and database.
+    /// Deletes one or more G-code files by ID and reports one outcome per distinct requested ID.
     /// </summary>
-    /// <param name="fileIds">Collection of file IDs (GUIDs) to delete</param>
+    /// <param name="fileIds">File IDs to delete. Duplicates are collapsed, preserving first-seen order.</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if at least one file was deleted successfully; false otherwise</returns>
+    /// <returns>One <see cref="BulkDeleteItemResult"/> per distinct ID, in request order.</returns>
     /// <remarks>
-    /// This method deletes by file ID (GUID) rather than path resolution, ensuring orphaned files
-    /// (database records with missing physical files) can be properly cleaned up.
-    /// Database records are deleted first, then physical files (with exception handling for missing files).
+    /// <para>Lookups and active-job checks run as one chunked set-based query each, before any mutation.
+    /// Missing IDs report <see cref="BulkDeleteItemStatus.NotFound"/>; files used by queued, assigned,
+    /// or printer-occupying jobs report <see cref="BulkDeleteItemStatus.Blocked"/>
+    /// (<see cref="BulkDeleteItemReasons.ActiveJobs"/>); files whose stored path cannot be resolved
+    /// inside the library root report <see cref="BulkDeleteItemReasons.UnsafePath"/>. Blocked items do not
+    /// prevent the other eligible items from being deleted.</para>
+    /// <para>Eligible files are removed in one owned transaction with one SaveChanges: historical job
+    /// GcodeFileId references are cleared and direct PartOutputMappings are deleted before the records.
+    /// If that unit fails it is rolled back and every eligible item reports
+    /// <see cref="BulkDeleteItemReasons.DatabaseFailed"/>; if only the commit call fails, the outcome is
+    /// reported as <see cref="BulkDeleteItemStatus.Unknown"/> and stored files are left in place.</para>
+    /// <para>Physical files are removed only after the database changes are committed. A record whose
+    /// file or thumbnail could not be removed reports <see cref="BulkDeleteItemStatus.DeletedCleanupIncomplete"/>.
+    /// Missing physical files count as deleted because the record was removed.</para>
     /// </remarks>
-    public async Task<bool> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct)
+    public async Task<IReadOnlyList<BulkDeleteItemResult>> DeleteFilesAsync(IEnumerable<Guid> fileIds, CancellationToken ct)
     {
-        List<Guid> fileIdsList = fileIds.ToList();
-
-        _logger.LogInformation("[DeleteFilesAsync] Starting deletion of {FileIdsListCount} file(s) by ID", fileIdsList.Count);
-
-        // Step 1: Get all file records from database by ID
-        List<GcodeFile> filesToDelete = new();
-        foreach (Guid fileId in fileIdsList)
+        ArgumentNullException.ThrowIfNull(fileIds);
+        List<Guid> requestedIds = fileIds.Distinct().ToList();
+        if (requestedIds.Count == 0)
         {
-            try
-            {
-                // IMPORTANT: Use UnitOfWork repo to ensure the same DbContext is used
-                // for queue updates and the actual delete.
-                GcodeFile? file = await _unitOfWork.GcodeFiles.GetByIdWithIncludesAsync(fileId, ct);
-                if (file != null)
-                {
-                    filesToDelete.Add(file);
-                    _logger.LogInformation("[DeleteFilesAsync] Found file {FileFileName} (ID: {FileId})", file.FileName, fileId);
-                }
-                else
-                {
-                    _logger.LogWarning("[DeleteFilesAsync] File not found in database: {FileId}", fileId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[DeleteFilesAsync] Failed to retrieve file {FileId}: {Message}", fileId, ex.Message);
-            }
+            return [];
         }
 
-        if (filesToDelete.Count == 0)
+        _logger.LogInformation("[DeleteFilesAsync] Starting deletion of {RequestedCount} distinct G-code file(s)", requestedIds.Count);
+
+        // Step 1: Load records and active-job counts with set-based queries on the UnitOfWork context,
+        // so the later reference clearing and removal use the same tracked entities.
+        List<GcodeFile> foundFiles;
+        Dictionary<Guid, int> activeJobCounts;
+        try
         {
-            _logger.LogWarning($"[DeleteFilesAsync] No files found in database, returning false");
-            return false;
+            foundFiles = await _unitOfWork.GcodeFiles.GetByIdsWithIncludesAsync(requestedIds, ct);
+            activeJobCounts = foundFiles.Count == 0
+                ? []
+                : await _unitOfWork.Queue.CountActiveJobsUsingGcodesAsync(foundFiles.ConvertAll(f => f.Id), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "[DeleteFilesAsync] Failed to load G-code files for deletion; nothing was changed");
+            return requestedIds.ConvertAll(id => new BulkDeleteItemResult(id, BulkDeleteItemStatus.Failed, BulkDeleteItemReasons.DatabaseFailed));
         }
 
-        // Step 2: Validate that files aren't referenced by active queue jobs.
-        // If active jobs exist, we block deletion to avoid breaking in-flight operations.
-        foreach (GcodeFile file in filesToDelete)
+        Dictionary<Guid, GcodeFile> filesById = foundFiles.ToDictionary(f => f.Id);
+        Dictionary<Guid, BulkDeleteItemResult> results = [];
+        List<GcodeFile> eligibleFiles = [];
+        Dictionary<Guid, (string FilePath, string? ThumbnailPath)> resolvedTargets = [];
+
+        // Step 2: Classify each ID. Ineligible items are reported without blocking the rest.
+        foreach (Guid id in requestedIds)
         {
-            int activeJobs = await _unitOfWork.Queue.CountActiveJobsUsingGcodeAsync(file.Id, ct);
-            if (activeJobs > 0)
+            if (!filesById.TryGetValue(id, out GcodeFile? file))
             {
-                throw new InvalidOperationException($"Cannot delete G-code file {file.Id} because it is referenced by {activeJobs} active job(s)");
+                results[id] = new BulkDeleteItemResult(id, BulkDeleteItemStatus.NotFound);
+                continue;
             }
-        }
 
-        Dictionary<Guid, (string FilePath, string? ThumbnailPath)> resolvedTargets = new();
-        foreach (GcodeFile file in filesToDelete)
-        {
+            if (activeJobCounts.TryGetValue(id, out int activeJobs) && activeJobs > 0)
+            {
+                _logger.LogWarning("[DeleteFilesAsync] Not deleting G-code {FileId}: referenced by {ActiveJobs} active job(s)", id, activeJobs);
+                results[id] = new BulkDeleteItemResult(id, BulkDeleteItemStatus.Blocked, BulkDeleteItemReasons.ActiveJobs);
+                continue;
+            }
+
             string? filePath = ResolveStoredFilePath(file);
             string? thumbnailPath = string.IsNullOrWhiteSpace(file.ThumbnailFileName)
                 ? null
@@ -1059,70 +1069,136 @@ public partial class GcodeFilesService(
             {
                 _logger.LogWarning(
                     "[DeleteFilesAsync] Refusing to delete G-code {FileId} because its stored path is unsafe or unresolvable",
-                    file.Id);
-                return false;
+                    id);
+                results[id] = new BulkDeleteItemResult(id, BulkDeleteItemStatus.Blocked, BulkDeleteItemReasons.UnsafePath);
+                continue;
             }
 
-            resolvedTargets[file.Id] = (filePath, thumbnailPath);
+            eligibleFiles.Add(file);
+            resolvedTargets[id] = (filePath, thumbnailPath);
         }
 
-        // F4 — Wrap Step 3 compensating deletes + Step 4 parent GcodeFile removal in a
-        // single transaction so a failure late in the sequence rolls back the earlier
-        // ExecuteDeleteAsync writes (queue references cleared, direct PartOutputMappings
-        // deleted). Cooperate with any outer
-        // transaction opened by a caller. Physical file deletion (Step 5) is intentionally
-        // OUTSIDE the transaction — filesystem operations cannot participate in an EF
-        // transaction, and the code already tolerates the "DB removed / physical file
-        // missing" state further down.
-        IDbContextTransaction? ownedTransaction = await _unitOfWork.BeginOwnedTransactionAsync(ct);
+        if (eligibleFiles.Count > 0 && !await TryCommitGcodeRecordDeletionAsync(eligibleFiles, results, ct))
+        {
+            eligibleFiles.Clear();
+        }
+
+        // Step 5: Delete physical files (gcode + thumbnails) only after the records are gone.
+        foreach (GcodeFile file in eligibleFiles)
+        {
+            (string fullPath, string? thumbnailPath) = resolvedTargets[file.Id];
+            string? cleanupReason = null;
+            try
+            {
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[DeleteFilesAsync] Record removed but stored file for {FileId} could not be deleted: {Name}", file.Id, ex.GetType().Name);
+                cleanupReason = BulkDeleteItemReasons.FileCleanupFailed;
+            }
+
+            if (thumbnailPath is not null && !TryDeleteFile(thumbnailPath, "thumbnail"))
+            {
+                cleanupReason ??= BulkDeleteItemReasons.ThumbnailCleanupFailed;
+            }
+
+            results[file.Id] = cleanupReason is null
+                ? new BulkDeleteItemResult(file.Id, BulkDeleteItemStatus.Deleted)
+                : new BulkDeleteItemResult(file.Id, BulkDeleteItemStatus.DeletedCleanupIncomplete, cleanupReason);
+        }
+
+        List<BulkDeleteItemResult> ordered = requestedIds.ConvertAll(id => results[id]);
+        _logger.LogInformation(
+            "[DeleteFilesAsync] Deletion complete: {RemovedCount}/{RequestedCount} record(s) removed",
+            ordered.Count(r => r.RecordRemoved),
+            requestedIds.Count);
+        return ordered;
+    }
+
+    /// <summary>
+    /// Clears historical references, removes direct part mappings and the records for
+    /// <paramref name="files"/> in one owned transaction with a single SaveChanges.
+    /// </summary>
+    /// <returns><c>true</c> when the records are known to be removed; otherwise every file has a
+    /// Failed or Unknown result in <paramref name="results"/>.</returns>
+    private async Task<bool> TryCommitGcodeRecordDeletionAsync(
+        List<GcodeFile> files,
+        Dictionary<Guid, BulkDeleteItemResult> results,
+        CancellationToken ct)
+    {
+        List<Guid> ids = files.ConvertAll(f => f.Id);
+
+        // F4 — Wrap compensating deletes + parent GcodeFile removal in a single transaction so a
+        // failure late in the sequence rolls back the earlier ExecuteDeleteAsync writes. Cooperate
+        // with any outer transaction opened by a caller. Physical file deletion is intentionally
+        // OUTSIDE the transaction — filesystem operations cannot participate in an EF transaction.
+        IDbContextTransaction? ownedTransaction = null;
+        bool saved = false;
         try
         {
+            ownedTransaction = await _unitOfWork.BeginOwnedTransactionAsync(ct);
+
             // Step 3: Clear FK references that would otherwise block deletion.
             // - PrintJobs keep history; we null out the FK.
             // - Direct PartOutputMappings (GcodeFileId path) must be explicitly deleted
             //   because their FK to GcodeFiles is Restrict, not Cascade, after the Dallas
-            //   cascade adjudication for #953 (broke the SQL Server 1785 multi-cascading-path
-            //   graph GcodeFiles ⇒ PartOutputMappings via {direct, via PrintProjectFiles}).
-            //   Mappings that reach the file indirectly via PrintProjectFileId are NOT touched
-            //   here — they cascade normally when the PrintProjectFile is removed.
-            foreach (GcodeFile file in filesToDelete)
-            {
-                await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
-                await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFileAsync(file.Id, ct);
-            }
+            //   cascade adjudication for #953. Mappings that reach the file indirectly via
+            //   PrintProjectFileId are NOT touched here — they cascade normally.
+            await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(ids, ct);
+            await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFilesAsync(ids, ct);
 
-            // Step 4: Delete database records first (before deleting physical files)
-            _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
-
-            foreach (GcodeFile file in filesToDelete)
+            // Step 4: Delete database records before deleting physical files.
+            foreach (GcodeFile file in files)
             {
-                _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
                 await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
             }
 
             await _unitOfWork.SaveChangesAsync(ct);
-            _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
+            saved = true;
 
             if (ownedTransaction is not null)
             {
                 await ownedTransaction.CommitAsync(ct);
             }
+
+            _logger.LogInformation("[DeleteFilesAsync] Removed {Count} G-code record(s) in one transaction", files.Count);
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            if (ownedTransaction is not null)
+            // Once SaveChanges succeeded inside our own transaction, a failed commit call may or may not
+            // have applied, so the outcome is reported as unknown rather than as a clean failure.
+            bool outcomeUnknown = saved && ownedTransaction is not null;
+            _logger.LogError(
+                ex,
+                "[DeleteFilesAsync] Database removal of {Count} G-code record(s) {Outcome}",
+                files.Count,
+                outcomeUnknown ? "has an unknown commit outcome" : "failed and was rolled back");
+
+            if (ownedTransaction is not null && !outcomeUnknown)
             {
                 try
                 {
                     await ownedTransaction.RollbackAsync(CancellationToken.None);
                 }
-                catch
+                catch (Exception rollbackEx)
                 {
-                    // Rollback best-effort; original exception propagates.
+                    _logger.LogWarning(rollbackEx, "[DeleteFilesAsync] Rollback after failed G-code removal also failed");
                 }
             }
 
-            throw;
+            foreach (Guid id in ids)
+            {
+                results[id] = outcomeUnknown
+                    ? new BulkDeleteItemResult(id, BulkDeleteItemStatus.Unknown, BulkDeleteItemReasons.CommitOutcomeUnknown)
+                    : new BulkDeleteItemResult(id, BulkDeleteItemStatus.Failed, BulkDeleteItemReasons.DatabaseFailed);
+            }
+
+            return false;
         }
         finally
         {
@@ -1131,47 +1207,6 @@ public partial class GcodeFilesService(
                 await ownedTransaction.DisposeAsync();
             }
         }
-
-        // Step 5: Delete physical files (gcode + thumbnails)
-        // If a physical file is missing, we still count it as deleted since the DB record was removed
-        int deleted = 0;
-        foreach (GcodeFile file in filesToDelete)
-        {
-            try
-            {
-                (string fullPath, string? thumbnailPath) = resolvedTargets[file.Id];
-
-                if (File.Exists(fullPath))
-                {
-                    _logger.LogInformation("[DeleteFilesAsync] Deleting file from disk: {FullPath}", fullPath);
-                    File.Delete(fullPath);
-                    deleted++;
-                    _logger.LogInformation("[DeleteFilesAsync] ✓ Successfully deleted file from disk: {FileFileName}", file.FileName);
-                }
-                else
-                {
-                    deleted++;
-                    _logger.LogInformation("[DeleteFilesAsync] ✓ File not on disk (DB record already deleted): {FileFileName}", file.FileName);
-                }
-
-                // Delete associated thumbnail if it exists
-                if (!string.IsNullOrEmpty(file.ThumbnailFileName))
-                {
-                    _logger.LogInformation("[DeleteFilesAsync] Checking for thumbnail: {ThumbnailPath}", thumbnailPath);
-                    if (TryDeleteFile(thumbnailPath, "thumbnail"))
-                    {
-                        _logger.LogInformation("[DeleteFilesAsync] ✓ Deleted thumbnail: {ThumbnailPath}", thumbnailPath);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("[DeleteFilesAsync] ✗ Exception while deleting {FileFileName} (ID: {FileId}): {Name}: {Message}", file.FileName, file.Id, ex.GetType().Name, ex.Message);
-            }
-        }
-
-        _logger.LogInformation("[DeleteFilesAsync] Deletion complete: {Deleted}/{FilesToDeleteCount} file(s) successfully processed, returning {Value2}", deleted, filesToDelete.Count, deleted > 0);
-        return deleted > 0;
     }
 
     /// <summary>
