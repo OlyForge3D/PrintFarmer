@@ -73,6 +73,20 @@ describe('FilesPage folder navigation with the real file browser', () => {
     expect(screen.queryByRole('list', { name: 'Folder tree' })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'File path' })).not.toBeInTheDocument();
     const foldersButton = screen.getByRole('button', { name: 'Folders' });
+    expect(foldersButton.textContent).toBe('');
+    expect(foldersButton.querySelector('svg')).toBeInTheDocument();
+    for (const [label, control] of [
+      ['Search files', screen.getByRole('searchbox', { name: 'Search files' })],
+      ['Type', screen.getByRole('combobox', { name: 'Type' })],
+      ['Sort', screen.getByRole('combobox', { name: 'Sort files' })],
+      ['Folders', foldersButton],
+    ] as const) {
+      const fieldLabel = screen.getByText(label, { selector: 'label' });
+      expect(fieldLabel).toBeVisible();
+      expect(fieldLabel).toHaveAttribute('for', control.id);
+      expect(fieldLabel.parentElement).toHaveClass('flex-col');
+      expect(fieldLabel.parentElement?.firstElementChild).toBe(fieldLabel);
+    }
     expect(foldersButton).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('combobox', { name: 'Folder' })).not.toBeInTheDocument();
     const panel = document.getElementById(foldersButton.getAttribute('aria-controls')!);
@@ -94,7 +108,8 @@ describe('FilesPage folder navigation with the real file browser', () => {
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
     expect(select).toHaveValue('/Parts');
     expect(screen.queryByRole('button', { name: 'Next page' })).not.toBeInTheDocument();
-    expect(foldersButton).toHaveTextContent('Folders: /Parts');
+    expect(foldersButton.textContent).toBe('');
+    expect(foldersButton).toHaveAttribute('title', 'Folders: /Parts');
     fireEvent.click(foldersButton);
     expect(panel).not.toBeVisible();
     expect(screen.queryByRole('combobox', { name: 'Folder' })).not.toBeInTheDocument();
@@ -145,7 +160,7 @@ describe('FilesPage folder navigation with the real file browser', () => {
     await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
       expect.objectContaining({ path: '/Parts', filter: 'gcode' }), expect.any(AbortSignal),
     ));
-    fireEvent.click(screen.getByRole('button', { name: 'Folders: /Parts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Folders' }));
     for (const filter of ['other', 'models', 'all']) {
       fireEvent.click(await screen.findByRole('checkbox', { name: 'Select part-1.stl' }));
       fireEvent.change(type, { target: { value: filter } });
@@ -157,7 +172,8 @@ describe('FilesPage folder navigation with the real file browser', () => {
       const params = new URL(currentUrl, 'http://localhost').searchParams;
       expect(params.get('type')).toBe(filter === 'all' ? null : filter);
       expect(params.get('remoteSearch')).toBe('usb');
-      expect(screen.getByRole('button', { name: 'Folders: /Parts' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Folders' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Folders' })).toHaveAttribute('title', 'Folders: /Parts');
     }
   });
 

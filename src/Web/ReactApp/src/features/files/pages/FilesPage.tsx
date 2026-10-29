@@ -54,7 +54,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button, Select } from '@/common/components/ui';
+import { Button, FormField, Select } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -761,8 +761,7 @@ export function FilesPage() {
   );
 
   const fileTypeFilter = (
-    <div className="flex items-center gap-2">
-      <label htmlFor="local-library-type" className="text-sm text-pf-text-secondary">Type</label>
+    <FormField label="Type" htmlFor="local-library-type">
       <Select id="local-library-type" value={selectedFilter} className="min-w-32"
         onChange={event => {
           const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
@@ -772,7 +771,7 @@ export function FilesPage() {
           <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
         ))}
       </Select>
-    </div>
+    </FormField>
   );
 
   return (

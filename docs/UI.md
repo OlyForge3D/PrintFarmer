@@ -49,7 +49,8 @@ Main overview page showing all printers with real-time status.
   64 header blocks, or 16 MiB of header data) show no metadata.
 - **On printers** (`/files?source=printers`): browse remote file metadata,
   availability and freshness, and act on one or several selected files. Add
-  `&printer=<printerId>` to scope the catalog to one printer.
+  `&printer=<printerId>` to scope the catalog to one printer. Filters appear
+  directly without a duplicate source heading and description.
 
 Both sources share the same compact card grid and 12px table, with the same
 file, status, and action glyphs. Selecting a card or file name opens a details
@@ -64,8 +65,10 @@ see their names.
 
 The folder-glyph **Folders** toolbar button reveals a compact row with the
 **Folder** dropdown and folder actions in both list and grid views. It starts
-collapsed; collapsing it preserves the filter and shows the selected path on
-the button. The **Type** dropdown replaces the All, 3D Models, G-Code, and Other
+collapsed; the button is glyph-only with an accessible **Folders** name.
+An active folder highlights the button, and its tooltip shows the selected path.
+Control labels sit above their inputs, matching **On printers**.
+Collapsing preserves the filter. The **Type** dropdown replaces the All, 3D Models, G-Code, and Other
 buttons. **All folders** shows the whole library; **Root** shows only files
 assigned to `/`. Choosing another folder shows its direct files, not descendants,
 with filtering applied before server pagination and totals. The dropdown combines

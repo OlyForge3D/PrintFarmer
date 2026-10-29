@@ -1,7 +1,7 @@
 import { Fragment, useId, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Button, Input, Label, Select } from '@/common/components/ui';
+import { Button, FormField, Input, Label, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
@@ -129,14 +129,13 @@ export function LocalLibraryFolders({
   return (
     <>
       <div id={controls?.id} hidden={controls ? !controls.expanded : false}>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <label htmlFor={`${id}-folder`} className="text-sm text-pf-text-secondary">Folder</label>
+        <div className="flex flex-wrap items-end gap-2">
+          <FormField label="Folder" htmlFor={`${id}-folder`} className="min-w-0">
             <Select id={`${id}-folder`} containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
               <option value="">All folders</option>
               {folderOptions}
             </Select>
-          </div>
+          </FormField>
           {canCreate && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
             create.reset(); setName(''); setCreating(true);
           }}>New folder</Button>}

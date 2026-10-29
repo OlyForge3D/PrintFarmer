@@ -3,7 +3,7 @@ import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
 import { useFileBrowser } from '../useFileBrowser';
-import { Button } from '@/common/components/ui';
+import { Button, FormField } from '@/common/components/ui';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { FolderIcon } from '@/common/components/icons/MdiIcons';
 import { type ColumnDef, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
@@ -79,15 +79,16 @@ export function FileBrowser<TDomain>({
           onViewModeChange={browser.setViewMode}
           filterActions={renderFolderNavigation ? <>
             {filterActions}
-            <Button size="sm" variant="secondary"
-              iconLeft={<span aria-hidden="true"><FolderIcon className="h-4 w-4" /></span>}
-              aria-expanded={foldersExpanded} aria-controls={folderControlsId}
-              onClick={() => setFoldersExpanded(expanded => !expanded)}
-              title={browser.currentPath || 'All folders'}>
-              <span className="max-w-48 truncate">
-                Folders{browser.currentPath ? `: ${browser.currentPath === '/' ? 'Root' : browser.currentPath}` : ''}
-              </span>
-            </Button>
+            <FormField label="Folders" htmlFor={`${folderControlsId}-toggle`}>
+              <Button id={`${folderControlsId}-toggle`} size="sm"
+                variant={browser.currentPath ? 'primary' : 'secondary'}
+                className="h-10 w-10 p-2" aria-label="Folders"
+                iconCenter={<span aria-hidden="true"><FolderIcon className="h-4 w-4" /></span>}
+                aria-expanded={foldersExpanded} aria-controls={folderControlsId}
+                onClick={() => setFoldersExpanded(expanded => !expanded)}
+                title={`Folders: ${browser.currentPath === '/' ? 'Root' : browser.currentPath || 'All folders'}`}
+              />
+            </FormField>
           </> : filterActions}
           extraActions={extraToolbarActions}
         />

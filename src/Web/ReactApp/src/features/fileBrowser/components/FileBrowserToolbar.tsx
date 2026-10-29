@@ -1,5 +1,5 @@
 import { Fragment, ReactNode } from 'react';
-import { Button, Input, Select } from '@/common/components/ui';
+import { Button, FormField, Input, Select } from '@/common/components/ui';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { type SortOrder, type ViewMode } from '../types';
 
@@ -31,11 +31,8 @@ export const FileBrowserToolbar = ({
   extraActions,
 }: FileBrowserToolbarProps) => {
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center" data-tour="gcode-toolbar">
-      <div className="flex-1 min-w-0">
-        <label htmlFor="file-browser-search" className="sr-only">
-          Search files
-        </label>
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-end" data-tour="gcode-toolbar">
+      <FormField label="Search files" htmlFor="file-browser-search" className="flex-1 min-w-0">
         <Input
           id="file-browser-search"
           type="search"
@@ -45,31 +42,30 @@ export const FileBrowserToolbar = ({
           onChange={(e) => onSearchChange(e.target.value)}
           className="min-w-[16rem]"
         />
-      </div>
+      </FormField>
 
       {filterActions && (
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="File filters">
+        <div className="flex flex-wrap items-end gap-2" role="group" aria-label="File filters">
           {filterActions}
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap">
-        <label htmlFor="file-browser-sort" className="text-sm text-pf-text-secondary whitespace-nowrap">
-          Sort
-        </label>
-        <Select
-          id="file-browser-sort"
-          aria-label="Sort files"
-          value={sortBy}
-          onChange={(e) => onSortChange(e.target.value)}
-          className="min-w-28"
-        >
-          {sortOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+      <div className="flex flex-wrap items-end justify-end gap-2 lg:flex-nowrap">
+        <FormField label="Sort" htmlFor="file-browser-sort">
+          <Select
+            id="file-browser-sort"
+            aria-label="Sort files"
+            value={sortBy}
+            onChange={(e) => onSortChange(e.target.value)}
+            className="min-w-28"
+          >
+            {sortOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
         <Button
           type="button"
           variant="secondary"

@@ -339,14 +339,12 @@ export function PrinterFileCatalog() {
   });
 
   return (
-    <section aria-labelledby="printer-catalog-heading" className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-pf-border pb-3">
-        <div>
-          <h2 id="printer-catalog-heading" className="text-lg font-semibold text-pf-text-primary">On printers</h2>
-          <p className="text-sm text-pf-text-secondary">Metadata observations, not owned library files. Browsing never downloads G-code.</p>
+    <section aria-label="On printers" className="space-y-4">
+      {hasPermission('system_settings', 'admin') && (
+        <div className="flex justify-end">
+          <Link to={DISCOVERY_SETTINGS_PATH} className="text-sm text-pf-accent underline">Discovery settings</Link>
         </div>
-        {hasPermission('system_settings', 'admin') && <Link to={DISCOVERY_SETTINGS_PATH} className="text-sm text-pf-accent underline">Discovery settings</Link>}
-      </div>
+      )}
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}

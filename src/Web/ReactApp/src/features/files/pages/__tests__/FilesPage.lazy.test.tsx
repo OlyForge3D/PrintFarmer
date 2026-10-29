@@ -172,12 +172,14 @@ describe('FilesPage lazy interactions', () => {
     expect(screen.getByText('Owned local browser')).toBeInTheDocument();
     expect(moduleLoads.remoteCatalog).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'On printers' }));
-    expect(await screen.findByRole('heading', { name: 'On printers' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'On printers' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'On printers' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Metadata observations, not owned library files. Browsing never downloads G-code.')).not.toBeInTheDocument();
     expect(screen.queryByText('Owned local browser')).not.toBeInTheDocument();
     await waitFor(() => expect(moduleLoads.remoteOperations).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Local library' }));
     expect(screen.getByText('Owned local browser')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'On printers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'On printers' })).not.toBeInTheDocument();
     expect(queryClient.getQueryCache().find({ queryKey: ['printer-file-catalog'], exact: false })?.getObserversCount()).toBe(0);
     vi.useFakeTimers();
     await vi.advanceTimersByTimeAsync(60_000);
