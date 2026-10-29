@@ -65,6 +65,7 @@ final class HarvestUITests: QueueUITestBase {
         try requireDraggable(beta, "beta drop target")
         let originalAlphaY = alpha.frame.minY
         let legalDiagnosticsBefore = try reorderCounts(in: app)
+        retainReorderState("legal move down", phase: "before")
         let source = alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         source.press(
@@ -85,6 +86,7 @@ final class HarvestUITests: QueueUITestBase {
         )
         _ = XCTWaiter.wait(for: [reordered], timeout: 5)
         let legalDiagnosticsAfter = try reorderCounts(in: app)
+        retainReorderState("legal move down", phase: "after")
         attachReorderDiagnostics("legal move down", before: legalDiagnosticsBefore, after: legalDiagnosticsAfter)
         XCTAssertTrue(movedBelowBeta(),
                       "Dragging alpha down within its group should move it below beta.")
@@ -131,6 +133,7 @@ final class HarvestUITests: QueueUITestBase {
             // prevented priority gesture.
             try requireDraggable(beta, "beta drop target before move back")
             let moveBackDiagnosticsBefore = try reorderCounts(in: app)
+            retainReorderState("legal move back", phase: "before")
             alphaHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
                 forDuration: 1,
                 thenDragTo: beta.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
@@ -149,6 +152,7 @@ final class HarvestUITests: QueueUITestBase {
             )
             _ = XCTWaiter.wait(for: [movedBack], timeout: 5)
             let moveBackDiagnosticsAfter = try reorderCounts(in: app)
+            retainReorderState("legal move back", phase: "after")
             attachReorderDiagnostics(
                 "legal move back", before: moveBackDiagnosticsBefore, after: moveBackDiagnosticsAfter
             )
@@ -187,6 +191,7 @@ final class HarvestUITests: QueueUITestBase {
     ) throws {
         let before = try reorderCounts(in: app, file: file, line: line)
         XCTAssertEqual(currentOrder(), expectedOrder, file: file, line: line)
+        retainReorderState("\(name) boundary", phase: "before")
         handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
             forDuration: 1,
             thenDragTo: boundary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)),
@@ -204,6 +209,7 @@ final class HarvestUITests: QueueUITestBase {
         changed.isInverted = true
         let observed = XCTWaiter.wait(for: [changed], timeout: 5)
         let after = try reorderCounts(in: app, file: file, line: line)
+        retainReorderState("\(name) boundary", phase: "after")
         attachReorderDiagnostics("\(name) boundary", before: before, after: after)
         XCTAssertEqual(observed, .completed,
                        "The \(name)-boundary drag must leave the queue untouched.", file: file, line: line)
@@ -265,8 +271,24 @@ final class HarvestUITests: QueueUITestBase {
     private func attachReorderDiagnostics(_ name: String, before: ReorderCounts, after: ReorderCounts) {
         let attachment = XCTAttachment(string: "before: \(before.summary)\nafter: \(after.summary)")
         attachment.name = "Queue reorder diagnostics (\(name))"
-        attachment.lifetime = .deleteOnSuccess
+        attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// #3457 R3457-D01 diagnostic retention only. Video, synthesized events and
+    /// automatic snapshots follow the test plan's plan-wide system-attachment policy
+    /// (deleted on success), so this test keeps its own screenshot and hierarchy
+    /// before and after each drag on success too. Passing and failing attempts
+    /// can then be compared. Captured outside the gesture, so timing is unchanged.
+    private func retainReorderState(_ name: String, phase: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Queue reorder \(phase) screenshot (\(name))"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "Queue reorder \(phase) hierarchy (\(name))"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
     }
 
     /// Fails with a diagnosable message instead of letting XCTest synthesise a
