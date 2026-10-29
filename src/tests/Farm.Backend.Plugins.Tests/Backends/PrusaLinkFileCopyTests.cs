@@ -107,6 +107,21 @@ public sealed class PrusaLinkFileCopyTests
     }
 
     [Fact]
+    public async Task CopyFileToAsync_RejectsNonPrintFileDetails()
+    {
+        using Handler handler = new(request => Json(Details("/usb/CABLE~1.GCO", type: "FOLDER")));
+        using HttpClient http = new(handler);
+        await using MemoryStream destination = new();
+
+        PrinterFileCopyException error = await Assert.ThrowsAsync<PrinterFileCopyException>(() =>
+            CopyClient(http).CopyFileToAsync(
+                BaseUrl, "usb", ShortPath, Credential, destination, 1024, CancellationToken.None));
+
+        Assert.Equal("source_changed", error.Reason);
+        Assert.Equal([DetailsPath], handler.Paths);
+    }
+
+    [Fact]
     public async Task CopyFileToAsync_RefusesRedirectBeforeFollowingTarget()
     {
         using Handler handler = new(request =>
@@ -151,12 +166,15 @@ public sealed class PrusaLinkFileCopyTests
     private static ISupportsPrinterFileCopy CopyClient(HttpClient http) =>
         Assert.IsAssignableFrom<ISupportsPrinterFileCopy>(new PrusaLinkClient(http));
 
-    private static string Details(string reference, string name = ShortPath) =>
+    // Mirrors real PrusaLink details, which always report size and m_timestamp.
+    private static string Details(string reference, string name = ShortPath, string type = "PRINT_FILE") =>
         JsonSerializer.Serialize(new
         {
-            type = "PRINT_FILE",
+            type,
             name,
             display_name = "Cable holder, final long filename.gcode",
+            size = 123456,
+            m_timestamp = 1761700000,
             refs = new { download = reference },
         });
 

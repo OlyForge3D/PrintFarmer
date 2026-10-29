@@ -30,9 +30,8 @@ public partial class PrusaLinkApiClient
         Uri downloadUri = PrinterFileCopyTransport.BuildUri(
             baseUrl, root, relativePath, root, rootPrefix + "/");
         string[] downloadSegments = [.. root.Split('/'), .. relativePath.Split('/')];
-        PrinterFileInventoryEntry observation = new(root, relativePath, SizeBytes: null);
-        using JsonDocument details = await ReadFilePreviewDetailsAsync(
-            detailsUri, observation, credential, ct).ConfigureAwait(false);
+        using JsonDocument details = await ReadFileCopyDetailsAsync(
+            detailsUri, relativePath, credential, ct).ConfigureAwait(false);
         JsonElement references = details.RootElement.TryGetProperty("refs", out JsonElement refs)
             ? refs
             : default;
@@ -48,6 +47,37 @@ public partial class PrusaLinkApiClient
             request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         return await PrinterFileCopyTransport.CopyResponseAsync(
             response, destination, maximumBytes, ct).ConfigureAwait(false);
+    }
+
+    // Revision checks belong to the copy service's before/after inventory reads; here only identity is pinned.
+    private async Task<JsonDocument> ReadFileCopyDetailsAsync(
+        Uri uri, string relativePath, PrinterCredential? credential, CancellationToken ct)
+    {
+        byte[] bytes = await PrinterFilePreviewTransport.ReadAsync(
+            token => SendFilePreviewRequestAsync(uri, credential, token),
+            PrinterFilePreviewTransport.MaximumMetadataBytes, ct).ConfigureAwait(false);
+        JsonDocument document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 32 });
+        try
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new PrinterFileCopyException("invalid_preview_metadata");
+            }
+
+            string leaf = relativePath[(relativePath.LastIndexOf('/') + 1)..];
+            if (ReadFilePreviewString(document.RootElement, "type") != "PRINT_FILE" ||
+                !string.Equals(ReadFilePreviewString(document.RootElement, "name"), leaf, StringComparison.Ordinal))
+            {
+                throw new PrinterFileCopyException("source_changed");
+            }
+
+            return document;
+        }
+        catch
+        {
+            document.Dispose();
+            throw;
+        }
     }
 
     private static bool IsExpectedDownloadReference(
