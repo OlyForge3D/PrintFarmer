@@ -123,6 +123,13 @@ public sealed class ProfileTaskScanBatchTests(ITestOutputHelper output)
                 timer.Stop();
                 long allocated = GC.GetTotalAllocatedBytes() - allocatedBefore;
                 int expectedMutations = workload == "missing" ? (legacy ? printers : models) : 0;
+                int expectedAppSql = workload switch
+                {
+                    "covered" => 1,
+                    "missing" => legacy ? 1 + (5 * models) + (6 * printers) : 1 + Chunks(models) + (6 * models),
+                    _ => legacy ? 1 + (5 * models) + printers : 1 + Chunks(models) + models
+                };
+                Assert.Equal(expectedAppSql, fixture.AppCommands.Total);
                 Assert.Equal(expectedMutations, fixture.AppCommands.TaskWrites);
                 Assert.Equal(expectedMutations, fixture.Events.Count);
                 Assert.Equal(expectedMutations, fixture.CountEvents);
