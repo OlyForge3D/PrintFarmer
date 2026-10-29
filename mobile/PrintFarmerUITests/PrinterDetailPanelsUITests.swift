@@ -2119,7 +2119,9 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         let fanValue = try XCTUnwrap(Self.readingValue(updatedSensors, sensorID: fanID, quantity: "FanSpeed"))
         // Fans have no app controls (#3552), so drive the fan through the same
         // backend sensor endpoint the removed stepper used.
-        let expectedFanValue = fanValue >= 100 ? fanValue - 1 : fanValue + 1
+        let expectedFanValue = Self.nextFanSpeed(after: fanValue)
+        XCTAssertTrue((0...100).contains(expectedFanValue), "FanSpeed request \(expectedFanValue) must stay within 0–100.")
+        XCTAssertNotEqual(expectedFanValue, fanValue, "FanSpeed request must change the reported fan value.")
         let fanUpdateCount = observer.updateCount
         try await setSensorValue(
             credentials,
@@ -2141,6 +2143,14 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
             try canonicalJSON(withoutSensorReadings(updatedPayload)),
             try canonicalJSON(withoutSensorReadings(fanPayload)),
             "A fan-only printerupdated must not alter non-sensor printer fields."
+        )
+        // Prove the Heat panel content is loaded before asserting fan controls are absent,
+        // so absence cannot pass on an unloaded or read-only panel.
+        let heatGroup = app.descendants(matching: .any)["printer.controls.heat-group"]
+        XCTAssertTrue(heatGroup.waitForExistence(timeout: 12), "\(printer.name) must show the loaded Heat panel.")
+        XCTAssertTrue(
+            heatGroup.descendants(matching: .any)["printer.controls.hotend.target"].waitForExistence(timeout: 12),
+            "\(printer.name) Heat panel must render its nozzle target before checking fan controls."
         )
         let fanControls = app.descendants(matching: .any)
         for suffix in ["value", "increase", "decrease"] {
@@ -2214,6 +2224,11 @@ final class PrinterSensorsLiveBackendUITests: XCTestCase {
         let (data, response) = try await URLSession.shared.data(for: request)
         try assertSuccess(response, data: data, operation: "Moonraker sensor mutation")
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    /// Next whole-percent FanSpeed (step 1, 0–100) that differs from `current`, even when fractional.
+    static func nextFanSpeed(after current: Double) -> Double {
+        current >= 100 ? 99 : min(100, max(0, current.rounded(.down) + 1))
     }
 
     private func setSensorValue(
