@@ -3886,7 +3886,8 @@ public sealed class MoonrakerSubscriptionService(
                         compositeStatus.PrintTimeLeftSeconds);
                     _statusCacheWriter.UpdateStatus(
                         cacheUpdate with { RawActivityState = compositeStatus.State }, originWatermark);
-                    _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
+                    // HTTP reachability proves Moonraker is online, not that known-shutdown Klippy is ready.
+                    _ = _klippyReadyState.TryAdd(printer.Id, compositeStatus.IsOnline);
 
                     await hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printer.Id))

@@ -630,10 +630,15 @@ public sealed class MoonrakerSensorSubscriptionTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task ProcessStatusUpdateAsync_AfterKlippyShutdown_SensorDeltaUpdatesReadingWithoutRestoringAvailability()
+    public async Task TriggerHttpPollingFallbackAsync_AfterKlippyShutdown_SensorDeltaUpdatesReadingWithoutRestoringAvailability()
     {
         await ProcessStatusAsync(InitialStatus);
         await ProcessMessageAsync("""{"jsonrpc":"2.0","method":"notify_klippy_shutdown"}""");
+        _client
+            .Setup(client => client.GetCompositeStatusAsync(
+                It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(true, "shutdown", null, null, null, null, null));
+        await _service.TriggerHttpPollingFallbackAsync(Printer, _cts.Token);
         _broadcasts.Clear();
 
         await ProcessStatusAsync("""{ "temperature_sensor chamber": { "humidity": 45 } }""");
