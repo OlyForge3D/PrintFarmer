@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { Button, Toolbar, HeaderActions, RefreshButton } from '@/common/components/ui';
+import { Button, Toolbar, HeaderActions, RefreshButton, ViewToggle, type ViewModeOption } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto } from '@/types/api';
@@ -38,10 +38,10 @@ import {
 
 const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
 
-const CAMERA_VIEW_OPTIONS: { value: CameraView; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'location', label: 'By location' },
-  { value: 'printer', label: 'By printer' },
+const CAMERA_VIEW_OPTIONS: ViewModeOption<CameraView>[] = [
+  { mode: 'all', kind: 'cards', title: 'All cameras' },
+  { mode: 'location', kind: 'locationGroups', title: 'By location' },
+  { mode: 'printer', kind: 'printerGroups', title: 'By printer' },
 ];
 
 /**
@@ -156,6 +156,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
           {canManageCameras && (
             <Button
               variant="secondary"
+              control
               iconLeft={<SettingsIcon className="w-4 h-4" />}
               onClick={() => setTab(activeTab === 'manage' ? 'view' : 'manage')}
             >
@@ -172,20 +173,13 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
       ) : (
         <div className="space-y-6">
           <Toolbar aria-label="Camera controls">
-          <div role="group" aria-label="Camera view" className="pf-toolbar__group pf-toolbar__group--segmented">
-            {CAMERA_VIEW_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                size="sm"
-                variant={activeView === option.value ? 'primary' : 'secondary'}
-                aria-pressed={activeView === option.value}
-                onClick={() => setView(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
+          <ViewToggle
+            size="md"
+            value={activeView}
+            onChange={setView}
+            options={CAMERA_VIEW_OPTIONS}
+            ariaLabel="Camera view"
+          />
           <Toolbar.Spacer />
           <RefreshButton onClick={loadCameras} busy={camerasQuery.isFetching} />
           </Toolbar>

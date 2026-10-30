@@ -316,7 +316,7 @@ export const LocationManagement: React.FC<LocationManagementProps> = ({
         <h2 className={clsx(embedded ? 'text-xl' : 'text-3xl', 'font-bold text-pf-text-primary')}>Printer Locations</h2>
         <HeaderActions>
         {!showForm && (
-          <Button onClick={() => { setFormData({ name: '', description: '', parentId: initialParentId ?? null }); setShowForm(true); }}>
+          <Button control onClick={() => { setFormData({ name: '', description: '', parentId: initialParentId ?? null }); setShowForm(true); }}>
             Add Location
           </Button>
         )}

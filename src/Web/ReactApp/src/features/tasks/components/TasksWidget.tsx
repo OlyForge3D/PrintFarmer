@@ -387,7 +387,7 @@ export function TasksWidget() {
   const headerAction = (
     <Button
       variant="subtle"
-      size="sm"
+      control
       onClick={() => setIsCreateModalOpen(true)}
       title="Create new task"
       iconLeft={<PlusIcon className="h-4 w-4" />}

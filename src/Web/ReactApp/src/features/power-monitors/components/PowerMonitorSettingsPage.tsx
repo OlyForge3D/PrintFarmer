@@ -203,7 +203,7 @@ export function PowerMonitorSettingsPage() {
       actions={
         <HeaderActions className="justify-end mb-0">
           <AdminNavPinButton destinationId="hw-power-monitors" />
-          <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="w-4 h-4" />}>
+          <Button control variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="w-4 h-4" />}>
             Add Monitor
           </Button>
         </HeaderActions>

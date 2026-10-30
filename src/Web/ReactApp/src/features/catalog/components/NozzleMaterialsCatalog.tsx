@@ -225,6 +225,7 @@ export function NozzleMaterialsCatalog() {
         </h2>
         <HeaderActions>
         <Button
+          control
           onClick={handleAddClick}
           title="Add new nozzle material"
           iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}

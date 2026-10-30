@@ -323,6 +323,7 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
           <Button
             variant="primary"
             onClick={() => setShowRegisterModal(true)}
+            control
             disabled={registerMutation.isPending}
             explainedDisabled
             title={registerMutation.isPending ? 'Passkey registration is in progress' : undefined}

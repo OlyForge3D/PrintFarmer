@@ -252,7 +252,8 @@ export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCom
           aria-expanded={isOpen}
           aria-controls={isOpen ? listboxId : undefined}
           aria-activedescendant={isOpen ? activeOptionId : undefined}
-          className="h-9 pl-9 pr-8 text-sm"
+          className="pf-control py-0 pl-9 pr-8 text-sm"
+          data-role="field"
         />
         {query ? (
           <Button

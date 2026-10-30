@@ -70,7 +70,8 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
                 type="date"
                 value={startDate}
                 onChange={(e) => handleStartChange(e.target.value)}
-                className="w-36 text-sm"
+                className="pf-control w-36 py-0 text-sm"
+                data-role="field"
                 aria-label="Start date"
                 max={endDate || undefined}
               />
@@ -79,7 +80,8 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
                 type="date"
                 value={endDate}
                 onChange={(e) => handleEndChange(e.target.value)}
-                className="w-36 text-sm"
+                className="pf-control w-36 py-0 text-sm"
+                data-role="field"
                 aria-label="End date"
                 min={startDate || undefined}
               />

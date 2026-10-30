@@ -436,9 +436,9 @@ export function AdminControlCenterPage() {
   const refreshButton = (
     <HeaderActions className="justify-end mb-0">
       <Button
+        control
         ref={pinChooserButtonRef}
         variant={showPinChooser ? 'secondary' : 'subtle'}
-        size="sm"
         aria-expanded={showPinChooser}
         aria-controls="admin-pin-chooser"
         onClick={() => setShowPinChooser((open) => !open)}

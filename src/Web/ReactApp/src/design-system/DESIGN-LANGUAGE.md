@@ -135,7 +135,10 @@ Use the shared components exported by `common/components/ui/toolbar`:
 `Toolbar` with `Group`, `Spacer` and `Divider`, `ToolbarField`, `SearchField`,
 `SortControl`, `FilterChip`, `FilterButton`, `RefreshButton` and `Pagination`.
 `ViewToggle` is the canonical segmented view selector; the printer and Files
-adapters preserve their existing view values and persistence.
+adapters preserve their existing view values and persistence. View options are
+icon-only at every width, with their title available as both the accessible name
+and a hover/focus tooltip; do not add visible option labels or native `title`
+attributes.
 
 - Reading order is Search, Filters, Sort, spacer, View, Refresh. Keep only
   existing controls. A missing search or refresh is not a request for a feature.
@@ -172,6 +175,30 @@ adapters preserve their existing view values and persistence.
   Icon-only controls have names; refresh keeps its name while busy and spins
   only when reduced-motion preferences allow.
 
+Filter refinements belong inside the shared `FiltersDisclosure`. Keep primary
+query criteria, sorting, navigation and actions visible or within their own
+purpose-built expander; do not fold them into the refinements disclosure.
+Unwrapped `ToolbarField` and direct toolbar `Select` exceptions are limited to
+these documented owners:
+
+| File | Unwrapped fields | Reason |
+|---|---|---|
+| `features/admin/components/SystemLogsContent.tsx` | `CorrelationId`, `Level`, `From`, `To`, `Metadata` | Primary simple-query fields; controls the active query mode and export. |
+| `features/admin/pages/LoginAuditPage.tsx` | `Username`, `Rows per page` | Primary username search and result page-size controls; date and status refinements use FiltersDisclosure. |
+| `features/filamentManagement/components/FilamentsTab.tsx` | `Search`, `Sort`, `Show` | Primary search, result ordering and page-size controls. |
+| `features/filamentManagement/components/SpoolsTab.tsx` | `Search`, `Sort` | Primary search and result-ordering controls. |
+| `features/queue/components/QueueDateRangeBar.tsx` | `From`, `To` | Primary range controls inside the date-range preset's own expander. |
+| `features/printers/components/PrinterFilesModal.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/auto-dispatch/pages/AutoDispatchDashboardPage.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/printers/pages/PrintersPage.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/queue/components/HistoryFiltersBar.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/queue/components/QueueFiltersBar.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/fileBrowser/components/FileBrowserToolbar.tsx` | `Search`, `Sort` | Primary search and sorting controls for file browsing. |
+| `features/fileBrowser/components/FileBrowser.tsx` | `Folders` | Folder navigation toggle; not a result-set filter. |
+| `features/files/components/LocalLibraryFolders.tsx` | `Folder` | Folder navigation/selection/action controls. |
+| `features/files/components/PrinterFileCatalog.tsx` | `Search` | Primary search query for the printer-file catalog. |
+| `features/files/pages/FilesPage.tsx` | `Type` | Type filter is declared separately for page composition and rendered inside the shared disclosure. |
+
 Geometry is opt-in through `Toolbar`, `HeaderActions`, `.pf-inline-form` or
 `Button control`/`.pf-control`. Do not normalize every Button globally:
 `link`/`unstyled` bypass the automatic geometry, and excluded consumers must
@@ -188,6 +215,7 @@ The following defaults remain **provisional**, not usability conclusions:
 | D4 | Primary fill for selected views | `ViewToggle.tsx`: `SELECTED_VIEW_VARIANT` (one line) |
 | D5 | Coarse pointer only, not a viewport heuristic | `styles/toolbar.css`: the single `(pointer: coarse)` sizing query (one line) |
 | D6 | Visible labels with 4px gap | `ToolbarField`, `.pf-toolbar-field__label`, `--pf-toolbar-label-gap` (structural) |
+| D7 | Icon-only view selectors with hover/focus tooltips | `ViewToggle.tsx`: all options use a named icon button wrapped in `Tooltip` |
 
 D3 is particularly uncertain: MDI's ascending arrow points down. Operator
 interpretation can falsify the default even when the accessible state and sort

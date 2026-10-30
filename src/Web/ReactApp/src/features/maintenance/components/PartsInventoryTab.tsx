@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import clsx from 'clsx';
 import { Badge, Button } from '@/common/components/ui';
 import { FileUpload } from '@/common/components/ui/FileUpload';
-import { HeaderActions, SearchField, Toolbar, ToolbarField, ViewToggle } from '@/common/components/ui';
+import { FiltersDisclosure, HeaderActions, SearchField, Toolbar, ToolbarField, ViewToggle } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -360,38 +360,40 @@ export function PartsInventoryTab() {
     <>
       <HeaderActions>
         <Button
+          control
           variant="primary"
           onClick={() => { setEditingComponent(null); setCloneSource(null); setIsFormOpen(true); }}
           iconLeft={<PlusIcon className="h-4 w-4" />}
         >
           Add Part
         </Button>
-        <Button variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
-        <Button variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+        <Button control variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button control variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
       </HeaderActions>
       <Toolbar aria-label="Maintenance inventory filters">
         <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search parts inventory" placeholder="Search parts…" />
-        <ToolbarField label="Category" htmlFor="maintenance-inventory-category">
-          <Select
-            id="maintenance-inventory-category"
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            aria-label="Filter by category"
-            containerClassName="w-full sm:w-48"
-          >
-            <option value="">All Categories</option>
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-          </Select>
-        </ToolbarField>
-        <Toolbar.Spacer />
+        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}>
+          <ToolbarField label="Category" htmlFor="maintenance-inventory-category">
+            <Select
+              id="maintenance-inventory-category"
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              aria-label="Filter by category"
+              containerClassName="w-full sm:w-48"
+            >
+              <option value="">All Categories</option>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
         <ViewToggle
           value={viewMode}
           onChange={setViewMode}
           size="md"
           ariaLabel="Maintenance inventory view"
           options={[
-            { mode: 'cards', icon: 'grid', title: 'Card view' },
-            { mode: 'table', icon: 'table', title: 'Table view' },
+            { mode: 'cards', kind: 'cards', title: 'Card view' },
+            { mode: 'table', kind: 'table', title: 'Table view' },
           ]}
         />
       </Toolbar>

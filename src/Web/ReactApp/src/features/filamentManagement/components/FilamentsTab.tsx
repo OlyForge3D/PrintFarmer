@@ -13,7 +13,7 @@ import {
   PlusIcon,
   GearIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination } from '@/common/components/ui';
+import { Button, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination, FiltersDisclosure } from '@/common/components/ui';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { classifyColor } from '@/common/utils/colorFamilies';
@@ -77,8 +77,6 @@ export function FilamentsTab() {
     page: urlPage,
     setSearch,
     setMany,
-    resetAll,
-    hasActiveFilters: urlHasActiveFilters,
   } = useUrlFilterState({
     search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
     material: { key: 'material', type: 'string', defaultValue: '' },
@@ -211,8 +209,8 @@ export function FilamentsTab() {
     setDragColId(null);
   };
 
-  const hasActiveFilters = urlHasActiveFilters;
-  const resetFilters = () => resetAll();
+  const activeFilterCount = [urlMaterial, urlVendor, urlColor].filter(Boolean).length;
+  const resetFilters = () => setMany({ material: '', vendor: '', color: '', page: 1 });
 
   // Filter dropdown options — loaded once from dedicated endpoint, supplemented by page data
   const [materialOptions, setMaterialOptions] = useState<string[]>([]);
@@ -458,6 +456,7 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             aria-label="Export Spoolman filaments to CSV"
+            control
             title="Export Spoolman filaments to CSV"
             disabled={exportCsvMutation.isPending || filaments.length === 0}
             onClick={async () => {
@@ -482,6 +481,7 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             aria-label="Import filaments from CSV file"
+            control
             title="Import filaments from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
@@ -491,6 +491,7 @@ export function FilamentsTab() {
           <Button
             variant="secondary"
             aria-label="Browse and import from Open Filament Database"
+            control
             title="Browse and import from Open Filament Database"
             onClick={() => setIsOfdOpen(true)}
           >
@@ -499,6 +500,7 @@ export function FilamentsTab() {
           <Button
             variant="primary"
             aria-label="Add a new filament"
+            control
             title="Add a new filament"
             onClick={() => setIsAddOpen(true)}
           >
@@ -512,6 +514,7 @@ export function FilamentsTab() {
               aria-haspopup="dialog"
               aria-expanded={showColumnConfig && viewMode === 'table'}
               aria-controls="filament-column-config-panel"
+              control
               onClick={() => setShowColumnConfig(!showColumnConfig)}
               disabled={viewMode !== 'table'}
             >
@@ -587,8 +590,8 @@ export function FilamentsTab() {
             size="md"
             ariaLabel="Filament view"
             options={[
-              { mode: 'cards', icon: 'grid', title: 'Card view' },
-              { mode: 'table', icon: 'table', title: 'Table view' },
+              { mode: 'cards', kind: 'cards', title: 'Card view' },
+              { mode: 'table', kind: 'table', title: 'Table view' },
             ]}
           />
           <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />
@@ -606,10 +609,11 @@ export function FilamentsTab() {
               placeholder="Name, vendor, material…"
             />
           </ToolbarField>
-          <ToolbarField label="Material" htmlFor="filament-material">
-            <Select
-              id="filament-material"
-              aria-label="Filter by material"
+          <FiltersDisclosure activeCount={activeFilterCount} onReset={resetFilters}>
+            <ToolbarField label="Material" htmlFor="filament-material">
+              <Select
+                id="filament-material"
+                aria-label="Filter by material"
                 value={urlMaterial}
                 onChange={e => setMany({ material: e.target.value, page: 1 })}
                 className="w-40"
@@ -646,6 +650,7 @@ export function FilamentsTab() {
               />
               </div>
             </ToolbarField>
+          </FiltersDisclosure>
             {viewMode === 'cards' && (
               <ToolbarField label="Sort" htmlFor="filament-sort">
                 <SortControl
@@ -673,7 +678,8 @@ export function FilamentsTab() {
                   aria-label="Page size"
                   value={String(pageSize)}
                   onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
-                  className="w-20"
+                  className="pf-control w-20 py-0"
+                  data-role="field"
                 >
                   <option value="10">10</option>
                   <option value="25">25</option>
@@ -682,18 +688,6 @@ export function FilamentsTab() {
                   <option value="0">All</option>
                 </Select>
             </ToolbarField>
-            {hasActiveFilters && (
-              <Button
-                variant="subtle"
-                control
-                onClick={resetFilters}
-                aria-label="Reset all filters"
-                title="Reset all filters"
-                iconLeft={<CloseIcon className="h-3 w-3" />}
-              >
-                Reset
-              </Button>
-            )}
             <span className="text-sm text-pf-text-secondary">
                 Showing {pagedFilaments.length} of {totalCount}
             </span>
@@ -704,8 +698,8 @@ export function FilamentsTab() {
               size="md"
               ariaLabel="Filament view"
               options={[
-                { mode: 'cards', icon: 'grid', title: 'Card view' },
-                { mode: 'table', icon: 'table', title: 'Table view' },
+                { mode: 'cards', kind: 'cards', title: 'Card view' },
+                { mode: 'table', kind: 'table', title: 'Table view' },
               ]}
             />
             <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />

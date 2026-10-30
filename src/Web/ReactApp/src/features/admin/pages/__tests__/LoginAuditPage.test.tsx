@@ -92,6 +92,15 @@ describe('LoginAuditPage', () => {
     renderPage();
 
     expect(screen.getByRole('group', { name: 'Filter login audit entries' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/filter by username/i)).toBeVisible();
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(panel).toHaveAttribute('hidden');
+    expect(screen.getByLabelText(/filter from date/i)).not.toBeVisible();
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).not.toHaveAttribute('hidden');
     expect(screen.getByLabelText(/filter from date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/filter to date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/filter by username/i)).toBeInTheDocument();
@@ -239,6 +248,7 @@ describe('LoginAuditPage', () => {
 
     renderPage();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     const select = screen.getByLabelText(/filter by login status/i);
     expect(select).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'All attempts' })).toBeInTheDocument();
@@ -274,5 +284,39 @@ describe('LoginAuditPage', () => {
         expect.objectContaining({ page: 2, pageSize: 50 }),
       );
     });
+  });
+
+  it('applies refinements immediately and resets the page without changing username or page size', async () => {
+    vi.mocked(securityAuditService.fetchLoginAudit).mockResolvedValue(mockPagedResponse);
+    renderPage('/admin/login-audit?username=admin&page=3&pageSize=25');
+    await waitFor(() => {
+      expect(securityAuditService.fetchLoginAudit).toHaveBeenLastCalledWith(
+        expect.objectContaining({ username: 'admin', page: 3, pageSize: 25 }),
+      );
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByLabelText(/filter by login status/i), { target: { value: 'false' } });
+    await waitFor(() => {
+      expect(securityAuditService.fetchLoginAudit).toHaveBeenLastCalledWith(
+        expect.objectContaining({ success: false, username: 'admin', page: 1, pageSize: 25 }),
+      );
+    });
+    fireEvent.change(screen.getByLabelText(/filter from date/i), { target: { value: '2026-10-01T08:00' } });
+    fireEvent.change(screen.getByLabelText(/filter to date/i), { target: { value: '2026-10-30T08:00' } });
+    await waitFor(() => {
+      expect(securityAuditService.fetchLoginAudit).toHaveBeenLastCalledWith(
+        expect.objectContaining({ from: '2026-10-01T08:00', to: '2026-10-30T08:00', page: 1 }),
+      );
+    });
+    expect(screen.getByRole('button', { name: 'Filters (3)' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => {
+      expect(securityAuditService.fetchLoginAudit).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          from: undefined, to: undefined, success: undefined, username: 'admin', page: 1, pageSize: 25,
+        }),
+      );
+    });
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveFocus();
   });
 });

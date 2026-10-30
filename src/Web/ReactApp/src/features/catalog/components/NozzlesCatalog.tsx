@@ -8,10 +8,9 @@ import {
   Badge,
   DataTable,
   type DataTableColumn,
-  ViewToggle,
-  gridTableOptions,
 } from '@/common/components/ui';
-import { HeaderActions, Toolbar } from '@/common/components/ui';
+import { CatalogHeader, CatalogModelToolbar, CatalogResultsSummary } from './CatalogModelToolbar';
+import { filterCatalogModels } from './catalogModelFilters';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
@@ -105,6 +104,8 @@ export function NozzlesCatalog() {
 
   // View toggle state (grid vs table) - persisted per tab
   const [view, setView] = useCatalogViewMode('nozzles');
+  const [searchValue, setSearchValue] = useState('');
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState<string | undefined>();
 
   // Define columns for DataTable with built-in sorting
   const columns = useMemo<DataTableColumn<NozzleModelCardData>[]>(() => [
@@ -343,7 +344,8 @@ export function NozzlesCatalog() {
     );
   }
 
-  const cards = (nozzleModels ?? []).map(toCardData);
+  const allCards = (nozzleModels ?? []).map(toCardData);
+  const cards = filterCatalogModels(allCards, searchValue, selectedManufacturerId);
 
   return (
     <div className="space-y-4">
@@ -354,32 +356,39 @@ export function NozzlesCatalog() {
         </Tabs.List>
         <Tabs.Panels>
           <Tabs.Panel id="models">
-      <div className="space-y-4">
-      {/* Header with Add button */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-pf-text-primary">
-          Nozzle Models ({cards.length})
-        </h2>
-        <HeaderActions>
-          <Button 
-            onClick={handleAddClick} 
+        <div className="space-y-4">
+        {/* Header with Add button */}
+        <CatalogHeader title="Nozzle Models">
+            <Button
+              control
+              onClick={handleAddClick}
             title="Add new nozzle model"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-        </HeaderActions>
-      </div>
-      <Toolbar aria-label="Nozzle catalog controls">
-        <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Nozzle catalog view" />
-      </Toolbar>
+      </CatalogHeader>
+      <CatalogModelToolbar
+        modelLabel="nozzle models"
+        context={CatalogContext.Nozzles}
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        manufacturerId={selectedManufacturerId}
+        onManufacturerChange={setSelectedManufacturerId}
+        view={view}
+        onViewChange={setView}
+      />
+      <CatalogResultsSummary shownCount={cards.length} totalCount={allCards.length} itemLabel="nozzle models" />
 
       {/* Grid or Table view of nozzle cards */}
-      {cards.length === 0 ? (
+      {allCards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No nozzle models defined yet.</p>
           <p className="mt-2">Click "Add Nozzle" to create your first one.</p>
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="text-center py-12 text-pf-text-secondary">
+          <p>No nozzle models match the current filters.</p>
         </div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

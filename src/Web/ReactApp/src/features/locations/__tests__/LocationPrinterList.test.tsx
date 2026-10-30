@@ -33,6 +33,24 @@ vi.mock('@/common/components/ui', () => ({
   ToolbarField: ({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) => (
     <div><label htmlFor={htmlFor}>{label}</label>{children}</div>
   ),
+  FiltersDisclosure: ({ activeCount, onReset, children }: {
+    activeCount: number;
+    onReset: () => void;
+    children: React.ReactNode;
+  }) => {
+    const [expanded, setExpanded] = React.useState(false);
+    return (
+      <>
+        <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          Filters{activeCount > 0 ? ` (${activeCount})` : ''}
+        </button>
+        <div role="region" aria-label="Filters" hidden={!expanded}>
+          {children}
+          <button type="button" disabled={activeCount === 0} onClick={onReset}>Reset filters</button>
+        </div>
+      </>
+    );
+  },
   SearchField: ({ value, onChange, onClear, label, id, placeholder }: {
     value: string;
     onChange: React.ChangeEventHandler<HTMLInputElement>;
@@ -106,10 +124,31 @@ describe('LocationPrinterList', () => {
 
   it('filters by status', () => {
     render(<LocationPrinterList printers={printers} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     const statusFilter = screen.getByLabelText('Filter by status');
     fireEvent.change(statusFilter, { target: { value: 'offline' } });
     expect(screen.getByText('Ender 3')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
+  });
+
+  it('keeps status filters collapsed, counts active values, and resets without clearing search', () => {
+    render(<LocationPrinterList printers={printers} />);
+    const searchInput = screen.getByPlaceholderText('Search printers…');
+    fireEvent.change(searchInput, { target: { value: 'prusa' } });
+
+    const filters = screen.getByRole('button', { name: 'Filters' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByLabelText('Filter by status').closest('[role="region"]')).not.toBeVisible();
+    expect(searchInput).toBeVisible();
+
+    fireEvent.click(filters);
+    fireEvent.change(screen.getByLabelText('Filter by status'), { target: { value: 'online' } });
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Filter by status')).toHaveValue('all');
+    expect(searchInput).toHaveValue('prusa');
   });
 
   it('shows empty message when no printers', () => {

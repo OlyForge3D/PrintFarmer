@@ -8,12 +8,13 @@ import { usePageTour } from '@/common/hooks/usePageTour';
 import { gcodeLibraryTour } from '@/features/gcode/tours/gcode-library.tour';
 import { HelpButton } from '@/common/components/HelpButton';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { CloseIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon } from '@/common/components/icons/MdiIcons';
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssignmentModal';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
-import { Button, Select } from '@/common/components/ui';
+import { Select } from '@/common/components/ui';
+import { FiltersDisclosure } from '@/common/components/ui/toolbar';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
@@ -27,7 +28,7 @@ export const GcodeLibraryPage: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterModels, setSelectedPrinterModels] = useState<string[]>([]);
   const [availablePrinterModels, setAvailablePrinterModels] = useState<Array<{ id: string | null; name: string }>>([]);
-  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [selectedFileForTagging, setSelectedFileForTagging] = useState<GcodeFile | null>(null);
@@ -66,7 +67,7 @@ export const GcodeLibraryPage: React.FC = () => {
     },
     {
       key: 'f',
-      handler: () => setShowFiltersPanel(!showFiltersPanel),
+      handler: () => setFiltersExpanded(expanded => !expanded),
       description: 'Toggle filters'
     },
     {
@@ -89,71 +90,6 @@ export const GcodeLibraryPage: React.FC = () => {
       titleActions={<HelpButton onClick={startTour} />}
     >
       <div className="space-y-4 h-full flex flex-col">
-        {/* Filter Panel */}
-        {showFiltersPanel && (
-          <div className="bg-pf-card rounded-lg border border-pf-border p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-pf-text-primary">Filters</h3>
-              <div className="flex items-center gap-2">
-                {(selectedTags.length > 0 || selectedPrinterModels.length > 0) && (
-                  <Button
-                    onClick={() => {
-                      setSelectedTags([]);
-                      setSelectedPrinterModels([]);
-                    }}
-                    variant="secondary"
-                    size="sm"
-                    className="text-xs"
-                  >
-                    Clear All
-                  </Button>
-                )}
-                <Button
-                  onClick={() => setShowFiltersPanel(false)}
-                  variant="secondary"
-                  size="sm"
-                  title="Close filters"
-                >
-                  <CloseIcon className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-4 items-end">
-              {/* Tag Filter */}
-              <div className="flex-1 min-w-48 space-y-1">
-                <label className="text-xs font-medium text-pf-text-secondary">Tags</label>
-                <TagInput
-                  selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
-                  onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
-                  placeholder="Select tags..."
-                  maxTags={undefined}
-                />
-              </div>
-
-              {/* Printer Model Filter */}
-              <div className="min-w-48 space-y-1">
-                <label htmlFor="printer-model-filter" className="text-xs font-medium text-pf-text-secondary">Printer Model</label>
-                <Select
-                  id="printer-model-filter"
-                  value={selectedPrinterModels[0] ?? ''}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setSelectedPrinterModels(value ? [value] : []);
-                  }}
-                >
-                  <option value="">All models</option>
-                  {availablePrinterModels.map((model) => (
-                    <option key={model.name} value={model.name}>
-                      {model.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Content */}
         <div className="flex-1 min-h-0">
           <GcodeFileBrowser
@@ -161,12 +97,51 @@ export const GcodeLibraryPage: React.FC = () => {
             viewMode={viewMode as 'grid' | 'explorer'}
             onViewModeChange={setViewMode}
             selectedTags={selectedTags}
+            filterActions={
+              <FiltersDisclosure
+                activeCount={selectedTags.length + selectedPrinterModels.length}
+                expanded={filtersExpanded}
+                onExpandedChange={setFiltersExpanded}
+                onReset={() => {
+                  setSelectedTags([]);
+                  setSelectedPrinterModels([]);
+                }}
+                dataTour="gcode-filters"
+              >
+                <div className="flex flex-wrap gap-4 items-end">
+                  <div className="flex-1 min-w-48 space-y-1">
+                    <label className="text-xs font-medium text-pf-text-secondary">Tags</label>
+                    <TagInput
+                      selectedTags={Array.isArray(allTags) ? allTags.filter(tag => selectedTags.includes(tag.id)) : []}
+                      onChange={(tags) => setSelectedTags(tags.map(tag => tag.id))}
+                      placeholder="Select tags..."
+                      maxTags={undefined}
+                    />
+                  </div>
+                  <div className="min-w-48 space-y-1">
+                    <label htmlFor="printer-model-filter" className="text-xs font-medium text-pf-text-secondary">Printer Model</label>
+                    <Select
+                      id="printer-model-filter"
+                      value={selectedPrinterModels[0] ?? ''}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setSelectedPrinterModels(value ? [value] : []);
+                      }}
+                    >
+                      <option value="">All models</option>
+                      {availablePrinterModels.map((model) => (
+                        <option key={model.name} value={model.name}>{model.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </FiltersDisclosure>
+            }
             selectedFileIds={selectedFileIds}
             onSelectionChange={setSelectedFileIds}
             onShowTagModal={() => setShowBulkTagModal(true)}
             onShowAddToProjectModal={() => setShowAddToProjectModal(true)}
             onShowSingleTagModal={(file) => setSelectedFileForTagging(file)}
-            onToggleTagFilterPanel={() => setShowFiltersPanel(!showFiltersPanel)}
             selectedPrinterModels={selectedPrinterModels}
             onAvailablePrinterModelsChange={setAvailablePrinterModels}
           />

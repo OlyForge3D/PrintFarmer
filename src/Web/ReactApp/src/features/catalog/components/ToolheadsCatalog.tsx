@@ -7,10 +7,9 @@ import {
   Select,
   DataTable,
   type DataTableColumn,
-  ViewToggle,
-  gridTableOptions,
 } from '@/common/components/ui';
-import { HeaderActions, Toolbar } from '@/common/components/ui';
+import { CatalogHeader, CatalogModelToolbar, CatalogResultsSummary } from './CatalogModelToolbar';
+import { filterCatalogModels } from './catalogModelFilters';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ToolheadModelCardData } from '@/common/components/ComponentModelCard';
@@ -130,6 +129,8 @@ export function ToolheadsCatalog() {
 
   // View toggle state (grid vs table) - persisted per tab
   const [view, setView] = useCatalogViewMode('toolheads');
+  const [searchValue, setSearchValue] = useState('');
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState<string | undefined>();
 
   // Define columns for DataTable with built-in sorting
   const columns = useMemo<DataTableColumn<ToolheadModelCardData>[]>(() => [
@@ -333,36 +334,43 @@ export function ToolheadsCatalog() {
     );
   }
 
-  const unsortedCards = (toolheadModels ?? []).map(toCardData);
-  const cards = unsortedCards;
+  const allCards = (toolheadModels ?? []).map(toCardData);
+  const cards = filterCatalogModels(allCards, searchValue, selectedManufacturerId);
 
   return (
     <div className="space-y-4">
       {/* Header with Add button */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-pf-text-primary">
-          Toolhead Models ({cards.length})
-        </h2>
-        <HeaderActions>
+      <CatalogHeader title="Toolhead Models">
           <Button 
+            control
             onClick={handleAddClick} 
             title="Add new toolhead model"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-        </HeaderActions>
-      </div>
-      <Toolbar aria-label="Toolhead catalog controls">
-        <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Toolhead catalog view" />
-      </Toolbar>
+      </CatalogHeader>
+      <CatalogModelToolbar
+        modelLabel="toolhead models"
+        context={CatalogContext.Toolheads}
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        manufacturerId={selectedManufacturerId}
+        onManufacturerChange={setSelectedManufacturerId}
+        view={view}
+        onViewChange={setView}
+      />
+      <CatalogResultsSummary shownCount={cards.length} totalCount={allCards.length} itemLabel="toolhead models" />
 
       {/* Grid or Table view of toolhead cards */}
-      {cards.length === 0 ? (
+      {allCards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No toolhead models defined yet.</p>
           <p className="mt-2">Click "Add Toolhead" to create your first one.</p>
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="text-center py-12 text-pf-text-secondary">
+          <p>No toolhead models match the current filters.</p>
         </div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

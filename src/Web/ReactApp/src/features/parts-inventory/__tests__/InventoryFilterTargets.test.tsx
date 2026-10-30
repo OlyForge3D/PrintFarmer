@@ -26,8 +26,15 @@ describe('Inventory inactive filter hit targets', () => {
   it.each([
     { name: 'SKUs', Component: PartsTab, query: useParts, target: 'inactive-skus' },
     { name: 'Bins', Component: BinsTab, query: useBins, target: 'inactive-bins' },
-  ])('keeps both $name filter labels clickable and preserves query state', ({ Component, query, target }) => {
+  ])('keeps $name filters in the shared disclosure and reset independent of search', ({ name, Component, query, target }) => {
     const { container } = render(<Component />);
+    const search = screen.getByRole('searchbox', { name: name === 'SKUs' ? 'Search SKUs' : 'Search bins' });
+    fireEvent.change(search, { target: { value: 'sample search' } });
+
+    const filterButton = screen.getByRole('button', { name: 'Filters' });
+    expect(filterButton).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(filterButton);
+
     const checkbox = screen.getByRole('checkbox', { name: 'Show inactive' });
     const hitTarget = container.querySelector(`[data-filter-hit-target="${target}"]`);
     const switchLabel = checkbox.closest('label');
@@ -45,5 +52,12 @@ describe('Inventory inactive filter hit targets', () => {
     fireEvent.click(switchLabel!);
     expect(checkbox).not.toBeChecked();
     expect(query).toHaveBeenLastCalledWith({ includeInactive: false });
+
+    fireEvent.click(textLabel);
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(checkbox).not.toBeChecked();
+    expect(query).toHaveBeenLastCalledWith({ includeInactive: false });
+    expect(search).toHaveValue('sample search');
   });
 });

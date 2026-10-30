@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { Toolbar, ToolbarField, SearchField, SortControl, FilterChip, FilterButton, RefreshButton, Pagination } from '@/common/components/ui/toolbar';
+import { Toolbar, ToolbarField, SearchField, SortControl, FilterChip, FilterButton, FiltersDisclosure, RefreshButton, Pagination } from '@/common/components/ui/toolbar';
 import { ViewToggle } from '@/common/components/ui/ViewToggle';
 
 describe('Toolbar controls', () => {
@@ -45,7 +45,7 @@ describe('Toolbar controls', () => {
       <FilterChip selected onClick={onClick}>Ready</FilterChip>
       <FilterButton count={2} expanded aria-controls="filters" />
       <ViewToggle value="grid" onChange={onChange} size="md" options={[
-        { mode: 'grid', icon: 'grid', title: 'Grid view' }, { mode: 'table', icon: 'table', title: 'Table view' },
+        { mode: 'grid', kind: 'cards', title: 'Grid view' }, { mode: 'table', kind: 'table', title: 'Table view' },
       ]} />
     </>);
     fireEvent.click(screen.getByRole('button', { name: 'Ready' }));
@@ -55,6 +55,48 @@ describe('Toolbar controls', () => {
     expect(screen.getByRole('button', { name: 'Grid view' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Table view' }));
     expect(onChange).toHaveBeenCalledWith('table');
+  });
+
+  it('links the filter trigger to an expandable panel and exposes its active count', () => {
+    const reset = vi.fn();
+    const expandedChange = vi.fn();
+    render(<Toolbar aria-label="Inventory controls">
+      <FiltersDisclosure activeCount={2} onReset={reset} onExpandedChange={expandedChange}>
+        <label htmlFor="material">Material</label>
+        <select id="material"><option>PLA</option></select>
+      </FiltersDisclosure>
+      <SearchField value="" onChange={vi.fn()} onClear={vi.fn()} />
+    </Toolbar>);
+
+    const trigger = screen.getByRole('button', { name: 'Filters (2)' });
+    const panelId = trigger.getAttribute('aria-controls');
+    expect(panelId).toBeTruthy();
+    expect(document.getElementById(panelId!)).toHaveAttribute('hidden');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+    const panel = screen.getByRole('region', { name: 'Filters' });
+    expect(panel).toHaveAttribute('id', panelId);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(expandedChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByLabelText('Material')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(reset).toHaveBeenCalledOnce();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    expect(expandedChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('disables Reset filters when no filters are active', () => {
+    render(<Toolbar aria-label="Inventory controls">
+      <FiltersDisclosure activeCount={0} onReset={vi.fn()}>
+        <span>Material</span>
+      </FiltersDisclosure>
+    </Toolbar>);
+
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
   });
 
   it('retains the refresh name while busy and prevents activation', () => {

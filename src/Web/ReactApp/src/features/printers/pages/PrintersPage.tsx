@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect, useRef } from 'react';
+import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, usePrinterCameraUrls } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
@@ -23,8 +23,7 @@ import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSk
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
-import { Tooltip } from '@/common/components/ui/Tooltip';
-import { Toolbar, HeaderActions } from '@/common/components/ui/toolbar';
+import { FiltersDisclosure, Toolbar, HeaderActions } from '@/common/components/ui/toolbar';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -33,7 +32,7 @@ import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/
 import { computeIsSidebarOpen } from '@/features/printers/utils/printerSidebarVisibility';
 import { useIsLgBreakpoint } from '@/common/hooks/useMediaQuery';
 
-import { PrinterIcon, PrinterSearchIcon, ClearFiltersIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
+import { PrinterIcon, PrinterSearchIcon, ClearFiltersIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
 import PrinterBulkControls from '@/features/printers/components/admin/PrinterBulkControls';
 import { usePageTour } from '@/common/hooks/usePageTour';
@@ -243,7 +242,6 @@ export function PrintersPage() {
   const [backendFilter, setBackendFilter] = useState<BackendFilter>('all');
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const filterToggleRef = useRef<HTMLButtonElement>(null);
   const [sortMode, setSortMode] = useState<PrinterSortMode>(() => {
     const saved = localStorage.getItem('printerSortMode');
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
@@ -327,7 +325,6 @@ export function PrintersPage() {
     setStateFilter('all');
     setBackendFilter('all');
     setAvailabilityFilter('all');
-    filterToggleRef.current?.focus();
   }, []);
 
   // Keyboard shortcuts for printer management
@@ -553,7 +550,7 @@ export function PrintersPage() {
         <HeaderActions data-tour="printers-actions">
           {hasPermission('printers', 'create') && <AddPrinterButton onSuccess={refetchPrinters} />}
           {hasPermission('printers', 'admin') && discoveryAvailable && (
-            <Button variant="secondary" aria-label="Discover Printers on the local network"
+            <Button control variant="secondary" aria-label="Discover Printers on the local network"
               onClick={() => setShowDiscovery(true)}
               onMouseEnter={() => PrinterDiscoveryModal.preload()}
               onFocus={() => PrinterDiscoveryModal.preload()}
@@ -573,47 +570,88 @@ export function PrintersPage() {
               tour anchor widens only while the strip is open. */}
           <div data-tour={filtersExpanded ? 'printers-filters' : undefined} className="flex flex-col gap-4 mb-6">
               <Toolbar aria-label="Printer controls" data-tour={filtersExpanded ? undefined : 'printers-filters'}>
-                <div className="flex items-center gap-0.5">
-                <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="top">
-                  <Button
-                    ref={filterToggleRef}
-                    type="button"
-                    variant={filtersExpanded || hasActiveFilters ? 'subtle' : 'secondary'}
-                    size="sm"
-                    control
-                    className="pf-control--icon"
-                    aria-label={`Printer filters${hasActiveFilters ? ` (${activeFilterCount} active)` : ''}`}
-                    aria-expanded={filtersExpanded}
-                    aria-controls="printer-filter-strip"
-                    onClick={() => setFiltersExpanded(expanded => !expanded)}
-                    iconLeft={<FilterIcon className="h-4 w-4" isOn={hasActiveFilters} />}
-                  />
-                </Tooltip>
-                {hasActiveFilters && (
-                  <Tooltip content="Clear filters" position="top" ariaMode="hidden">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      control
-                      className="pf-control--icon"
-                      aria-label="Clear filters"
-                      onClick={handleClearFilters}
-                      iconLeft={<ClearFiltersIcon className="h-4 w-4" />}
-                    />
-                  </Tooltip>
-                )}
-                </div>
+                <FiltersDisclosure
+                  activeCount={activeFilterCount}
+                  onReset={handleClearFilters}
+                  onExpandedChange={setFiltersExpanded}
+                >
+                  <div
+                    role="group"
+                    aria-label="Printer filters"
+                    className="pf-inline-form rounded-lg border border-pf-border bg-pf-bg-1 p-3"
+                  >
+                    <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="pf-toolbar-field">
+                        <label htmlFor="state-filter" className="pf-toolbar-field__label">State</label>
+                        <Select
+                          id="state-filter"
+                          data-role="field"
+                          value={stateFilter}
+                          onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
+                          aria-label="Filter by printer state"
+                          className="pf-control min-w-0 py-0"
+                        >
+                          <option value="all">All States</option>
+                          <option value="online">Online</option>
+                          <option value="printing">Printing</option>
+                          <option value="paused">Paused</option>
+                          <option value="shutdown">Shutdown</option>
+                          <option value="offline">Offline</option>
+                        </Select>
+                      </div>
+
+                      <div className="pf-toolbar-field">
+                        <label htmlFor="backend-filter" className="pf-toolbar-field__label">Backend</label>
+                        <Select
+                          id="backend-filter"
+                          data-role="field"
+                          value={backendFilter}
+                          onChange={e => setBackendFilter(e.target.value as BackendFilter)}
+                          aria-label="Filter by backend"
+                          className="pf-control min-w-0 py-0"
+                        >
+                          <option value="all">All Backends</option>
+                          <option value="Moonraker">Moonraker</option>
+                          <option value="PrusaLink">PrusaLink</option>
+                          <option value="SDCP">SDCP</option>
+                          <option value="OctoPrint">OctoPrint</option>
+                          <option value="FlashForge">FlashForge</option>
+                        </Select>
+                      </div>
+
+                      <div className="pf-toolbar-field">
+                        <label htmlFor="availability-filter" className="pf-toolbar-field__label">Done in</label>
+                        <Select
+                          id="availability-filter"
+                          data-role="field"
+                          value={availabilityFilter}
+                          onChange={e => setAvailabilityFilter(e.target.value as AvailabilityFilter)}
+                          aria-label="Done in (estimated completion time)"
+                          className="pf-control min-w-0 py-0"
+                        >
+                          <option value="all">Any Time</option>
+                          <option value="1">≤ 1 hour</option>
+                          <option value="2">≤ 2 hours</option>
+                          <option value="4">≤ 4 hours</option>
+                          <option value="8">≤ 8 hours</option>
+                          <option value="12">≤ 12 hours</option>
+                          <option value="24">≤ 24 hours</option>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </FiltersDisclosure>
 
                 {/* Sort Order */}
                 <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
                   <label htmlFor="sort-mode" className="sr-only text-sm text-pf-text-secondary sm:not-sr-only">Sort:</label>
                   <Select
                     id="sort-mode"
+                    data-role="field"
                     value={sortMode}
                     onChange={e => setSortMode(e.target.value as PrinterSortMode)}
                     aria-label="Sort by"
-                    className="min-w-0"
+                    className="pf-control min-w-0 py-0"
                     containerClassName="sm:w-40"
                   >
                     <option value="state">State</option>
@@ -625,75 +663,6 @@ export function PrintersPage() {
                 <Toolbar.Spacer />
                 <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
               </Toolbar>
-
-            <div
-              id="printer-filter-strip"
-              hidden={!filtersExpanded}
-              role="group"
-              aria-label="Printer filters"
-              className="pf-inline-form rounded-lg border border-pf-border bg-pf-bg-1 p-3"
-            >
-              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="pf-toolbar-field">
-                  <label htmlFor="state-filter" className="pf-toolbar-field__label">State</label>
-                  <Select
-                    id="state-filter"
-                    value={stateFilter}
-                    onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
-                    aria-label="Filter by printer state"
-                    className="min-w-0"
-                  >
-                    <option value="all">All States</option>
-                    <option value="online">Online</option>
-                    <option value="printing">Printing</option>
-                    <option value="paused">Paused</option>
-                    <option value="shutdown">Shutdown</option>
-                    <option value="offline">Offline</option>
-                  </Select>
-                </div>
-
-                {/* Backend Filter */}
-                <div className="pf-toolbar-field">
-                  <label htmlFor="backend-filter" className="pf-toolbar-field__label">Backend</label>
-                  <Select
-                    id="backend-filter"
-                    value={backendFilter}
-                    onChange={e => setBackendFilter(e.target.value as BackendFilter)}
-                    aria-label="Filter by backend"
-                    className="min-w-0"
-                  >
-                    <option value="all">All Backends</option>
-                    <option value="Moonraker">Moonraker</option>
-                    <option value="PrusaLink">PrusaLink</option>
-                    <option value="SDCP">SDCP</option>
-                    <option value="OctoPrint">OctoPrint</option>
-                    <option value="FlashForge">FlashForge</option>
-                  </Select>
-                </div>
-
-                {/* Availability Filter */}
-                <div className="pf-toolbar-field">
-                  <label htmlFor="availability-filter" className="pf-toolbar-field__label">Done in</label>
-                  <Select
-                    id="availability-filter"
-                    value={availabilityFilter}
-                    onChange={e => setAvailabilityFilter(e.target.value as AvailabilityFilter)}
-                    aria-label="Done in (estimated completion time)"
-                    className="min-w-0"
-                  >
-                    <option value="all">Any Time</option>
-                    <option value="1">≤ 1 hour</option>
-                    <option value="2">≤ 2 hours</option>
-                    <option value="4">≤ 4 hours</option>
-                    <option value="8">≤ 8 hours</option>
-                    <option value="12">≤ 12 hours</option>
-                    <option value="24">≤ 24 hours</option>
-                  </Select>
-                </div>
-
-              </div>
-            </div>
-
           </div>
 
           {/* Printer details sidebar on small screens: between toolbar and grid.

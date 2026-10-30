@@ -325,13 +325,13 @@ export function AutoDispatchDashboardPage() {
                   data-role="button"
                   onClick={() => setStateFilter(key)}
                   onKeyDown={event => {
-                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
                     event.preventDefault();
                     const radios = Array.from(
                       event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
                     );
                     const currentIndex = radios.indexOf(event.currentTarget);
-                    const offset = event.key === 'ArrowRight' ? 1 : -1;
+                    const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
                     const nextRadio = radios[(currentIndex + offset + radios.length) % radios.length];
                     if (nextRadio) {
                       nextRadio.focus();
@@ -361,7 +361,8 @@ export function AutoDispatchDashboardPage() {
                 value={sortMode}
                 onChange={e => setSortMode(e.target.value as AutoDispatchSortMode)}
                 aria-label="Sort by"
-                className="min-w-0 !text-xs"
+                className="pf-control min-w-0 py-0"
+                data-role="field"
               >
                 <option value="state">By State</option>
                 <option value="name">By Name</option>

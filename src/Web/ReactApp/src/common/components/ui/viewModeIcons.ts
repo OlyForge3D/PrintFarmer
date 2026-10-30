@@ -1,10 +1,32 @@
-import { mdiTable, mdiViewCompact, mdiViewComfy, mdiViewAgenda } from '@mdi/js';
+import {
+  mdiMapMarker,
+  mdiPrinter3d,
+  mdiTable,
+  mdiViewAgenda,
+  mdiViewComfy,
+  mdiViewCompact,
+  mdiViewGrid,
+  mdiViewList,
+} from '@mdi/js';
 
 /**
- * MDI icon paths for common view modes
- * 
- * These paths are extracted from Material Design Icons (@mdi/js) for use
- * with the ViewToggle component without requiring the full MDI dependency.
+ * MDI icon paths for semantic view kinds. Every kind has a distinct glyph.
+ */
+export const viewKindIcons = {
+  cards: mdiViewGrid,
+  table: mdiTable,
+  list: mdiViewList,
+  compactCards: mdiViewCompact,
+  detailedCards: mdiViewComfy,
+  explorer: mdiViewAgenda,
+  locationGroups: mdiMapMarker,
+  printerGroups: mdiPrinter3d,
+} as const;
+
+export type ViewKind = keyof typeof viewKindIcons;
+
+/**
+ * Legacy MDI icon paths retained for consumers outside ViewToggle.
  */
 export const viewModeIcons = {
   /** Grid of cards (mdiViewGrid) */
@@ -36,36 +58,20 @@ export const viewModeIcons = {
   drawer: 'M22,4V2H2V4H11V18.17L5.5,12.67L4.08,14.08L12,22L19.92,14.08L18.5,12.67L13,18.17V4H22Z',
 } as const;
 
-/**
- * Type for built-in view mode icon names
- */
 export type ViewModeIconName = keyof typeof viewModeIcons;
 
-/**
- * A single view mode option
- */
 export interface ViewModeOption<T extends string = string> {
-  /** The mode value */
   mode: T;
-  /** MDI icon path string, or a key from viewModeIcons */
-  icon: string | ViewModeIconName;
-  /** Tooltip/title for the button */
+  kind: ViewKind;
   title: string;
-  label?: string;
 }
 
-/**
- * Pre-configured options for grid/table toggle (catalog pages)
- */
 export const gridTableOptions: ViewModeOption<'grid' | 'table'>[] = [
-  { mode: 'grid', icon: 'grid', title: 'Grid view' },
-  { mode: 'table', icon: 'table', title: 'Table view' },
+  { mode: 'grid', kind: 'cards', title: 'Grid view' },
+  { mode: 'table', kind: 'table', title: 'Table view' },
 ];
 
-/**
- * Pre-configured options for grid/list toggle
- */
 export const gridListOptions: ViewModeOption<'grid' | 'list'>[] = [
-  { mode: 'grid', icon: 'grid', title: 'Grid view' },
-  { mode: 'list', icon: 'list', title: 'List view' },
+  { mode: 'grid', kind: 'cards', title: 'Grid view' },
+  { mode: 'list', kind: 'list', title: 'List view' },
 ];

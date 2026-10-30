@@ -361,3 +361,37 @@ describe('SpoolsTab — "Open Spoolman" link scheme safety (js/xss-through-dom)'
     expect(screen.queryByRole('link', { name: /open spoolman/i })).not.toBeInTheDocument();
   });
 });
+
+describe('SpoolsTab — filter disclosure reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: 'search term', material: 'PETG', vendor: 'Prusa', color: 'blue',
+      location: 'Shelf A', showEmpty: true, pageSize: 25,
+      sortField: 'vendor', sortDir: 'desc', page: 0, hasActiveFilters: true,
+    });
+    mockGetSpools.mockResolvedValue(pageOf([makeSpool(1)], 1));
+  });
+
+  it('resets only filters while preserving search, sort, and page size', async () => {
+    render(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
+
+    expect(filterState.setMany).toHaveBeenCalledTimes(1);
+    expect(filterState.setMany).toHaveBeenCalledWith({
+      material: '',
+      vendor: '',
+      color: '',
+      location: '',
+      showEmpty: false,
+      page: 0,
+    });
+    expect(screen.getByPlaceholderText(/name, vendor, material/i)).toHaveValue('search term');
+    expect(screen.getByRole('combobox', { name: /sort by/i })).toHaveValue('vendor');
+    expect(filterState.pageSize).toBe(25);
+  });
+});

@@ -726,11 +726,11 @@ export function MaintenancePlansTab() {
   return (
     <>
       <HeaderActions>
-        <Button variant="primary" onClick={() => { setEditingPlan(null); setCloneSource(null); setIsPlanFormOpen(true); }} iconLeft={<PlusIcon className="h-4 w-4" />}>
+        <Button control variant="primary" onClick={() => { setEditingPlan(null); setCloneSource(null); setIsPlanFormOpen(true); }} iconLeft={<PlusIcon className="h-4 w-4" />}>
           New Plan
         </Button>
-        <Button variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
-        <Button variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+        <Button control variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button control variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
       </HeaderActions>
       <Toolbar aria-label="Maintenance plan filters">
         <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search maintenance plans" placeholder="Search plans or tasks…" />

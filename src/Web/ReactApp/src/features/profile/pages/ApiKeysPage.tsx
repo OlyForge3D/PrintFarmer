@@ -828,6 +828,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
             <Button
               variant="primary"
               ref={createButtonRef}
+              control
               onClick={() => setShowCreateForm(true)}
               disabled={isSecretLocked}
               iconLeft={<PlusIcon className="w-4 h-4" />}

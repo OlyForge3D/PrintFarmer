@@ -1671,7 +1671,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <Button
           type="button"
           variant="subtle"
-          size="sm"
+          control
           onClick={openCommandPalette}
           iconLeft={<SearchIcon className="h-4 w-4" />}
           className="rounded-md border border-pf-border bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary"

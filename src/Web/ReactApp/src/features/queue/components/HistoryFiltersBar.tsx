@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
-import { Toolbar, FilterButton, RefreshButton, ViewToggle, ControlIcon } from "@/common/components/ui";
+import { Toolbar, FiltersDisclosure, RefreshButton, ViewToggle, ControlIcon } from "@/common/components/ui";
 import { mdiCheck, mdiClose, mdiCircleOutline } from '@mdi/js';
 
 interface HistoryFiltersBarProps {
@@ -36,8 +36,6 @@ export default function HistoryFiltersBar({
   viewMode,
   onViewModeChange,
 }: HistoryFiltersBarProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
   const handleStatusToggle = useCallback(
     (status: string) => {
       if (selectedStatuses.includes(status)) {
@@ -49,36 +47,18 @@ export default function HistoryFiltersBar({
     [selectedStatuses, onStatusChange]
   );
 
-  // Build filter summary for collapsed view
-  const getFilterSummary = () => {
-    if (selectedStatuses.length === 3) return "All statuses";
-    if (selectedStatuses.length > 0) {
-      return selectedStatuses.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(", ");
-    }
-    return "No statuses selected";
-  };
-
   return (
     <div className="bg-pf-bg-1 border border-pf-border rounded-lg">
       {/* Collapsed Header - Always Visible */}
       <Toolbar aria-label="History controls" className="p-3">
-        <FilterButton expanded={isExpanded} count={selectedStatuses.length === 3 ? 0 : selectedStatuses.length}
-          onClick={() => setIsExpanded(!isExpanded)}
-          variant="ghost"
-          className="flex items-center gap-2 text-left flex-[1_1_14rem] min-w-0 justify-start px-0 hover:bg-transparent"
-          aria-controls="filter-content"
-        >
-          <span className="inline-flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium text-pf-text-primary">Filters</span>
-            <span className="text-xs text-pf-text-secondary truncate">{getFilterSummary()}</span>
-          </span>
-        </FilterButton>
           <Select
             value={sortBy}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
             containerClassName="w-auto"
+            className="pf-control py-0"
+            data-role="field"
             aria-label="Sort by"
           >
             <option value="newest">Newest</option>
@@ -89,16 +69,17 @@ export default function HistoryFiltersBar({
           <Toolbar.Spacer />
           <ViewToggle value={viewMode} onChange={onViewModeChange} size="md" className="pf-view-toggle--desktop"
             ariaLabel="History view mode" options={[
-              { mode: 'cards', icon: 'grid', title: 'Card view' },
-              { mode: 'table', icon: 'table', title: 'Table view' },
+              { mode: 'cards', kind: 'cards', title: 'Card view' },
+              { mode: 'table', kind: 'table', title: 'Table view' },
             ]} />
           <RefreshButton onClick={onRefresh} busy={isLoading} />
       </Toolbar>
 
-      {/* Expandable Content */}
-      {isExpanded && (
-        <div id="filter-content" className="pf-inline-form px-3 pb-3 pt-0 border-t border-pf-border space-y-3">
-          <div className="pt-3">
+      <Toolbar aria-label="History filters">
+        <FiltersDisclosure
+          activeCount={selectedStatuses.length === 3 ? 0 : selectedStatuses.length}
+          onReset={() => onStatusChange(["completed", "failed", "cancelled"])}
+        >
             {/* Status Filter */}
             <div>
               <label className="block text-xs font-medium text-pf-text-secondary mb-1.5">
@@ -110,7 +91,7 @@ export default function HistoryFiltersBar({
                     key={status}
                     onClick={() => handleStatusToggle(status)}
                     variant="ghost"
-                    size="sm"
+                    control
                     aria-pressed={selectedStatuses.includes(status)}
                     aria-label={
                       status === "completed"
@@ -119,7 +100,7 @@ export default function HistoryFiltersBar({
                           ? "Failed"
                           : "Cancelled"
                     }
-                    className={`px-2 py-1 text-xs font-medium ${
+                    className={`px-2 text-xs font-medium ${
                       selectedStatuses.includes(status)
                         ? status === "completed"
                           ? "bg-pf-success text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]"
@@ -148,9 +129,8 @@ export default function HistoryFiltersBar({
                 ))}
               </div>
             </div>
-          </div>
-        </div>
-      )}
+        </FiltersDisclosure>
+      </Toolbar>
     </div>
   );
 }

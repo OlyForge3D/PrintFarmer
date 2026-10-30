@@ -1,5 +1,6 @@
 import { Button } from './Button';
-import { viewModeIcons, type ViewModeIconName, type ViewModeOption } from './viewModeIcons';
+import { Tooltip } from './Tooltip';
+import { viewKindIcons, type ViewModeOption } from './viewModeIcons';
 import clsx from 'clsx';
 
 const SELECTED_VIEW_VARIANT = 'primary';
@@ -38,20 +39,11 @@ function ViewIcon({ path, className = 'w-4 h-4' }: { path: string; className?: s
 }
 
 /**
- * Resolves an icon to its path string
- */
-function resolveIconPath(icon: string | ViewModeIconName): string {
-  if (icon in viewModeIcons) {
-    return viewModeIcons[icon as ViewModeIconName];
-  }
-  return icon;
-}
-
-/**
  * ViewToggle - Generic toggle between multiple view modes
  * 
  * A flexible, reusable component for switching between different view modes.
- * Accepts an array of options with mode values, icons, and titles.
+ * Accepts an array of options with mode values, icons, and titles. Each option
+ * is icon-only; its title is shown in a tooltip and remains the accessible name.
  * 
  * @example
  * // Simple grid/table toggle
@@ -59,8 +51,8 @@ function resolveIconPath(icon: string | ViewModeIconName): string {
  *   value={view}
  *   onChange={setView}
  *   options={[
- *     { mode: 'grid', icon: 'grid', title: 'Grid view' },
- *     { mode: 'table', icon: 'table', title: 'Table view' },
+ *     { mode: 'grid', kind: 'cards', title: 'Grid view' },
+ *     { mode: 'table', kind: 'table', title: 'Table view' },
  *   ]}
  * />
  * 
@@ -70,10 +62,9 @@ function resolveIconPath(icon: string | ViewModeIconName): string {
  *   value={viewMode}
  *   onChange={setViewMode}
  *   options={[
- *     { mode: 'compact', icon: 'compact', title: 'Compact Cards' },
- *     { mode: 'collapsed', icon: 'collapsed', title: 'Collapsed View' },
- *     { mode: 'detailed', icon: 'expandable', title: 'Detailed Cards' },
- *     { mode: 'table', icon: 'quilt', title: 'Table View' },
+ *     { mode: 'compact', kind: 'compactCards', title: 'Compact Cards' },
+ *     { mode: 'detailed', kind: 'detailedCards', title: 'Detailed Cards' },
+ *     { mode: 'table', kind: 'table', title: 'Table View' },
  *   ]}
  * />
  */
@@ -92,22 +83,19 @@ export function ViewToggle<T extends string>({
       aria-label={ariaLabel}
     >
       {options.map((option) => (
-        <Button
-          key={option.mode}
-          type="button"
-          onClick={() => onChange(option.mode)}
-          variant={value === option.mode ? SELECTED_VIEW_VARIANT : 'secondary'}
-          size={size}
-          control
-          title={option.title}
-          aria-label={option.title}
-          aria-pressed={value === option.mode}
-          className={option.label ? 'px-2' : 'pf-control--icon'}
-          iconLeft={option.label ? <ViewIcon path={resolveIconPath(option.icon)} className={size === 'lg' ? 'w-5 h-5' : 'w-4 h-4'} /> : undefined}
-          iconCenter={!option.label ? <ViewIcon path={resolveIconPath(option.icon)} className={size === 'lg' ? 'w-5 h-5' : 'w-4 h-4'} /> : undefined}
-        >
-          {option.label && <span className="hidden md:inline">{option.label}</span>}
-        </Button>
+        <Tooltip key={option.mode} content={option.title} ariaMode="hidden">
+          <Button
+            type="button"
+            onClick={() => onChange(option.mode)}
+            variant={value === option.mode ? SELECTED_VIEW_VARIANT : 'secondary'}
+            size={size}
+            control
+            aria-label={option.title}
+            aria-pressed={value === option.mode}
+            className="pf-control--icon"
+            iconCenter={<ViewIcon path={viewKindIcons[option.kind]} className={size === 'lg' ? 'w-5 h-5' : 'w-4 h-4'} />}
+          />
+        </Tooltip>
       ))}
     </div>
   );

@@ -1,9 +1,8 @@
 import React from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mdiFilter, mdiFilterOutline } from '@mdi/js';
 
 const mockUseAdminHubParent = vi.fn();
 
@@ -454,30 +453,25 @@ describe('PrintersPage', () => {
     });
   });
 
-  it('starts collapsed with a glyph-only named toggle, tooltip, and keyboard-operable disclosure', async () => {
+  it('starts collapsed with the shared Filters disclosure and keeps sort outside its panel', async () => {
     const user = userEvent.setup();
     renderPage('/printers');
 
-    const toggle = screen.getByRole('button', { name: 'Printer filters' });
-    expect(toggle).toHaveTextContent(/^$/);
-    expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilterOutline);
-    expect(within(toggle).queryByRole('img')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Filters' });
+    expect(toggle).toHaveTextContent('Filters');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const stripId = toggle.getAttribute('aria-controls')!;
     expect(document.getElementById(stripId)).not.toBeVisible();
     expect(screen.getAllByRole('combobox')).toHaveLength(1);
     expect(screen.getByRole('combobox', { name: 'Sort by' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
 
     await user.tab();
     expect(toggle).toHaveFocus();
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Show printer filters');
-    expect(screen.getByRole('tooltip')).toHaveClass('bottom-full');
     await user.keyboard('{Enter}');
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilterOutline);
     expect(document.getElementById(stripId)).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Filters' })).toBeVisible();
     const strip = screen.getByRole('group', { name: 'Printer filters' });
     expect(within(strip).getAllByRole('combobox')).toHaveLength(3);
     expect(within(strip).getByText('State', { selector: 'label' })).toHaveAttribute('for', 'state-filter');
@@ -512,7 +506,7 @@ describe('PrintersPage', () => {
       refetch: mockRefetchPrinters,
     });
     renderPage('/printers');
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by printer state' }), state);
 
     const cards = screen.getAllByTestId(/^compact-card-/);
@@ -520,9 +514,8 @@ describe('PrintersPage', () => {
       expect.arrayContaining(expectedIds.map(id => `compact-card-${id}`))
     );
     expect(cards).toHaveLength(expectedIds.length);
-    const toggle = screen.getByRole('button', { name: 'Printer filters (1 active)' });
-    expect(toggle).toHaveTextContent(/^$/);
-    expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilter);
+    const toggle = screen.getByRole('button', { name: 'Filters (1)' });
+    expect(toggle).toHaveTextContent('Filters (1)');
   });
 
   it('keeps completion filtering inclusive and includes printers without completion times', async () => {
@@ -540,7 +533,7 @@ describe('PrintersPage', () => {
         refetch: mockRefetchPrinters,
       });
       renderPage('/printers');
-      await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+      await user.click(screen.getByRole('button', { name: 'Filters' }));
       const completion = screen.getByRole('combobox', { name: 'Done in (estimated completion time)' });
       expect(within(completion).getAllByRole('option').map(option => option.getAttribute('value')))
         .toEqual(['all', '1', '2', '4', '8', '12', '24']);
@@ -548,19 +541,18 @@ describe('PrintersPage', () => {
       expect(screen.getByText('Open Printer Alpha')).toBeVisible();
       expect(screen.getByText('Open Printer Beta')).toBeVisible();
       expect(screen.queryByText('Open Later Printer')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Printer filters (1 active)' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeVisible();
       await user.selectOptions(completion, '4');
       expect(screen.getByText('Open Later Printer')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Printer filters (1 active)' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeVisible();
       await user.selectOptions(completion, 'all');
       expect(screen.getByText('Open Later Printer')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Printer filters' })).toBeVisible();
-      expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
       await user.selectOptions(completion, '1');
-      await user.click(screen.getByRole('button', { name: 'Printer filters (1 active)' }));
-      await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+      await user.click(screen.getByRole('button', { name: 'Reset filters' }));
       expect(screen.getByText('Open Later Printer')).toBeVisible();
-      expect(screen.getByRole('button', { name: 'Printer filters' })).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Filters' })).toHaveFocus();
     } finally {
       clock.mockRestore();
     }
@@ -569,7 +561,7 @@ describe('PrintersPage', () => {
   it('keeps the tour spotlight around the toggle and the filters it describes', async () => {
     const user = userEvent.setup();
     const { container } = renderPage('/printers');
-    const toggle = screen.getByRole('button', { name: 'Printer filters' });
+    const toggle = screen.getByRole('button', { name: 'Filters' });
     await user.click(toggle);
 
     expect(container.querySelectorAll('[data-tour="printers-filters"]')).toHaveLength(1);
@@ -583,84 +575,66 @@ describe('PrintersPage', () => {
     expect(anchors).toHaveLength(1);
 
     const anchor = anchors[0];
-    expect(anchor).toContainElement(screen.getByRole('button', { name: 'Printer filters' }));
+    expect(anchor).toContainElement(screen.getByRole('button', { name: 'Filters' }));
     expect(anchor).toContainElement(screen.getByLabelText('Sort by'));
     expect(anchor).not.toContainElement(container.querySelector('[data-tour="printers-actions"]') as HTMLElement);
   });
 
-  it('shows the clear tooltip above the controls without repeating the accessible name', async () => {
+  it('retains combined filters when collapsed and resets them from the shared filter panel', async () => {
     const user = userEvent.setup();
     renderPage('/printers');
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
-    await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
-    const clear = screen.getByRole('button', { name: 'Clear filters' });
-
-    act(() => clear.focus());
-
-    const tooltip = screen.getByRole('tooltip', { hidden: true });
-    expect(tooltip).toHaveTextContent('Clear filters');
-    expect(tooltip).toHaveAttribute('aria-hidden', 'true');
-    expect(clear).not.toHaveAttribute('aria-describedby');
-    expect(clear).toHaveAccessibleName('Clear filters');
-    expect(tooltip).toHaveClass('bottom-full');
-  });
-
-  it('retains combined filters when collapsed, fills the funnel without a badge, and offers a glyph-only clear button beside the toggle', async () => {
-    const user = userEvent.setup();
-    renderPage('/printers');
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
     await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
     await user.selectOptions(screen.getByLabelText('Filter by backend'), 'Moonraker');
     await user.selectOptions(screen.getByLabelText('Done in (estimated completion time)'), '4');
-    const toggle = screen.getByRole('button', { name: 'Printer filters (3 active)' });
+    const toggle = screen.getByRole('button', { name: 'Filters (3)' });
     expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle).toHaveTextContent(/^$/);
-    expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilter);
+    expect(toggle).toHaveTextContent('Filters (3)');
     expect(screen.queryByRole('group', { name: 'Printer filters' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Filter by backend' })).not.toBeInTheDocument();
     expect(screen.queryByText('Open Printer Alpha')).not.toBeInTheDocument();
     expect(screen.getByText('Open Printer Beta')).toBeVisible();
-    const clear = screen.getByRole('button', { name: 'Clear filters' });
-    expect(clear).toBeVisible();
-    expect(clear).toHaveTextContent(/^$/);
-    expect(toggle.closest('[data-tour="printers-filters"]')).toContainElement(clear);
-    expect(toggle.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
     await user.keyboard('{Enter}');
     expect(screen.getByLabelText('Filter by printer state')).toHaveValue('printing');
     expect(screen.getByLabelText('Filter by backend')).toHaveValue('Moonraker');
     expect(screen.getByLabelText('Done in (estimated completion time)')).toHaveValue('4');
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveFocus();
+    expect(screen.getByLabelText('Filter by printer state')).toHaveValue('all');
+    expect(screen.getByLabelText('Filter by backend')).toHaveValue('all');
+    expect(screen.getByLabelText('Done in (estimated completion time)')).toHaveValue('all');
   });
 
-  it('clears all narrowing filters while collapsed without changing sort or persisted table view', async () => {
+  it('resets filters from the shared panel without changing sort or persisted table view', async () => {
     const user = userEvent.setup();
     renderPage('/printers');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'name');
     await user.click(screen.getByRole('button', { name: 'Table view' }));
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
     await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
     await user.selectOptions(screen.getByLabelText('Filter by backend'), 'Moonraker');
     await user.selectOptions(screen.getByLabelText('Done in (estimated completion time)'), '2');
     expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
     expect(within(screen.getByTestId('printer-table')).queryByText('Printer Alpha')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Printer filters (3 active)' }));
-    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters (3)' }));
+    expect(screen.queryByRole('button', { name: 'Reset filters' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Filters (3)' }));
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
 
-    const toggle = screen.getByRole('button', { name: 'Printer filters' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const toggle = screen.getByRole('button', { name: 'Filters' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveFocus();
-    expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilterOutline);
-    expect(screen.queryByRole('group', { name: 'Printer filters' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tooltip')).toHaveTextContent('Show printer filters');
+    expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
     expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveValue('name');
     expect(localStorage.getItem('printerSortMode')).toBe('name');
     expect(localStorage.getItem('printerViewMode')).toBe('table');
     expect(within(screen.getByTestId('printer-table')).getAllByText(/Printer/).map(row => row.textContent))
       .toEqual(['Printer Alpha', 'Printer Beta']);
-    await user.keyboard('{Enter}');
     expect(screen.getByLabelText('Filter by printer state')).toHaveValue('all');
     expect(screen.getByLabelText('Filter by backend')).toHaveValue('all');
     expect(screen.getByLabelText('Done in (estimated completion time)')).toHaveValue('all');
@@ -674,7 +648,7 @@ describe('PrintersPage', () => {
     expect(screen.queryByText('No Printers Found')).not.toBeInTheDocument();
     expect(screen.queryByText('No printers match these filters')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
     await user.selectOptions(screen.getByLabelText('Filter by backend'), 'PrusaLink');
 
     // Only Printer Alpha (PrusaLink) matches; Printer Beta (Moonraker) does not.
@@ -690,7 +664,7 @@ describe('PrintersPage', () => {
     expect(screen.queryByText('No Printers Found')).not.toBeInTheDocument();
     expect(screen.queryByText(/add your first 3D printer/i)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Printer filters (1 active)' }));
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }));
     expect(screen.queryByRole('combobox', { name: 'Filter by backend' })).not.toBeInTheDocument();
     // Clearing filters restores the full list.
     const emptyState = screen.getByText('No printers match these filters').parentElement!;
@@ -740,7 +714,7 @@ describe('PrintersPage', () => {
 
     renderPage('/printers');
 
-    await user.click(screen.getByRole('button', { name: 'Printer filters' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
     const stateFilterSelect = screen.getByLabelText('Filter by printer state');
     expect(within(stateFilterSelect).getByRole('option', { name: 'Shutdown' })).toBeInTheDocument();
 

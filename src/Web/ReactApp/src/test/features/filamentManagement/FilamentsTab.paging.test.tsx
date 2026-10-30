@@ -5,7 +5,7 @@
  * Heavy child components are mocked so the tests are fast and deterministic.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test via a mutable ref ─────────────────
@@ -104,9 +104,10 @@ vi.mock('@/common/components/ui', async (importOriginal) => ({
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,
-  Select: ({ children, value, onChange }: {
+  Select: ({ children, value, onChange, id, 'aria-label': ariaLabel }: {
     children?: React.ReactNode; value?: string | number; onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-  }) => <select value={value} onChange={onChange}>{children}</select>,
+    id?: string; 'aria-label'?: string;
+  }) => <select id={id} value={value} onChange={onChange} aria-label={ariaLabel}>{children}</select>,
   FileUpload: () => null,
 }));
 
@@ -488,5 +489,37 @@ describe('FilamentsTab — page value sanitization', () => {
       (c: unknown[]) => (c[0] as Record<string, unknown>)?.page !== undefined
     );
     expect(pageCalls.every((c: unknown[]) => (c[0] as Record<string, unknown>).page === 1)).toBe(true);
+  });
+});
+
+describe('FilamentsTab — filter disclosure reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: 'search term', material: 'PETG', vendor: 'Prusa', color: 'blue',
+      sortField: 'vendor', sortDir: 'desc', page: 1, hasActiveFilters: true,
+    });
+    localStorage.setItem('filaments-page-size', '25');
+    mockGetFilamentsPaged.mockResolvedValue(pageOf([makeFilament(1)], 10));
+  });
+
+  it('resets only filters while preserving search, sort, and page size', async () => {
+    render(<FilamentsTab />);
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
+
+    expect(filterState.setMany).toHaveBeenCalledTimes(1);
+    expect(filterState.setMany).toHaveBeenCalledWith({
+      material: '',
+      vendor: '',
+      color: '',
+      page: 1,
+    });
+    expect(screen.getByPlaceholderText(/name, vendor, material/i)).toHaveValue('search term');
+    expect(screen.getByRole('combobox', { name: /sort by/i })).toHaveValue('vendor');
+    expect(screen.getByRole('combobox', { name: /page size/i })).toHaveValue('25');
   });
 });

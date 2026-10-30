@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectService } from '@/services/projectService';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
+import { HeaderActions, SearchField, Toolbar, ToolbarField, FiltersDisclosure } from '@/common/components/ui';
 import { ViewToggle } from '@/common/components/ui/ViewToggle';
 import { Button, Select, EmptyState, ProgressBar } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
@@ -106,7 +106,7 @@ export const ProjectsPage: React.FC = () => {
  <PageTemplate
  title="Projects"
  subtitle="Track multi-print jobs and progress"
- actions={<HeaderActions><Button variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>New Project</Button></HeaderActions>}
+ actions={<HeaderActions><Button control variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>New Project</Button></HeaderActions>}
  padding="px-4"
  backgroundColor="bg-pf-bg-2"
  >
@@ -114,6 +114,7 @@ export const ProjectsPage: React.FC = () => {
  {/* Search, filter and view controls stay together; page actions are in the header above. */}
  <Toolbar aria-label="Project filters">
  <SearchField value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onClear={() => setSearchQuery('')} label="Search projects" placeholder="Search projects…" />
+ <FiltersDisclosure activeCount={statusFilter ? 1 : 0} onReset={() => setStatusFilter('')}>
  <ToolbarField label="Status" htmlFor="project-status-filter">
  <Select
  id="project-status-filter"
@@ -129,14 +130,15 @@ export const ProjectsPage: React.FC = () => {
  <option value="Cancelled">Cancelled</option>
  </Select>
  </ToolbarField>
+ </FiltersDisclosure>
  <Toolbar.Spacer />
  <ViewToggle
  value={viewMode}
  onChange={handleViewModeChange}
  size="md"
  options={[
- { mode: 'cards', icon: 'grid', title: 'Card view' },
- { mode: 'table', icon: 'table', title: 'Table view' },
+ { mode: 'cards', kind: 'cards', title: 'Card view' },
+ { mode: 'table', kind: 'table', title: 'Table view' },
  ]}
  ariaLabel="Project view"
  />

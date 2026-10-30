@@ -46,6 +46,8 @@ for (const [surface, target] of [
 
     await page.goto('/');
     const root = page.locator(`[data-filter-hit-target="${target}"]`);
+    await expect(root).toBeHidden();
+    await page.getByRole('button', { name: 'Filters', exact: true }).click();
     await expect(root).toBeVisible();
     const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
     expect(coarse, 'project must exercise its intended pointer type')

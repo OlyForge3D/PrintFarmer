@@ -11,7 +11,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
-import { HeaderActions, Pagination, SearchField, Toolbar } from '@/common/components/ui';
+import { Pagination, SearchField, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
@@ -23,6 +23,7 @@ import {
   useImportFilamentTypesFromSpoolman,
 } from '@/common/hooks/useApi';
 import type { FilamentTypeDto, CreateFilamentTypeRequest, UpdateFilamentTypeRequest, TempTargets } from '@/types/api';
+import { CatalogHeader, CatalogResultsSummary } from './CatalogModelToolbar';
 
 const PAGE_SIZE = 50;
 
@@ -487,30 +488,26 @@ export function FilamentsCatalog() {
 
   return (
     <div className="space-y-4">
-      {/* Header with action buttons */}
-      <div className="flex justify-between items-center flex-wrap gap-2">
-        <h2 className="text-lg font-semibold text-pf-text-primary">
-          Filament Types ({totalCount})
-        </h2>
-        <HeaderActions>
-          <Button 
-            onClick={handleImportFromSpoolman}
-            title="Import filament types from Spoolman"
-            variant="secondary"
-            disabled={importMutation.isPending}
-            iconLeft={<DownloadIcon className="w-4 h-4 mr-1" />}
-          >
-            {importMutation.isPending ? 'Importing...' : 'Import from Spoolman'}
-          </Button>
-          <Button 
-            onClick={handleAddClick}
-            title="Add new filament type"
-            iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
-          >
-            Add
-          </Button>
-        </HeaderActions>
-      </div>
+      <CatalogHeader title="Filament Types">
+        <Button
+          control
+          onClick={handleImportFromSpoolman}
+          title="Import filament types from Spoolman"
+          variant="secondary"
+          disabled={importMutation.isPending}
+          iconLeft={<DownloadIcon className="w-4 h-4 mr-1" />}
+        >
+          {importMutation.isPending ? 'Importing...' : 'Import from Spoolman'}
+        </Button>
+        <Button
+          control
+          onClick={handleAddClick}
+          title="Add new filament type"
+          iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
+        >
+          Add
+        </Button>
+      </CatalogHeader>
       <Toolbar aria-label="Filament catalog controls">
         <form className="pf-inline-form pf-toolbar__search" onSubmit={(e) => { e.preventDefault(); handleSearch(); }}>
           <SearchField
@@ -524,6 +521,11 @@ export function FilamentsCatalog() {
         <Toolbar.Spacer />
         <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Filament catalog view" />
       </Toolbar>
+      <CatalogResultsSummary
+        shownCount={filaments.length}
+        totalCount={totalCount}
+        itemLabel="filament types"
+      />
 
       {/* Grid or Table view of filament cards */}
       {filaments.length === 0 ? (
@@ -587,7 +589,6 @@ export function FilamentsCatalog() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div>
-          <p className="mb-2 text-sm text-pf-text-secondary">{totalCount} total filament types</p>
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={isLoading} />
         </div>
       )}

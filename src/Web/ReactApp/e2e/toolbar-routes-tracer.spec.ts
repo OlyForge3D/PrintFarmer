@@ -17,14 +17,24 @@ for (const state of tracerRouteStates) test(`routed ${state.name} normal state`,
     if (state.name === 'printers') {
       await expect(page.getByRole('button', { name: 'Discover Printers on the local network', exact: true })).toBeVisible();
     }
-    await captureRoutedToolbarState(page, testInfo, state.name);
+    await captureRoutedToolbarState(page, testInfo, state.name, state.filtersDisclosureCount);
     const toolbar = page.locator('main .pf-toolbar').first();
     if (await toolbar.count()) {
-      const controls = toolbar.locator('button:visible:enabled, input:visible:enabled, select:visible:enabled');
+      const controls = toolbar.locator('button:visible:enabled:not([tabindex="-1"]), input:visible:enabled:not([tabindex="-1"]), select:visible:enabled:not([tabindex="-1"])');
       if (await controls.count() >= 2) {
         await controls.nth(0).focus();
         await page.keyboard.press('Tab');
         await expect(controls.nth(1)).toBeFocused();
+      }
+      if (state.name === 'auto-dispatch') {
+        const radios = toolbar.getByRole('radiogroup', { name: 'Filter printers by state' });
+        await radios.getByRole('radio', { name: 'All', exact: true }).focus();
+        await page.keyboard.press('ArrowRight');
+        const queued = radios.getByRole('radio', { name: /^Queued Jobs/ });
+        await expect(queued).toBeFocused();
+        await expect(queued).toHaveAttribute('aria-checked', 'true');
+        await page.keyboard.press('Tab');
+        await expect(toolbar.getByRole('combobox', { name: 'Sort by' })).toBeFocused();
       }
     }
     if (state.name === 'printers') {
@@ -47,15 +57,31 @@ for (const state of tracerRouteStates) test(`routed ${state.name} normal state`,
 test('routed queue filters, view persistence and cancel guard', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: testInfo.project.name === 'chromium' ? 1440 : 390, height: 900 });
   const requests = await mountRoutedToolbarPage(page, '/printQueue', tracerRouteSeeds);
+  await page.route('**/api/job-queue-analytics?*', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+    const model = new URL(route.request().url()).searchParams.get('filterModel');
+    await route.fulfill({ json: model === 'Not a printer' ? [] : tracerRouteSeeds['/api/job-queue-analytics'] });
+  });
   const controls = page.getByRole('group', { name: 'Queue controls', exact: true });
   await expect(controls).toBeVisible();
   await controls.getByRole('combobox', { name: 'Sort by' }).selectOption('deadline');
   await expect(controls.getByRole('combobox', { name: 'Sort by' })).toHaveValue('deadline');
+  await expect(controls.getByRole('textbox', { name: 'Filter by printer model' })).toBeHidden();
+  await controls.getByRole('button', { name: 'Filters', exact: true }).click();
+  const filteredResponse = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/job-queue-analytics'
+    && new URL(response.url()).searchParams.get('filterModel') === 'Not a printer');
   await controls.getByRole('textbox', { name: 'Filter by printer model' }).fill('Not a printer');
+  await filteredResponse;
   await expect(page.getByRole('rowgroup', { name: 'Print job: Fixture gear' })).toHaveCount(0);
-  await controls.getByRole('button', { name: 'Reset all filters' }).click();
-  await expect(controls.getByRole('combobox', { name: 'Sort by' })).toHaveValue('priority');
+  await controls.getByRole('button', { name: 'Reset filters', exact: true }).click();
+  await expect(controls.getByRole('combobox', { name: 'Sort by' })).toHaveValue('deadline');
   await expect(controls.getByRole('textbox', { name: 'Filter by printer model' })).toHaveValue('');
+  await expect(page.getByRole('rowgroup', { name: 'Print job: Fixture gear' })).toBeVisible();
+  await controls.getByRole('button', { name: 'Filters', exact: true }).click();
   await controls.getByRole('button', { name: 'Cards view', exact: true }).click();
   await expect(controls.getByRole('button', { name: 'Cards view', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('printfarmer-queue-view-mode'))).toBe('cards');
@@ -73,7 +99,7 @@ test('routed queue filters, view persistence and cancel guard', async ({ page },
     .locator('..').locator('[data-pf-radius="full"]').first();
   expect(await safetyTrack.evaluate(element => element.getBoundingClientRect().height)).toBe(16);
   await expect(page.getByRole('checkbox', { name: 'Toggle system auto-dispatch' })).not.toBeChecked();
-  await captureRoutedToolbarState(page, testInfo, 'queue-card-filter-cancel');
+  await captureRoutedToolbarState(page, testInfo, 'queue-card-filter-cancel', 1);
   expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
 });
 
@@ -81,7 +107,8 @@ test('routed history filters, date labels and pagination boundaries', async ({ p
   await page.setViewportSize({ width: testInfo.project.name === 'chromium' ? 1440 : 390, height: 900 });
   const requests = await mountRoutedToolbarPage(page, '/printQueue/history', tracerRouteSeeds);
   const filters = page.getByRole('group', { name: 'History controls', exact: true });
-  await filters.getByRole('button', { name: 'Filters All statuses' }).click();
+  const refinementToolbar = page.getByRole('group', { name: 'History filters', exact: true });
+  await refinementToolbar.getByRole('button', { name: 'Filters', exact: true }).click();
   const done = page.getByRole('button', { name: 'Done', exact: true });
   await expect(done).toHaveAttribute('aria-pressed', 'true');
   await done.click();
@@ -97,6 +124,7 @@ test('routed history filters, date labels and pagination boundaries', async ({ p
   const pagination = page.getByRole('group', { name: 'Pagination', exact: true });
   await expect(pagination.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
   await expect(pagination.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
-  await captureRoutedToolbarState(page, testInfo, 'history-expanded-filters-dates');
+  await refinementToolbar.getByRole('button', { name: 'Filters (2)', exact: true }).click();
+  await captureRoutedToolbarState(page, testInfo, 'history-collapsed-filters-dates', 1);
   expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
 });

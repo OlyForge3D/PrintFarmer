@@ -20,7 +20,7 @@ function Fixture() {
   const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
   return <main className="p-4 min-w-0 bg-pf-bg-2 text-pf-text-primary">
     <h1 className="text-2xl">Toolbar consistency</h1>
-    <HeaderActions><Button variant="primary">Create specimen</Button></HeaderActions>
+    <HeaderActions><Button variant="primary" control>Create specimen</Button></HeaderActions>
     <Toolbar labelled aria-label="Specimen controls">
       <SearchField value={search} onChange={event => setSearch(event.target.value)} onClear={() => setSearch('')} label="Search specimens" placeholder="Search specimens..." />
       <ToolbarField label="Sort by" htmlFor="specimen-sort">
@@ -29,7 +29,7 @@ function Fixture() {
         </SortControl>
       </ToolbarField>
       <Toolbar.Spacer />
-      <ViewToggle value="grid" onChange={() => {}} size="md" options={[{ mode: 'grid', icon: 'grid', title: 'Grid view' }, { mode: 'table', icon: 'table', title: 'Table view' }]} />
+      <ViewToggle value="grid" onChange={() => {}} size="md" options={[{ mode: 'grid', kind: 'cards', title: 'Grid view' }, { mode: 'table', kind: 'table', title: 'Table view' }]} />
       <RefreshButton />
     </Toolbar>
     <h2>Queue</h2>

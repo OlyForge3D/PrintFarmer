@@ -248,6 +248,14 @@ describe('AutoDispatchDashboardPage', () => {
     await user.keyboard('{ArrowLeft}');
     expect(screen.getByRole('radio', { name: 'Offline' })).toHaveFocus();
     expect(screen.getByRole('radio', { name: 'Offline' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.keyboard('{ArrowDown}');
+    expect(allFilter).toHaveFocus();
+    expect(allFilter).toHaveAttribute('aria-checked', 'true');
+
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('displays ready-gate checks with pass/fail indicators', () => {

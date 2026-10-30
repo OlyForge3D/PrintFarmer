@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  assertCollapsedFiltersDisclosures,
   captureRoutedToolbarState,
   mountRoutedToolbarPage,
   toolbarRouteUser,
@@ -76,22 +77,87 @@ async function routeQueryPayloads(page: Page) {
 }
 
 test.describe("actual Files routes: local library", () => {
+  for (const { alias, filter } of [
+    { alias: "models", filter: "models" },
+    { alias: "gcode", filter: "gcode" },
+  ] as const) {
+    test(`normalizes /files/${alias} to the ${filter} library filter`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const payloads = await routeQueryPayloads(page);
+      const requests = await mountRoutedToolbarPage(
+        page,
+        `/files/${alias}`,
+        filesToolbarSeeds(),
+      );
+      await expect(
+        page.getByRole("main").getByRole("heading", { name: "Files", level: 1 }),
+      ).toBeVisible();
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("type"))
+        .toBe(filter);
+      const toolbar = page.getByRole("group", { name: "File controls" });
+      const filtersButton = page.getByRole("button", { name: /^Filters/ });
+      await expect(filtersButton).toHaveAttribute("aria-expanded", "false");
+      await filtersButton.click();
+      await expect(
+        toolbar.getByRole("combobox", { name: "Type" }),
+      ).toHaveValue(filter);
+      await filtersButton.click();
+      await expect(filtersButton).toHaveAttribute("aria-expanded", "false");
+      await expect.poll(() => payloads.at(-1)?.filter).toBe(filter);
+      await assertCollapsedFiltersDisclosures(
+        page,
+        `files-${filter}-legacy-route`,
+        1,
+      );
+
+      expect(requests.unhandled).toEqual([]);
+      expectSafeFixtureTraffic(requests);
+    });
+  }
+
   test("gives nested search its own row at compact desktop widths", async ({ page }) => {
     await page.setViewportSize({ width: 705, height: 900 });
     const requests = await openFilesState(page, "/files");
     const toolbar = page.getByRole("group", { name: "File controls", exact: true });
     const search = toolbar.getByRole("searchbox", { name: "Search", exact: true });
     const toolbarBounds = await toolbar.boundingBox();
-    const searchFieldWidth = await search.evaluate((element) => {
+    const searchGeometry = await search.evaluate((element) => {
       const toolbarElement = element.closest(".pf-toolbar");
       const field = toolbarElement
         ? Array.from(toolbarElement.children).find((child) =>
             child.contains(element),
           )
         : undefined;
-      return field?.getBoundingClientRect().width ?? 0;
+      const ancestors = [];
+      for (
+        let current: HTMLElement | null = element as HTMLElement;
+        current && current !== document.body;
+        current = current.parentElement
+      ) {
+        const style = getComputedStyle(current);
+        const bounds = current.getBoundingClientRect();
+        ancestors.push({
+          element: current.tagName.toLowerCase(),
+          className: current.className,
+          width: bounds.width,
+          minWidth: style.minWidth,
+          flex: style.flex,
+          flexBasis: style.flexBasis,
+          overflow: style.overflow,
+        });
+      }
+      return {
+        fieldWidth: field?.getBoundingClientRect().width ?? 0,
+        ancestors,
+      };
     });
-    expect(searchFieldWidth).toBeGreaterThan(toolbarBounds!.width - 4);
+    expect(
+      searchGeometry.fieldWidth,
+      `search field width ${searchGeometry.fieldWidth}; toolbar width ${toolbarBounds!.width}; layout ancestors: ${JSON.stringify(searchGeometry.ancestors)}`,
+    ).toBeGreaterThan(toolbarBounds!.width - 4);
     await search.fill("adapter");
     await expect(search).toHaveValue("adapter");
     expect(await search.evaluate(element => element.scrollWidth <= element.clientWidth + 1))
@@ -150,7 +216,7 @@ test.describe("actual Files routes: local library", () => {
     await expect(
       toolbar.getByRole("searchbox", { name: "Search" }),
     ).toBeVisible();
-    await expect(toolbar.getByRole("combobox", { name: "Type" })).toBeVisible();
+    await expect(toolbar.getByRole("combobox", { name: "Type" })).toBeHidden();
     await expect(
       toolbar.getByRole("combobox", { name: "Sort by" }),
     ).toBeVisible();
@@ -179,8 +245,9 @@ test.describe("actual Files routes: local library", () => {
         );
       }),
     ).toBe(true);
-    await captureRoutedToolbarState(page, testInfo, "files-local-desktop");
+    await captureRoutedToolbarState(page, testInfo, "files-local-desktop", 1);
 
+    await toolbar.getByRole("button", { name: "Filters", exact: true }).click();
     await toolbar
       .getByRole("combobox", { name: "Type" })
       .selectOption("models");
@@ -245,7 +312,7 @@ test.describe("actual Files routes: local library", () => {
     const requests = await openFilesState(page, "/files");
     const toolbar = page.getByRole("group", { name: "File controls" });
     const search = toolbar.getByRole("searchbox", { name: "Search" });
-    await captureRoutedToolbarState(page, testInfo, "files-local-mobile");
+    await captureRoutedToolbarState(page, testInfo, "files-local-mobile", 1);
     const mdHeight = await search.evaluate(
       () =>
         Number.parseFloat(
@@ -304,7 +371,7 @@ test.describe("actual Files routes: on printers", () => {
     ).toBeVisible();
     await expect(
       toolbar.getByRole("combobox", { name: "Printer" }),
-    ).toBeVisible();
+    ).toBeHidden();
     await expect(
       toolbar.getByRole("button", { name: "Explorer view" }),
     ).toBeVisible();
@@ -321,10 +388,11 @@ test.describe("actual Files routes: on printers", () => {
     await expect(
       toolbar.getByRole("checkbox", { name: "Select all files on this page" }),
     ).toBeVisible();
-    await captureRoutedToolbarState(page, testInfo, "files-printers-desktop");
+    await captureRoutedToolbarState(page, testInfo, "files-printers-desktop", 1);
 
     // View and filters are presentation/read controls; do not activate any
     // refresh, copy, queue, download, or delete command in a routed test.
+    await toolbar.getByRole("button", { name: "Filters", exact: true }).click();
     await toolbar
       .getByRole("combobox", { name: "Printer" })
       .selectOption("toolbar-printer-1");
@@ -357,7 +425,7 @@ test.describe("actual Files routes: on printers", () => {
     const requests = await openFilesState(page, "/files?source=printers");
     const toolbar = page.getByRole("group", { name: "Printer file controls" });
     const search = toolbar.getByRole("searchbox", { name: "Search" });
-    await captureRoutedToolbarState(page, testInfo, "files-printers-mobile");
+    await captureRoutedToolbarState(page, testInfo, "files-printers-mobile", 1);
     const mdHeight = await search.evaluate(
       () =>
         Number.parseFloat(
@@ -375,6 +443,10 @@ test.describe("actual Files routes: on printers", () => {
     await expect(
       toolbar.getByRole("button", { name: "Clear search" }),
     ).toBeFocused();
+    await expect(
+      toolbar.getByRole("combobox", { name: "Printer" }),
+    ).toBeHidden();
+    await toolbar.getByRole("button", { name: "Filters", exact: true }).click();
     await expect(
       toolbar.getByRole("combobox", { name: "Printer" }),
     ).toBeVisible();

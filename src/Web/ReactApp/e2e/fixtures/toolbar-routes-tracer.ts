@@ -95,14 +95,14 @@ export const tracerRouteSeeds: Record<string, unknown> = {
 };
 
 export const tracerRouteStates = [
-  { name: 'dashboard', path: '/dashboard', heading: 'Printer Dashboard' },
-  { name: 'printers', path: '/printers', heading: 'Printers', populated: 'Printer Alpha' },
-  { name: 'cameras', path: '/cameras', heading: 'Cameras', populated: 'Workbench camera' },
-  { name: 'printer-groups', path: '/printer-groups', heading: 'Printer Groups', populated: 'Workshop' },
-  { name: 'queue', path: '/printQueue', heading: 'Print Queue Dashboard', populated: 'Fixture gear' },
-  { name: 'queue-timeline', path: '/printQueue/timeline', heading: 'Print Queue Dashboard', populated: 'Fixture gear' },
-  { name: 'queue-history', path: '/printQueue/history', heading: 'Print Queue Dashboard', populated: 'Completed bracket' },
-  { name: 'queue-dispatch-log', path: '/printQueue/dispatch-log', heading: 'Print Queue Dashboard', populated: 'Fixture gear' },
-  { name: 'nfc-bindings', path: '/nfc-bindings', heading: 'NFC Tag Bindings', populated: 'No NFC tags have been bound yet.' },
-  { name: 'auto-dispatch', path: '/auto-dispatch', heading: 'Auto-Dispatch', populated: 'Printer Alpha' },
+  { name: 'dashboard', path: '/dashboard', heading: 'Printer Dashboard', filtersDisclosureCount: 0 },
+  { name: 'printers', path: '/printers', heading: 'Printers', populated: 'Printer Alpha', filtersDisclosureCount: 1 },
+  { name: 'cameras', path: '/cameras', heading: 'Cameras', populated: 'Workbench camera', filtersDisclosureCount: 0 },
+  { name: 'printer-groups', path: '/printer-groups', heading: 'Printer Groups', populated: 'Workshop', filtersDisclosureCount: 0 },
+  { name: 'queue', path: '/printQueue', heading: 'Print Queue Dashboard', populated: 'Fixture gear', filtersDisclosureCount: 1 },
+  { name: 'queue-timeline', path: '/printQueue/timeline', heading: 'Print Queue Dashboard', populated: 'Fixture gear', filtersDisclosureCount: 0 },
+  { name: 'queue-history', path: '/printQueue/history', heading: 'Print Queue Dashboard', populated: 'Completed bracket', filtersDisclosureCount: 1 },
+  { name: 'queue-dispatch-log', path: '/printQueue/dispatch-log', heading: 'Print Queue Dashboard', populated: 'Fixture gear', filtersDisclosureCount: 0 },
+  { name: 'nfc-bindings', path: '/nfc-bindings', heading: 'NFC Tag Bindings', populated: 'No NFC tags have been bound yet.', filtersDisclosureCount: 0 },
+  { name: 'auto-dispatch', path: '/auto-dispatch', heading: 'Auto-Dispatch', populated: 'Printer Alpha', filtersDisclosureCount: 0 },
 ] as const;

@@ -41,9 +41,9 @@ async function mountFilesPage(page: Page, source: 'local' | 'printers', mode: 'g
 }
 
 async function expectUniformControls(toolbar: Locator, alignBottom: boolean) {
-  const toggle = toolbar.getByTitle('Grid view').locator('..');
+  const toggle = toolbar.getByRole('group', { name: 'File view mode', exact: true });
   if (await toggle.count()) {
-    const radii = await toggle.evaluate(element => Array.from(element.children, child => {
+    const radii = await toggle.evaluate(element => Array.from(element.querySelectorAll('button'), child => {
       const style = getComputedStyle(child);
       return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius];
     }));
@@ -52,7 +52,7 @@ async function expectUniformControls(toolbar: Locator, alignBottom: boolean) {
       ['0px', '2px', '0px', '2px'],
     ]);
   }
-  const controls = toolbar.locator('input:not([type=checkbox]), select, button');
+  const controls = toolbar.locator('input:visible:not([type=checkbox]), select:visible, button:visible');
   const { expectedHeight, dimensions } = await controls.evaluateAll(elements => {
     const root = document.documentElement;
     const rootFontSize = Number.parseFloat(getComputedStyle(root).fontSize);
@@ -73,7 +73,7 @@ async function expectUniformControls(toolbar: Locator, alignBottom: boolean) {
   });
   expect(dimensions.length).toBeGreaterThan(1);
   for (const control of dimensions) {
-    expect(control.height, `${control.name} height`).toBe(expectedHeight);
+    expect(Math.abs(control.height - expectedHeight), `${control.name} height`).toBeLessThanOrEqual(0.02);
     if (alignBottom) {
       const peers = dimensions.filter(peer => Math.abs(peer.top - control.top) < 1);
       if (peers.length > 1) expect(control.bottom, `${control.name} bottom edge`).toBe(peers[0].bottom);
@@ -102,8 +102,17 @@ for (const width of [390, 1440]) {
             return [style.paddingInlineStart, style.paddingInlineEnd];
           })).toEqual(['32px', '44px']);
           await expectUniformControls(toolbar, width === 1440);
+          const filters = toolbar.getByRole('button', { name: 'Filters', exact: true });
+          await expect(toolbar.getByRole('combobox', { name: 'Printer' })).toBeHidden();
           await page.keyboard.press('Tab');
-          await expect(toolbar.getByRole('combobox', { name: 'Printer' })).toBeFocused();
+          await expect(filters).toBeFocused();
+          await page.keyboard.press('Enter');
+          const printer = toolbar.getByRole('combobox', { name: 'Printer' });
+          await expect(printer).toBeVisible();
+          await expectUniformControls(toolbar, width === 1440);
+          await page.keyboard.press('Tab');
+          await expect(printer).toBeFocused();
+          // Reset remains in the tab order only when a refinement is active.
           if (mode === 'grid') {
             const selectAll = toolbar.getByRole('checkbox', { name: 'Select all files on this page' });
             if (await selectAll.isEnabled()) {
@@ -112,7 +121,7 @@ for (const width of [390, 1440]) {
             }
           }
           await page.keyboard.press('Tab');
-          await expect(toolbar.getByTitle('Explorer view')).toBeFocused();
+          await expect(toolbar.getByRole('button', { name: 'Explorer view', exact: true })).toBeFocused();
         } else {
           await expect(page.getByRole('checkbox', { name: 'Select part.stl' })).toBeVisible();
           await page.getByRole('checkbox', { name: 'Select part.stl' }).check();

@@ -177,13 +177,14 @@ export const LocationDashboardPage: React.FC = () => {
           <Button
             type="button"
             variant={manageMode ? 'secondary' : 'subtle'}
+            control
             onClick={() => setManageMode((value) => !value)}
             iconLeft={<EditIcon />}
             aria-pressed={manageMode}
           >
             Manage
           </Button>
-          <Button type="button" variant="primary" onClick={handleAddLocation} iconLeft={<PlusIcon />}>
+          <Button type="button" variant="primary" control onClick={handleAddLocation} iconLeft={<PlusIcon />}>
             Add location
           </Button>
         </HeaderActions>

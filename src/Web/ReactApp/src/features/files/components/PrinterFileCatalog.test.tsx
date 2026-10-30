@@ -245,11 +245,13 @@ describe('Printer file catalog', () => {
       const { queryClient } = renderCatalog();
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
       const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
-      expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
+      await user.click(screen.getByRole('button', { name: 'Filters' }));
+      const gridView = screen.getByRole('button', { name: 'Grid view' });
+      expect(screen.getByRole('group', { name: 'File view mode' }).nextElementSibling).toBe(refresh);
       expect(screen.getByRole('group', { name: 'Printer file controls' })).toHaveClass('pf-toolbar');
-      expect(screen.getByTitle('Grid view').parentElement).not.toHaveClass('p-1');
-      expect(screen.getByTitle('Grid view')).toHaveClass('pf-control');
-      expect(screen.getByTitle('Grid view')).toHaveAttribute('data-size', 'md');
+      expect(gridView.parentElement).not.toHaveClass('p-1');
+      expect(gridView).toHaveClass('pf-control');
+      expect(gridView).toHaveAttribute('data-size', 'md');
       expect(refresh).toHaveClass('pf-control');
       expect(refresh).toHaveAttribute('data-size', 'md');
       expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
@@ -685,19 +687,23 @@ describe('Printer file catalog', () => {
   });
 
   it.each(['explorer', 'grid'])('groups printer, search, view and refresh controls in one responsive toolbar in %s mode', async mode => {
+    const user = userEvent.setup();
     localStorage.setItem('printfarmer-printer-files-viewmode', mode);
     renderCatalog();
     const toolbar = screen.getByRole('group', { name: 'Printer file controls' });
     expect(toolbar).toHaveClass('pf-toolbar', 'pf-toolbar--labelled');
     const search = within(toolbar).getByRole('searchbox', { name: 'Search' });
+    const filters = within(toolbar).getByRole('button', { name: 'Filters' });
+    expect(search).toBeVisible();
+    expect(filters).toBeVisible();
+    await user.click(filters);
     const printer = within(toolbar).getByRole('combobox', { name: 'Printer' });
     expect(printer).toBeVisible();
     expect(within(printer).getByRole('option', { name: 'All' })).toHaveValue('');
     expect(printer).toHaveValue('');
-    expect(search).toBeVisible();
     expect(search).toHaveAttribute('placeholder', 'Search filenames or paths');
     expect(toolbar.querySelector('.pf-toolbar-field')).toContainElement(search);
-    expect(toolbar.children[1]).toContainElement(printer);
+    expect(toolbar.children[1]).toContainElement(filters);
     expect(within(toolbar).getByRole('button', { name: 'Explorer view' })).toBeVisible();
     expect(within(toolbar).getByRole('button', { name: 'Grid view' })).toBeVisible();
     expect(await within(toolbar).findByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
@@ -709,6 +715,26 @@ describe('Printer file catalog', () => {
     if (mode === 'grid') {
       expect(within(toolbar).getByRole('checkbox', { name: 'Select all files on this page' })).toBeVisible();
     }
+  });
+
+  it('counts and resets the printer filter without changing search', async () => {
+    const user = userEvent.setup();
+    renderCatalog('/files?source=printers&printer=source&remoteSearch=part&remotePage=2');
+    const filters = screen.getByRole('button', { name: 'Filters (1)' });
+    const search = screen.getByRole('searchbox', { name: 'Search' });
+    expect(search).toHaveValue('part');
+    await user.click(filters);
+    expect(screen.getByRole('combobox', { name: 'Printer' })).toHaveValue('source');
+
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId('url').textContent ?? '');
+      expect(params.get('printer')).toBeNull();
+      expect(params.get('remotePage')).toBeNull();
+      expect(params.get('remoteSearch')).toBe('part');
+    });
+    expect(screen.getByRole('combobox', { name: 'Printer' })).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps path search scoped to the selected printer and resets paging', async () => {

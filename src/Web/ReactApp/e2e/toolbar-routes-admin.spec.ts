@@ -61,13 +61,20 @@ for (const state of toolbarAdminStates) {
         await page.getByRole('button', { name: 'Today', exact: true }).click();
       }
       if (state.name === 'admin-workers') {
-        await page.locator('main .pf-toolbar select').selectOption('Online');
+        const toolbar = page.getByRole('group', { name: 'Worker filters and status', exact: true });
+        const trigger = toolbar.getByRole('button', { name: 'Filters', exact: true });
+        const status = toolbar.getByRole('combobox', { name: 'Filter by worker status', exact: true });
+        await expect(status).toBeHidden();
+        await trigger.click();
+        await status.selectOption('Online');
         await expect(page.getByText('Fixture worker', { exact: true })).toBeVisible();
-        expect(await page.locator('main .pf-toolbar').evaluate(element => {
-          const filter = element.querySelector('select');
-          const refresh = element.querySelector('button');
-          return !!filter && !!refresh && !!(filter.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING);
-        }), 'worker status filter precedes refresh').toBe(true);
+        await expect(toolbar.getByRole('button', { name: 'Filters (1)', exact: true })).toHaveAttribute('aria-expanded', 'true');
+        await toolbar.getByRole('button', { name: 'Filters (1)', exact: true }).click();
+        await expect(status).toBeHidden();
+        await expect(toolbar.getByRole('button', { name: 'Refresh workers', exact: true })).toBeVisible();
+      }
+      if (state.name === 'admin-worker-jobs') {
+        await expect(page.getByRole('combobox', { name: 'Filter by status', exact: true })).toBeVisible();
       }
       if (state.name === 'admin-login-audit') {
         const username = page.getByRole('textbox', { name: 'Filter by username', exact: true });
@@ -81,6 +88,19 @@ for (const state of toolbarAdminStates) {
         await expect(next).toBeDisabled();
         await previous.click();
         await expect(previous).toBeDisabled();
+        const toolbar = page.getByRole('group', { name: 'Filter login audit entries', exact: true });
+        const status = toolbar.getByRole('combobox', { name: 'Filter by login status', exact: true });
+        await expect(status).toBeHidden();
+        await toolbar.getByRole('button', { name: 'Filters', exact: true }).click();
+        await status.selectOption('false');
+        await expect(page).toHaveURL(/success=false/);
+        await expect(toolbar.getByRole('button', { name: 'Filters (1)', exact: true })).toHaveAttribute('aria-expanded', 'true');
+        await toolbar.getByRole('button', { name: 'Reset filters', exact: true }).click();
+        await expect(page).not.toHaveURL(/success=/);
+        await expect(username).toHaveValue('fixture.operator');
+        await expect(toolbar.getByRole('button', { name: 'Filters', exact: true })).toBeFocused();
+        await toolbar.getByRole('button', { name: 'Filters', exact: true }).click();
+        await expect(status).toBeHidden();
         await expect(page.getByRole('button', { name: 'Clear all filters', exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Clear all filters', exact: true }).click();
         await expect(page).not.toHaveURL(/username=/);
@@ -100,7 +120,7 @@ for (const state of toolbarAdminStates) {
         });
         await expect(command.locator('xpath=ancestor::*[contains(@class,"pf-header-actions")]')).toHaveCount(1);
       }
-      await captureRoutedToolbarState(page, testInfo, state.name);
+      await captureRoutedToolbarState(page, testInfo, state.name, state.filtersDisclosureCount);
       // Include the intentionally non-toolbar controls (row actions, wizard
       // model cards and export form) without imposing toolbar sizes on them.
       const surface = await page.locator('main button:visible, main input:visible, main select:visible')

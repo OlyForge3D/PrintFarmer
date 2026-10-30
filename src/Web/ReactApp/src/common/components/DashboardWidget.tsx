@@ -141,8 +141,9 @@ export function DashboardWidget({
           {moreInfoLink && (
             <Link to={moreInfoLink}>
               <Button 
+                control
                 variant="subtle" 
-                size="sm"
+                size="md"
                 iconRight={<ChevronRightIcon className="h-4 w-4 ml-1" />}
               >
                 {moreInfoText}

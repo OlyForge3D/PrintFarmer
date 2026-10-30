@@ -582,6 +582,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
             variant="secondary"
             type="button"
             onClick={goToday}
+            control
           >
             Today
           </Button>

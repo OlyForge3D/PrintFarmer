@@ -5,13 +5,14 @@ import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
 import { Button, Checkbox, TagChip } from '@/common/components/ui';
-import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
+import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
+import type { ReactNode } from 'react';
 
 const toGcodeFileItem = (file: GcodeFile): GcodeFileItem => ({
   id: file.id,
@@ -180,7 +181,7 @@ interface GcodeFileBrowserProps {
   onShowTagModal?: () => void;
   onShowSingleTagModal?: (file: GcodeFile) => void;
   onShowAddToProjectModal?: () => void;
-  onToggleTagFilterPanel?: () => void;
+  filterActions?: ReactNode;
   onAvailablePrinterModelsChange?: (models: Array<{ id: string | null; name: string }>) => void;
 }
 
@@ -195,7 +196,7 @@ export const GcodeFileBrowser = ({
   onShowTagModal,
   onShowSingleTagModal,
   onShowAddToProjectModal,
-  onToggleTagFilterPanel,
+  filterActions,
   onAvailablePrinterModelsChange,
 }: GcodeFileBrowserProps) => {
   const { hasPermission } = useAuth();
@@ -644,17 +645,6 @@ export const GcodeFileBrowser = ({
           data-tour="gcode-upload"
         />
       )}
-      {onToggleTagFilterPanel && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={onToggleTagFilterPanel}
-          title="Filter by tags"
-          iconCenter={<FilterIcon className="h-4 w-4" />}
-          data-tour="gcode-filters"
-        />
-      )}
       {selection.length > 0 && onShowTagModal && (
         <Button
           type="button"
@@ -746,6 +736,7 @@ export const GcodeFileBrowser = ({
         config={config as any}
         sortOptions={sortOptions}
         columns={gcodeColumns}
+        filterActions={filterActions}
         extraToolbarActions={extraToolbarActions}
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}

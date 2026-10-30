@@ -1,4 +1,4 @@
-import { useId, useRef, type ChangeEvent } from 'react';
+import { forwardRef, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { mdiClose, mdiMagnify, mdiRefresh, mdiFilterVariant, mdiChevronLeft, mdiChevronRight } from '@mdi/js';
 import { Button, type ButtonProps } from '@/common/components/ui/Button';
@@ -66,14 +66,55 @@ export function FilterChip({ selected, className, ...props }: ButtonProps & { se
       className)} />;
 }
 
-export function FilterButton({ count = 0, expanded, children = 'Filters', ...props }: ButtonProps & {
+export const FilterButton = forwardRef<HTMLButtonElement, ButtonProps & {
   count?: number; expanded: boolean;
-}) {
-  return <Button {...props} type="button" variant={props.variant ?? 'secondary'} control aria-expanded={expanded}
+}>(function FilterButton({ count = 0, expanded, children = 'Filters', ...props }, ref) {
+  return <Button {...props} ref={ref} type="button" variant={props.variant ?? 'secondary'} control aria-expanded={expanded}
     aria-label={props['aria-label'] ?? (typeof children === 'string' ? `${children}${count > 0 ? ` (${count})` : ''}` : undefined)}
     iconLeft={<ControlIcon path={mdiFilterVariant} />}>
     {children}{count > 0 && <span className="ml-1 text-xs"> ({count})</span>}
   </Button>;
+});
+
+export function FiltersDisclosure({ activeCount, onReset, children, expanded, onExpandedChange, dataTour }: {
+  activeCount: number;
+  onReset: () => void;
+  children: ReactNode;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  dataTour?: string;
+}) {
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const panelId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const isExpanded = expanded ?? internalExpanded;
+
+  const handleToggle = () => {
+    const nextExpanded = !isExpanded;
+    if (expanded === undefined) {
+      setInternalExpanded(nextExpanded);
+    }
+    onExpandedChange?.(nextExpanded);
+  };
+
+  const handleReset = () => {
+    onReset();
+    triggerRef.current?.focus();
+  };
+
+  return <>
+    <Toolbar.Group>
+      <FilterButton ref={triggerRef} count={activeCount} expanded={isExpanded} aria-controls={panelId}
+        data-tour={dataTour}
+        onClick={handleToggle} />
+    </Toolbar.Group>
+    <div id={panelId} className="pf-toolbar__filters" role="region" aria-label="Filters" hidden={!isExpanded}>
+      <div className="pf-toolbar__filters-content">{children}</div>
+      <Button type="button" variant="secondary" control disabled={activeCount === 0} onClick={handleReset}>
+        Reset filters
+      </Button>
+    </div>
+  </>;
 }
 
 export function RefreshButton({ busy = false, ...props }: Omit<ButtonProps, 'loading'> & { busy?: boolean }) {
@@ -90,7 +131,7 @@ export function Pagination({ page, totalPages, onPageChange, pageSize, pageSizeO
 }) {
   return <Toolbar aria-label="Pagination">
     {pageSize !== undefined && onPageSizeChange && <Select aria-label="Page size" value={pageSize}
-      className="pf-control" data-role="field"
+      className="pf-control py-0" data-role="field"
       containerClassName="w-auto" disabled={disabled}
       onChange={(event: ChangeEvent<HTMLSelectElement>) => onPageSizeChange(Number(event.target.value))}>
       {(pageSizeOptions ?? [10, 25, 50, 100]).map(size => <option value={size} key={size}>{size} per page</option>)}

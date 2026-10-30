@@ -3,7 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { HeaderActions, ToolbarField } from '@/common/components/ui/toolbar';
+import { FiltersDisclosure, HeaderActions, ToolbarField } from '@/common/components/ui/toolbar';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
@@ -659,7 +659,7 @@ export function FilesPage() {
           ref={printablesButtonRef}
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<PrintablesIcon />}
           onClick={() => setShowPrintablesBrowserModal(true)}
           onFocus={() => void PrintablesBrowserModal.preload()}
@@ -672,7 +672,7 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<CubeIcon className="h-4 w-4" />}
           onClick={() => setShowModelUploadModal(true)}
         >
@@ -683,7 +683,7 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<UploadIcon className="h-4 w-4" />}
           onClick={() => setShowGcodeUploadModal(true)}
         >
@@ -787,7 +787,14 @@ export function FilesPage() {
                     columns={modelColumns}
                     renderItemActions={renderItemActions}
                     renderCard={renderCard}
-                    filterActions={fileTypeFilter}
+                    filterActions={(
+                      <FiltersDisclosure
+                        activeCount={selectedFilter === 'all' ? 0 : 1}
+                        onReset={() => handleFilterChange('all')}
+                      >
+                        {fileTypeFilter}
+                      </FiltersDisclosure>
+                    )}
                     extraToolbarActions={toolbarActions}
                     extraToolbarActionsPlacement="below"
                     renderFolderNavigation={(path, onNavigate, controls) => (

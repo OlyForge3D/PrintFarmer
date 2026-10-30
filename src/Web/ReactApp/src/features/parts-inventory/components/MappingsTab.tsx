@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Select, Spinner, HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Select, Spinner, HeaderActions, SearchField, Toolbar, ToolbarField, FiltersDisclosure } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
@@ -103,6 +103,7 @@ export function MappingsTab() {
     <div className="space-y-4">
       <HeaderActions>
         <Button
+          control
           variant="primary"
           iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
           onClick={openCreate}
@@ -119,21 +120,23 @@ export function MappingsTab() {
           label="Search mappings"
           placeholder="Filter by SKU or file ID"
         />
-        <ToolbarField label="SKU" htmlFor="mappings-sku-filter">
-          <Select
-            id="mappings-sku-filter"
-            value={skuFilter}
-            onChange={(event) => setSkuFilter(event.target.value)}
-            aria-label="Filter by SKU"
-          >
-            <option value="">All SKUs</option>
-            {parts.map((part) => (
-              <option key={part.sku} value={part.sku}>
-                {part.sku} — {part.name}
-              </option>
-            ))}
-          </Select>
-        </ToolbarField>
+        <FiltersDisclosure activeCount={skuFilter ? 1 : 0} onReset={() => setSkuFilter('')}>
+          <ToolbarField label="SKU" htmlFor="mappings-sku-filter">
+            <Select
+              id="mappings-sku-filter"
+              value={skuFilter}
+              onChange={(event) => setSkuFilter(event.target.value)}
+              aria-label="Filter by SKU"
+            >
+              <option value="">All SKUs</option>
+              {parts.map((part) => (
+                <option key={part.sku} value={part.sku}>
+                  {part.sku} — {part.name}
+                </option>
+              ))}
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
       </Toolbar>
 
       {isLoading && (

@@ -5,14 +5,15 @@ export async function measureToolbar(toolbar: Locator) {
     elements.filter(element => element.getBoundingClientRect().width > 0).map(element => {
       const box = element.getBoundingClientRect();
       const style = getComputedStyle(element);
+      const segment = element.closest('.pf-toolbar__group--segmented');
+      const firstSegment = segment?.querySelector('button[data-pf-button]');
       return {
         name: element.getAttribute('aria-label') || element.getAttribute('title')
           || ((element instanceof HTMLInputElement || element instanceof HTMLSelectElement)
             ? Array.from(element.labels ?? []).map(label => label.textContent?.trim()).join(' ')
             : element.textContent?.trim()),
         tag: element.tagName,
-        interiorSegment: element.parentElement?.classList.contains('pf-toolbar__group--segmented')
-          && element !== element.parentElement.firstElementChild,
+        interiorSegment: Boolean(segment) && element !== firstSegment,
         height: box.height,
         radius: Number.parseFloat(style.borderTopLeftRadius),
         left: box.left, right: box.right, top: box.top, bottom: box.bottom,

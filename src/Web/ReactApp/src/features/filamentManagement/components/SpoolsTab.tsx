@@ -16,7 +16,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor } from '@/common/utils/colorFamilies';
 import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
-import { Button, Checkbox, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination } from '@/common/components/ui';
+import { Button, Checkbox, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination, FiltersDisclosure } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
@@ -83,7 +83,6 @@ export function SpoolsTab() {
     page: urlPage,
     setSearch,
     setMany,
-    resetAll,
     hasActiveFilters: urlHasActiveFilters,
   } = useUrlFilterState({
     search: { key: 'q', type: 'string', defaultValue: '', debounce: 300 },
@@ -283,9 +282,16 @@ export function SpoolsTab() {
   };
 
   const hasActiveSpoolFilters = urlHasActiveFilters;
-  const resetSpoolFilters = () => {
-    resetAll();
-  };
+  const activeSpoolFilterCount = [filters.material, filters.vendor, filters.color, filters.location]
+    .filter(Boolean).length + (filters.showEmpty ? 1 : 0);
+  const resetSpoolFilters = () => setMany({
+    material: '',
+    vendor: '',
+    color: '',
+    location: '',
+    showEmpty: false,
+    page: 0,
+  });
 
   const totalPages = filters.pageSize > 0 ? Math.max(1, Math.ceil(totalCount / filters.pageSize)) : 1;
   const clampedPage = hasLoadedTotalCount
@@ -561,6 +567,7 @@ export function SpoolsTab() {
         <HeaderActions>
           <Button
             variant="secondary"
+            control
             onClick={handleExportCsv}
             aria-label="Export spools to CSV"
             title="Export spools to CSV"
@@ -570,6 +577,7 @@ export function SpoolsTab() {
           <Button
             variant="secondary"
             aria-label="Import spools from CSV file"
+            control
             title="Import spools from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
@@ -579,6 +587,7 @@ export function SpoolsTab() {
           <Button
             variant="primary"
             aria-label="Add a new spool"
+            control
             title="Add a new spool"
             onClick={() => setIsAddOpen(true)}
           >
@@ -592,6 +601,7 @@ export function SpoolsTab() {
               aria-haspopup="dialog"
               aria-expanded={showColumnConfig && viewMode === 'table'}
               aria-controls="column-config-panel"
+              control
               onClick={() => setShowColumnConfig(!showColumnConfig)}
               disabled={viewMode !== 'table'}
             >
@@ -705,9 +715,9 @@ export function SpoolsTab() {
             size="md"
             ariaLabel="Spool view"
             options={[
-              { mode: 'cards', icon: 'grid', title: 'Card view' },
-              { mode: 'compact', icon: 'list', title: 'Compact list view' },
-              { mode: 'table', icon: 'table', title: 'Table view' },
+              { mode: 'cards', kind: 'cards', title: 'Card view' },
+              { mode: 'compact', kind: 'list', title: 'Compact list view' },
+              { mode: 'table', kind: 'table', title: 'Table view' },
             ]}
           />
           <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />
@@ -727,63 +737,74 @@ export function SpoolsTab() {
                   placeholder="Name, vendor, material…"
                 />
               </ToolbarField>
-              <ToolbarField label="Material" htmlFor="spool-material">
-                <Select
-                  id="spool-material"
-                  aria-label="Filter by material"
-                  value={filters.material}
-                  onChange={(e) => setMany({ material: e.target.value, page: 0 })}
-                  className="w-40"
-                >
-                  <option value="">All Materials</option>
-                  {materialOptions.map(material => (
-                    <option key={material} value={material}>{material}</option>
-                  ))}
-                </Select>
-              </ToolbarField>
-              
-              <ToolbarField label="Vendor" htmlFor="spool-vendor">
-                <Select
-                  id="spool-vendor"
-                  aria-label="Filter by vendor"
-                  value={filters.vendor}
-                  onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
-                  className="w-40"
-                >
-                  <option value="">All Vendors</option>
-                  {vendorOptions.map(vendor => (
-                    <option key={vendor} value={vendor}>{vendor}</option>
-                  ))}
-                </Select>
-              </ToolbarField>
+              <FiltersDisclosure activeCount={activeSpoolFilterCount} onReset={resetSpoolFilters}>
+                <ToolbarField label="Material" htmlFor="spool-material">
+                  <Select
+                    id="spool-material"
+                    aria-label="Filter by material"
+                    value={filters.material}
+                    onChange={(e) => setMany({ material: e.target.value, page: 0 })}
+                    className="w-40"
+                  >
+                    <option value="">All Materials</option>
+                    {materialOptions.map(material => (
+                      <option key={material} value={material}>{material}</option>
+                    ))}
+                  </Select>
+                </ToolbarField>
 
-              <ToolbarField label="Color" htmlFor="spool-color" className={isPaginated ? 'opacity-60' : undefined}>
-                <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
-                <ColorFamilySelect
-                  id="spool-color"
-                  value={isPaginated ? '' : filters.color}
-                  onChange={(val) => setMany({ color: val, page: 0 })}
-                  options={getColorFamilyOptions()}
-                  placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
-                  disabled={isPaginated}
-                />
-                </div>
-              </ToolbarField>
+                <ToolbarField label="Vendor" htmlFor="spool-vendor">
+                  <Select
+                    id="spool-vendor"
+                    aria-label="Filter by vendor"
+                    value={filters.vendor}
+                    onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
+                    className="w-40"
+                  >
+                    <option value="">All Vendors</option>
+                    {vendorOptions.map(vendor => (
+                      <option key={vendor} value={vendor}>{vendor}</option>
+                    ))}
+                  </Select>
+                </ToolbarField>
 
-              <ToolbarField label="Location" htmlFor="spool-location">
-                <Select
-                  id="spool-location"
-                  aria-label="Filter by location"
-                  value={filters.location}
-                  onChange={(e) => setMany({ location: e.target.value, page: 0 })}
-                  className="w-40"
-                >
-                  <option value="">All Locations</option>
-                  {locationOptions.map(loc => (
-                    <option key={loc} value={loc}>{loc}</option>
-                  ))}
-                </Select>
-              </ToolbarField>
+                <ToolbarField label="Color" htmlFor="spool-color" className={isPaginated ? 'opacity-60' : undefined}>
+                  <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
+                    <ColorFamilySelect
+                      id="spool-color"
+                      value={isPaginated ? '' : filters.color}
+                      onChange={(val) => setMany({ color: val, page: 0 })}
+                      options={getColorFamilyOptions()}
+                      placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
+                      disabled={isPaginated}
+                    />
+                  </div>
+                </ToolbarField>
+
+                <ToolbarField label="Location" htmlFor="spool-location">
+                  <Select
+                    id="spool-location"
+                    aria-label="Filter by location"
+                    value={filters.location}
+                    onChange={(e) => setMany({ location: e.target.value, page: 0 })}
+                    className="w-40"
+                  >
+                    <option value="">All Locations</option>
+                    {locationOptions.map(loc => (
+                      <option key={loc} value={loc}>{loc}</option>
+                    ))}
+                  </Select>
+                </ToolbarField>
+
+                <label data-filter-hit-target="empty-spools" className="flex min-h-[var(--pf-control-h-md)] items-center gap-1 text-xs cursor-pointer">
+                  <Checkbox
+                    aria-label="Show empty spools"
+                    checked={filters.showEmpty}
+                    onChange={e => setMany({ showEmpty: Boolean(e.target.checked), page: 0 })}
+                  />
+                  Show empty
+                </label>
+              </FiltersDisclosure>
 
               {(viewMode === 'cards' || viewMode === 'compact') && (
                 <ToolbarField label="Sort" htmlFor="sort-field">
@@ -805,26 +826,6 @@ export function SpoolsTab() {
                 </ToolbarField>
               )}
 
-                <label data-filter-hit-target="empty-spools" className="flex min-h-[var(--pf-control-h-md)] items-center gap-1 text-xs cursor-pointer">
-                  <Checkbox
-                    aria-label="Show empty spools"
-                    checked={filters.showEmpty}
-                    onChange={e => setMany({ showEmpty: Boolean(e.target.checked), page: 0 })}
-                  />
-                  Show empty
-                </label>
-              {hasActiveSpoolFilters && (
-                <Button
-                  variant="subtle"
-                  control
-                  onClick={resetSpoolFilters}
-                  aria-label="Reset all filters"
-                  title="Reset all filters"
-                  iconLeft={<CloseIcon className="h-3 w-3" />}
-                >
-                  Reset
-                </Button>
-              )}
               <span className="text-sm text-pf-text-secondary">
                 {totalCount > 0
                   ? !filters.showEmpty && displayedSpools.length < spools.length
@@ -839,9 +840,9 @@ export function SpoolsTab() {
                 size="md"
                 ariaLabel="Spool view"
                 options={[
-                  { mode: 'cards', icon: 'grid', title: 'Card view' },
-                  { mode: 'compact', icon: 'list', title: 'Compact list view' },
-                  { mode: 'table', icon: 'table', title: 'Table view' },
+                  { mode: 'cards', kind: 'cards', title: 'Card view' },
+                  { mode: 'compact', kind: 'list', title: 'Compact list view' },
+                  { mode: 'table', kind: 'table', title: 'Table view' },
                 ]}
               />
               <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />

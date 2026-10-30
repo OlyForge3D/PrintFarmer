@@ -84,7 +84,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
           <Button
             variant="unstyled"
             onClick={goToToday}
-            className="pf-control bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            className="pf-control px-3 bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
             data-role="button"
           >
             Today

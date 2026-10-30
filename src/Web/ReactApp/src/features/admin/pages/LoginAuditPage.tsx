@@ -17,6 +17,7 @@ import {
   Pagination,
   Toolbar,
   ToolbarField,
+  FiltersDisclosure,
 } from '@/common/components/ui';
 import { AdminLoading, AdminError, AdminEmpty } from '@/common/components/admin';
 import { ShieldIcon, RefreshIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
@@ -86,6 +87,7 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
   const handleFilterWithPageReset = (updates: Record<string, string | number | boolean>) => {
     setMany({ ...updates, page: 1 } as Parameters<typeof setMany>[0]);
   };
+  const refinementCount = [from, to, success].filter(Boolean).length;
 
   return (
     <PageTemplate
@@ -100,9 +102,28 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
         className="bg-pf-bg-1 border border-pf-border rounded-md p-4 mb-4"
         labelled
       >
+          <ToolbarField label="Username" htmlFor="audit-username">
+            <Input
+              id="audit-username"
+              className="pf-control py-0"
+              data-role="field"
+              type="text"
+              value={username as string}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Partial match…"
+              aria-label="Filter by username"
+            />
+          </ToolbarField>
+
+        <FiltersDisclosure
+          activeCount={refinementCount}
+          onReset={() => handleFilterWithPageReset({ from: '', to: '', success: '' })}
+        >
           <ToolbarField label="From" htmlFor="audit-from">
             <Input
               id="audit-from"
+              className="pf-control py-0"
+              data-role="field"
               type="datetime-local"
               value={from as string}
               onChange={(e) => handleFilterWithPageReset({ from: e.target.value })}
@@ -113,6 +134,8 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
           <ToolbarField label="To" htmlFor="audit-to">
             <Input
               id="audit-to"
+              className="pf-control py-0"
+              data-role="field"
               type="datetime-local"
               value={to as string}
               onChange={(e) => handleFilterWithPageReset({ to: e.target.value })}
@@ -120,20 +143,11 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
             />
           </ToolbarField>
 
-          <ToolbarField label="Username" htmlFor="audit-username">
-            <Input
-              id="audit-username"
-              type="text"
-              value={username as string}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Partial match…"
-              aria-label="Filter by username"
-            />
-          </ToolbarField>
-
           <ToolbarField label="Status" htmlFor="audit-success">
             <Select
               id="audit-success"
+              className="pf-control py-0"
+              data-role="field"
               value={success as string}
               onChange={(e) => handleFilterWithPageReset({ success: e.target.value })}
               aria-label="Filter by login status"
@@ -143,6 +157,7 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
               <option value="false">Failed</option>
             </Select>
           </ToolbarField>
+        </FiltersDisclosure>
 
         {hasActiveFilters && (
           <>
@@ -193,6 +208,8 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
             {isFetching && <RefreshIcon className="w-3.5 h-3.5 pf-animate-spin text-pf-text-tertiary" aria-hidden />}
             <Select
               id="audit-page-size"
+              className="pf-control py-0"
+              data-role="field"
               value={String(currentPageSize)}
               onChange={(e) => setMany({ pageSize: Number(e.target.value), page: 1 } as Parameters<typeof setMany>[0])}
               containerClassName="w-28"

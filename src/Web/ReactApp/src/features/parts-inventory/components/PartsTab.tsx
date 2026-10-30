@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
@@ -67,9 +67,11 @@ export function PartsTab() {
     <div className="space-y-4">
       <HeaderActions>
         <Button
+          control
           variant="primary"
           iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
           onClick={() => setIsCreating(true)}
+          className="rounded-[2px]"
         >
           Add SKU
         </Button>
@@ -83,14 +85,16 @@ export function PartsTab() {
           label="Search SKUs"
           placeholder="Filter by SKU, name, or description"
         />
-        {/* Enlarge both clickable labels, not the switch track or thumb. */}
-        <div data-filter-hit-target="inactive-skus" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
-          <Toggle
-            checked={includeInactive}
-            onChange={(event) => setIncludeInactive(event.target.checked)}
-            label="Show inactive"
-          />
-        </div>
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}>
+          {/* Enlarge both clickable labels, not the switch track or thumb. */}
+          <div data-filter-hit-target="inactive-skus" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
+            <Toggle
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              label="Show inactive"
+            />
+          </div>
+        </FiltersDisclosure>
         <Toolbar.Spacer />
       </Toolbar>
 

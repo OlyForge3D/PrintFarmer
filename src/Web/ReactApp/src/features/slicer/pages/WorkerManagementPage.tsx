@@ -13,7 +13,7 @@ import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Select } from '@/common/components/ui/Select';
 import { Spinner } from '@/common/components/ui/Spinner';
-import { RefreshButton, Toolbar } from '@/common/components/ui';
+import { FiltersDisclosure, RefreshButton, Toolbar } from '@/common/components/ui';
 import { WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -320,19 +320,21 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
         <>
         {/* Worker-specific controls */}
         <Toolbar aria-label="Worker filters and status">
-          <Select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
-            containerClassName="w-52"
-            aria-label="Filter by worker status"
-          >
-            <option value="all">All Workers ({workers.length})</option>
-            {Object.values(WorkerStatus).map(status => (
-              <option key={status} value={status}>
-                {status} ({workers.filter(w => w.status === status).length})
-              </option>
+          <FiltersDisclosure activeCount={filter === 'all' ? 0 : 1} onReset={() => setFilter('all')}>
+            <Select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
+              containerClassName="w-52"
+              aria-label="Filter by worker status"
+            >
+              <option value="all">All Workers ({workers.length})</option>
+              {Object.values(WorkerStatus).map(status => (
+                <option key={status} value={status}>
+                  {status} ({workers.filter(w => w.status === status).length})
+                </option>
               ))}
-          </Select>
+            </Select>
+          </FiltersDisclosure>
 
           <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>

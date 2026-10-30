@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { WorkerManagementPage } from '../WorkerManagementPage';
-import { workerService, WorkerResponse } from '@/services/workerService';
+import { workerService, WorkerResponse, WorkerStatus } from '@/services/workerService';
 import { slicerHubService } from '@/services/slicerHubService';
 
 vi.mock('@/features/slicer/components/SliceJobsPanel', () => ({
@@ -118,7 +118,36 @@ describe('WorkerManagementPage responsive workers table', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(workerService.getAllWorkers).mockResolvedValue([mockWorker]);
+    vi.mocked(workerService.getWorkersByStatus).mockResolvedValue([mockWorker]);
     vi.mocked(slicerHubService.start).mockResolvedValue(undefined);
+  });
+
+  it('discloses status refinements and resets the live filter without hiding refresh or connection status', async () => {
+    renderPage();
+    await screen.findByText('Worker One');
+    const trigger = screen.getByRole('button', { name: 'Filters' });
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!);
+    expect(panel).toHaveAttribute('hidden');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'Filter by worker status' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh workers' })).toBeVisible();
+    expect(await screen.findByText('Real-time updates active')).toBeVisible();
+
+    fireEvent.click(trigger);
+    expect(panel).not.toHaveAttribute('hidden');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const status = screen.getByRole('combobox', { name: 'Filter by worker status' });
+    fireEvent.change(status, { target: { value: WorkerStatus.Online } });
+    await waitFor(() => expect(workerService.getWorkersByStatus).toHaveBeenLastCalledWith(WorkerStatus.Online));
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBe(trigger);
+
+    vi.mocked(workerService.getAllWorkers).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => expect(workerService.getAllWorkers).toHaveBeenCalledOnce());
+    expect(status).toHaveValue('all');
+    expect(trigger).toHaveAccessibleName('Filters');
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
   });
 
   it.each([320, 768, 1920])('keeps every column and the Actions buttons reachable at %ipx viewport', async (width) => {

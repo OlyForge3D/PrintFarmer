@@ -704,16 +704,6 @@ export function PrintQueueDashboardPage() {
         </div>
       )}
 
-      {/* Date range applies to Timeline/History/Dispatch Log only. The Print Queue tab
-          shows current active state and is not date-filtered, so hide the bar there. */}
-      {activeTab !== "print-queue" && (
-        <QueueDateRangeBar
-          dateFrom={dateRange.from}
-          dateTo={dateRange.to}
-          onChange={setDateRange}
-        />
-      )}
-
       {/* Tabbed Interface */}
       <Tabs activeTab={activeTab} onTabChange={setActiveTab}>
         <div data-tour="queue-tabs">
@@ -852,11 +842,21 @@ export function PrintQueueDashboardPage() {
 
           {/* Tab 2: Timeline */}
           <Tabs.Panel id="timeline">
+            <QueueDateRangeBar
+              dateFrom={dateRange.from}
+              dateTo={dateRange.to}
+              onChange={setDateRange}
+            />
             <QueueTimelineTab stats={stats} dateFrom={dateRange.from} dateTo={dateRange.to} />
           </Tabs.Panel>
 
           {/* Tab 3: History */}
           <Tabs.Panel id="history">
+            <QueueDateRangeBar
+              dateFrom={dateRange.from}
+              dateTo={dateRange.to}
+              onChange={setDateRange}
+            />
             <QueueHistoryTab
               onRerun={handleRerunJob}
               onViewDetails={(jobId) => {
@@ -870,6 +870,11 @@ export function PrintQueueDashboardPage() {
 
           {/* Tab 4: Dispatch Log */}
           <Tabs.Panel id="dispatch-log">
+            <QueueDateRangeBar
+              dateFrom={dateRange.from}
+              dateTo={dateRange.to}
+              onChange={setDateRange}
+            />
             <DispatchLogTab dateFrom={dateRange.from} dateTo={dateRange.to} />
           </Tabs.Panel>
         </Tabs.Panels>

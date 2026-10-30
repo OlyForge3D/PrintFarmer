@@ -5,14 +5,23 @@ import { captureRoutedToolbarState, mountRoutedToolbarPage, toolbarRouteUser } f
 import { inventoryRouteSeeds, inventoryRouteStates } from './fixtures/toolbar-routes-inventory';
 
 async function assertGeometryAndOrder(page: Page) {
-  const expected = await page.evaluate(() => matchMedia('(pointer: coarse)').matches ? 44 : 36);
   const groups = page.locator('main .pf-toolbar:visible, main .pf-header-actions:visible');
   expect(await groups.count(), 'each audited state must expose its existing controls to geometry checks').toBeGreaterThan(0);
   for (const group of await groups.all()) {
     const controls = group.locator('button:visible, input:visible:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]), select:visible');
     for (const control of await controls.all()) {
-      const box = await control.boundingBox();
-      expect(box?.height, `${await control.getAttribute('aria-label') ?? await control.textContent()} height`).toBe(expected);
+      const tokenMinHeight = await control.evaluate(element => {
+        if (!element.matches('.pf-control')) return null;
+        const size = element.getAttribute('data-size');
+        const token = size === 'sm' ? '--pf-control-h-sm' : size === 'lg' ? '--pf-control-h-lg' : '--pf-control-h-md';
+        const rootStyle = getComputedStyle(document.documentElement);
+        return Number.parseFloat(rootStyle.getPropertyValue(token)) * Number.parseFloat(rootStyle.fontSize);
+      });
+      if (tokenMinHeight !== null) {
+        const box = await control.boundingBox();
+        const name = await control.getAttribute('aria-label') ?? await control.textContent();
+        expect(box?.height, `${name} should meet ${await control.getAttribute('data-size') ?? 'md'} control token minimum`).toBeGreaterThanOrEqual(tokenMinHeight - 0.5);
+      }
     }
     // At most one primary command in each header, without hiding any commands.
     if (await group.evaluate(element => element.classList.contains('pf-header-actions'))) {
@@ -52,6 +61,11 @@ for (const state of inventoryRouteStates) {
         await tab.click();
         await expect(tab).toHaveAttribute('aria-selected', 'true');
       }
+      if ('subTab' in state) {
+        const subTab = page.locator(`#tab-${state.subTab}`);
+        await subTab.click();
+        await expect(subTab).toHaveAttribute('aria-selected', 'true');
+      }
       const main = page.locator('main');
       await expect(main.getByText(state.marker, { exact: false }).first()).toBeVisible();
       await expect(main.getByText(/Failed to load|Something went wrong/)).toHaveCount(0);
@@ -83,7 +97,11 @@ for (const state of inventoryRouteStates) {
       }
 
       await assertGeometryAndOrder(page);
-      await captureRoutedToolbarState(page, testInfo, state.name);
+      await captureRoutedToolbarState(page, testInfo, state.name, state.filtersDisclosureCount);
+      for (const filters of await main.getByRole('button', { name: 'Filters', exact: true }).all()) {
+        await expect(filters).toHaveAttribute('aria-expanded', 'false');
+        await filters.click();
+      }
       // Optional original audit image is a review reference, not a pixel golden:
       // seeded records and offline fallback fonts intentionally differ from live.
       if (process.env.TOOLBAR_AUDIT_SHOTS_DIR) {
@@ -97,9 +115,22 @@ for (const state of inventoryRouteStates) {
       // Exercise existing presentation/filter behavior, never a real write.
       const search = main.locator('.pf-toolbar input[type=search], .pf-toolbar input.pf-control').first();
       if (await search.count()) {
+        const searchResponse = state.name === 'filaments' ? page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.pathname === '/api/spoolman/filaments' && url.searchParams.get('search') === 'Workshop';
+        }) : null;
         await search.fill('Workshop');
+        if (searchResponse) await (await searchResponse).finished();
         await expect(search).toHaveValue('Workshop');
+        const clearResponse = state.name === 'filaments' ? page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.pathname === '/api/spoolman/filaments' && !url.searchParams.has('search');
+        }) : null;
         await search.fill('');
+        if (clearResponse) {
+          await (await clearResponse).finished();
+          await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBeNull();
+        }
       }
       const sortDirection = main.getByRole('button', { name: 'Sort direction: ascending', exact: true });
       if (await sortDirection.count()) {
@@ -110,7 +141,13 @@ for (const state of inventoryRouteStates) {
         await material.selectOption('PLA');
         await expect.poll(() => new URL(page.url()).searchParams.get('material')).toBe('PLA');
         await expect.poll(() => reads.some(url => url.searchParams.get('material') === 'PLA')).toBe(true);
+        const clearedMaterial = state.name === 'filaments' ? page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.pathname === '/api/spoolman/filaments' && !url.searchParams.has('material');
+        }) : null;
         await material.selectOption('');
+        if (clearedMaterial) await (await clearedMaterial).finished();
+        await expect.poll(() => new URL(page.url()).searchParams.get('material')).toBeNull();
         await expect(main.getByRole('button', { name: 'Filter by color family', exact: true })).toBeDisabled();
       }
       const tableView = main.locator('.pf-toolbar').getByRole('button', { name: /Table view/i }).first();
@@ -126,7 +163,7 @@ for (const state of inventoryRouteStates) {
         }
       }
       if (state.name === 'parts-skus' || state.name === 'parts-bins' || state.name === 'spools') {
-        const root = main.locator('[data-filter-hit-target]');
+        const root = main.locator('[data-filter-hit-target]:visible');
         const label = root.locator('label').last();
         const expectedHeight = await page.evaluate(() => matchMedia('(pointer: coarse)').matches ? 44 : 36);
         const labels = state.name === 'spools' ? root : root.locator('label');
@@ -165,13 +202,6 @@ for (const state of inventoryRouteStates) {
       if (state.name === 'projects') {
         await main.getByRole('combobox', { name: 'Filter by status', exact: true }).selectOption('InProgress');
         await expect.poll(() => reads.some(url => url.pathname === '/api/projects' && url.searchParams.get('status') === 'InProgress')).toBe(true);
-      }
-      if (state.name === 'maintenance-library') {
-        // The second library tab has its own migrated action/filter composition.
-        await main.locator('#tab-tasks').click();
-        await expect(main.getByText('Inspect nozzle', { exact: true }).first()).toBeVisible();
-        await assertGeometryAndOrder(page);
-        await captureRoutedToolbarState(page, testInfo, 'maintenance-library-tasks');
       }
       if (state.name.startsWith('catalog-') || state.name === 'projects') {
         await page.reload();

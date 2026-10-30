@@ -184,6 +184,7 @@ export function SchedulingPage() {
         <HeaderActions className="justify-end mb-0">
           <Button
             variant="primary"
+            control
             iconLeft={<PlusIcon />}
             onClick={() => setIsScheduleModalOpen(true)}
           >

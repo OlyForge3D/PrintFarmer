@@ -125,6 +125,7 @@ export function MaterialClustersTab() {
         </div>
         <HeaderActions>
           <Button
+            control
             variant="primary"
             iconLeft={<PlusIcon className="h-4 w-4" />}
             onClick={() => setShowCreateForm(true)}

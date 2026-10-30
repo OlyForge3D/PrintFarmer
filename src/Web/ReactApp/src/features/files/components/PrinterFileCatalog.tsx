@@ -39,7 +39,7 @@ import {
   FILE_TABLE_HEADER_CELL_CLASS,
   FILE_TABLE_PREVIEW_CELL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
-import { RefreshButton, SearchField } from '@/common/components/ui/toolbar';
+import { FiltersDisclosure, RefreshButton, SearchField } from '@/common/components/ui/toolbar';
 
 const CATALOG_POLL_MS = 30_000;
 const OPERATION_POLL_MS = 2_000;
@@ -347,14 +347,17 @@ export function PrinterFileCatalog() {
             onClear={() => changeFilter('remoteSearch', '')}
           />
         </ToolbarField>
-        <Toolbar.Group>
+        <FiltersDisclosure
+          activeCount={printerId ? 1 : 0}
+          onReset={() => changeFilter('printer', '')}
+        >
           <ToolbarField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
             <Select id="catalog-printer" data-role="field" className="pf-control py-0" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
-            <option value="">All</option>
-            {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
+              <option value="">All</option>
+              {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
             </Select>
           </ToolbarField>
-        </Toolbar.Group>
+        </FiltersDisclosure>
         <Toolbar.Spacer />
         <Toolbar.Group className="pf-toolbar__group--nowrap">
           {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}

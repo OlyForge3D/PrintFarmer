@@ -58,7 +58,7 @@ export interface QueueDateRangeBarProps {
 }
 
 /**
- * Compact date range bar shown above all queue tabs.
+ * Compact date range bar shown below queue tabs on date-filtered views.
  * Provides quick presets (24h / 7d / 30d / 90d / All) and
  * an expandable custom From / To date picker.
  */
@@ -112,9 +112,9 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
               key={preset.label}
               onClick={() => handlePreset(preset.hours)}
               variant="ghost"
-              size="sm"
+              control
               aria-pressed={activePreset === preset.label}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+              className={`px-2.5 text-xs font-medium transition-colors ${
                 activePreset === preset.label
                   ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
                   : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary"
@@ -132,10 +132,10 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
         <Button
           onClick={() => setExpanded((v) => !v)}
           variant="ghost"
-          size="sm"
+          control
           aria-expanded={expanded}
           iconRight={<ControlIcon path={mdiChevronDown} className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
-          className={`px-2 py-1 text-xs flex items-center gap-1.5 ${
+          className={`px-2 text-xs flex items-center gap-1.5 ${
             activePreset === null
               ? "text-pf-accent font-medium"
               : "text-pf-text-secondary"
@@ -154,7 +154,8 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
                 type="date"
                 value={toInputValue(dateFrom)}
                 onChange={handleFromChange}
-                className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                data-role="field"
+                className="pf-control w-full px-2 py-0 text-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
               />
             </ToolbarField>
             <ToolbarField label="To" htmlFor="queue-date-to">
@@ -162,7 +163,8 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
                 type="date"
                 value={toInputValue(dateTo)}
                 onChange={handleToChange}
-                className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
+                data-role="field"
+                className="pf-control w-full px-2 py-0 text-sm border border-pf-border bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
               />
             </ToolbarField>
           </div>

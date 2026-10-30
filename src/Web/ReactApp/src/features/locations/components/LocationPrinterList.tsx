@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Badge, Button, Card, Select, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
+import { Badge, Button, Card, FiltersDisclosure, Select, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import clsx from 'clsx';
 
 export interface LocationPrinterListPrinter {
@@ -76,21 +76,26 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
     <div className="space-y-4">
       <Toolbar aria-label="Location printer filters">
         <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search printers" placeholder="Search printers…" />
-        <ToolbarField label="Status" htmlFor="location-printer-status">
-          <Select
-            id="location-printer-status"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-            containerClassName="w-40"
-            aria-label="Filter by status"
-          >
-          <option value="all">All Status</option>
-          <option value="online">Online</option>
-          <option value="offline">Offline</option>
-          <option value="printing">Printing</option>
-          <option value="idle">Idle</option>
-          </Select>
-        </ToolbarField>
+        <FiltersDisclosure
+          activeCount={statusFilter === 'all' ? 0 : 1}
+          onReset={() => setStatusFilter('all')}
+        >
+          <ToolbarField label="Status" htmlFor="location-printer-status">
+            <Select
+              id="location-printer-status"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+              containerClassName="w-40"
+              aria-label="Filter by status"
+            >
+              <option value="all">All Status</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="printing">Printing</option>
+              <option value="idle">Idle</option>
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
       </Toolbar>
 
       {filtered.length === 0 ? (

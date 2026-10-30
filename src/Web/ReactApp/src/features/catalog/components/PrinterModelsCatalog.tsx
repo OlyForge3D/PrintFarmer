@@ -1,16 +1,11 @@
 import { useState, useCallback, useMemo } from 'react';
 import { 
   Button, 
-  FormField, 
   Alert,
   Badge,
   DataTable,
   type DataTableColumn,
-  ViewToggle,
-  gridTableOptions,
 } from '@/common/components/ui';
-import { HeaderActions, Toolbar } from '@/common/components/ui';
-import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { PrinterModelCard, type PrinterModelCardData } from '@/common/components/PrinterModelCard';
 import { useManufacturers, useModels } from '@/common/hooks/useApi';
 import { EditModelModal } from '@/features/models3d/components/EditModelModal';
@@ -21,6 +16,8 @@ import { PlusIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/ic
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { CatalogHeader, CatalogModelToolbar, CatalogResultsSummary } from './CatalogModelToolbar';
+import { filterCatalogModels } from './catalogModelFilters';
 
 /**
  * Converts a PrinterModelDto to the card display format with manufacturer name
@@ -61,6 +58,7 @@ export function PrinterModelsCatalog() {
 
   // Filter state
   const [selectedManufacturerId, setSelectedManufacturerId] = useState<string | undefined>(undefined);
+  const [searchValue, setSearchValue] = useState('');
 
   // Modal state
   const [editModelModalOpen, setEditModelModalOpen] = useState(false);
@@ -139,18 +137,10 @@ export function PrinterModelsCatalog() {
     },
   });
 
-  // Filter models by selected manufacturer
-  const filteredModels = useMemo(() => {
-    if (!selectedManufacturerId) {
-      return models;
-    }
-    return models.filter(m => m.manufacturerId === selectedManufacturerId);
-  }, [models, selectedManufacturerId]);
-
-  // Convert to card data with manufacturer names
+  // Convert to card data and apply the shared catalog filters
   const cards = useMemo(() => {
-    return filteredModels.map(m => toCardData(m, manufacturers));
-  }, [filteredModels, manufacturers]);
+    return filterCatalogModels(models.map(m => toCardData(m, manufacturers)), searchValue, selectedManufacturerId);
+  }, [models, manufacturers, searchValue, selectedManufacturerId]);
 
   // Handle add new model
   const handleAddClick = useCallback(() => {
@@ -227,11 +217,6 @@ export function PrinterModelsCatalog() {
     setDeletingModel(null);
   }, []);
 
-  // Handle manufacturer selection
-  const handleManufacturerChange = useCallback((manufacturerId: string | undefined) => {
-    setSelectedManufacturerId(manufacturerId);
-  }, []);
-
   // Handle edit modal success - modal handles cache refresh
   const handleEditSuccess = useCallback(() => {
     handleCloseEditModal();
@@ -258,45 +243,34 @@ export function PrinterModelsCatalog() {
 
   return (
     <div className="space-y-4">
-      {/* Header with Filter and Add button */}
-      <div className="flex justify-end">
-        <HeaderActions>
-          <Button
-            onClick={handleAddClick}
-            title="Add new printer model"
-            iconLeft={<PlusIcon className="h-4 w-4 mr-2" />}
-          >
-            Add
-          </Button>
-        </HeaderActions>
-      </div>
-      <Toolbar labelled aria-label="Printer model filters">
-        <FormField label="Manufacturer" className="flex-1 sm:flex-initial sm:min-w-[280px]">
-          <ManufacturerSelector
-            value={selectedManufacturerId}
-            onChange={handleManufacturerChange}
-            context={CatalogContext.Printers}
-            placeholder="All Manufacturers"
-            ariaLabel="Filter printer models by manufacturer"
-          />
-        </FormField>
-        <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Printer models catalog view" />
-      </Toolbar>
-
-      {/* Helpful hint when no manufacturer selected */}
-      {!selectedManufacturerId && (
-        <p className="text-sm text-pf-text-secondary">
-          Showing all {models.length} printer models. Select a manufacturer to filter.
-        </p>
-      )}
+      <CatalogHeader title="Printer Models">
+        <Button
+          control
+          onClick={handleAddClick}
+          title="Add new printer model"
+          iconLeft={<PlusIcon className="h-4 w-4 mr-2" />}
+        >
+          Add
+        </Button>
+      </CatalogHeader>
+      <CatalogModelToolbar
+        modelLabel="printer models"
+        context={CatalogContext.Printers}
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        manufacturerId={selectedManufacturerId}
+        onManufacturerChange={setSelectedManufacturerId}
+        view={view}
+        onViewChange={setView}
+      />
+      <CatalogResultsSummary shownCount={cards.length} totalCount={models.length} itemLabel="printer models" />
 
       {/* Grid or Table view of printer model cards */}
       {cards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
-          {selectedManufacturerId ? (
+          {selectedManufacturerId || searchValue.trim() ? (
             <div>
-              <p>No printer models found for this manufacturer.</p>
+              <p>No printer models match the current filters.</p>
               <p className="mt-2">Click "Add Printer Model" to create one.</p>
             </div>
           ) : (

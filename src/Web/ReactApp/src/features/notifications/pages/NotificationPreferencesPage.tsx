@@ -208,6 +208,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
 
   const saveButton = (
     <Button
+      control
       variant="primary"
       onClick={handleSave}
       disabled={!isDirty || updateMutation.isPending || !capabilitiesResolved}

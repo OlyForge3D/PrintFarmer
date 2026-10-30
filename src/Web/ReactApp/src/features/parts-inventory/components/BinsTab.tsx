@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
@@ -58,6 +58,7 @@ export function BinsTab() {
     <div className="space-y-4">
       <HeaderActions>
         <Button
+          control
           variant="secondary"
           iconLeft={<BarcodeScanIcon className="w-4 h-4" ariaLabel="Scan" />}
           onClick={() => setIsRegistering(true)}
@@ -65,6 +66,7 @@ export function BinsTab() {
           Register barcode
         </Button>
         <Button
+          control
           variant="primary"
           iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
           onClick={() => setIsCreating(true)}
@@ -81,14 +83,16 @@ export function BinsTab() {
           label="Search bins"
           placeholder="Filter by code, name, location, or notes"
         />
-        {/* Keep the thumb positioned against its track as the label target grows. */}
-        <div data-filter-hit-target="inactive-bins" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
-          <Toggle
-            checked={includeInactive}
-            onChange={(event) => setIncludeInactive(event.target.checked)}
-            label="Show inactive"
-          />
-        </div>
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}>
+          {/* Keep the thumb positioned against its track as the label target grows. */}
+          <div data-filter-hit-target="inactive-bins" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
+            <Toggle
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              label="Show inactive"
+            />
+          </div>
+        </FiltersDisclosure>
         <Toolbar.Spacer />
       </Toolbar>
 
