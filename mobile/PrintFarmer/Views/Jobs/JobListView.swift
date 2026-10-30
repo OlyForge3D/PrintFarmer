@@ -1204,6 +1204,80 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
             }
             attachSessionObservers(to: view)
             hookCellRecognizers(in: view)
+            QueueReorderUITestTouchLog.install()
+        }
+
+        // Touch layer (R3457-D01, log-only). Identifies the owner of each recognizer and the
+        // recognizers attached to the gesture's touch, so a cancelled long press can be attributed.
+        private var touchFirstMove: Set<ObjectIdentifier> = []
+        private var touchMoveCounts: [ObjectIdentifier: Int] = [:]
+
+        /// `Type@OwnerType[row]:state`; row is the owning cell's index path, `cv` for the
+        /// collection view itself, or `-` outside it.
+        fileprivate func describe(_ recognizer: UIGestureRecognizer) -> String {
+            let owner = recognizer.view.map { "\(type(of: $0))" } ?? "nil"
+            return "\(type(of: recognizer))@\(owner)[\(row(of: recognizer.view))]:\(Self.name(recognizer.state))"
+        }
+
+        private func row(of view: UIView?) -> String {
+            guard let collectionView, let view else { return "-" }
+            if view === collectionView { return "cv" }
+            var ancestor: UIView? = view
+            while let candidate = ancestor, candidate !== collectionView {
+                if let cell = candidate as? UICollectionViewCell {
+                    return collectionView.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                }
+                ancestor = candidate.superview
+            }
+            return ancestor === collectionView ? "cv-sub" : "-"
+        }
+
+        private static func name(_ state: UIGestureRecognizer.State) -> String {
+            switch state {
+            case .possible: return "possible"
+            case .began: return "began"
+            case .changed: return "changed"
+            case .ended: return "ended"
+            case .cancelled: return "cancelled"
+            case .failed: return "failed"
+            @unknown default: return "unknown"
+            }
+        }
+
+        /// Called after the window delivered `event`; logs began, first move and ended/cancelled
+        /// only (stationary/repeated moves are counted, not logged).
+        fileprivate func observe(_ event: UIEvent) {
+            guard event.type == .touches, let touches = event.allTouches, let window,
+                  let collectionView else { return }
+            for touch in touches where touch.window === window {
+                let id = ObjectIdentifier(touch)
+                let label: String
+                switch touch.phase {
+                case .began:
+                    touchFirstMove.remove(id)
+                    touchMoveCounts[id] = 0
+                    label = "began"
+                case .moved:
+                    touchMoveCounts[id, default: 0] += 1
+                    guard touchFirstMove.insert(id).inserted else { continue }
+                    label = "firstMove"
+                case .ended, .cancelled:
+                    label = touch.phase == .ended ? "ended" : "cancelled"
+                default:
+                    continue
+                }
+                let point = touch.location(in: collectionView)
+                let hit = touch.view.map { "\(type(of: $0))[\(row(of: $0))]" } ?? "nil"
+                let recognizers = (touch.gestureRecognizers ?? []).map(describe).joined(separator: ",")
+                QueueReorderUITestDiagnostics.shared.log(
+                    "touch \(label) at=(\(Int(point.x)),\(Int(point.y))) view=\(hit)"
+                        + " moves=\(touchMoveCounts[id] ?? 0) grs=[\(recognizers)] \(sessionState())"
+                )
+                if touch.phase == .ended || touch.phase == .cancelled {
+                    touchFirstMove.remove(id)
+                    touchMoveCounts[id] = nil
+                }
+            }
         }
 
         // Session-callback layer (R3457-D01, log-only). UIDrag/UIDropInteraction delegates are
@@ -1319,7 +1393,7 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
             default:
                 return
             }
-            QueueReorderUITestDiagnostics.shared.log("gr \(type(of: recognizer)) \(phase) \(sessionState())")
+            QueueReorderUITestDiagnostics.shared.log("gr \(describe(recognizer)) \(phase) \(sessionState())")
             sample("gr-\(phase)")
             guard phase != "began" else { return }
             inFlightRecognizers.remove(id)
@@ -1355,6 +1429,33 @@ private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
             }
             return nil
         }
+    }
+}
+
+/// R3457-D01 diagnostic only: observes touch delivery after `UIWindow.sendEvent(_:)` has run
+/// unchanged, so no recognizer, delegate or responder is added to the touch's path. Installed
+/// once, only while the queue-reorder fixture is active.
+@MainActor
+private enum QueueReorderUITestTouchLog {
+    private static var installed = false
+
+    static func install() {
+        guard QueueReorderUITestDiagnostics.isActive, !installed else { return }
+        installed = true
+        let original = #selector(UIWindow.sendEvent(_:))
+        let logging = #selector(UIWindow.queueReorderUITestLoggingSendEvent(_:))
+        guard let originalMethod = class_getInstanceMethod(UIWindow.self, original),
+              let loggingMethod = class_getInstanceMethod(UIWindow.self, logging) else { return }
+        method_exchangeImplementations(originalMethod, loggingMethod)
+        QueueReorderUITestDiagnostics.shared.log("touchLog installed")
+    }
+}
+
+extension UIWindow {
+    /// After the exchange this name invokes the original `sendEvent(_:)`.
+    @objc fileprivate func queueReorderUITestLoggingSendEvent(_ event: UIEvent) {
+        queueReorderUITestLoggingSendEvent(event)
+        QueueReorderUITestEventLogProbe.ProbeView.current?.observe(event)
     }
 }
 
