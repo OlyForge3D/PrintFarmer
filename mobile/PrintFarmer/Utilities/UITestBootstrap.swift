@@ -377,6 +377,9 @@ enum UITestBootstrap {
         #if DEBUG
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
+            // #3457: keep drag fixtures hermetic; simulated 30s queue invalidations
+            // otherwise race the gesture. Revalidation behavior is unit tested.
+            services.signalRService = DemoSignalRService(simulatesProgress: false)
         }
         #endif
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
@@ -2955,6 +2958,107 @@ private final class UITestMainThreadWatchdog: @unchecked Sendable {
 }
 
 #if DEBUG
+/// #3457 DEBUG test seam, active only in the queue-reorder UI-test fixture: records List
+/// `onMove` deliveries and fixture repository move calls. Harvest XCUI asserts these to
+/// prove legal drops persist once and cross-group drags are prevented natively.
+final class QueueReorderUITestDiagnostics: @unchecked Sendable {
+    static let shared = QueueReorderUITestDiagnostics()
+    @MainActor static var isActive: Bool {
+        UITestBootstrap.isEnabled && UITestBootstrap.mode == .authenticatedQueueReorder
+    }
+
+    private let lock = NSLock()
+    private var onMoveCount = 0
+    private var lastOnMove = "none"
+    private var repositoryMoveCount = 0
+
+    func recordOnMove(offsets: IndexSet, destination: Int) {
+        let move = "\(offsets.map { String($0) }.joined(separator: ","))->\(destination)"
+        lock.withLock {
+            onMoveCount += 1
+            lastOnMove = move
+        }
+        log("onMove \(move)")
+    }
+
+    func recordRepositoryMove() {
+        lock.withLock { repositoryMoveCount += 1 }
+        log("repositoryMove")
+    }
+
+    // R3457-D01 diagnostic trail (revertible; see `QueueReorderUITestEventLogProbe`). Log-only:
+    // appending never touches SwiftUI state, so recording cannot invalidate the List mid-drag.
+    // Deferred publication: the accessible copy stays a short placeholder until a collection-view
+    // gesture resolves, so pre-gesture and in-gesture XCTest snapshots never carry the trail.
+    private static let eventCapacity = 400
+    private var events: [String] = []
+    private var droppedEvents = 0
+    private var publishesTrail = false
+    private var publishedEventLog = "pending: no collection-view gesture has resolved"
+
+    func log(_ event: String) {
+        let line = String(format: "%.3f ", Date().timeIntervalSince1970) + event
+        lock.withLock {
+            if events.count >= Self.eventCapacity {
+                events.removeFirst()
+                droppedEvents += 1
+            }
+            events.append(line)
+            if publishesTrail { publishedEventLog = renderedTrail() }
+        }
+        NSLog("[R3457-D01] %@", line)
+    }
+
+    /// Withholds the trail while a collection-view gesture is in flight.
+    func suspendPublication() {
+        lock.withLock {
+            publishesTrail = false
+            publishedEventLog = "pending: collection-view gesture in flight"
+        }
+    }
+
+    /// Publishes the trail once the gesture resolves; later post-gesture events stay included.
+    func resumePublication() {
+        lock.withLock {
+            publishesTrail = true
+            publishedEventLog = renderedTrail()
+        }
+    }
+
+    private func renderedTrail() -> String {
+        ((droppedEvents > 0 ? ["dropped=\(droppedEvents)"] : []) + events).joined(separator: "\n")
+    }
+
+    @MainActor static func logIfActive(_ event: @autoclosure () -> String) {
+        guard isActive else { return }
+        shared.log(event())
+    }
+
+    /// Records a SwiftUI body evaluation without reading any observable state.
+    @MainActor static func logBody(_ name: String) -> Bool {
+        logIfActive("body \(name)")
+        return true
+    }
+
+    var eventLog: String {
+        lock.withLock { publishedEventLog }
+    }
+
+    var summary: String {
+        lock.withLock {
+            Self.summary(
+                onMoveCount: onMoveCount,
+                lastOnMove: lastOnMove,
+                repositoryMoveCount: repositoryMoveCount
+            )
+        }
+    }
+
+    static func summary(onMoveCount: Int, lastOnMove: String, repositoryMoveCount: Int) -> String {
+        "onMove=\(onMoveCount) last=\(lastOnMove) repositoryMoves=\(repositoryMoveCount)"
+    }
+}
+
 private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sendable {
     private let lock = NSLock()
     private var queueJobs = QueueReorderUITestJobService.makeQueueJobs()
@@ -2970,7 +3074,8 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
         reviewedRowVersion: String,
         neighbor: QueuePositionNeighbor
     ) async throws -> MoveQueuedJobResponse {
-        try lock.withLock {
+        QueueReorderUITestDiagnostics.shared.recordRepositoryMove()
+        return try lock.withLock {
             guard let source = queueJobs.firstIndex(where: { $0.job.jobUUID == id }),
                   let neighborIndex = queueJobs.firstIndex(where: {
                       switch neighbor {

@@ -1,5 +1,8 @@
 import SwiftUI
 import OSLog
+#if DEBUG
+import UIKit
+#endif
 
 struct JobListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -12,6 +15,9 @@ struct JobListView: View {
     @State private var retryTask: Task<Void, Never>?
     @State private var showsJobHistory = false
     @State private var historyNavigationPath: [AppDestination] = []
+    #if DEBUG
+    @State private var queueReorderDiagnostics: String?
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     private var activePrinterStatusRequestKey: String {
@@ -49,16 +55,34 @@ struct JobListView: View {
             }
         }
         .task {
+            #if DEBUG
+            if QueueReorderUITestDiagnostics.isActive {
+                queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+            }
+            QueueReorderUITestDiagnostics.logIfActive("loadTask start")
+            #endif
             viewModel.activate()
             viewModel.configure(jobService: services.jobService)
             viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
             viewModel.configureSignalR(services.signalRService)
             viewModel.setQueueWriteAuthorization(canWriteQueue)
             viewModel.startObservingNetworkPath()
+            #if DEBUG
+            QueueReorderUITestObservation.start(viewModel)
+            #endif
             await viewModel.loadJobs()
             queueEditMode = viewModel.keepsQueueEditingActive ? .active : .inactive
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive(
+                "loadTask end cancelled=\(Task.isCancelled) editMode=\(queueEditMode == .active)"
+            )
+            #endif
         }
         .task(id: activePrinterStatusRequestKey) {
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive("statusTask start key=\(activePrinterStatusRequestKey)")
+            defer { QueueReorderUITestDiagnostics.logIfActive("statusTask end cancelled=\(Task.isCancelled)") }
+            #endif
             await refreshActivePrinterStatuses()
         }
         .onChange(of: canWriteQueue) { _, isAuthorized in
@@ -66,6 +90,9 @@ struct JobListView: View {
         }
         .onChange(of: viewModel.keepsQueueEditingActive, initial: true) { _, isActive in
             queueEditMode = isActive ? .active : .inactive
+            #if DEBUG
+            QueueReorderUITestDiagnostics.logIfActive("editMode=\(isActive)")
+            #endif
         }
         .onDisappear {
             retryTask?.cancel()
@@ -182,6 +209,10 @@ struct JobListView: View {
 
     private var jobList: some View {
         List {
+            #if DEBUG
+            let _ = QueueReorderUITestDiagnostics.logBody("jobList")
+            let _ = QueueReorderUITestEventLogProbe.requestAttach()
+            #endif
             if let message = viewModel.errorMessage {
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle")
@@ -225,19 +256,33 @@ struct JobListView: View {
                             : nil
                         let canMove = groupID.flatMap { groupID in
                             item.job.jobUUID.map { id in
-                                viewModel.canMoveQueuedJob(id: id, direction: .up, inGroup: groupID)
-                                    || viewModel.canMoveQueuedJob(id: id, direction: .down, inGroup: groupID)
+                                viewModel.presentsMoveControl(id: id, inGroup: groupID)
                             }
                         } ?? false
                         queueCard { queuedJobRow(item, groupID: groupID) }
                             .moveDisabled(!canMove)
                     }
                     .onMove { offsets, destination in
+                        #if DEBUG
+                        if QueueReorderUITestDiagnostics.isActive {
+                            QueueReorderUITestDiagnostics.shared.recordOnMove(
+                                offsets: offsets,
+                                destination: destination
+                            )
+                            queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+                        }
+                        #endif
                         Task { @MainActor in
                             await viewModel.moveQueuedRows(
                                 fromOffsets: offsets,
                                 toOffset: destination
                             )
+                            #if DEBUG
+                            QueueReorderUITestDiagnostics.logIfActive("moveQueuedRows returned")
+                            if QueueReorderUITestDiagnostics.isActive {
+                                queueReorderDiagnostics = QueueReorderUITestDiagnostics.shared.summary
+                            }
+                            #endif
                         }
                     }
                 }
@@ -253,7 +298,7 @@ struct JobListView: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(Color.pfTextTertiary)
                             }
-                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                            if viewModel.presentsQueueReorder && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
                                     .font(.caption)
                                     .foregroundStyle(Color.pfTextSecondary)
@@ -264,7 +309,7 @@ struct JobListView: View {
                             Label("Queued", systemImage: "tray.full")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            if viewModel.canReorderQueue && !viewModel.reorderableQueuedJobs.isEmpty {
+                            if viewModel.presentsQueueReorder && !viewModel.reorderableQueuedJobs.isEmpty {
                                 Text("Drag to reorder")
                                     .font(.caption)
                                     .foregroundStyle(Color.pfTextSecondary)
@@ -329,6 +374,26 @@ struct JobListView: View {
             $queueEditMode
         )
         .accessibilityIdentifier("jobList.combined.list")
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            // #3457 DEBUG test seam: zero-geometry counters label asserted by Harvest XCUI, not a List row.
+            if let queueReorderDiagnostics {
+                Text(queueReorderDiagnostics)
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(queueReorderDiagnostics)
+                    .accessibilityIdentifier("jobList.reorderDiagnostics")
+            }
+            // R3457-D01 diagnostic only: deferred event trail; drag/drop state read at gesture transitions.
+            if QueueReorderUITestDiagnostics.isActive {
+                QueueReorderUITestEventLogProbe()
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        #endif
     }
 
     private func recentFailuresHeader(count: Int) -> some View {
@@ -1018,3 +1083,500 @@ struct AuthenticatedJobThumbnail: View {
         return UUID(uuidString: String(fileID)) != nil
     }
 }
+
+#if DEBUG
+/// R3457-D01 diagnostic only (one revertible commit; active only in the queue-reorder
+/// UI-test fixture). Logs every view-model property invalidation through Observation
+/// without touching SwiftUI state or adding view dependencies.
+@MainActor
+private enum QueueReorderUITestObservation {
+    private static var observed: Set<ObjectIdentifier> = []
+
+    static func start(_ viewModel: JobListViewModel) {
+        guard QueueReorderUITestDiagnostics.isActive,
+              observed.insert(ObjectIdentifier(viewModel)).inserted else { return }
+        let probes: [(String, @MainActor @Sendable (JobListViewModel) -> String)] = [
+            ("queuedOrder", { model in
+                model.queuedJobs.map { String(($0.job.jobUUID?.uuidString ?? "?").suffix(2)) }
+                    .joined(separator: ",")
+            }),
+            ("jobs", { "\($0.jobs.count)" }),
+            ("isLoading", { "\($0.isLoading)" }),
+            ("errorMessage", { $0.errorMessage == nil ? "nil" : "set" }),
+            ("isReorderingQueue", { "\($0.isReorderingQueue)" }),
+            ("isRevalidatingQueue", { "\($0.isRevalidatingQueue)" }),
+            ("hasFreshQueueSnapshot", { "\($0.hasFreshQueueSnapshot)" }),
+            ("queueWriteAuthorized", { "\($0.queueWriteAuthorized)" }),
+            ("isNetworkReachable", { "\($0.isNetworkReachable)" }),
+            ("isViewActive", { "\($0.isViewActive)" }),
+            ("keepsQueueEditingActive", { "\($0.keepsQueueEditingActive)" }),
+            ("presentsQueueReorder", { "\($0.presentsQueueReorder)" }),
+            ("activePrinterStatuses", { "\($0.activePrinterStatuses.count)" }),
+            ("unavailableActivePrinterStatuses", { "\($0.unavailableActivePrinterStatuses.count)" }),
+            ("recentFailures", { "\($0.recentFailures.count)" }),
+            ("jobListMayHaveMore", { "\($0.jobListMayHaveMore)" }),
+        ]
+        for (name, read) in probes {
+            track(name, viewModel, read)
+        }
+    }
+
+    private static func track(
+        _ name: String,
+        _ viewModel: JobListViewModel,
+        _ read: @escaping @MainActor @Sendable (JobListViewModel) -> String
+    ) {
+        let value = withObservationTracking {
+            read(viewModel)
+        } onChange: { [weak viewModel] in
+            QueueReorderUITestDiagnostics.shared.log("vm.\(name) willSet")
+            Task { @MainActor in
+                guard let viewModel else { return }
+                track(name, viewModel, read)
+            }
+        }
+        QueueReorderUITestDiagnostics.shared.log("vm.\(name)=\(value)")
+    }
+}
+
+/// R3457-D01 diagnostic only: event-driven, read-only view of the List's backing collection
+/// view. Logging targets are added to its existing gesture recognizers (adding a target never
+/// changes recognition), including recognizers in visible cells (the reorder accessory). Drag/drop
+/// state is sampled, deduplicated, at recognizer transitions/changes and contentOffset/contentSize
+/// KVO, and the List's existing drag/drop delegates are wrapped by a forwarding logging proxy;
+/// there is no timer. The accessibility label returns the trail published by
+/// `QueueReorderUITestDiagnostics` once a gesture resolves, never a live in-gesture copy.
+private struct QueueReorderUITestEventLogProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ProbeView { ProbeView() }
+    func updateUIView(_ uiView: ProbeView, context: Context) {}
+
+    /// Called from List body evaluation; defers recognizer discovery to the next main-queue turn.
+    @MainActor static func requestAttach() -> Bool {
+        guard QueueReorderUITestDiagnostics.isActive, let probe = ProbeView.current else { return true }
+        DispatchQueue.main.async { probe.attachRecognizers() }
+        return true
+    }
+
+    final class ProbeView: UIView {
+        @MainActor fileprivate static weak var current: ProbeView?
+        private weak var collectionView: UICollectionView?
+        private var hookedRecognizers: Set<ObjectIdentifier> = []
+        private var inFlightRecognizers: Set<ObjectIdentifier> = []
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            isAccessibilityElement = true
+            accessibilityIdentifier = "jobList.reorderEventLog"
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override var accessibilityLabel: String? {
+            get { QueueReorderUITestDiagnostics.shared.eventLog }
+            set {}
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else {
+                if Self.current === self { Self.current = nil }
+                QueueReorderUITestDiagnostics.shared.log("probe detached")
+                return
+            }
+            Self.current = self
+            QueueReorderUITestDiagnostics.shared.log("probe attached")
+            attachRecognizers()
+        }
+
+        fileprivate func attachRecognizers() {
+            if collectionView == nil, let found = locateCollectionView() {
+                collectionView = found
+                QueueReorderUITestDiagnostics.shared.log(
+                    "probe cv frame=\(found.frame) id=\(found.accessibilityIdentifier ?? "nil")"
+                )
+            }
+            guard let view = collectionView else { return }
+            for recognizer in view.gestureRecognizers ?? []
+            where hookedRecognizers.insert(ObjectIdentifier(recognizer)).inserted {
+                recognizer.addTarget(self, action: #selector(recognizerChanged(_:)))
+                QueueReorderUITestDiagnostics.shared.log("probe hooked \(type(of: recognizer))")
+            }
+            attachSessionObservers(to: view)
+            hookCellRecognizers(in: view)
+            QueueReorderUITestTouchLog.install()
+        }
+
+        // Touch layer (R3457-D01, log-only). Identifies the owner of each recognizer and the
+        // recognizers attached to the gesture's touch, so a cancelled long press can be attributed.
+        private var touchFirstMove: Set<ObjectIdentifier> = []
+        private var touchMoveCounts: [ObjectIdentifier: Int] = [:]
+
+        /// `Type@OwnerType[row]:state`; row is the owning cell's index path, `cv` for the
+        /// collection view itself, or `-` outside it.
+        fileprivate func describe(_ recognizer: UIGestureRecognizer) -> String {
+            let owner = recognizer.view.map { "\(type(of: $0))" } ?? "nil"
+            return "\(type(of: recognizer))@\(owner)[\(row(of: recognizer.view))]:\(Self.name(recognizer.state))"
+        }
+
+        private func row(of view: UIView?) -> String {
+            guard let collectionView, let view else { return "-" }
+            if view === collectionView { return "cv" }
+            var ancestor: UIView? = view
+            while let candidate = ancestor, candidate !== collectionView {
+                if let cell = candidate as? UICollectionViewCell {
+                    return collectionView.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                }
+                ancestor = candidate.superview
+            }
+            return ancestor === collectionView ? "cv-sub" : "-"
+        }
+
+        private static func name(_ state: UIGestureRecognizer.State) -> String {
+            switch state {
+            case .possible: return "possible"
+            case .began: return "began"
+            case .changed: return "changed"
+            case .ended: return "ended"
+            case .cancelled: return "cancelled"
+            case .failed: return "failed"
+            @unknown default: return "unknown"
+            }
+        }
+
+        /// Called after the window delivered `event`; logs began, first move and ended/cancelled
+        /// only (stationary/repeated moves are counted, not logged).
+        fileprivate func observe(_ event: UIEvent) {
+            guard event.type == .touches, let touches = event.allTouches, let window,
+                  let collectionView else { return }
+            for touch in touches where touch.window === window {
+                let id = ObjectIdentifier(touch)
+                let label: String
+                switch touch.phase {
+                case .began:
+                    touchFirstMove.remove(id)
+                    touchMoveCounts[id] = 0
+                    label = "began"
+                case .moved:
+                    touchMoveCounts[id, default: 0] += 1
+                    guard touchFirstMove.insert(id).inserted else { continue }
+                    label = "firstMove"
+                case .ended, .cancelled:
+                    label = touch.phase == .ended ? "ended" : "cancelled"
+                default:
+                    continue
+                }
+                let point = touch.location(in: collectionView)
+                let hit = touch.view.map { "\(type(of: $0))[\(row(of: $0))]" } ?? "nil"
+                let recognizers = (touch.gestureRecognizers ?? []).map(describe).joined(separator: ",")
+                QueueReorderUITestDiagnostics.shared.log(
+                    "touch \(label) at=(\(Int(point.x)),\(Int(point.y))) view=\(hit)"
+                        + " moves=\(touchMoveCounts[id] ?? 0) grs=[\(recognizers)] \(sessionState())"
+                )
+                if touch.phase == .ended || touch.phase == .cancelled {
+                    touchFirstMove.remove(id)
+                    touchMoveCounts[id] = nil
+                }
+            }
+        }
+
+        // Session-callback layer (R3457-D01, log-only). UIDrag/UIDropInteraction delegates are
+        // read-only, so the observable session callbacks are the collection view's drag/drop
+        // delegates. A proxy is installed only over a delegate SwiftUI already set; it forwards
+        // every message unchanged and mirrors `responds(to:)`, adding only void notifications.
+        private var dragProxy: QueueReorderSessionLogProxy?
+        private var dropProxy: QueueReorderSessionLogProxy?
+        private var scrollObservations: [NSKeyValueObservation] = []
+        private var lastSample = ""
+        private var loggedAbsentDelegates: Set<String> = []
+
+        private func attachSessionObservers(to view: UICollectionView) {
+            if scrollObservations.isEmpty {
+                QueueReorderUITestDiagnostics.shared.log(
+                    "probe cv dragEnabled=\(view.dragInteractionEnabled)"
+                        + " reorderCadence=\(view.reorderingCadence.rawValue)"
+                        + " interactions=\(view.interactions.map { "\(type(of: $0))" })"
+                )
+                scrollObservations = [
+                    view.observe(\.contentOffset) { [weak self] _, _ in
+                        MainActor.assumeIsolated { self?.sample("scroll") }
+                    },
+                    view.observe(\.contentSize) { [weak self] _, _ in
+                        MainActor.assumeIsolated {
+                            guard let self, let cv = self.collectionView else { return }
+                            self.hookCellRecognizers(in: cv)
+                            self.sample("layout")
+                        }
+                    },
+                ]
+            }
+            if let current = view.dragDelegate, !(current is QueueReorderSessionLogProxy) {
+                let proxy = QueueReorderSessionLogProxy(role: .drag, original: current) { [weak self] in
+                    self?.sessionState() ?? "probe=nil"
+                }
+                dragProxy = proxy
+                view.dragDelegate = proxy
+                QueueReorderUITestDiagnostics.shared.log("probe wrapped dragDelegate \(type(of: current))")
+            } else if view.dragDelegate == nil, !loggedAbsentDelegates.contains("drag") {
+                loggedAbsentDelegates.insert("drag")
+                QueueReorderUITestDiagnostics.shared.log("probe dragDelegate=nil (not wrapped)")
+            }
+            if let current = view.dropDelegate, !(current is QueueReorderSessionLogProxy) {
+                let proxy = QueueReorderSessionLogProxy(role: .drop, original: current) { [weak self] in
+                    self?.sessionState() ?? "probe=nil"
+                }
+                dropProxy = proxy
+                view.dropDelegate = proxy
+                QueueReorderUITestDiagnostics.shared.log("probe wrapped dropDelegate \(type(of: current))")
+            } else if view.dropDelegate == nil, !loggedAbsentDelegates.contains("drop") {
+                loggedAbsentDelegates.insert("drop")
+                QueueReorderUITestDiagnostics.shared.log("probe dropDelegate=nil (not wrapped)")
+            }
+        }
+
+        /// Hooks every recognizer in visible cells' subtrees, including the reorder accessory's.
+        private func hookCellRecognizers(in view: UICollectionView) {
+            for cell in view.visibleCells {
+                var pending: [UIView] = [cell]
+                while !pending.isEmpty {
+                    let candidate = pending.removeFirst()
+                    for recognizer in candidate.gestureRecognizers ?? []
+                    where hookedRecognizers.insert(ObjectIdentifier(recognizer)).inserted {
+                        recognizer.addTarget(self, action: #selector(recognizerChanged(_:)))
+                        let row = view.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                        QueueReorderUITestDiagnostics.shared.log(
+                            "probe hooked cell[\(row)] \(type(of: candidate)) \(type(of: recognizer))"
+                        )
+                    }
+                    pending.append(contentsOf: candidate.subviews)
+                }
+            }
+        }
+
+        /// Deduplicated state sample: logs only when drag/drop/scroll/visible-row layout changed.
+        private func sample(_ source: String) {
+            let state = sessionState() + " rows=" + visibleRowLayout()
+            guard state != lastSample else { return }
+            lastSample = state
+            QueueReorderUITestDiagnostics.shared.log("sample \(source) \(state)")
+        }
+
+        private func visibleRowLayout() -> String {
+            guard let view = collectionView else { return "nil" }
+            return view.visibleCells
+                .map { cell -> (CGFloat, String) in
+                    let row = view.indexPath(for: cell).map { "\($0.section).\($0.item)" } ?? "?"
+                    return (cell.frame.minY, "\(row)@\(Int(cell.frame.minY.rounded()))")
+                }
+                .sorted { $0.0 < $1.0 }
+                .map(\.1)
+                .joined(separator: ",")
+        }
+
+        @objc private func recognizerChanged(_ recognizer: UIGestureRecognizer) {
+            let id = ObjectIdentifier(recognizer)
+            let phase: String
+            switch recognizer.state {
+            case .began:
+                phase = "began"
+                inFlightRecognizers.insert(id)
+                QueueReorderUITestDiagnostics.shared.suspendPublication()
+            case .ended:
+                phase = "ended"
+            case .cancelled:
+                phase = "cancelled"
+            case .failed:
+                phase = "failed"
+            case .changed:
+                sample("gr-changed \(type(of: recognizer))")
+                return
+            default:
+                return
+            }
+            QueueReorderUITestDiagnostics.shared.log("gr \(describe(recognizer)) \(phase) \(sessionState())")
+            sample("gr-\(phase)")
+            guard phase != "began" else { return }
+            inFlightRecognizers.remove(id)
+            guard inFlightRecognizers.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                QueueReorderUITestDiagnostics.shared.log("gr resolved+1 \(self.sessionState())")
+                if self.inFlightRecognizers.isEmpty {
+                    QueueReorderUITestDiagnostics.shared.resumePublication()
+                }
+            }
+        }
+
+        private func sessionState() -> String {
+            guard let view = collectionView else { return "cv=nil" }
+            return "drag=\(view.hasActiveDrag) drop=\(view.hasActiveDrop)"
+                + " uncommitted=\(view.hasUncommittedUpdates) editing=\(view.isEditing)"
+                + " tracking=\(view.isTracking) dragging=\(view.isDragging)"
+                + " offsetY=\(Int(view.contentOffset.y.rounded())) cells=\(view.visibleCells.count)"
+        }
+
+        /// The nearest collection view sharing an ancestor with this overlay is the List's.
+        private func locateCollectionView() -> UICollectionView? {
+            var ancestor = superview
+            while let container = ancestor {
+                var pending = container.subviews
+                while !pending.isEmpty {
+                    let view = pending.removeFirst()
+                    if let collectionView = view as? UICollectionView { return collectionView }
+                    pending.append(contentsOf: view.subviews)
+                }
+                ancestor = container.superview
+            }
+            return nil
+        }
+    }
+}
+
+/// R3457-D01 diagnostic only: observes touch delivery after `UIWindow.sendEvent(_:)` has run
+/// unchanged, so no recognizer, delegate or responder is added to the touch's path. Installed
+/// once, only while the queue-reorder fixture is active.
+@MainActor
+private enum QueueReorderUITestTouchLog {
+    private static var installed = false
+
+    static func install() {
+        guard QueueReorderUITestDiagnostics.isActive, !installed else { return }
+        installed = true
+        let original = #selector(UIWindow.sendEvent(_:))
+        let logging = #selector(UIWindow.queueReorderUITestLoggingSendEvent(_:))
+        guard let originalMethod = class_getInstanceMethod(UIWindow.self, original),
+              let loggingMethod = class_getInstanceMethod(UIWindow.self, logging) else { return }
+        method_exchangeImplementations(originalMethod, loggingMethod)
+        QueueReorderUITestDiagnostics.shared.log("touchLog installed")
+    }
+}
+
+extension UIWindow {
+    /// After the exchange this name invokes the original `sendEvent(_:)`.
+    @objc fileprivate func queueReorderUITestLoggingSendEvent(_ event: UIEvent) {
+        queueReorderUITestLoggingSendEvent(event)
+        QueueReorderUITestEventLogProbe.ProbeView.current?.observe(event)
+    }
+}
+
+/// R3457-D01 diagnostic only: transparent logging proxy over the List collection view's existing
+/// drag or drop delegate. Every selector the original implements is forwarded unchanged
+/// (`responds(to:)` mirrors the original); the only additions are void session notifications,
+/// which log and then forward when the original also implements them.
+private final class QueueReorderSessionLogProxy: NSObject, UICollectionViewDragDelegate,
+    UICollectionViewDropDelegate {
+    enum Role { case drag, drop }
+
+    private nonisolated static let dragNotifications: Set<Selector> = [
+        #selector(UICollectionViewDragDelegate.collectionView(_:dragSessionWillBegin:)),
+        #selector(UICollectionViewDragDelegate.collectionView(_:dragSessionDidEnd:)),
+    ]
+    private nonisolated static let dropNotifications: Set<Selector> = [
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidEnter:)),
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidExit:)),
+        #selector(UICollectionViewDropDelegate.collectionView(_:dropSessionDidEnd:)),
+    ]
+
+    private nonisolated let role: Role
+    // Read by Objective-C runtime forwarding hooks; only ever set in init.
+    private nonisolated(unsafe) weak var original: NSObjectProtocol?
+    private let state: () -> String
+    private var lastUpdate = ""
+
+    init(role: Role, original: NSObjectProtocol, state: @escaping () -> String) {
+        self.role = role
+        self.original = original
+        self.state = state
+    }
+
+    private nonisolated var addedNotifications: Set<Selector> {
+        role == .drag ? Self.dragNotifications : Self.dropNotifications
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        if addedNotifications.contains(selector) { return true }
+        return original?.responds(to: selector) ?? false
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        original
+    }
+
+    private var drag: UICollectionViewDragDelegate? { original as? UICollectionViewDragDelegate }
+    private var drop: UICollectionViewDropDelegate? { original as? UICollectionViewDropDelegate }
+
+    private func log(_ event: String) {
+        QueueReorderUITestDiagnostics.shared.log("session \(event) \(state())")
+    }
+
+    // MARK: Drag (required + intercepted)
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        itemsForBeginning session: UIDragSession,
+        at indexPath: IndexPath
+    ) -> [UIDragItem] {
+        let items = drag?.collectionView(collectionView, itemsForBeginning: session, at: indexPath) ?? []
+        log("drag itemsForBeginning \(indexPath.section).\(indexPath.item) count=\(items.count)")
+        return items
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionWillBegin session: UIDragSession) {
+        log("drag willBegin items=\(session.items.count)")
+        drag?.collectionView?(collectionView, dragSessionWillBegin: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {
+        log("drag didEnd")
+        drag?.collectionView?(collectionView, dragSessionDidEnd: session)
+    }
+
+    // MARK: Drop (required + intercepted)
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        performDropWith coordinator: UICollectionViewDropCoordinator
+    ) {
+        let destination = coordinator.destinationIndexPath.map { "\($0.section).\($0.item)" } ?? "nil"
+        log("drop perform op=\(coordinator.proposal.operation.rawValue)"
+            + " intent=\(coordinator.proposal.intent.rawValue) dest=\(destination)")
+        drop?.collectionView(collectionView, performDropWith: coordinator)
+    }
+
+    /// Reached only when the original implements it (`responds(to:)` mirrors the original).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        dropSessionDidUpdate session: UIDropSession,
+        withDestinationIndexPath destinationIndexPath: IndexPath?
+    ) -> UICollectionViewDropProposal {
+        let proposal = drop?.collectionView?(
+            collectionView,
+            dropSessionDidUpdate: session,
+            withDestinationIndexPath: destinationIndexPath
+        ) ?? UICollectionViewDropProposal(operation: .forbidden)
+        let destination = destinationIndexPath.map { "\($0.section).\($0.item)" } ?? "nil"
+        let update = "op=\(proposal.operation.rawValue) intent=\(proposal.intent.rawValue) dest=\(destination)"
+        if update != lastUpdate {
+            lastUpdate = update
+            log("drop didUpdate \(update)")
+        }
+        return proposal
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidEnter session: UIDropSession) {
+        log("drop didEnter")
+        drop?.collectionView?(collectionView, dropSessionDidEnter: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidExit session: UIDropSession) {
+        log("drop didExit")
+        drop?.collectionView?(collectionView, dropSessionDidExit: session)
+    }
+
+    func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
+        lastUpdate = ""
+        log("drop didEnd")
+        drop?.collectionView?(collectionView, dropSessionDidEnd: session)
+    }
+}
+#endif

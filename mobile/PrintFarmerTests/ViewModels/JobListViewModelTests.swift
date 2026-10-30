@@ -584,7 +584,7 @@ final class JobListViewModelTests: XCTestCase {
     }
 
     func testLoadJobsHandlesServerError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.errorToThrow = NetworkError.invalidResponse
 
         await viewModel.loadJobs()
 
@@ -890,6 +890,73 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.jobs.map(\.id), serverOrder.map(\.id))
     }
 
+    /// #3457 option A: on iPad the native List prevents these drops, so XCUI can only
+    /// prove no `onMove` arrives. These pin the app's own rejection should one arrive.
+    func testMoveQueuedRowsRejectsHarvestPriorityBoundaryDestination() async throws {
+        let rows = try makeHarvestReorderRows(alphaBelowBeta: true)
+        await viewModel.loadJobs()
+        let before = viewModel.jobs.map(\.id)
+        XCTAssertEqual(viewModel.queuedJobs.map(\.id), rows.map(\.id))
+
+        // alpha (offset 2) dropped between the priority and printer boundary rows.
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 2), toOffset: 5)
+
+        XCTAssertEqual(viewModel.errorMessage,
+                       "Jobs can only be reordered within the same printer and priority group.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertEqual(viewModel.jobs.map(\.id), before)
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+    }
+
+    func testMoveQueuedRowsRejectsHarvestPrinterBoundaryDestination() async throws {
+        let rows = try makeHarvestReorderRows(alphaBelowBeta: false)
+        await viewModel.loadJobs()
+        let before = viewModel.jobs.map(\.id)
+        XCTAssertEqual(viewModel.queuedJobs.map(\.id), rows.map(\.id))
+
+        // alpha (offset 1) dropped below the printer boundary row, at the list end.
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 1), toOffset: 6)
+
+        XCTAssertEqual(viewModel.errorMessage,
+                       "Jobs can only be reordered within the same printer and priority group.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+        XCTAssertEqual(viewModel.jobs.map(\.id), before)
+        XCTAssertTrue(viewModel.hasFreshQueueSnapshot)
+    }
+
+    /// Mirrors the queue-reorder XCUI fixture's visible queued rows: assigned, the
+    /// high-priority alpha/beta/gamma group, a normal-priority row on the same
+    /// printer, then a high-priority row on another printer.
+    private func makeHarvestReorderRows(alphaBelowBeta: Bool) throws -> [QueuedPrintJobResponse] {
+        let printerID = UUID()
+        let assigned = try makeQueueJob(
+            scope: printerID, status: .assigned, priority: .high, queuePosition: 0, name: "assigned"
+        )
+        let alpha = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 1, revision: "AQIDAw==", name: "alpha"
+        )
+        let beta = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 2, revision: "AQIDBA==", name: "beta"
+        )
+        let gamma = try makeQueueJob(
+            scope: printerID, priority: .high, queuePosition: 3, revision: "AQIDBw==", name: "gamma"
+        )
+        let priorityBoundary = try makeQueueJob(
+            scope: printerID, priority: .normal, queuePosition: 4, revision: "AQIDBQ==",
+            name: "priority boundary"
+        )
+        let printerBoundary = try makeQueueJob(
+            scope: UUID(), priority: .high, queuePosition: 1, revision: "AQIDBg==",
+            name: "printer boundary"
+        )
+        let group = alphaBelowBeta ? [beta, alpha, gamma] : [alpha, beta, gamma]
+        let rows = [assigned] + group + [priorityBoundary, printerBoundary]
+        mockJobService.queuedJobResponsesToReturn = rows
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        return rows
+    }
+
     func testVoiceOverMovesRespectGroupBoundaries() async throws {
         let printerID = UUID()
         let highFirst = try makeQueueJob(scope: printerID, priority: .high, name: "high first")
@@ -1040,6 +1107,76 @@ final class JobListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.jobs.map(\.id), signalROrder.map(\.id))
         XCTAssertEqual(viewModel.jobs.map(\.job.rowVersion), ["AQIDBA==", "AQIDAw=="])
         XCTAssertEqual(viewModel.errorMessage, "Queue changed — refreshed.")
+    }
+
+    func testQueueInvalidationKeepsDragAffordancesStableWhileRevalidating() async throws {
+        // #3457: a SignalR queue update mid-drag must not flip edit mode or
+        // `moveDisabled`, or UIKit silently cancels the user's drop.
+        let printerID = UUID()
+        let first = try makeQueueJob(scope: printerID, name: "first")
+        let second = try makeQueueJob(scope: printerID, name: "second")
+        mockJobService.queuedJobResponsesToReturn = [first, second]
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        let firstID = try XCTUnwrap(first.job.jobUUID)
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+        XCTAssertTrue(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
+
+        let gate = QueueMoveGate()
+        mockJobService.beforeListAllJobs = { await gate.suspend() }
+        signalR.simulateJobQueueUpdate(JobQueueUpdate(printerId: printerID, jobs: []))
+        await gate.waitUntilEntered()
+
+        XCTAssertTrue(viewModel.isRevalidatingQueue)
+        XCTAssertFalse(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.canReorderQueue, "Mutations still require a fresh snapshot.")
+        XCTAssertTrue(viewModel.keepsQueueEditingActive)
+        XCTAssertTrue(viewModel.presentsQueueReorder)
+        XCTAssertTrue(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
+        XCTAssertFalse(viewModel.canMoveQueuedJob(id: firstID, direction: .down, inGroup: groupID))
+
+        await viewModel.moveQueuedRows(fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        XCTAssertEqual(viewModel.errorMessage, "Refresh the queue before reordering to load current revisions.",
+                       "A drop during revalidation must be rejected visibly, not silently cancelled.")
+        XCTAssertNil(mockJobService.moveQueuedJobCalledWith)
+
+        await gate.release()
+        for _ in 0..<500 where viewModel.isRevalidatingQueue || !viewModel.hasFreshQueueSnapshot {
+            await Task.yield()
+        }
+        XCTAssertFalse(viewModel.isRevalidatingQueue)
+        XCTAssertTrue(viewModel.canReorderQueue)
+        XCTAssertEqual(viewModel.keepsQueueEditingActive, viewModel.canReorderQueue)
+        XCTAssertTrue(viewModel.canMoveQueuedJob(id: firstID, direction: .down, inGroup: groupID))
+    }
+
+    func testFailedQueueRevalidationEndsDragAffordances() async throws {
+        let printerID = UUID()
+        let first = try makeQueueJob(scope: printerID, name: "first")
+        let second = try makeQueueJob(scope: printerID, name: "second")
+        mockJobService.queuedJobResponsesToReturn = [first, second]
+        viewModel.setQueueWriteAuthorization(true)
+        viewModel.setNetworkReachability(true)
+        await viewModel.loadJobs()
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let groupID = try XCTUnwrap(viewModel.reorderableQueueGroups.first?.id)
+        let firstID = try XCTUnwrap(first.job.jobUUID)
+
+        mockJobService.errorToThrow = NetworkError.invalidResponse
+        signalR.simulateJobQueueUpdate(JobQueueUpdate(printerId: printerID, jobs: []))
+        for _ in 0..<500 where viewModel.errorMessage == nil || viewModel.isRevalidatingQueue {
+            await Task.yield()
+        }
+
+        XCTAssertFalse(viewModel.isRevalidatingQueue)
+        XCTAssertFalse(viewModel.hasFreshQueueSnapshot)
+        XCTAssertFalse(viewModel.keepsQueueEditingActive)
+        XCTAssertFalse(viewModel.presentsMoveControl(id: firstID, inGroup: groupID))
     }
 
     // MARK: - Grouped Jobs: Recent
