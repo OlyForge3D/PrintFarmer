@@ -5,7 +5,7 @@ import { apiClient } from '@/services/api';
 import { isSettingsConflict } from '@/common/utils/apiErrors';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
-import { Button, FormField, Input, Select, Toggle, Badge } from '@/common/components/ui';
+import { Button, FormField, HeaderActions, Input, Select, Toggle, Badge } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { DeleteIcon, EditIcon, PlusIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
@@ -200,14 +200,13 @@ export function PowerMonitorSettingsPage() {
       subtitle="Manage smart plug power monitors for energy tracking"
       icon={SettingsIcon}
       parent={ADMIN_HUB_PARENT}
-      titleActions={
-        <div className="flex flex-wrap items-center gap-2">
+      actions={
+        <HeaderActions className="justify-end mb-0">
           <AdminNavPinButton destinationId="hw-power-monitors" />
-          <Button variant="primary" onClick={openCreate}>
-            <PlusIcon className="w-4 h-4 mr-1" />
+          <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="w-4 h-4" />}>
             Add Monitor
           </Button>
-        </div>
+        </HeaderActions>
       }
     >
       {/* Farm-wide fallback rate */}

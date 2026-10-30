@@ -1,5 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
+import { mdiArrowDown, mdiArrowUp } from '@mdi/js';
 import { Button, Checkbox } from '@/common/components/ui';
+import { ControlIcon } from '@/common/components/ui/toolbar';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
 import {
@@ -561,7 +563,12 @@ export const ExplorerView = ({
                           aria-label={`Sort by ${column.label}`}
                         >
                           {column.label}
-                          {isSorted && <span aria-hidden="true">{sortOrder === 'asc' ? ' ↑' : ' ↓'}</span>}
+                          {isSorted && (
+                            <ControlIcon
+                              path={sortOrder === 'asc' ? mdiArrowUp : mdiArrowDown}
+                              className="h-3 w-3"
+                            />
+                          )}
                         </Button>
                       ) : (
                         <span className="text-pf-text-secondary">{column.label}</span>

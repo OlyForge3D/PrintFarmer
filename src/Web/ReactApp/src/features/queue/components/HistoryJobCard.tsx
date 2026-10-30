@@ -1,4 +1,6 @@
 import { Button } from "@/common/components/ui/Button";
+import { mdiRestart, mdiArrowRight } from '@mdi/js';
+import { ControlIcon } from '@/common/components/ui/toolbar';
 import { Badge } from "@/common/components/ui/Badge";
 import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
@@ -284,8 +286,9 @@ export default function HistoryJobCard({
             onClick={onRerun}
             className="flex-1 px-3 py-2 rounded-sm text-sm font-medium"
             variant="secondary"
+            iconLeft={<ControlIcon path={mdiRestart} />}
           >
-            ↻ Rerun
+            Rerun
           </Button>
         )}
         {onViewDetails && (
@@ -293,8 +296,9 @@ export default function HistoryJobCard({
             onClick={() => onViewDetails(job.id)}
             className="flex-1 px-3 py-2 rounded-sm text-sm font-medium"
             variant="secondary"
+            iconRight={<ControlIcon path={mdiArrowRight} />}
           >
-            View Details →
+            View Details
           </Button>
         )}
       </div>

@@ -3,7 +3,7 @@ import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
 import { useFileBrowser } from '../useFileBrowser';
-import { Button, FormField } from '@/common/components/ui';
+import { Button, ToolbarField } from '@/common/components/ui';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { FolderIcon } from '@/common/components/icons/MdiIcons';
 import { type ColumnDef, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
@@ -17,6 +17,8 @@ interface FileBrowserProps<TDomain> {
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
   filterActions?: ReactNode;
   extraToolbarActions?: ReactNode;
+  /** Place selected-file actions after the filter toolbar instead of inside it. */
+  extraToolbarActionsPlacement?: 'toolbar' | 'below';
   renderFolderNavigation?: (
     path: string, onNavigate: (path: string) => void, controls: { id: string; expanded: boolean },
   ) => ReactNode;
@@ -44,6 +46,7 @@ export function FileBrowser<TDomain>({
     renderCard,
     filterActions,
     extraToolbarActions,
+    extraToolbarActionsPlacement = 'toolbar',
     renderFolderNavigation,
     viewMode,
     onViewModeChange,
@@ -79,19 +82,24 @@ export function FileBrowser<TDomain>({
           onViewModeChange={browser.setViewMode}
           filterActions={renderFolderNavigation ? <>
             {filterActions}
-            <FormField label="Folders" htmlFor={`${folderControlsId}-toggle`}>
-              <Button id={`${folderControlsId}-toggle`} size="sm"
+            <ToolbarField label="Folders" htmlFor={`${folderControlsId}-toggle`}>
+              <Button id={`${folderControlsId}-toggle`} control
                 variant={browser.currentPath ? 'primary' : 'secondary'}
-                className="h-10 w-10 p-2" aria-label="Folders"
+                className="pf-control--icon" aria-label="Folders"
                 iconCenter={<span aria-hidden="true"><FolderIcon className="h-4 w-4" /></span>}
                 aria-expanded={foldersExpanded} aria-controls={folderControlsId}
                 onClick={() => setFoldersExpanded(expanded => !expanded)}
                 title={`Folders: ${browser.currentPath === '/' ? 'Root' : browser.currentPath || 'All folders'}`}
               />
-            </FormField>
+            </ToolbarField>
           </> : filterActions}
-          extraActions={extraToolbarActions}
+          extraActions={extraToolbarActionsPlacement === 'toolbar' ? extraToolbarActions : undefined}
         />
+        {extraToolbarActionsPlacement === 'below' && extraToolbarActions && (
+          <div role="group" aria-label="Selected file actions" className="pf-inline-form">
+            {extraToolbarActions}
+          </div>
+        )}
 
         {renderFolderNavigation?.(browser.currentPath, (path) => {
           browser.clearSelection();

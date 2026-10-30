@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { maintenanceService } from '@/services/maintenanceService';
-import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
+import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import type { FleetPrinterStatistics } from '@/types/maintenance';
 
@@ -213,7 +213,7 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
             className="text-sm text-pf-accent hover:text-pf-accent-text"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
-            View all {stats.length} printers →
+            View all {stats.length} printers <ArrowRightIcon className="inline h-4 w-4" />
           </Button>
         </div>
       )}

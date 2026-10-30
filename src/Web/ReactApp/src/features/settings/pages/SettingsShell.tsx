@@ -22,7 +22,7 @@ import {
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { Button } from '@/common/components/ui';
+import { Button, HeaderActions } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
 import { SettingsHeaderSlotContext } from '@/features/settings/components/settingsHeaderSlotContext';
@@ -1654,7 +1654,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // Admin search advertises the global palette shortcut inline. Personal settings
   // has no workspace search, so it retains a dedicated palette launcher.
   const headerActions = (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <HeaderActions role="group" aria-label="Settings actions" className="justify-end mb-0">
       <div ref={setHeaderSlot} className="contents" />
       {isAdminRoute && activeTabDestination ? (
         <AdminNavPinButton destinationId={activeTabDestination.id} />
@@ -1684,7 +1684,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           </span>
         </Button>
       )}
-    </div>
+    </HeaderActions>
   );
 
   const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;

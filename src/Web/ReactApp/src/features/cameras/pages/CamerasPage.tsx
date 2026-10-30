@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { Button } from '@/common/components/ui';
+import { Button, Toolbar, HeaderActions, RefreshButton } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto } from '@/types/api';
@@ -152,7 +152,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
       subtitle="Live camera feeds by location, by printer, or all at once"
       icon={CameraIcon}
       actions={
-        <div className="flex items-center gap-2">
+        <HeaderActions>
           {canManageCameras && (
             <Button
               variant="secondary"
@@ -163,12 +163,7 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
             </Button>
           )}
 
-          {activeTab === 'view' && (
-            <Button variant="secondary" onClick={loadCameras}>
-              Refresh
-            </Button>
-          )}
-        </div>
+        </HeaderActions>
       }
       embedded={embedded}
     >
@@ -176,7 +171,8 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
         <CameraManagementPanel onCamerasChanged={loadCameras} />
       ) : (
         <div className="space-y-6">
-          <div role="group" aria-label="Camera view" className="inline-flex gap-0">
+          <Toolbar aria-label="Camera controls">
+          <div role="group" aria-label="Camera view" className="pf-toolbar__group pf-toolbar__group--segmented">
             {CAMERA_VIEW_OPTIONS.map((option) => (
               <Button
                 key={option.value}
@@ -190,6 +186,9 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
               </Button>
             ))}
           </div>
+          <Toolbar.Spacer />
+          <RefreshButton onClick={loadCameras} busy={camerasQuery.isFetching} />
+          </Toolbar>
 
           {/* Error message */}
           {displayedError && (

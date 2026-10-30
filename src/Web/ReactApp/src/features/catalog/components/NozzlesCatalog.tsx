@@ -11,6 +11,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
+import { HeaderActions, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type NozzleModelCardData } from '@/common/components/ComponentModelCard';
@@ -359,18 +360,20 @@ export function NozzlesCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Nozzle Models ({cards.length})
         </h2>
-        <div className="flex items-center gap-2">
+        <HeaderActions>
           <Button 
             onClick={handleAddClick} 
-            size="sm"
             title="Add new nozzle model"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
+        </HeaderActions>
       </div>
+      <Toolbar aria-label="Nozzle catalog controls">
+        <Toolbar.Spacer />
+        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Nozzle catalog view" />
+      </Toolbar>
 
       {/* Grid or Table view of nozzle cards */}
       {cards.length === 0 ? (

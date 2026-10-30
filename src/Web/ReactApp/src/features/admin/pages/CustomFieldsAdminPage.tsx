@@ -4,7 +4,7 @@ import { DeleteIcon, EditIcon, PlusIcon } from '@/common/components/icons/MdiIco
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, Input, Select, FormField, Textarea, Toggle } from '@/common/components/ui';
+import { Button, HeaderActions, Input, Select, FormField, Textarea, Toggle, Toolbar } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useCustomFieldDefinitions, queryKeys } from '@/common/hooks/useApi';
 import {
@@ -172,24 +172,27 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
       title="Custom Fields"
       subtitle="Define custom metadata fields for printers and users"
       actions={
-        <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>
-          Add Field
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>
+            Add Field
+          </Button>
+        </HeaderActions>
       }
       embedded={embedded}
     >
-      <div className="mb-6 flex gap-2">
+      <Toolbar aria-label="Custom field entity">
         {(['Printer', 'User'] as const).map(tab => (
           <Button
             key={tab}
             variant={activeTab === tab ? 'primary' : 'secondary'}
-            size="sm"
+            control
+            aria-pressed={activeTab === tab}
             onClick={() => setActiveTab(tab)}
           >
             {tab} Fields
           </Button>
         ))}
-      </div>
+      </Toolbar>
 
       {isLoading ? (
         <AdminLoading variant="table" cols={6} label={`Loading ${activeTab.toLowerCase()} custom fields`} />

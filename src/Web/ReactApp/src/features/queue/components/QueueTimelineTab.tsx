@@ -8,7 +8,8 @@ import {
   type CSSProperties,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@/common/components/ui";
+import { Button, Toolbar, FilterChip, ControlIcon } from "@/common/components/ui";
+import { mdiChevronLeft, mdiChevronRight } from '@mdi/js';
 import { apiClient } from "@/services/api";
 import type { QueueOverviewDto, QueueStatsDto, TimelineEventDto } from "@/types/api";
 
@@ -246,16 +247,14 @@ interface PillGroupProps<T extends string> {
 }
 function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: PillGroupProps<T>) {
   return (
-    <div className="flex rounded-lg overflow-hidden border border-pf-border" role="group" aria-label={ariaLabel}>
+    <div className="pf-toolbar__group pf-toolbar__group--segmented border border-pf-border" role="group" aria-label={ariaLabel}>
       {options.map((opt, i) => (
-        <Button
+        <FilterChip
           key={opt.value}
-          variant="unstyled"
           type="button"
           onClick={() => onChange(opt.value)}
-          aria-pressed={active === opt.value}
+          selected={active === opt.value}
           className={[
-            "px-3 py-1.5 text-sm font-medium transition-colors",
             i > 0 ? "border-l border-pf-border" : "",
             active === opt.value
               ? "bg-pf-accent-bg text-[var(--pf-on-accent)]"
@@ -265,7 +264,7 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
             .join(" ")}
         >
           {opt.label}
-        </Button>
+        </FilterChip>
       ))}
     </div>
   );
@@ -545,9 +544,8 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
         </section>
 
         {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-        <div
-          className={`flex flex-wrap items-center gap-2 ${isFullscreen ? "flex-shrink-0" : ""}`}
-          role="toolbar"
+        <Toolbar
+          className={isFullscreen ? "flex-shrink-0" : ""}
           aria-label="Chart controls"
         >
           <PillGroup
@@ -571,30 +569,31 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
           />
 
           <Button
-            variant="unstyled"
+            variant="secondary"
+            control
             type="button"
             onClick={() => step(-1)}
             aria-label="Previous period"
-            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
+            className="pf-control--icon"
           >
-            ‹
+            <ControlIcon path={mdiChevronLeft} />
           </Button>
           <Button
-            variant="unstyled"
+            variant="secondary"
             type="button"
             onClick={goToday}
-            className="px-3 h-8 text-sm bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors"
           >
             Today
           </Button>
           <Button
-            variant="unstyled"
+            variant="secondary"
+            control
             type="button"
             onClick={() => step(1)}
             aria-label="Next period"
-            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-1 transition-colors text-lg leading-none"
+            className="pf-control--icon"
           >
-            ›
+            <ControlIcon path={mdiChevronRight} />
           </Button>
 
           <span className="flex-1" aria-hidden="true" />
@@ -616,11 +615,12 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
 
           {/* Fullscreen toggle */}
           <Button
-            variant="unstyled"
+            variant="secondary"
+            control
             type="button"
             onClick={toggleFullscreen}
             aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-            className="w-8 h-8 flex items-center justify-center bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-secondary hover:text-pf-text-primary transition-colors"
+            className="pf-control--icon"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
               {isFullscreen ? (
@@ -630,7 +630,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
               )}
             </svg>
           </Button>
-        </div>
+        </Toolbar>
 
         {/* ── Gantt chart ──────────────────────────────────────────────────── */}
         <section

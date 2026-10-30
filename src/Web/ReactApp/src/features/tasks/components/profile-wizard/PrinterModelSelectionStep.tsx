@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Alert } from '@/common/components/ui';
-import { AlertCircleIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Alert, SearchField, Toolbar } from '@/common/components/ui';
+import { AlertCircleIcon } from '@/common/components/icons/MdiIcons';
 import { ChevronRight, Package } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
@@ -128,16 +128,16 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
       </div>
 
       {/* Search box */}
-      <div className="mb-4 relative">
-        <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-tertiary" />
-        <input
-          type="text"
+      <Toolbar aria-label="Printer model filters">
+        <SearchField
+          label="Search manufacturers or models"
           placeholder="Search manufacturers or models..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 bg-pf-bg-2 border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-accent focus:border-transparent text-sm"
+          onClear={() => setSearchQuery('')}
+          containerClassName="w-full"
         />
-      </div>
+      </Toolbar>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">

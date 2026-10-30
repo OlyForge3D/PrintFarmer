@@ -11,6 +11,7 @@ import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge, Button } from '@/common/components/ui';
 import { FileUpload } from '@/common/components/ui/FileUpload';
+import { HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -22,7 +23,6 @@ import {
   DeleteIcon,
   PlusIcon,
   SearchIcon,
-  FilterIcon,
   DownloadIcon,
   UploadIcon,
   CopyIcon,
@@ -692,21 +692,16 @@ export function TaskCatalogTab() {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-pf-text-muted" aria-hidden="true" />
-          <Input
-            className="pl-9"
-            placeholder="Search tasks…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            aria-label="Search task catalog"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <FilterIcon className="h-4 w-4 text-pf-text-muted shrink-0" aria-hidden="true" />
+      <HeaderActions>
+        <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>New Task</Button>
+        <Button variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+      </HeaderActions>
+      <Toolbar aria-label="Task catalog controls">
+        <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search task catalog" placeholder="Search tasks…" />
+        <ToolbarField label="Category" htmlFor="task-category-filter">
           <Select
+            id="task-category-filter"
             value={categoryFilter}
             onChange={e => setCategoryFilter(e.target.value)}
             aria-label="Filter by category"
@@ -717,18 +712,9 @@ export function TaskCatalogTab() {
               <option key={c} value={c}>{c}</option>
             ))}
           </Select>
-        </div>
-        <Button variant="primary" size="sm" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />} className="shrink-0">
-          New Task
-        </Button>
-        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
-          Export
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
-          Import
-        </Button>
+        </ToolbarField>
         <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
-      </div>
+      </Toolbar>
 
       {/* Summary */}
       <p className="text-sm text-pf-text-muted">

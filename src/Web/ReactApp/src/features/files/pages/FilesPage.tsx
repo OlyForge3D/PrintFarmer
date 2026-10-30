@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { HeaderActions, ToolbarField } from '@/common/components/ui/toolbar';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
@@ -56,7 +57,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button, FormField, Select, Tabs } from '@/common/components/ui';
+import { Button, Select, Tabs } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -652,7 +653,7 @@ export function FilesPage() {
   }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (
-    <div className="flex flex-wrap items-center gap-2">
+    <HeaderActions>
       {hasPermission('3d_models', 'create') && (
         <Button
           ref={printablesButtonRef}
@@ -689,7 +690,7 @@ export function FilesPage() {
           Upload G-Code
         </Button>
       )}
-    </div>
+    </HeaderActions>
   );
 
   const toolbarActions = (
@@ -738,7 +739,7 @@ export function FilesPage() {
   );
 
   const fileTypeFilter = (
-    <FormField label="Type" htmlFor="local-library-type">
+    <ToolbarField label="Type" htmlFor="local-library-type">
       <Select id="local-library-type" value={selectedFilter} className="min-w-32"
         onChange={event => {
           const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
@@ -748,7 +749,7 @@ export function FilesPage() {
           <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
         ))}
       </Select>
-    </FormField>
+    </ToolbarField>
   );
 
   return (
@@ -788,6 +789,7 @@ export function FilesPage() {
                     renderCard={renderCard}
                     filterActions={fileTypeFilter}
                     extraToolbarActions={toolbarActions}
+                    extraToolbarActionsPlacement="below"
                     renderFolderNavigation={(path, onNavigate, controls) => (
                       <LocalLibraryFolders
                         controls={controls}

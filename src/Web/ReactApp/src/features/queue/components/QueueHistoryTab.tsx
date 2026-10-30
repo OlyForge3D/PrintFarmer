@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "@/common/components/ui/Alert";
-import { Button } from "@/common/components/ui/Button";
+import { Pagination } from "@/common/components/ui/toolbar";
 import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
@@ -258,8 +258,6 @@ export default function QueueHistoryTab({
   };
 
   const totalPages = Math.ceil(totalCount / pageSize);
-  const hasNextPage = currentPage < totalPages - 1;
-  const hasPrevPage = currentPage > 0;
 
   return (
     <div className="space-y-4">
@@ -330,26 +328,12 @@ export default function QueueHistoryTab({
           )}
 
           {/* Pagination */}
-          <div className="flex items-center justify-between py-4">
+          <div className="py-4">
             <div className="text-sm text-pf-text-secondary">
-              Page {currentPage + 1} of {Math.max(1, totalPages)} | {totalCount} total jobs
+              {totalCount} total jobs
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                disabled={!hasPrevPage || loading}
-                variant="secondary"
-              >
-                ← Previous
-              </Button>
-              <Button
-                onClick={() => setCurrentPage(p => p + 1)}
-                disabled={!hasNextPage || loading}
-                variant="secondary"
-              >
-                Next →
-              </Button>
-            </div>
+            <Pagination page={currentPage + 1} totalPages={Math.max(1, totalPages)}
+              onPageChange={page => setCurrentPage(page - 1)} disabled={loading} />
           </div>
         </>
       )}

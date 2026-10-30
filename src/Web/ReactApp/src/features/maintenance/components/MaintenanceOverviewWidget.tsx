@@ -9,6 +9,7 @@ import { Link } from 'react-router';
 import { 
   WrenchIcon, 
   CheckCircleIcon,
+  ArrowRightIcon,
 } from '@/common/components/icons/MdiIcons';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
@@ -138,7 +139,7 @@ export function MaintenanceOverviewWidget({
             to="/maintenance"
             className="block text-xs text-center text-pf-accent hover:text-pf-accent-hover py-2"
           >
-            View {tasks.length - 3} more →
+            View {tasks.length - 3} more <ArrowRightIcon className="inline h-4 w-4" />
           </Link>
         )}
       </div>

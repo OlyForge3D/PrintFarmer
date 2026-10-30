@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 import { Button } from "@/common/components/ui/Button";
+import { Toolbar, ToolbarField, Input, ControlIcon } from '@/common/components/ui';
+import { mdiChevronDown, mdiCalendar } from '@mdi/js';
 
 export interface DateRange {
   from: Date | null;
@@ -97,14 +99,14 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
   return (
     <div className="bg-pf-bg-1 border border-pf-border rounded-lg mb-4">
       {/* Always-visible row */}
-      <div className="flex items-center gap-3 px-3 py-2 flex-wrap">
+      <Toolbar aria-label="Queue date controls" className="px-3 py-2">
         {/* Calendar icon + label */}
-        <span className="text-xs font-medium text-pf-text-secondary shrink-0 select-none">
-          📅 Date range
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-pf-text-secondary shrink-0 select-none">
+          <ControlIcon path={mdiCalendar} /> Date range
         </span>
 
         {/* Preset buttons */}
-        <div className="flex gap-1" role="group" aria-label="Date range presets">
+        <div className="pf-toolbar__group" role="group" aria-label="Date range presets">
           {PRESETS.map((preset) => (
             <Button
               key={preset.label}
@@ -132,6 +134,7 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
           variant="ghost"
           size="sm"
           aria-expanded={expanded}
+          iconRight={<ControlIcon path={mdiChevronDown} className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
           className={`px-2 py-1 text-xs flex items-center gap-1.5 ${
             activePreset === null
               ? "text-pf-accent font-medium"
@@ -139,41 +142,29 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
           } hover:text-pf-text-primary hover:bg-pf-bg-2`}
         >
           <span>{activePreset === null ? rangeSummary : "Custom…"}</span>
-          <span
-            className="transition-transform duration-150"
-            style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}
-          >
-            ▾
-          </span>
         </Button>
-      </div>
+      </Toolbar>
 
       {/* Expandable custom date inputs */}
       {expanded && (
         <div className="px-3 pb-3 pt-0 border-t border-pf-border">
-          <div className="grid grid-cols-2 gap-3 pt-3 max-w-xs">
-            <div>
-              <label className="block text-xs font-medium text-pf-text-secondary mb-1">
-                From
-              </label>
-              <input
+          <div className="pf-inline-form pt-3">
+            <ToolbarField label="From" htmlFor="queue-date-from">
+              <Input id="queue-date-from"
                 type="date"
                 value={toInputValue(dateFrom)}
                 onChange={handleFromChange}
                 className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-pf-text-secondary mb-1">
-                To
-              </label>
-              <input
+            </ToolbarField>
+            <ToolbarField label="To" htmlFor="queue-date-to">
+              <Input id="queue-date-to"
                 type="date"
                 value={toInputValue(dateTo)}
                 onChange={handleToChange}
                 className="w-full px-2 py-1 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-none focus:ring-1 focus:ring-pf-accent"
               />
-            </div>
+            </ToolbarField>
           </div>
         </div>
       )}

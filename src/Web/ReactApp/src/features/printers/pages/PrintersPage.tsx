@@ -24,6 +24,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
 import { Tooltip } from '@/common/components/ui/Tooltip';
+import { Toolbar, HeaderActions } from '@/common/components/ui/toolbar';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -548,6 +549,21 @@ export function PrintersPage() {
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
       parent={adminHubParent}
+      actions={
+        <HeaderActions data-tour="printers-actions">
+          {hasPermission('printers', 'create') && <AddPrinterButton onSuccess={refetchPrinters} />}
+          {hasPermission('printers', 'admin') && discoveryAvailable && (
+            <Button variant="secondary" aria-label="Discover Printers on the local network"
+              onClick={() => setShowDiscovery(true)}
+              onMouseEnter={() => PrinterDiscoveryModal.preload()}
+              onFocus={() => PrinterDiscoveryModal.preload()}
+              iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}>
+              Discover Printers
+            </Button>
+          )}
+          {hasPermission('printers', 'admin') && <PrinterImportExportControls />}
+        </HeaderActions>
+      }
     >
       <FailureDetectionPollingProvider value={anyObicoEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
@@ -556,31 +572,7 @@ export function PrintersPage() {
               The full-width strip cannot be spotlit without the actions row, so the
               tour anchor widens only while the strip is open. */}
           <div data-tour={filtersExpanded ? 'printers-filters' : undefined} className="flex flex-col gap-4 mb-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {/* Primary Actions (Left) */}
-              <div data-tour="printers-actions" className="flex flex-col sm:flex-row sm:items-center gap-2">
-                {hasPermission('printers', 'create') && (
-                  <AddPrinterButton onSuccess={refetchPrinters} />
-                )}
-                {hasPermission('printers', 'admin') && discoveryAvailable && (
-                  <Button
-                    variant="secondary"
-                    aria-label="Discover Printers on the local network"
-                    onClick={() => setShowDiscovery(true)}
-                    onMouseEnter={() => PrinterDiscoveryModal.preload()}
-                    onFocus={() => PrinterDiscoveryModal.preload()}
-                    iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
-                  >
-                    Discover Printers
-                  </Button>
-                )}
-                {hasPermission('printers', 'admin') && (
-                  <PrinterImportExportControls />
-                )}
-              </div>
-
-              {/* View & Filters (Right) */}
-              <div data-tour={filtersExpanded ? undefined : 'printers-filters'} className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <Toolbar aria-label="Printer controls" data-tour={filtersExpanded ? undefined : 'printers-filters'}>
                 <div className="flex items-center gap-0.5">
                 <Tooltip content={filtersExpanded ? 'Hide printer filters' : 'Show printer filters'} position="top">
                   <Button
@@ -588,12 +580,13 @@ export function PrintersPage() {
                     type="button"
                     variant={filtersExpanded || hasActiveFilters ? 'subtle' : 'secondary'}
                     size="sm"
-                    className="min-h-11 min-w-11"
+                    control
+                    className="pf-control--icon"
                     aria-label={`Printer filters${hasActiveFilters ? ` (${activeFilterCount} active)` : ''}`}
                     aria-expanded={filtersExpanded}
                     aria-controls="printer-filter-strip"
                     onClick={() => setFiltersExpanded(expanded => !expanded)}
-                    iconLeft={<FilterIcon className="h-5 w-5" isOn={hasActiveFilters} />}
+                    iconLeft={<FilterIcon className="h-4 w-4" isOn={hasActiveFilters} />}
                   />
                 </Tooltip>
                 {hasActiveFilters && (
@@ -602,10 +595,11 @@ export function PrintersPage() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="min-h-11 min-w-11"
+                      control
+                      className="pf-control--icon"
                       aria-label="Clear filters"
                       onClick={handleClearFilters}
-                      iconLeft={<ClearFiltersIcon className="h-5 w-5" />}
+                      iconLeft={<ClearFiltersIcon className="h-4 w-4" />}
                     />
                   </Tooltip>
                 )}
@@ -618,8 +612,8 @@ export function PrintersPage() {
                     id="sort-mode"
                     value={sortMode}
                     onChange={e => setSortMode(e.target.value as PrinterSortMode)}
-                    aria-label="Sort printers by"
-                    className="min-h-11 min-w-0"
+                    aria-label="Sort by"
+                    className="min-w-0"
                     containerClassName="sm:w-40"
                   >
                     <option value="state">State</option>
@@ -628,26 +622,26 @@ export function PrintersPage() {
                   </Select>
                 </div>
 
+                <Toolbar.Spacer />
                 <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-              </div>
-            </div>
+              </Toolbar>
 
             <div
               id="printer-filter-strip"
               hidden={!filtersExpanded}
               role="group"
               aria-label="Printer filters"
-              className="rounded-lg border border-pf-border bg-pf-bg-1 p-3"
+              className="pf-inline-form rounded-lg border border-pf-border bg-pf-bg-1 p-3"
             >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="flex min-w-0 flex-col gap-1">
-                  <label htmlFor="state-filter" className="text-sm font-medium text-pf-text-secondary">State</label>
+              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="pf-toolbar-field">
+                  <label htmlFor="state-filter" className="pf-toolbar-field__label">State</label>
                   <Select
                     id="state-filter"
                     value={stateFilter}
                     onChange={e => setStateFilter(e.target.value as PrinterStateFilter)}
                     aria-label="Filter by printer state"
-                    className="min-h-11 min-w-0"
+                    className="min-w-0"
                   >
                     <option value="all">All States</option>
                     <option value="online">Online</option>
@@ -659,14 +653,14 @@ export function PrintersPage() {
                 </div>
 
                 {/* Backend Filter */}
-                <div className="flex min-w-0 flex-col gap-1">
-                  <label htmlFor="backend-filter" className="text-sm font-medium text-pf-text-secondary">Backend</label>
+                <div className="pf-toolbar-field">
+                  <label htmlFor="backend-filter" className="pf-toolbar-field__label">Backend</label>
                   <Select
                     id="backend-filter"
                     value={backendFilter}
                     onChange={e => setBackendFilter(e.target.value as BackendFilter)}
                     aria-label="Filter by backend"
-                    className="min-h-11 min-w-0"
+                    className="min-w-0"
                   >
                     <option value="all">All Backends</option>
                     <option value="Moonraker">Moonraker</option>
@@ -678,14 +672,14 @@ export function PrintersPage() {
                 </div>
 
                 {/* Availability Filter */}
-                <div className="flex min-w-0 flex-col gap-1">
-                  <label htmlFor="availability-filter" className="text-sm font-medium text-pf-text-secondary">Done in</label>
+                <div className="pf-toolbar-field">
+                  <label htmlFor="availability-filter" className="pf-toolbar-field__label">Done in</label>
                   <Select
                     id="availability-filter"
                     value={availabilityFilter}
                     onChange={e => setAvailabilityFilter(e.target.value as AvailabilityFilter)}
                     aria-label="Done in (estimated completion time)"
-                    className="min-h-11 min-w-0"
+                    className="min-w-0"
                   >
                     <option value="all">Any Time</option>
                     <option value="1">≤ 1 hour</option>

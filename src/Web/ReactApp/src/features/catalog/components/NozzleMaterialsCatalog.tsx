@@ -8,6 +8,7 @@ import {
   DataTable,
   type DataTableColumn,
 } from '@/common/components/ui';
+import { HeaderActions } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, EditIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -222,14 +223,15 @@ export function NozzleMaterialsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Nozzle Materials ({items.length})
         </h2>
+        <HeaderActions>
         <Button
           onClick={handleAddClick}
-          size="sm"
           title="Add new nozzle material"
           iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
         >
           Add
         </Button>
+        </HeaderActions>
       </div>
 
       {items.length === 0 ? (

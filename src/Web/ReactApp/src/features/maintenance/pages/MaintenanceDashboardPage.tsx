@@ -25,7 +25,7 @@ import {
   DatabaseIcon,
   AlertIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button, Tabs, Badge } from '@/common/components/ui';
+import { HeaderActions, RefreshButton, Tabs, Badge } from '@/common/components/ui';
 
 import { FleetMaintenanceOverview } from '../components/FleetMaintenanceOverview';
 import { MaintenanceStatusGrid } from '../components/MaintenanceStatusGrid';
@@ -152,19 +152,13 @@ export function MaintenanceDashboardPage() {
       icon={WrenchIcon}
       parent={adminHubParent}
       actions={
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isAnyLoading}
-          iconLeft={
-            <RefreshIcon
-              className={`h-4 w-4 ${isAnyLoading ? 'animate-spin' : ''}`}
-            />
-          }
-        >
-          Refresh
-        </Button>
+        <HeaderActions>
+          <RefreshButton
+            aria-label="Refresh maintenance"
+            onClick={handleRefresh}
+            busy={isAnyLoading}
+          />
+        </HeaderActions>
       }
     >
       {/* ═══════════════════ Ribbon Stats ═══════════════════ */}

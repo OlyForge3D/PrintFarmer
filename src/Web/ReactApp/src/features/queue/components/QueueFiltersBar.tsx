@@ -1,6 +1,8 @@
-import { RefreshIcon, ClearFiltersIcon } from "@/common/components/icons/MdiIcons";
+import { ClearFiltersIcon } from "@/common/components/icons/MdiIcons";
 import { Button, Select, Input } from "@/common/components/ui";
+import { Toolbar, RefreshButton } from "@/common/components/ui/toolbar";
 import { useState, useCallback } from "react";
+import type { ReactNode } from "react";
 
 export interface TableFiltersBarProps {
   onStatusChange: (status: string | null) => void;
@@ -9,6 +11,7 @@ export interface TableFiltersBarProps {
   onSortChange: (sortBy: "priority" | "deadline" | "deadline_desc") => void;
   onRefresh: () => void;
   isLoading?: boolean;
+  viewControls?: ReactNode;
 }
 
 // Terminal states (Completed/Failed/Cancelled) are intentionally excluded here: the Print
@@ -37,6 +40,7 @@ export function TableFiltersBar({
   onSortChange,
   onRefresh,
   isLoading = false,
+  viewControls,
 }: TableFiltersBarProps) {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null);
@@ -93,7 +97,7 @@ export function TableFiltersBar({
   const hasActiveFilters = selectedStatus || selectedMaterial || selectedModel || selectedSortBy !== "priority";
 
   return (
-    <div className="flex flex-wrap items-center gap-3 bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
+    <Toolbar aria-label="Queue controls" className="bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
       <div className="w-full sm:w-36 shrink-0">
         <Select
           value={selectedStatus || ""}
@@ -142,7 +146,7 @@ export function TableFiltersBar({
           value={selectedSortBy}
           onChange={handleSortChange}
           className="w-full text-sm"
-          aria-label="Sort queue jobs"
+          aria-label="Sort by"
         >
           <option value="priority">Sort: Priority</option>
           <option value="deadline">Sort: Deadline (Soonest)</option>
@@ -150,13 +154,12 @@ export function TableFiltersBar({
         </Select>
       </div>
 
-      <div className="flex items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
-        <Button
+      <div className="flex flex-wrap items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
+        {viewControls}
+        <RefreshButton
           onClick={onRefresh}
-          disabled={isLoading}
+          busy={isLoading}
           variant="subtle"
-          size="sm"
-          iconCenter={<RefreshIcon />}
           title="Refresh data"
           aria-label="Refresh data"
         />
@@ -171,6 +174,6 @@ export function TableFiltersBar({
           />
         )}
       </div>
-    </div>
+    </Toolbar>
   );
 }

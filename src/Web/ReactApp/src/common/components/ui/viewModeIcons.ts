@@ -1,3 +1,5 @@
+import { mdiTable, mdiViewCompact, mdiViewComfy, mdiViewAgenda } from '@mdi/js';
+
 /**
  * MDI icon paths for common view modes
  * 
@@ -7,16 +9,17 @@
 export const viewModeIcons = {
   /** Grid of cards (mdiViewGrid) */
   grid: 'M3,11H11V3H3M3,21H11V13H3M13,21H21V13H13M13,3V11H21V3',
-  /** Table/list view (mdiViewList) */
-  table: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
-  /** List view (mdiViewList) - alias for table */
+  /** Table view (mdiTable) */
+  table: mdiTable,
+  /** List view (mdiViewList) */
   list: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
-  /** Compact cards (mdiViewGrid) - alias for grid */
-  compact: 'M3,11H11V3H3M3,21H11V13H3M13,21H21V13H13M13,3V11H21V3',
+  /** Compact cards (mdiViewCompact) */
+  compact: mdiViewCompact,
   /** Collapsed view (mdiViewList) */
   collapsed: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
   /** Expandable view (mdiViewComfy) */
-  expandable: 'M2,4V20H22V4H2M4,6H8V10H4V6M4,18V12H8V18H4M20,18H10V14H20V18M20,12H10V6H20V12Z',
+  expandable: mdiViewComfy,
+  explorer: mdiViewAgenda,
   /** Quilt/tile view (mdiViewQuilt) */
   quilt: 'M10,5V11H21V5M16,18H21V12H16M10,18H15V12H10M3,5V18H9V5H3Z',
   /** Glass effect (mdiBlur) */
@@ -48,6 +51,7 @@ export interface ViewModeOption<T extends string = string> {
   icon: string | ViewModeIconName;
   /** Tooltip/title for the button */
   title: string;
+  label?: string;
 }
 
 /**

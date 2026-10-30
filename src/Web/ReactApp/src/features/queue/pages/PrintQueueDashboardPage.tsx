@@ -732,7 +732,7 @@ export function PrintQueueDashboardPage() {
               {/* Filters + Auto-dispatch global toggle */}
               <div data-tour="queue-filters" className="shrink-0 p-4 border-b border-pf-border bg-pf-bg-1">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex-1 min-w-0">
+                  <div className="w-full flex-none sm:flex-1 min-w-0">
                     <TableFiltersBar
                       onStatusChange={setStatusFilter}
                       onModelChange={setModelFilter}
@@ -740,10 +740,10 @@ export function PrintQueueDashboardPage() {
                       onSortChange={setSortBy}
                       onRefresh={invalidateQueue}
                       isLoading={loading || isRefreshing}
+                      viewControls={<QueueViewModeSelector value={queueViewMode} onChange={setQueueViewMode} />}
                     />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <QueueViewModeSelector value={queueViewMode} onChange={setQueueViewMode} />
                     <AutoDispatchGlobalToggle />
                   </div>
                 </div>

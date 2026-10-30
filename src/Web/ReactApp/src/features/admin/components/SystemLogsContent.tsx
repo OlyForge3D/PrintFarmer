@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/services/api";
-import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { mdiChevronDown, mdiChevronRight } from '@mdi/js';
+import {
+  Button,
+  Checkbox,
+  ControlIcon,
+  FormField,
+  HeaderActions,
+  Input,
+  Select,
+  Textarea,
+  Toolbar,
+  ToolbarField,
+} from '@/common/components/ui';
 import { adminToast } from '@/common/components/admin';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
 
@@ -150,14 +162,19 @@ export function SystemLogsContent() {
         </Button>
       </div>
 
+      {/* Page-level export action stays above the filter controls. */}
+      <HeaderActions className="justify-end mb-0">
+        <Button variant="success" onClick={exportLogs}>Export</Button>
+      </HeaderActions>
+
       {/* Filters */}
       {!useAdvancedQuery && (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
-          <FormField label="CorrelationId">
-            <Input placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
-          </FormField>
-          <FormField label="Level">
-            <Select value={filters.level} onChange={e => setFilters(f => ({ ...f, level: e.target.value }))}>
+        <Toolbar aria-label="System log filters" className="mb-0">
+          <ToolbarField label="CorrelationId" htmlFor="system-log-correlation-id">
+            <Input id="system-log-correlation-id" placeholder="CorrelationId" value={filters.correlationId} onChange={e => setFilters(f => ({ ...f, correlationId: e.target.value }))} />
+          </ToolbarField>
+          <ToolbarField label="Level" htmlFor="system-log-level">
+            <Select id="system-log-level" value={filters.level} onChange={e => setFilters(f => ({ ...f, level: e.target.value }))}>
               <option value="">All Levels</option>
               <option value="Trace">Trace</option>
               <option value="Debug">Debug</option>
@@ -166,17 +183,19 @@ export function SystemLogsContent() {
               <option value="Error">Error</option>
               <option value="Critical">Critical</option>
             </Select>
-          </FormField>
-          <FormField label="From">
-            <Input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
-          </FormField>
-          <FormField label="To">
-            <Input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
-          </FormField>
-          <FormField label="Metadata">
-            <Input placeholder="Metadata" value={filters.metadata} onChange={e => setFilters(f => ({ ...f, metadata: e.target.value }))} />
-          </FormField>
-        </div>
+          </ToolbarField>
+          <ToolbarField label="From" htmlFor="system-log-from">
+            <Input id="system-log-from" type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
+          </ToolbarField>
+          <ToolbarField label="To" htmlFor="system-log-to">
+            <Input id="system-log-to" type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
+          </ToolbarField>
+          <ToolbarField label="Metadata" htmlFor="system-log-metadata">
+            <Input id="system-log-metadata" placeholder="Metadata" value={filters.metadata} onChange={e => setFilters(f => ({ ...f, metadata: e.target.value }))} />
+          </ToolbarField>
+          <Toolbar.Spacer />
+          <Button variant="primary" control onClick={fetchLogs} disabled={loading}>Search</Button>
+        </Toolbar>
       )}
 
       {/* Advanced Query */}
@@ -203,11 +222,12 @@ export function SystemLogsContent() {
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex gap-2">
-        <Button variant="primary" onClick={fetchLogs} disabled={loading}>Search</Button>
-        <Button variant="success" onClick={exportLogs}>Export</Button>
-      </div>
+      {useAdvancedQuery && (
+        <Toolbar aria-label="System log query actions" className="mb-0">
+          <Toolbar.Spacer />
+          <Button variant="primary" control onClick={fetchLogs} disabled={loading}>Search</Button>
+        </Toolbar>
+      )}
 
       {/* Column Visibility Controls */}
       <div className="p-3 bg-pf-bg-1 rounded-sm border border-pf-border">
@@ -256,8 +276,9 @@ export function SystemLogsContent() {
                       onClick={() => setExpandedRowId(expandedRowId === log.id ? null : log.id)}
                       className="text-pf-accent hover:text-pf-accent-text"
                       aria-label={expandedRowId === log.id ? 'Collapse row' : 'Expand row'}
+                      aria-expanded={expandedRowId === log.id}
                     >
-                      {expandedRowId === log.id ? '▼' : '▶'}
+                      <ControlIcon path={expandedRowId === log.id ? mdiChevronDown : mdiChevronRight} />
                     </Button>
                   </td>
                   {visibleColumns.timestamp && <td className="p-2 text-xs text-pf-text-secondary whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>}

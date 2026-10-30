@@ -13,7 +13,8 @@ import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Select } from '@/common/components/ui/Select';
 import { Spinner } from '@/common/components/ui/Spinner';
-import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
+import { RefreshButton, Toolbar } from '@/common/components/ui';
+import { WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 
@@ -318,7 +319,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
       {activeTab === 'workers' && (
         <>
         {/* Worker-specific controls */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Toolbar aria-label="Worker filters and status">
           <Select
             value={filter}
             onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
@@ -330,26 +331,24 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
               <option key={status} value={status}>
                 {status} ({workers.filter(w => w.status === status).length})
               </option>
-            ))}
+              ))}
           </Select>
 
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
-            <span className="text-sm text-pf-text-secondary">
-              {isConnected ? 'Real-time updates active' : 'Polling mode'}
-            </span>
+              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+              <span className="text-sm text-pf-text-secondary">
+                {isConnected ? 'Real-time updates active' : 'Polling mode'}
+              </span>
           </div>
 
-          <div className="ml-auto">
-            <Button
+          <Toolbar.Spacer />
+          <RefreshButton
               variant="ghost"
-              size="sm"
               onClick={loadWorkers}
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
               aria-label="Refresh workers"
-            />
-          </div>
-        </div>
+              title="Refresh workers"
+          />
+        </Toolbar>
 
         {/* Workers table */}
         <div className="bg-pf-bg-1 rounded-sm border border-pf-border">

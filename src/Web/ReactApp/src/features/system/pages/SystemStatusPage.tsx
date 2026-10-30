@@ -1,10 +1,12 @@
 import { useId, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import {
   Alert,
   Badge,
-  Button,
+  HeaderActions,
+  RefreshButton,
   Card,
   Spinner,
   Table,
@@ -20,7 +22,6 @@ import {
   ClockIcon,
   DatabaseIcon,
   PackageIcon,
-  RefreshIcon,
   ServerIcon,
   WrenchIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -28,6 +29,7 @@ import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { apiClient } from '@/services/api';
 import { SystemServiceHealth, type SystemInfo } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useSettingsHeaderSlot } from '@/features/settings/components/settingsHeaderSlotContext';
 
 const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
@@ -219,6 +221,7 @@ function renderServicesTable(systemInfo: SystemInfo) {
 }
 
 export function SystemStatusPage() {
+  const headerSlot = useSettingsHeaderSlot();
   const { hasPermission } = useAuth();
   const canViewSystemInfo = hasPermission('system_settings', 'admin');
   const { data, error, isFetching, isLoading, refetch, dataUpdatedAt } = useQuery({
@@ -254,6 +257,7 @@ export function SystemStatusPage() {
 
   const memoryUsage = getUsagePercentage(data.memory.usedBytes, data.memory.totalBytes);
   const diskUsage = getUsagePercentage(data.disk.usedBytes, data.disk.totalBytes);
+  const refreshAction = <RefreshButton busy={isFetching} onClick={() => void refetch()} />;
 
   return (
     <div className="space-y-4">
@@ -265,14 +269,9 @@ export function SystemStatusPage() {
           </p>
           <p className="mt-2 text-xs text-pf-text-secondary">{formatUpdatedAt(dataUpdatedAt)}</p>
         </div>
-        <Button
-          variant="secondary"
-          iconLeft={<RefreshIcon className="h-4 w-4" />}
-          loading={isFetching}
-          onClick={() => void refetch()}
-        >
-          Refresh
-        </Button>
+        {headerSlot
+          ? createPortal(refreshAction, headerSlot)
+          : <HeaderActions className="mb-0">{refreshAction}</HeaderActions>}
       </div>
 
       <p className="sr-only" aria-live="polite">

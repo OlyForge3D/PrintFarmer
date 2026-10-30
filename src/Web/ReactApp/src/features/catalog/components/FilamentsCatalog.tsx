@@ -11,6 +11,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
+import { HeaderActions, Pagination, SearchField, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DownloadIcon, EditIcon, DeleteIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { useCatalogViewMode } from '@/common/hooks/useCatalogViewMode';
@@ -491,33 +492,10 @@ export function FilamentsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Filament Types ({totalCount})
         </h2>
-        <div className="flex items-center gap-2">
-          <form
-            className="flex gap-1"
-            onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
-          >
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by name…"
-              className="w-44"
-            />
-            {search && (
-              <Button
-                type="button"
-                variant="subtle"
-                size="sm"
-                onClick={() => { setSearchInput(''); setSearch(undefined); setPage(1); }}
-                title="Clear search"
-              >
-                ✕
-              </Button>
-            )}
-          </form>
+        <HeaderActions>
           <Button 
             onClick={handleImportFromSpoolman}
             title="Import filament types from Spoolman"
-            size="sm"
             variant="secondary"
             disabled={importMutation.isPending}
             iconLeft={<DownloadIcon className="w-4 h-4 mr-1" />}
@@ -527,14 +505,25 @@ export function FilamentsCatalog() {
           <Button 
             onClick={handleAddClick}
             title="Add new filament type"
-            size="sm"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
+        </HeaderActions>
       </div>
+      <Toolbar aria-label="Filament catalog controls">
+        <form className="pf-inline-form pf-toolbar__search" onSubmit={(e) => { e.preventDefault(); handleSearch(); }}>
+          <SearchField
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onClear={() => { setSearchInput(''); setSearch(undefined); setPage(1); }}
+            label="Search filament types"
+            placeholder="Search by name…"
+          />
+        </form>
+        <Toolbar.Spacer />
+        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Filament catalog view" />
+      </Toolbar>
 
       {/* Grid or Table view of filament cards */}
       {filaments.length === 0 ? (
@@ -597,28 +586,9 @@ export function FilamentsCatalog() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between py-2">
-          <div className="text-sm text-pf-text-secondary">
-            Page {page} of {totalPages} &middot; {totalCount} total
-          </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page <= 1 || isLoading}
-              variant="secondary"
-              size="sm"
-            >
-              ← Previous
-            </Button>
-            <Button
-              onClick={() => setPage(p => p + 1)}
-              disabled={page >= totalPages || isLoading}
-              variant="secondary"
-              size="sm"
-            >
-              Next →
-            </Button>
-          </div>
+        <div>
+          <p className="mb-2 text-sm text-pf-text-secondary">{totalCount} total filament types</p>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} disabled={isLoading} />
         </div>
       )}
 

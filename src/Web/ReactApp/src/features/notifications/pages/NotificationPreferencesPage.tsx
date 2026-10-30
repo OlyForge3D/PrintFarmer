@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Card, Toggle, Select, Alert, Button, Spinner } from '@/common/components/ui';
+import { Card, Toggle, Select, Alert, Button, Spinner, HeaderActions } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
 import {
   useNotificationCapabilities,
@@ -367,19 +367,19 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   const headerActions = embedded ? (
     saveButton
   ) : (
-    <div className="flex items-center gap-2">
+    <>
       <Button variant="ghost" onClick={() => navigate(-1)}>
         Back
       </Button>
       {saveButton}
-    </div>
+    </>
   );
 
   return (
     <PageTemplate
       title="Notification Preferences"
       icon={BellIcon}
-      actions={headerActions}
+      actions={<HeaderActions>{headerActions}</HeaderActions>}
       embedded={embedded}
     >
       {content}

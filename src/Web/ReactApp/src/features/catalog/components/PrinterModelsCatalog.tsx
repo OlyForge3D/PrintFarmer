@@ -9,6 +9,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
+import { HeaderActions, Toolbar } from '@/common/components/ui';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { PrinterModelCard, type PrinterModelCardData } from '@/common/components/PrinterModelCard';
 import { useManufacturers, useModels } from '@/common/hooks/useApi';
@@ -258,31 +259,30 @@ export function PrinterModelsCatalog() {
   return (
     <div className="space-y-4">
       {/* Header with Filter and Add button */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="flex items-center gap-4 w-full sm:w-auto">
-          <FormField label="Filter by Manufacturer" className="flex-1 sm:flex-initial sm:min-w-[280px]">
-            <ManufacturerSelector
-              value={selectedManufacturerId}
-              onChange={handleManufacturerChange}
-              context={CatalogContext.Printers}
-              placeholder="All Manufacturers"
-              ariaLabel="Filter printer models by manufacturer"
-            />
-          </FormField>
-        </div>
-
-        <div className="flex items-center gap-2">
+      <div className="flex justify-end">
+        <HeaderActions>
           <Button
             onClick={handleAddClick}
             title="Add new printer model"
-            size="sm"
             iconLeft={<PlusIcon className="h-4 w-4 mr-2" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
+        </HeaderActions>
       </div>
+      <Toolbar labelled aria-label="Printer model filters">
+        <FormField label="Manufacturer" className="flex-1 sm:flex-initial sm:min-w-[280px]">
+          <ManufacturerSelector
+            value={selectedManufacturerId}
+            onChange={handleManufacturerChange}
+            context={CatalogContext.Printers}
+            placeholder="All Manufacturers"
+            ariaLabel="Filter printer models by manufacturer"
+          />
+        </FormField>
+        <Toolbar.Spacer />
+        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Printer models catalog view" />
+      </Toolbar>
 
       {/* Helpful hint when no manufacturer selected */}
       {!selectedManufacturerId && (

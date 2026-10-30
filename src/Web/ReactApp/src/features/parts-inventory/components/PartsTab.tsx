@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Spinner, Toggle } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   EditIcon,
   DeleteIcon,
   MinusIcon,
-  SearchIcon,
   AlertIcon,
   PackageIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -66,39 +65,34 @@ export function PartsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="parts-filter" className="sr-only">
-            Search SKUs
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="parts-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by SKU, name, or description"
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-3">
+      <HeaderActions>
+        <Button
+          variant="primary"
+          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
+          onClick={() => setIsCreating(true)}
+        >
+          Add SKU
+        </Button>
+      </HeaderActions>
+      <Toolbar aria-label="SKU inventory filters">
+        <SearchField
+          id="parts-filter"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          onClear={() => setFilter('')}
+          label="Search SKUs"
+          placeholder="Filter by SKU, name, or description"
+        />
+        {/* Enlarge both clickable labels, not the switch track or thumb. */}
+        <div data-filter-hit-target="inactive-skus" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
           <Toggle
             checked={includeInactive}
             onChange={(event) => setIncludeInactive(event.target.checked)}
             label="Show inactive"
           />
-          <Button
-            variant="primary"
-            size="sm"
-            iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
-            onClick={() => setIsCreating(true)}
-          >
-            Add SKU
-          </Button>
         </div>
-      </div>
+        <Toolbar.Spacer />
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">

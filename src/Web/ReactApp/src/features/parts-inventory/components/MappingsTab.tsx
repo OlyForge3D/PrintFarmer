@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Select, Spinner } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Select, Spinner, HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   DeleteIcon,
-  SearchIcon,
   LayersIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
@@ -102,27 +101,25 @@ export function MappingsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="mappings-filter" className="sr-only">
-            Search mappings
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="mappings-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by SKU or file ID"
-            className="pl-8"
-          />
-        </div>
-        <div>
-          <label htmlFor="mappings-sku-filter" className="sr-only">
-            Filter by SKU
-          </label>
+      <HeaderActions>
+        <Button
+          variant="primary"
+          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
+          onClick={openCreate}
+        >
+          Add mapping
+        </Button>
+      </HeaderActions>
+      <Toolbar aria-label="Mapping filters">
+        <SearchField
+          id="mappings-filter"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          onClear={() => setFilter('')}
+          label="Search mappings"
+          placeholder="Filter by SKU or file ID"
+        />
+        <ToolbarField label="SKU" htmlFor="mappings-sku-filter">
           <Select
             id="mappings-sku-filter"
             value={skuFilter}
@@ -136,16 +133,8 @@ export function MappingsTab() {
               </option>
             ))}
           </Select>
-        </div>
-        <Button
-          variant="primary"
-          size="sm"
-          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
-          onClick={openCreate}
-        >
-          Add mapping
-        </Button>
-      </div>
+        </ToolbarField>
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">

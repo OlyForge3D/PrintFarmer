@@ -2,28 +2,21 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import {
-  FilterIcon,
-  RefreshIcon,
   ExternalLinkIcon,
   PackageIcon,
   EditIcon,
-  GridIcon,
-  ListIcon,
-  TableIcon,
   GearIcon,
   CloseIcon,
   DownloadIcon,
   UploadIcon,
   ArrowUpIcon,
   ArrowDownIcon,
-  ArrowLeftIcon,
-  ArrowRightIcon,
   PlusIcon,
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor } from '@/common/utils/colorFamilies';
 import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
-import { Button, Checkbox, Select, FileUpload } from '@/common/components/ui';
+import { Button, Checkbox, Select, FileUpload, HeaderActions, SearchField, SortControl, Toolbar, ToolbarField, ViewToggle, RefreshButton, Pagination } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
 import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatch';
@@ -565,9 +558,8 @@ export function SpoolsTab() {
       )}
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-pf-text-primary">Spools ({totalCount})</h2>
-        <div className="flex gap-2 items-center">
+        <HeaderActions>
           <Button
-            size="sm"
             variant="secondary"
             onClick={handleExportCsv}
             aria-label="Export spools to CSV"
@@ -576,8 +568,8 @@ export function SpoolsTab() {
             <DownloadIcon className="h-4 w-4 mr-1" />
           </Button>
           <Button
-            size="sm"
             variant="secondary"
+            aria-label="Import spools from CSV file"
             title="Import spools from CSV file"
             disabled={importCsvMutation.isPending}
             onClick={() => csvFileInputRef.current?.click()}
@@ -586,44 +578,14 @@ export function SpoolsTab() {
           </Button>
           <Button
             variant="primary"
-            size="sm"
+            aria-label="Add a new spool"
             title="Add a new spool"
             onClick={() => setIsAddOpen(true)}
           >
             <PlusIcon className="h-4 w-4 mr-1" />
           </Button>
-          <div className="flex rounded-sm overflow-hidden border border-pf-border">
-            <Button
-              variant={viewMode === 'cards' ? 'primary' : 'secondary'}
-              size="sm"
-              aria-label="Card view"
-              title="Card view"
-              onClick={() => setViewMode('cards')}
-            >
-              <GridIcon className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'compact' ? 'primary' : 'secondary'}
-              size="sm"
-              aria-label="Compact list view"
-              title="Compact list view"
-              onClick={() => setViewMode('compact')}
-            >
-              <ListIcon className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === 'table' ? 'primary' : 'secondary'}
-              size="sm"
-              aria-label="Table view"
-              title="Table view"
-              onClick={() => setViewMode('table')}
-            >
-              <TableIcon className="h-4 w-4" />
-            </Button>
-          </div>
           <div className="relative">
             <Button
-              size="sm"
               variant="secondary"
               aria-label="Configure columns"
               title="Configure columns"
@@ -692,16 +654,6 @@ export function SpoolsTab() {
               </div>
             )}
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={reload}
-            disabled={!spoolmanBaseUrl}
-            aria-label="Refresh spools"
-            title="Refresh spools"
-          >
-            <RefreshIcon className="h-4 w-4" />
-          </Button>
           {spoolmanBaseUrl && isSafeHttpUrl(spoolmanBaseUrl) && (
             <a
               // Re-validate the scheme immediately at the sink (in addition to
@@ -724,7 +676,7 @@ export function SpoolsTab() {
               <ExternalLinkIcon className="h-4 w-4" />
             </a>
           )}
-        </div>
+        </HeaderActions>
       </div>
 
       {spoolmanError && (
@@ -744,43 +696,39 @@ export function SpoolsTab() {
         </div>
       )}
 
+      {(spoolmanError || !(spools.length > 0 || totalCount > 0 || hasActiveSpoolFilters)) && (
+        <Toolbar aria-label="Spool view controls">
+          <Toolbar.Spacer />
+          <ViewToggle
+            value={viewMode}
+            onChange={setViewMode}
+            ariaLabel="Spool view"
+            options={[
+              { mode: 'cards', icon: 'grid', title: 'Card view' },
+              { mode: 'compact', icon: 'list', title: 'Compact list view' },
+              { mode: 'table', icon: 'table', title: 'Table view' },
+            ]}
+          />
+          <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />
+        </Toolbar>
+      )}
       {!spoolmanError && (spools.length > 0 || totalCount > 0 || hasActiveSpoolFilters) && (
         <>
           {/* Filters */}
-          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4" data-testid="spool-filters">
-            <div className="flex items-center gap-2 mb-3">
-              <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
-              <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
-              {hasActiveSpoolFilters && (
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  onClick={resetSpoolFilters}
-                  aria-label="Reset all filters"
-                  title="Reset all filters"
-                  iconLeft={<CloseIcon className="h-3 w-3" />}
-                >
-                  Reset
-                </Button>
-              )}
-            </div>
-            
-            <div className="flex flex-wrap gap-4 items-end">
-              <div className="flex flex-col gap-1">
-                <label htmlFor="spool-search" className="text-xs text-pf-text-secondary">Search</label>
-                <input
+          <Toolbar labelled aria-label="Spool filters" data-testid="spool-filters">
+              <ToolbarField label="Search" htmlFor="spool-search">
+                <SearchField
                   id="spool-search"
-                  type="search"
                   value={filters.search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Name, vendor, material..."
-                  className="w-56 px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-sm text-pf-text-primary placeholder:text-pf-text-secondary/60 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
-                  aria-label="Search spools"
+                  onClear={() => setSearch('')}
+                  label="Search spools"
+                  placeholder="Name, vendor, material…"
                 />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary">Material</label>
+              </ToolbarField>
+              <ToolbarField label="Material" htmlFor="spool-material">
                 <Select
+                  id="spool-material"
                   aria-label="Filter by material"
                   value={filters.material}
                   onChange={(e) => setMany({ material: e.target.value, page: 0 })}
@@ -791,11 +739,11 @@ export function SpoolsTab() {
                     <option key={material} value={material}>{material}</option>
                   ))}
                 </Select>
-              </div>
+              </ToolbarField>
               
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary">Vendor</label>
+              <ToolbarField label="Vendor" htmlFor="spool-vendor">
                 <Select
+                  id="spool-vendor"
                   aria-label="Filter by vendor"
                   value={filters.vendor}
                   onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
@@ -806,22 +754,24 @@ export function SpoolsTab() {
                     <option key={vendor} value={vendor}>{vendor}</option>
                   ))}
                 </Select>
-              </div>
+              </ToolbarField>
 
-              <div className="flex flex-col gap-1" title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
-                <label className={`text-xs ${isPaginated ? 'text-pf-text-secondary/40' : 'text-pf-text-secondary'}`}>Color</label>
+              <ToolbarField label="Color" htmlFor="spool-color" className={isPaginated ? 'opacity-60' : undefined}>
+                <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
                 <ColorFamilySelect
+                  id="spool-color"
                   value={isPaginated ? '' : filters.color}
                   onChange={(val) => setMany({ color: val, page: 0 })}
                   options={getColorFamilyOptions()}
                   placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
                   disabled={isPaginated}
                 />
-              </div>
+                </div>
+              </ToolbarField>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-pf-text-secondary">Location</label>
+              <ToolbarField label="Location" htmlFor="spool-location">
                 <Select
+                  id="spool-location"
                   aria-label="Filter by location"
                   value={filters.location}
                   onChange={(e) => setMany({ location: e.target.value, page: 0 })}
@@ -832,86 +782,29 @@ export function SpoolsTab() {
                     <option key={loc} value={loc}>{loc}</option>
                   ))}
                 </Select>
-              </div>
+              </ToolbarField>
 
               {(viewMode === 'cards' || viewMode === 'compact') && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-pf-text-secondary" htmlFor="sort-field">Sort</label>
-                  <div className="flex gap-1 items-center">
-                    <Select
-                      id="sort-field"
-                      aria-label="Sort field"
-                      value={sortField}
-                      onChange={e => setMany({ sortField: e.target.value, page: 0 })}
-                      className="w-40"
-                    >
+                <ToolbarField label="Sort" htmlFor="sort-field">
+                  <SortControl
+                    id="sort-field"
+                    aria-label="Sort by"
+                    value={sortField}
+                    direction={sortDir}
+                    onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
+                    onChange={e => setMany({ sortField: e.target.value, page: 0 })}
+                  >
                       <option value="id">ID</option>
                       <option value="vendor">Vendor</option>
                       <option value="material">Material</option>
                       <option value="remaining">Remaining (g)</option>
                       <option value="location">Location</option>
                       <option value="name">Name</option>
-                    </Select>
-                    <Button
-                      size="sm"
-                      variant="subtle"
-                      aria-label="Toggle sort direction"
-                      onClick={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
-                      iconLeft={sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />}
-                    />
-                  </div>
-                </div>
+                  </SortControl>
+                </ToolbarField>
               )}
 
-              <div className="ml-auto flex flex-wrap gap-2 items-center text-sm">
-                <div className="flex items-center gap-1.5">
-                  <label htmlFor="spool-page-size" className="text-xs text-pf-text-secondary">Show</label>
-                  <Select
-                    id="spool-page-size"
-                    aria-label="Page size"
-                    value={String(filters.pageSize)}
-                    onChange={(e) => setMany({ pageSize: parseInt(e.target.value), page: 0 })}
-                    className="w-20"
-                  >
-                    <option value="10">10</option>
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                  </Select>
-                </div>
-                <span className="text-pf-text-secondary">
-                  {totalCount > 0
-                    // showEmpty=false filters client-side; show actual displayed vs page count
-                    ? !filters.showEmpty && displayedSpools.length < spools.length
-                      ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
-                      : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
-                    : '0 results'}
-                </span>
-
-                {/* Pagination controls */}
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    disabled={clampedPage === 0}
-                    onClick={() => setMany({ page: Math.max(0, clampedPage - 1) })}
-                    aria-label="Previous page"
-                    iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
-                  />
-                  <span className="text-xs text-pf-text-secondary px-1">
-                    Page {clampedPage + 1} of {totalPages}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    disabled={clampedPage >= totalPages - 1}
-                    onClick={() => setMany({ page: Math.min(totalPages - 1, clampedPage + 1) })}
-                    aria-label="Next page"
-                    iconLeft={<ArrowRightIcon className="h-3 w-3" />}
-                  />
-                </div>
-                
-                <label className="flex items-center gap-1 text-xs cursor-pointer">
+                <label data-filter-hit-target="empty-spools" className="flex min-h-[var(--pf-control-h-md)] items-center gap-1 text-xs cursor-pointer">
                   <Checkbox
                     aria-label="Show empty spools"
                     checked={filters.showEmpty}
@@ -919,9 +812,47 @@ export function SpoolsTab() {
                   />
                   Show empty
                 </label>
-              </div>
-            </div>
-          </div>
+              {hasActiveSpoolFilters && (
+                <Button
+                  variant="subtle"
+                  control
+                  onClick={resetSpoolFilters}
+                  aria-label="Reset all filters"
+                  title="Reset all filters"
+                  iconLeft={<CloseIcon className="h-3 w-3" />}
+                >
+                  Reset
+                </Button>
+              )}
+              <span className="text-sm text-pf-text-secondary">
+                {totalCount > 0
+                  ? !filters.showEmpty && displayedSpools.length < spools.length
+                    ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
+                    : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
+                  : '0 results'}
+              </span>
+              <Toolbar.Spacer />
+              <ViewToggle
+                value={viewMode}
+                onChange={setViewMode}
+                ariaLabel="Spool view"
+                options={[
+                  { mode: 'cards', icon: 'grid', title: 'Card view' },
+                  { mode: 'compact', icon: 'list', title: 'Compact list view' },
+                  { mode: 'table', icon: 'table', title: 'Table view' },
+                ]}
+              />
+              <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />
+          </Toolbar>
+          <Pagination
+            page={clampedPage + 1}
+            totalPages={totalPages}
+            onPageChange={(page) => setMany({ page: page - 1 })}
+            pageSize={filters.pageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            onPageSizeChange={(pageSize) => setMany({ pageSize, page: 0 })}
+            disabled={loading}
+          />
 
           {viewMode === 'cards' && (
             <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">

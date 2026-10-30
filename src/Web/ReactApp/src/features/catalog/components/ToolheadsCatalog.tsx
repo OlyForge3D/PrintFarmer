@@ -10,6 +10,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
+import { HeaderActions, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type ToolheadModelCardData } from '@/common/components/ComponentModelCard';
@@ -342,18 +343,20 @@ export function ToolheadsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Toolhead Models ({cards.length})
         </h2>
-        <div className="flex items-center gap-2">
+        <HeaderActions>
           <Button 
             onClick={handleAddClick} 
-            size="sm"
             title="Add new toolhead model"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
+        </HeaderActions>
       </div>
+      <Toolbar aria-label="Toolhead catalog controls">
+        <Toolbar.Spacer />
+        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Toolhead catalog view" />
+      </Toolbar>
 
       {/* Grid or Table view of toolhead cards */}
       {cards.length === 0 ? (

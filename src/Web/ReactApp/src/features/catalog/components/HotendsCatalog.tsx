@@ -11,6 +11,7 @@ import {
   ViewToggle,
   gridTableOptions,
 } from '@/common/components/ui';
+import { HeaderActions, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type HotendModelCardData } from '@/common/components/ComponentModelCard';
@@ -306,18 +307,20 @@ export function HotendsCatalog() {
         <h2 className="text-lg font-semibold text-pf-text-primary">
           Hotend Models ({cards.length})
         </h2>
-        <div className="flex items-center gap-2">
+        <HeaderActions>
           <Button 
             onClick={handleAddClick}
             title="Add new hotend model"
-            size="sm"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
+        </HeaderActions>
       </div>
+      <Toolbar aria-label="Hotend catalog controls">
+        <Toolbar.Spacer />
+        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Hotend catalog view" />
+      </Toolbar>
 
       {/* Grid or Table view of hotend cards */}
       {cards.length === 0 ? (

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Button, Input, Select, FormField, Card, Spinner, Badge } from '@/common/components/ui';
+import { Button, Input, Select, FormField, Card, Spinner, Badge, HeaderActions } from '@/common/components/ui';
 import { PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import type {
@@ -116,21 +116,22 @@ export function MaterialClustersTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-64">
           <p className="text-sm text-pf-text-secondary">
             Group equivalent materials from different vendors so auto-dispatch can pick the right spool
             when an exact match is unavailable.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          iconLeft={<PlusIcon className="h-4 w-4" />}
-          onClick={() => setShowCreateForm(true)}
-        >
-          New Cluster
-        </Button>
+        <HeaderActions>
+          <Button
+            variant="primary"
+            iconLeft={<PlusIcon className="h-4 w-4" />}
+            onClick={() => setShowCreateForm(true)}
+          >
+            New Cluster
+          </Button>
+        </HeaderActions>
       </div>
 
       {showCreateForm && (

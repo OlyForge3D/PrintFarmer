@@ -1,9 +1,7 @@
 import { Fragment, ReactNode } from 'react';
-import clsx from 'clsx';
-import { Button, FormField, Input, Select } from '@/common/components/ui';
+import { SearchField, SortControl, Toolbar, ToolbarField } from '@/common/components/ui';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
 import { type SortOrder, type ViewMode } from '../types';
-import { FILE_TOOLBAR_CONTROL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 interface FileBrowserToolbarProps {
   search: string;
@@ -33,56 +31,45 @@ export const FileBrowserToolbar = ({
   extraActions,
 }: FileBrowserToolbarProps) => {
   return (
-    <div className={clsx('flex flex-col gap-3 lg:flex-row lg:items-end', FILE_TOOLBAR_CONTROL_CLASS)} data-tour="gcode-toolbar">
-      <FormField label="Search" htmlFor="file-browser-search" className="flex-1 min-w-0">
-        <Input
+    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar">
+      <ToolbarField label="Search" htmlFor="file-browser-search" className="min-w-0 flex-1">
+        <SearchField
           id="file-browser-search"
-          type="search"
+          label="Search"
           value={search}
-          placeholder="Search files"
-          aria-label="Search"
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="min-w-[16rem]"
+          placeholder="Search files…"
+          onChange={(event) => onSearchChange(event.target.value)}
+          onClear={() => onSearchChange('')}
         />
-      </FormField>
+      </ToolbarField>
 
       {filterActions && (
-        <div className="flex flex-wrap items-end gap-2" role="group" aria-label="File filters">
+        <Toolbar.Group aria-label="File filters">
           {filterActions}
-        </div>
+        </Toolbar.Group>
       )}
 
-      <div className="flex flex-wrap items-end justify-end gap-2 lg:flex-nowrap">
-        <FormField label="Sort" htmlFor="file-browser-sort">
-          <Select
-            id="file-browser-sort"
-            aria-label="Sort files"
-            value={sortBy}
-            onChange={(e) => onSortChange(e.target.value)}
-            className="min-w-28"
-          >
+      <ToolbarField label="Sort" htmlFor="file-browser-sort">
+        <SortControl
+          id="file-browser-sort"
+          aria-label="Sort by"
+          value={sortBy}
+          onChange={(event) => onSortChange(event.target.value)}
+          direction={sortOrder}
+          onDirectionChange={onToggleSortOrder}
+        >
             {sortOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </Select>
-        </FormField>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          aria-label={sortOrder === 'asc' ? 'Sort descending' : 'Sort ascending'}
-          className="h-10 w-10 p-2"
-          onClick={onToggleSortOrder}
-        >
-          {sortOrder === 'asc' ? '↑' : '↓'}
-        </Button>
+        </SortControl>
+      </ToolbarField>
 
-        {extraActions && <Fragment>{extraActions}</Fragment>}
+      <Toolbar.Spacer />
 
-        <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} flush />
-      </div>
-    </div>
+      <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
+      {extraActions && <Toolbar.Group><Fragment>{extraActions}</Fragment></Toolbar.Group>}
+    </Toolbar>
   );
 };

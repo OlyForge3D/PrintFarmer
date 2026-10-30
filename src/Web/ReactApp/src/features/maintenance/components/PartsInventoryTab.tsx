@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import clsx from 'clsx';
 import { Badge, Button } from '@/common/components/ui';
 import { FileUpload } from '@/common/components/ui/FileUpload';
+import { HeaderActions, SearchField, Toolbar, ToolbarField, ViewToggle } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -20,15 +21,12 @@ import {
   PlusIcon,
   EditIcon,
   DeleteIcon,
-  SearchIcon,
   AlertIcon,
   GearIcon,
   ExternalLinkIcon,
   DownloadIcon,
   UploadIcon,
   CopyIcon,
-  GridViewIcon,
-  ListViewIcon,
   MinusIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
@@ -360,65 +358,43 @@ export function PartsInventoryTab() {
 
   return (
     <>
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <div className="relative flex-1 w-full sm:max-w-sm">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search parts..."
-            className="pl-9 w-full"
-            aria-label="Search parts inventory"
-          />
-        </div>
-        <Select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          containerClassName="w-full sm:w-48"
-        >
-          <option value="">All Categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </Select>
+      <HeaderActions>
         <Button
           variant="primary"
-          size="sm"
           onClick={() => { setEditingComponent(null); setCloneSource(null); setIsFormOpen(true); }}
           iconLeft={<PlusIcon className="h-4 w-4" />}
-          className="shrink-0"
         >
           Add Part
         </Button>
-        <div className="flex items-center border border-pf-border rounded-md overflow-hidden shrink-0">
-          <Button
-            variant={viewMode === 'cards' ? 'primary' : 'subtle'}
-            size="sm"
-            onClick={() => setViewMode('cards')}
-            aria-label="Card view"
-            className="rounded-none border-0"
+        <Button variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+      </HeaderActions>
+      <Toolbar aria-label="Maintenance inventory filters">
+        <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search parts inventory" placeholder="Search parts…" />
+        <ToolbarField label="Category" htmlFor="maintenance-inventory-category">
+          <Select
+            id="maintenance-inventory-category"
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="Filter by category"
+            containerClassName="w-full sm:w-48"
           >
-            <GridViewIcon className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === 'table' ? 'primary' : 'subtle'}
-            size="sm"
-            onClick={() => setViewMode('table')}
-            aria-label="Table view"
-            className="rounded-none border-0"
-          >
-            <ListViewIcon className="h-4 w-4" />
-          </Button>
-        </div>
-        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
-          Export
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
-          Import
-        </Button>
-        <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
-      </div>
+            <option value="">All Categories</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </ToolbarField>
+        <Toolbar.Spacer />
+        <ViewToggle
+          value={viewMode}
+          onChange={setViewMode}
+          ariaLabel="Maintenance inventory view"
+          options={[
+            { mode: 'cards', icon: 'grid', title: 'Card view' },
+            { mode: 'table', icon: 'table', title: 'Table view' },
+          ]}
+        />
+      </Toolbar>
+      <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
 
       {/* Summary */}
       <p className="text-sm text-pf-text-tertiary mb-4">

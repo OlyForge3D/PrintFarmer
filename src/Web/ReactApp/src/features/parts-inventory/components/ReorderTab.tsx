@@ -1,8 +1,7 @@
-import { Badge, Button, EmptyState, Spinner } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, RefreshButton, Toolbar } from '@/common/components/ui';
 import {
   AlertIcon,
   CheckCircleIcon,
-  RefreshIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useReorderCandidates } from '../hooks/usePartsInventory';
 
@@ -56,7 +55,7 @@ export function ReorderTab({ onOpenSkusTab }: ReorderTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <Toolbar aria-label="Reorder controls">
         <div>
           <h3 className="text-sm font-medium">
             {candidates.length} SKU{candidates.length === 1 ? '' : 's'} need attention
@@ -65,16 +64,9 @@ export function ReorderTab({ onOpenSkusTab }: ReorderTabProps) {
             SKUs at or below their reorder point.
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          iconLeft={<RefreshIcon className="w-4 h-4" ariaLabel="Refresh" />}
-          onClick={() => refetch()}
-          loading={isFetching}
-        >
-          Refresh
-        </Button>
-      </div>
+        <Toolbar.Spacer />
+        <RefreshButton busy={isFetching} onClick={() => refetch()} aria-label="Refresh reorder suggestions" />
+      </Toolbar>
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">

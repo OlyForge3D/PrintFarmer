@@ -28,6 +28,7 @@ import {
   TableRow,
   Textarea,
   Toggle,
+  HeaderActions,
 } from '@/common/components/ui';
 import {
   AlertIcon,
@@ -472,9 +473,11 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       icon={ShieldIcon}
       embedded={embedded}
       actions={
-        <Button variant="primary" onClick={openCreateModal} iconLeft={<PlusIcon className="w-4 h-4" />}>
-          New role
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button variant="primary" onClick={openCreateModal} iconLeft={<PlusIcon className="w-4 h-4" />}>
+            New role
+          </Button>
+        </HeaderActions>
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-6">

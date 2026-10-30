@@ -5,7 +5,7 @@ import { DeleteIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, Refres
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, Input, FormField, Tabs, TagChip } from '@/common/components/ui';
+import { Button, HeaderActions, Input, FormField, Tabs, TagChip } from '@/common/components/ui';
 import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
 import {
     AdminEmpty,
@@ -516,6 +516,22 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             subtitle="Create, manage, and analyze 3D model tags"
             icon={TagIcon}
             embedded={embedded}
+            actions={activeTab === 'management' ? (
+                <HeaderActions className="justify-end mb-0">
+                    <Button
+                        variant="primary"
+                        data-testid="add-tag-action"
+                        iconLeft={<PlusIcon className="w-4 h-4" />}
+                        onClick={() => {
+                            createForm.markPristine({ name: '', color: nextTagColor, description: '' });
+                            setShowNewTagForm(true);
+                        }}
+                        title="Add new tag (A)"
+                    >
+                        <kbd className="px-1 py-0.5 text-xs font-mono bg-pf-bg-0/20 rounded-sm">A</kbd>dd Tag
+                    </Button>
+                </HeaderActions>
+            ) : undefined}
         >
             <Tabs defaultTab="management" activeTab={activeTab} onTabChange={(tabId) => setActiveTab(tabId as 'management' | 'analytics')}>
                 <Tabs.List>
@@ -525,24 +541,9 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 <Tabs.Panels>
                     <Tabs.Panel id="management">
                         <div className="space-y-6">
-                            {/* Add Tag Button */}
-                            <div className="flex justify-between items-center">
-                                <p className="text-sm text-pf-text-secondary">
-                                    {tags.length} tag{tags.length !== 1 ? 's' : ''} in your library
-                                </p>
-                                <Button
-                                    variant="primary"
-                                    data-testid="add-tag-action"
-                                    iconLeft={<PlusIcon className="w-4 h-4" />}
-                                    onClick={() => {
-                                        createForm.markPristine({ name: '', color: nextTagColor, description: '' });
-                                        setShowNewTagForm(true);
-                                    }}
-                                    title="Add new tag (A)"
-                                >
-                                    <kbd className="px-1 py-0.5 text-xs font-mono bg-pf-bg-0/20 rounded-sm">A</kbd>dd Tag
-                                </Button>
-                            </div>
+                            <p className="text-sm text-pf-text-secondary">
+                                {tags.length} tag{tags.length !== 1 ? 's' : ''} in your library
+                            </p>
 
                 {/* Tags List */}
                 <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">

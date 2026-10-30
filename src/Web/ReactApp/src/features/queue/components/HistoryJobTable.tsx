@@ -261,7 +261,7 @@ export default function HistoryJobTable({
                           title="Rerun this job"
                           aria-label={`Rerun ${job.name}`}
                         >
-                          ↻
+                          <ControlIcon path={mdiRestart} />
                         </Button>
                       )}
                       {onViewDetails && (
@@ -272,7 +272,7 @@ export default function HistoryJobTable({
                           className="px-2 py-1 text-xs"
                           title="View details"
                         >
-                          →
+                          <ControlIcon path={mdiArrowRight} />
                         </Button>
                       )}
                     </div>
@@ -286,3 +286,5 @@ export default function HistoryJobTable({
     </div>
   );
 }
+import { mdiRestart, mdiArrowRight } from '@mdi/js';
+import { ControlIcon } from '@/common/components/ui/toolbar';

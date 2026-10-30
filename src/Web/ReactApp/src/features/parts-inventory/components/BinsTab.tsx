@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Spinner, Toggle } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   EditIcon,
   DeleteIcon,
-  SearchIcon,
   DatabaseIcon,
   BarcodeScanIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -57,47 +56,41 @@ export function BinsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="bins-filter" className="sr-only">
-            Search bins
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="bins-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by code, name, location, or notes"
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-3">
+      <HeaderActions>
+        <Button
+          variant="secondary"
+          iconLeft={<BarcodeScanIcon className="w-4 h-4" ariaLabel="Scan" />}
+          onClick={() => setIsRegistering(true)}
+        >
+          Register barcode
+        </Button>
+        <Button
+          variant="primary"
+          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
+          onClick={() => setIsCreating(true)}
+        >
+          Add bin
+        </Button>
+      </HeaderActions>
+      <Toolbar aria-label="Bin inventory filters">
+        <SearchField
+          id="bins-filter"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          onClear={() => setFilter('')}
+          label="Search bins"
+          placeholder="Filter by code, name, location, or notes"
+        />
+        {/* Keep the thumb positioned against its track as the label target grows. */}
+        <div data-filter-hit-target="inactive-bins" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
           <Toggle
             checked={includeInactive}
             onChange={(event) => setIncludeInactive(event.target.checked)}
             label="Show inactive"
           />
-          <Button
-            variant="secondary"
-            size="sm"
-            iconLeft={<BarcodeScanIcon className="w-4 h-4" ariaLabel="Scan" />}
-            onClick={() => setIsRegistering(true)}
-          >
-            Register barcode
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
-            onClick={() => setIsCreating(true)}
-          >
-            Add bin
-          </Button>
         </div>
-      </div>
+        <Toolbar.Spacer />
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">

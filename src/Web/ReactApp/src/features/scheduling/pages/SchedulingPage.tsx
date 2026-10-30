@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { CalendarIcon, PlusIcon, PauseIcon, PlayIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Card, Badge, Spinner, DataTable } from '@/common/components/ui';
+import { Button, Card, Badge, DataTable, HeaderActions, Spinner } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } from '@/common/hooks/useApi';
 import { MonthCalendar } from '../components/MonthCalendar';
@@ -181,13 +181,15 @@ export function SchedulingPage() {
       subtitle="Schedule print jobs and manage recurring tasks"
       icon={CalendarIcon}
       actions={
-        <Button
-          variant="primary"
-          iconLeft={<PlusIcon />}
-          onClick={() => setIsScheduleModalOpen(true)}
-        >
-          Schedule Job
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button
+            variant="primary"
+            iconLeft={<PlusIcon />}
+            onClick={() => setIsScheduleModalOpen(true)}
+          >
+            Schedule Job
+          </Button>
+        </HeaderActions>
       }
     >
       <div className="space-y-6">

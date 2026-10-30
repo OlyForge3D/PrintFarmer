@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Badge, Button } from '@/common/components/ui';
 import { FileUpload } from '@/common/components/ui/FileUpload';
+import { HeaderActions, SearchField, Toolbar } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -22,7 +23,6 @@ import {
   DeleteIcon,
   PlusIcon,
   GearIcon,
-  SearchIcon,
   ClockIcon,
   AlertIcon,
   ChevronRightIcon,
@@ -725,35 +725,17 @@ export function MaintenancePlansTab() {
 
   return (
     <>
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <div className="relative flex-1 w-full sm:max-w-sm">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-pf-text-tertiary" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search plans or tasks..."
-            className="pl-9 w-full"
-            aria-label="Search maintenance plans"
-          />
-        </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => { setEditingPlan(null); setCloneSource(null); setIsPlanFormOpen(true); }}
-          iconLeft={<PlusIcon className="h-4 w-4" />}
-          className="shrink-0"
-        >
+      <HeaderActions>
+        <Button variant="primary" onClick={() => { setEditingPlan(null); setCloneSource(null); setIsPlanFormOpen(true); }} iconLeft={<PlusIcon className="h-4 w-4" />}>
           New Plan
         </Button>
-        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
-          Export
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
-          Import
-        </Button>
+        <Button variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+      </HeaderActions>
+      <Toolbar aria-label="Maintenance plan filters">
+        <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search maintenance plans" placeholder="Search plans or tasks…" />
         <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
-      </div>
+      </Toolbar>
 
       {/* Summary */}
       <p className="text-sm text-pf-text-tertiary mb-4">
@@ -816,5 +798,3 @@ export function MaintenancePlansTab() {
     </>
   );
 }
-
-

@@ -3,7 +3,7 @@ import { Card } from '@/common/components/ui/Card';
 import { DataTable } from '@/common/components/ui/DataTable';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { Tabs } from '@/common/components/ui/Tabs';
-import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
+import { TimePeriodFilter, Toolbar } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -127,8 +127,10 @@ export const CostDashboardPage: React.FC = () => {
       title="Cost Analytics"
       subtitle="Track print job costs and analyze spending patterns"
       icon={TrendingUpIcon}
-      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
     >
+      <Toolbar aria-label="Cost analytics filters">
+        <TimePeriodFilter value={period} onChange={setPeriod} />
+      </Toolbar>
       <CostDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );
@@ -245,4 +247,3 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
     )}
   </Card>
 );
-

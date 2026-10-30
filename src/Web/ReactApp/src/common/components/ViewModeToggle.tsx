@@ -1,6 +1,6 @@
 import { 
   mdiViewList, 
-  mdiViewGrid, 
+  mdiTable,
   mdiViewComfy, 
 } from '@mdi/js';
 import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
@@ -21,7 +21,7 @@ interface ViewModeToggleProps {
 const coreViewModes: ViewModeOption<ViewMode>[] = [
   { mode: 'collapsed', icon: mdiViewList, title: 'Collapsed Card View' },
   { mode: 'detailed', icon: mdiViewComfy, title: 'Detailed Cards' },
-  { mode: 'table', icon: mdiViewGrid, title: 'Table View' },
+  { mode: 'table', icon: mdiTable, title: 'Table View' },
 ];
 
 /**
@@ -31,15 +31,12 @@ const coreViewModes: ViewModeOption<ViewMode>[] = [
  */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
   return (
-    <div className="flex flex-col gap-1">
       <ViewToggle
         value={viewMode}
         onChange={onChange}
         options={coreViewModes}
         size="md"
-        className="p-1"
         ariaLabel="Core view modes"
       />
-    </div>
   );
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/common/components/ui/Button';
+import { FilterChip } from '@/common/components/ui/toolbar';
 import { Input } from '@/common/components/ui/Input';
 import { TIME_PERIOD_OPTIONS, type TimePeriodOption, type TimePeriodFilterValue } from './timePeriodOptions';
 
@@ -46,38 +46,26 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Time period filter">
+    <div className="pf-inline-form" role="group" aria-label="Time period filter">
       {options.map((opt) => (
-        <Button
-          variant="unstyled"
+        <FilterChip
           key={opt.label}
           onClick={() => onChange({ type: 'preset', days: opt.value })}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            !isCustom && presetDays === opt.value
-              ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
-              : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-bg-2'
-          }`}
-          aria-pressed={!isCustom && presetDays === opt.value}
+          selected={!isCustom && presetDays === opt.value}
         >
           {opt.label}
-        </Button>
+        </FilterChip>
       ))}
       {allowCustom && (
         <>
-          <Button
-            variant="unstyled"
+          <FilterChip
             onClick={handleCustomToggle}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              isCustom
-                ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
-                : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-bg-2'
-            }`}
-            aria-pressed={isCustom}
+            selected={isCustom}
           >
             Custom
-          </Button>
+          </FilterChip>
           {isCustom && (
-            <div className="flex items-center gap-2 ml-2">
+            <div className="pf-toolbar__group">
               <Input
                 type="date"
                 value={startDate}

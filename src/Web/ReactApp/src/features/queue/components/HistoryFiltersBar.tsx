@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
+import { Toolbar, FilterButton, RefreshButton, ViewToggle, ControlIcon } from "@/common/components/ui";
+import { mdiCheck, mdiClose, mdiCircleOutline } from '@mdi/js';
 
 interface HistoryFiltersBarProps {
   selectedStatuses: string[];
@@ -59,88 +61,43 @@ export default function HistoryFiltersBar({
   return (
     <div className="bg-pf-bg-1 border border-pf-border rounded-lg">
       {/* Collapsed Header - Always Visible */}
-      <div className="p-3 flex items-center justify-between gap-4">
-        <Button
+      <Toolbar aria-label="History controls" className="p-3">
+        <FilterButton expanded={isExpanded} count={selectedStatuses.length === 3 ? 0 : selectedStatuses.length}
           onClick={() => setIsExpanded(!isExpanded)}
           variant="ghost"
-          className="flex items-center gap-2 text-left flex-1 min-w-0 justify-start px-0 hover:bg-transparent"
-          aria-expanded={isExpanded}
+          className="flex items-center gap-2 text-left flex-[1_1_14rem] min-w-0 justify-start px-0 hover:bg-transparent"
           aria-controls="filter-content"
         >
-          <span className="text-pf-text-secondary transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-            ▶
+          <span className="inline-flex items-center gap-2 min-w-0">
+            <span className="text-sm font-medium text-pf-text-primary">Filters</span>
+            <span className="text-xs text-pf-text-secondary truncate">{getFilterSummary()}</span>
           </span>
-          <span className="text-sm font-medium text-pf-text-primary">Filters</span>
-          <span className="text-xs text-pf-text-secondary truncate">{getFilterSummary()}</span>
-        </Button>
-        
-        {/* Quick actions always visible */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* View Toggle */}
-          <div
-            className="hidden sm:flex rounded-sm border border-pf-border overflow-hidden shrink-0"
-            role="group"
-            aria-label="History view mode"
-          >
-            <Button
-              onClick={() => onViewModeChange("cards")}
-              variant="ghost"
-              size="sm"
-              aria-pressed={viewMode === "cards"}
-              aria-label="Card view"
-              className={`px-2 py-1 text-xs rounded-none ${
-                viewMode === "cards"
-                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
-                  : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
-              }`}
-              title="Card view"
-            >
-              <span aria-hidden="true">▦</span>
-            </Button>
-            <Button
-              onClick={() => onViewModeChange("table")}
-              variant="ghost"
-              size="sm"
-              aria-pressed={viewMode === "table"}
-              aria-label="Table view"
-              className={`px-2 py-1 text-xs rounded-none ${
-                viewMode === "table"
-                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
-                  : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
-              }`}
-              title="Table view"
-            >
-              <span aria-hidden="true">☰</span>
-            </Button>
-          </div>
+        </FilterButton>
           <Select
             value={sortBy}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
-            className="text-xs py-1 px-2 w-auto shrink-0"
-            aria-label="Sort history jobs"
+            containerClassName="w-auto"
+            aria-label="Sort by"
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
             <option value="duration">Duration</option>
             <option value="model">Model</option>
           </Select>
-          <Button
-            onClick={onRefresh}
-            disabled={isLoading}
-            variant="secondary"
-            size="sm"
-            className="px-3 py-1 text-xs"
-          >
-            {isLoading ? "..." : "↻"}
-          </Button>
-        </div>
-      </div>
+          <Toolbar.Spacer />
+          <ViewToggle value={viewMode} onChange={onViewModeChange} className="pf-view-toggle--desktop"
+            ariaLabel="History view mode" options={[
+              { mode: 'cards', icon: 'grid', title: 'Card view' },
+              { mode: 'table', icon: 'table', title: 'Table view' },
+            ]} />
+          <RefreshButton onClick={onRefresh} busy={isLoading} />
+      </Toolbar>
 
       {/* Expandable Content */}
       {isExpanded && (
-        <div id="filter-content" className="px-3 pb-3 pt-0 border-t border-pf-border space-y-3">
+        <div id="filter-content" className="pf-inline-form px-3 pb-3 pt-0 border-t border-pf-border space-y-3">
           <div className="pt-3">
             {/* Status Filter */}
             <div>
@@ -174,17 +131,17 @@ export default function HistoryFiltersBar({
                   >
                     {status === "completed" && (
                       <>
-                        <span aria-hidden="true">✓</span> Done
+                        <span className="inline-flex items-center gap-1"><ControlIcon path={mdiCheck} /> Done</span>
                       </>
                     )}
                     {status === "failed" && (
                       <>
-                        <span aria-hidden="true">✗</span> Failed
+                        <span className="inline-flex items-center gap-1"><ControlIcon path={mdiClose} /> Failed</span>
                       </>
                     )}
                     {status === "cancelled" && (
                       <>
-                        <span aria-hidden="true">◯</span> Cancelled
+                        <span className="inline-flex items-center gap-1"><ControlIcon path={mdiCircleOutline} /> Cancelled</span>
                       </>
                     )}
                   </Button>
