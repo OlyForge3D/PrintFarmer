@@ -131,7 +131,7 @@ export function LocalLibraryFolders({
       <div id={controls?.id} hidden={controls ? !controls.expanded : false}>
         <Toolbar aria-label="Folder controls" labelled className="mb-0">
           <ToolbarField label="Folder" htmlFor={`${id}-folder`} className="min-w-0">
-            <Select id={`${id}-folder`} containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
+            <Select id={`${id}-folder`} className="pf-control py-0" containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
               <option value="">All folders</option>
               {folderOptions}
             </Select>

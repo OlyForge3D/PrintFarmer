@@ -41,6 +41,17 @@ async function mountFilesPage(page: Page, source: 'local' | 'printers', mode: 'g
 }
 
 async function expectUniformControls(toolbar: Locator, alignBottom: boolean) {
+  const toggle = toolbar.getByTitle('Grid view').locator('..');
+  if (await toggle.count()) {
+    const radii = await toggle.evaluate(element => Array.from(element.children, child => {
+      const style = getComputedStyle(child);
+      return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius];
+    }));
+    expect(radii).toEqual([
+      ['2px', '0px', '2px', '0px'],
+      ['0px', '2px', '0px', '2px'],
+    ]);
+  }
   const controls = toolbar.locator('input:not([type=checkbox]), select, button');
   const { expectedHeight, dimensions } = await controls.evaluateAll(elements => {
     const root = document.documentElement;
@@ -68,17 +79,8 @@ async function expectUniformControls(toolbar: Locator, alignBottom: boolean) {
       if (peers.length > 1) expect(control.bottom, `${control.name} bottom edge`).toBe(peers[0].bottom);
     }
   }
-  const toggle = toolbar.getByTitle('Grid view').locator('..');
   if (await toggle.count()) {
     expect((await toggle.boundingBox())?.height, 'view-toggle wrapper height').toBeCloseTo(expectedHeight, 1);
-    const radii = await toggle.evaluate(element => Array.from(element.children, child => {
-      const style = getComputedStyle(child);
-      return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius];
-    }));
-    expect(radii).toEqual([
-      ['2px', '0px', '2px', '0px'],
-      ['0px', '2px', '0px', '2px'],
-    ]);
   }
 }
 
@@ -92,10 +94,14 @@ for (const width of [390, 1440]) {
         if (source === 'printers') {
           const toolbar = page.getByRole('group', { name: 'Printer file controls' });
           await expect(toolbar.getByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
-          await expectUniformControls(toolbar, width === 1440);
           const search = toolbar.getByRole('searchbox', { name: 'Search' });
           await expect(toolbar.locator('input, select, button').first()).toHaveAttribute('id', 'catalog-search');
           await search.focus();
+          expect(await search.evaluate(element => {
+            const style = getComputedStyle(element);
+            return [style.paddingInlineStart, style.paddingInlineEnd];
+          })).toEqual(['32px', '44px']);
+          await expectUniformControls(toolbar, width === 1440);
           await page.keyboard.press('Tab');
           await expect(toolbar.getByRole('combobox', { name: 'Printer' })).toBeFocused();
           if (mode === 'grid') {

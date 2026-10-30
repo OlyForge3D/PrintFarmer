@@ -349,7 +349,7 @@ export function PrinterFileCatalog() {
         </ToolbarField>
         <Toolbar.Group>
           <ToolbarField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
-            <Select id="catalog-printer" data-role="field" className="pf-control" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
+            <Select id="catalog-printer" data-role="field" className="pf-control py-0" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
             <option value="">All</option>
             {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
             </Select>

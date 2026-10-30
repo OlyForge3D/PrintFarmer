@@ -740,7 +740,7 @@ export function FilesPage() {
 
   const fileTypeFilter = (
     <ToolbarField label="Type" htmlFor="local-library-type">
-      <Select id="local-library-type" value={selectedFilter} className="min-w-32"
+      <Select id="local-library-type" value={selectedFilter} className="pf-control py-0 min-w-32"
         onChange={event => {
           const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
           if (option) handleFilterChange(option.value);

@@ -321,8 +321,23 @@ export function AutoDispatchDashboardPage() {
                   variant="unstyled"
                   role="radio"
                   aria-checked={stateFilter === key}
+                  tabIndex={stateFilter === key ? 0 : -1}
                   data-role="button"
                   onClick={() => setStateFilter(key)}
+                  onKeyDown={event => {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    event.preventDefault();
+                    const radios = Array.from(
+                      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
+                    );
+                    const currentIndex = radios.indexOf(event.currentTarget);
+                    const offset = event.key === 'ArrowRight' ? 1 : -1;
+                    const nextRadio = radios[(currentIndex + offset + radios.length) % radios.length];
+                    if (nextRadio) {
+                      nextRadio.focus();
+                      nextRadio.click();
+                    }
+                  }}
                   className={clsx(
                     'pf-control text-sm font-bold transition-all border',
                     stateFilter === key

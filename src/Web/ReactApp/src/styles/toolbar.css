@@ -60,12 +60,9 @@
   .pf-control--icon[data-size="lg"] { inline-size: var(--pf-control-h-lg); }
   .pf-control[data-role="button"] { border-radius: 2px; }
   .pf-control[data-role="field"] { border-radius: 4px; }
-  .pf-toolbar__group.pf-toolbar__group--segmented > button[data-pf-button] { border-radius: 0; }
-  .pf-toolbar__group--segmented > button[data-pf-button]:first-child { border-start-start-radius: 2px; border-end-start-radius: 2px; }
-  .pf-toolbar__group--segmented > button[data-pf-button]:last-child { border-start-end-radius: 2px; border-end-end-radius: 2px; }
   .pf-search { position: relative; align-items: center; min-inline-size: 0; }
   .pf-search > svg { position: absolute; inset-inline-start: .625rem; pointer-events: none; }
-  .pf-search > input { padding-inline: 2rem 2.75rem; inline-size: 100%; }
+  .pf-search > input { inline-size: 100%; }
   .pf-search > input::-webkit-search-cancel-button { appearance: none; }
   .pf-search__clear { position: absolute; inset-inline-end: 0; }
   @media (width < 40rem) {
@@ -76,4 +73,10 @@
     .pf-toolbar__search { flex-basis: 100%; max-inline-size: none; }
     .pf-toolbar > :has(.pf-toolbar__search) { flex-basis: 100%; }
   }
+}
+
+@layer utilities {
+  .pf-toolbar__group.pf-toolbar__group--segmented > button[data-pf-button] { border-radius: 0; }
+  .pf-toolbar__group--segmented > button[data-pf-button]:first-child { border-start-start-radius: 2px; border-end-start-radius: 2px; }
+  .pf-toolbar__group--segmented > button[data-pf-button]:last-child { border-start-end-radius: 2px; border-end-end-radius: 2px; }
 }

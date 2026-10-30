@@ -25,7 +25,7 @@ export function SearchField({ value, onClear, label = 'Search', id, containerCla
     <ControlIcon path={mdiMagnify} />
     <Input {...props} ref={inputRef} id={fieldId} type="search" value={value}
       aria-label={props['aria-label'] ?? (props['aria-labelledby'] ? undefined : label)}
-      className={clsx('pf-control', className)} data-role="field" />
+      className={clsx('pf-control py-0 ps-8 pe-11', className)} data-role="field" />
     {value && <Button type="button" variant="ghost" control className="pf-control--icon pf-search__clear"
       aria-label="Clear search" title="Clear search" disabled={props.disabled} onClick={() => { onClear(); inputRef.current?.focus(); }}
       iconCenter={<ControlIcon path={mdiClose} />} />}
@@ -35,7 +35,7 @@ export function SearchField({ value, onClear, label = 'Search', id, containerCla
 export function SortSelect({ className, containerClassName, ...props }: SelectProps) {
   return <Select {...props} aria-label={props['aria-label'] ?? 'Sort by'}
     containerClassName={clsx('w-auto max-w-full', containerClassName)}
-    className={clsx('pf-control', className)} data-role="field" />;
+    className={clsx('pf-control py-0', className)} data-role="field" />;
 }
 
 export function SortDirectionButton({ direction, onClick, ...props }: Omit<ButtonProps, 'children' | 'onClick'> & {
