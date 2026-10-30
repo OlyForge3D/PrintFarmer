@@ -72,6 +72,12 @@ in the unit CI job. Retain the sibling `.events.jsonl` and `.timing.json` along 
 the `.xcresult` and text log. A forced stop returns 124 and may leave a partial
 bundle; the log/event stream remain usable. See the
 [timeout policy](docs/xcui-timeout-diagnosis.md#runner-finalization-policy-2583).
+For each `xcodebuild` child process, the runner appends
+`safe.bareRepository=all` to that process's Git-config environment. SwiftPM
+resolves packages from bare Git repository caches, which Git otherwise rejects
+when the caller's `safe.bareRepository` setting is `explicit`. Existing
+`GIT_CONFIG_*` entries are preserved, and the runner's own environment is not
+changed.
 
 ## Session Completion
 
