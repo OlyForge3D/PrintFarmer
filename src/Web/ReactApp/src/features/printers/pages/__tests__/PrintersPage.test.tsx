@@ -466,7 +466,7 @@ describe('PrintersPage', () => {
     const stripId = toggle.getAttribute('aria-controls')!;
     expect(document.getElementById(stripId)).not.toBeVisible();
     expect(screen.getAllByRole('combobox')).toHaveLength(1);
-    expect(screen.getByRole('combobox', { name: 'Sort printers by' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument();
 
     await user.tab();
@@ -491,7 +491,7 @@ describe('PrintersPage', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole('combobox', { name: 'Sort printers by' })).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveFocus();
   });
 
   it.each([
@@ -584,7 +584,7 @@ describe('PrintersPage', () => {
 
     const anchor = anchors[0];
     expect(anchor).toContainElement(screen.getByRole('button', { name: 'Printer filters' }));
-    expect(anchor).toContainElement(screen.getByLabelText('Sort printers by'));
+    expect(anchor).toContainElement(screen.getByLabelText('Sort by'));
     expect(anchor).not.toContainElement(container.querySelector('[data-tour="printers-actions"]') as HTMLElement);
   });
 
@@ -638,7 +638,7 @@ describe('PrintersPage', () => {
   it('clears all narrowing filters while collapsed without changing sort or persisted table view', async () => {
     const user = userEvent.setup();
     renderPage('/printers');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort printers by' }), 'name');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'name');
     await user.click(screen.getByRole('button', { name: 'Table view' }));
     await user.click(screen.getByRole('button', { name: 'Printer filters' }));
     await user.selectOptions(screen.getByLabelText('Filter by printer state'), 'printing');
@@ -655,7 +655,7 @@ describe('PrintersPage', () => {
     expect(toggle.querySelector('svg path')).toHaveAttribute('d', mdiFilterOutline);
     expect(screen.queryByRole('group', { name: 'Printer filters' })).not.toBeInTheDocument();
     expect(screen.getByRole('tooltip')).toHaveTextContent('Show printer filters');
-    expect(screen.getByRole('combobox', { name: 'Sort printers by' })).toHaveValue('name');
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveValue('name');
     expect(localStorage.getItem('printerSortMode')).toBe('name');
     expect(localStorage.getItem('printerViewMode')).toBe('table');
     expect(within(screen.getByTestId('printer-table')).getAllByText(/Printer/).map(row => row.textContent))

@@ -196,7 +196,7 @@ describe("TableFiltersBar Component", () => {
 
     render(<TableFiltersBar {...mockHandlers} />);
 
-    const sortSelect = screen.getByLabelText("Sort queue jobs") as HTMLSelectElement;
+    const sortSelect = screen.getByLabelText("Sort by") as HTMLSelectElement;
     fireEvent.change(sortSelect, { target: { value: "deadline" } });
 
     expect(onSortChange).toHaveBeenCalledWith("deadline");

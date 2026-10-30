@@ -80,7 +80,7 @@ describe("HistoryFiltersBar accessibility", () => {
     renderHistoryFilters({ onSortChange });
 
     const sortControl = screen.getByRole("combobox", {
-      name: "Sort history jobs",
+      name: "Sort by",
     });
     expect(screen.getByRole("option", { name: "Model" })).toBeInTheDocument();
 

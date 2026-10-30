@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -91,6 +91,7 @@ describe('LoginAuditPage', () => {
 
     renderPage();
 
+    expect(screen.getByRole('group', { name: 'Filter login audit entries' })).toBeInTheDocument();
     expect(screen.getByLabelText(/filter from date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/filter to date/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/filter by username/i)).toBeInTheDocument();
@@ -255,6 +256,23 @@ describe('LoginAuditPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/showing 1–2 of 2 entries/i)).toBeInTheDocument();
+    });
+  });
+
+  it('keeps page navigation connected to the URL-backed audit query', async () => {
+    vi.mocked(securityAuditService.fetchLoginAudit).mockResolvedValue({
+      ...mockPagedResponse,
+      totalCount: 100,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(securityAuditService.fetchLoginAudit).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2, pageSize: 50 }),
+      );
     });
   });
 });

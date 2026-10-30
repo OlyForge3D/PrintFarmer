@@ -29,6 +29,23 @@ vi.mock('@/common/components/ui', () => ({
   Select: ({ value, onChange, children, containerClassName, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
     <select value={value} onChange={onChange} data-container-class-name={containerClassName} {...rest}>{children}</select>
   ),
+  Toolbar: ({ children, ...rest }: React.HTMLAttributes<HTMLDivElement>) => <div role="group" {...rest}>{children}</div>,
+  ToolbarField: ({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) => (
+    <div><label htmlFor={htmlFor}>{label}</label>{children}</div>
+  ),
+  SearchField: ({ value, onChange, onClear, label, id, placeholder }: {
+    value: string;
+    onChange: React.ChangeEventHandler<HTMLInputElement>;
+    onClear: () => void;
+    label?: string;
+    id?: string;
+    placeholder?: string;
+  }) => (
+    <span>
+      <input id={id} type="search" aria-label={label} value={value} onChange={onChange} placeholder={placeholder} />
+      {value && <button type="button" aria-label="Clear search" onClick={onClear}>Clear</button>}
+    </span>
+  ),
   Badge: ({ children, variant, size, className }: { children: React.ReactNode; variant?: string; size?: string; className?: string }) => (
     <span data-testid="badge" data-variant={variant} data-size={size} className={className}>{children}</span>
   ),
@@ -80,7 +97,7 @@ describe('LocationPrinterList', () => {
 
   it('filters by search text', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers…');
     fireEvent.change(searchInput, { target: { value: 'voron' } });
     expect(screen.getByText('Voron 2.4')).toBeInTheDocument();
     expect(screen.queryByText('Prusa MK4')).not.toBeInTheDocument();
@@ -102,7 +119,7 @@ describe('LocationPrinterList', () => {
 
   it('shows filter-no-match message when filters exclude all', () => {
     render(<LocationPrinterList printers={printers} />);
-    const searchInput = screen.getByPlaceholderText('Search printers...');
+    const searchInput = screen.getByPlaceholderText('Search printers…');
     fireEvent.change(searchInput, { target: { value: 'nonexistent' } });
     expect(screen.getByText('No printers match the current filters.')).toBeInTheDocument();
   });

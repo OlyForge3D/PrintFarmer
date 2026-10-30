@@ -62,6 +62,7 @@ describe('StatisticsPage', () => {
 
     it('renders period filter buttons', () => {
       renderStatisticsPage();
+      expect(screen.getByRole('group', { name: 'Statistics filters' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '7 days' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '30 days' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '90 days' })).toBeInTheDocument();

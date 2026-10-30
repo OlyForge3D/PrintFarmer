@@ -96,7 +96,9 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     renderPage();
     await screen.findAllByText('Resin');
 
-    await user.click(screen.getByRole('button', { name: /add tag/i }));
+    const addTagButton = screen.getByRole('button', { name: /add tag/i });
+    expect(addTagButton.closest('.pf-header-actions')).toBeInTheDocument();
+    await user.click(addTagButton);
 
     const preview = screen.getByLabelText('Tag preview: Tag Preview');
     expect(preview).toHaveAttribute('data-pf-radius', 'full');

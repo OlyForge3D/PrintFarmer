@@ -124,6 +124,10 @@ describe("ExplorerView", () => {
       screen.getByRole("button", { name: /Sort by Name/i }),
     );
     expect(onSort).toHaveBeenCalledWith("fileName");
+    const nameHeader = screen.getByRole("button", { name: "Sort by Name" });
+    expect(nameHeader.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    expect(nameHeader.querySelector("svg")).toHaveClass("h-3", "w-3");
+    expect(nameHeader.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("keeps the folder delete action named, destructive, and operable", async () => {

@@ -14,7 +14,6 @@ import {
   FILE_TABLE_HEADER_CELL_CLASS,
   FILE_TABLE_PREVIEW_CELL_CLASS,
   FILE_TABLE_ROW_CLASS,
-  FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
 
 const mocks = vi.hoisted(() => ({
@@ -247,12 +246,12 @@ describe('Printer file catalog', () => {
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
       const refresh = await screen.findByRole('button', { name: 'Force refresh all online printers' });
       expect(screen.getByTitle('Grid view').parentElement?.nextElementSibling).toBe(refresh);
-      expect(screen.getByRole('group', { name: 'Printer file controls' })).toHaveClass(FILE_TOOLBAR_CONTROL_CLASS);
+      expect(screen.getByRole('group', { name: 'Printer file controls' })).toHaveClass('pf-toolbar');
       expect(screen.getByTitle('Grid view').parentElement).not.toHaveClass('p-1');
-      for (const sizing of ['text-sm', 'py-2', 'px-3']) {
-        expect(screen.getByTitle('Grid view')).toHaveClass(sizing);
-        expect(refresh).toHaveClass(sizing);
-      }
+      expect(screen.getByTitle('Grid view')).toHaveClass('pf-control');
+      expect(screen.getByTitle('Grid view')).toHaveAttribute('data-size', 'md');
+      expect(refresh).toHaveClass('pf-control');
+      expect(refresh).toHaveAttribute('data-size', 'md');
       expect(refresh).toHaveAttribute('title', expect.stringMatching(/bypassing schedule and preview caches\. Requires idle printers/));
       expect(refresh.textContent).toBe('');
       expect(mocks.refresh).not.toHaveBeenCalled();
@@ -689,7 +688,7 @@ describe('Printer file catalog', () => {
     localStorage.setItem('printfarmer-printer-files-viewmode', mode);
     renderCatalog();
     const toolbar = screen.getByRole('group', { name: 'Printer file controls' });
-    expect(toolbar).toHaveClass('flex', 'flex-wrap', 'items-end');
+    expect(toolbar).toHaveClass('pf-toolbar', 'pf-toolbar--labelled');
     const search = within(toolbar).getByRole('searchbox', { name: 'Search' });
     const printer = within(toolbar).getByRole('combobox', { name: 'Printer' });
     expect(printer).toBeVisible();
@@ -697,7 +696,7 @@ describe('Printer file catalog', () => {
     expect(printer).toHaveValue('');
     expect(search).toBeVisible();
     expect(search).toHaveAttribute('placeholder', 'Search filenames or paths');
-    expect(toolbar.firstElementChild).toContainElement(search);
+    expect(toolbar.querySelector('.pf-toolbar-field')).toContainElement(search);
     expect(toolbar.children[1]).toContainElement(printer);
     expect(within(toolbar).getByRole('button', { name: 'Explorer view' })).toBeVisible();
     expect(within(toolbar).getByRole('button', { name: 'Grid view' })).toBeVisible();
