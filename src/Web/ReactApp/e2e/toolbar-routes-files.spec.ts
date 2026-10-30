@@ -76,6 +76,30 @@ async function routeQueryPayloads(page: Page) {
 }
 
 test.describe("actual Files routes: local library", () => {
+  test("gives nested search its own row at compact desktop widths", async ({ page }) => {
+    await page.setViewportSize({ width: 705, height: 900 });
+    const requests = await openFilesState(page, "/files");
+    const toolbar = page.getByRole("group", { name: "File controls", exact: true });
+    const search = toolbar.getByRole("searchbox", { name: "Search", exact: true });
+    const toolbarBounds = await toolbar.boundingBox();
+    const searchFieldWidth = await search.evaluate((element) => {
+      const toolbarElement = element.closest(".pf-toolbar");
+      const field = toolbarElement
+        ? Array.from(toolbarElement.children).find((child) =>
+            child.contains(element),
+          )
+        : undefined;
+      return field?.getBoundingClientRect().width ?? 0;
+    });
+    expect(searchFieldWidth).toBeGreaterThan(toolbarBounds!.width - 4);
+    await search.fill("adapter");
+    await expect(search).toHaveValue("adapter");
+    expect(await search.evaluate(element => element.scrollWidth <= element.clientWidth + 1))
+      .toBe(true);
+    expect(requests.unhandled).toEqual([]);
+    expectSafeFixtureTraffic(requests);
+  });
+
   test("keeps file creation controls hidden for a user without create permissions", async ({
     page,
   }) => {

@@ -83,4 +83,5 @@
 
 @container (max-width: 64rem) {
   .pf-toolbar__search { flex-basis: 100%; max-inline-size: none; }
+  .pf-toolbar > :has(.pf-toolbar__search) { flex-basis: 100%; }
 }
