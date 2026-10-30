@@ -41,6 +41,57 @@ def event(name, identifier="Probe/test()", duration=0.05, status="Success",
     return json.dumps({"name": {"_value": name}, "structuredPayload": payload}) + "\n"
 
 
+class XcodebuildEnvironmentTests(unittest.TestCase):
+    def test_unset_count_adds_first_pair_without_mutating_parent_environment(self):
+        parent_env = {"PATH": "/usr/bin"}
+
+        child_env = runner.xcodebuild_environment(parent_env)
+
+        self.assertEqual(parent_env, {"PATH": "/usr/bin"})
+        self.assertEqual(child_env["GIT_CONFIG_COUNT"], "1")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "safe.bareRepository")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "all")
+
+    def test_existing_config_pairs_are_preserved_and_allowance_is_appended(self):
+        parent_env = {
+            "GIT_CONFIG_COUNT": "3",
+            "GIT_CONFIG_KEY_0": "first.key",
+            "GIT_CONFIG_VALUE_0": "first.value",
+            "GIT_CONFIG_KEY_1": "second.key",
+            "GIT_CONFIG_VALUE_1": "second.value",
+            "GIT_CONFIG_KEY_2": "third.key",
+            "GIT_CONFIG_VALUE_2": "third.value",
+        }
+
+        child_env = runner.xcodebuild_environment(parent_env)
+
+        self.assertEqual(parent_env["GIT_CONFIG_COUNT"], "3")
+        for index in range(3):
+            self.assertEqual(
+                child_env[f"GIT_CONFIG_KEY_{index}"],
+                parent_env[f"GIT_CONFIG_KEY_{index}"],
+            )
+            self.assertEqual(
+                child_env[f"GIT_CONFIG_VALUE_{index}"],
+                parent_env[f"GIT_CONFIG_VALUE_{index}"],
+            )
+        self.assertEqual(child_env["GIT_CONFIG_COUNT"], "4")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_3"], "safe.bareRepository")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_3"], "all")
+
+    def test_malformed_count_fails_without_mutating_parent_environment(self):
+        for count in ("invalid", "-1", ""):
+            with self.subTest(count=count):
+                parent_env = {"GIT_CONFIG_COUNT": count}
+
+                with self.assertRaisesRegex(
+                    ValueError, "GIT_CONFIG_COUNT must be a non-negative integer"
+                ):
+                    runner.xcodebuild_environment(parent_env)
+
+                self.assertEqual(parent_env, {"GIT_CONFIG_COUNT": count})
+
+
 class EventTests(unittest.TestCase):
     def test_failed_test_may_retry_once_and_retains_both_attempts(self):
         tests = [
@@ -709,8 +760,13 @@ class RunnerTests(unittest.TestCase):
         process = Process()
         signals = []
 
-        def popen(command, start_new_session):
+        def popen(command, start_new_session, env):
             self.assertTrue(start_new_session)
+            self.assertEqual(
+                env["GIT_CONFIG_KEY_"
+                    + str(int(env.get("GIT_CONFIG_COUNT", "1")) - 1)],
+                "safe.bareRepository",
+            )
             stream_path = Path(command[command.index("-resultStreamPath") + 1])
             stream_path.write_text("".join((
                 event("invocationStarted"),
