@@ -44,7 +44,7 @@ describe('Toolbar controls', () => {
     render(<>
       <FilterChip selected onClick={onClick}>Ready</FilterChip>
       <FilterButton count={2} expanded aria-controls="filters" />
-      <ViewToggle value="grid" onChange={onChange} options={[
+      <ViewToggle value="grid" onChange={onChange} size="md" options={[
         { mode: 'grid', icon: 'grid', title: 'Grid view' }, { mode: 'table', icon: 'table', title: 'Table view' },
       ]} />
     </>);

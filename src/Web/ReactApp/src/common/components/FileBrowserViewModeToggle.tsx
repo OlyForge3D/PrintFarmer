@@ -7,7 +7,6 @@ export type FileBrowserViewMode = 'explorer' | 'grid';
 interface FileBrowserViewModeToggleProps {
   viewMode: FileBrowserViewMode;
   onViewModeChange: (mode: FileBrowserViewMode) => void;
-  flush?: boolean;
 }
 
 export const FileBrowserViewModeToggle: React.FC<FileBrowserViewModeToggleProps> = ({
@@ -20,6 +19,6 @@ export const FileBrowserViewModeToggle: React.FC<FileBrowserViewModeToggleProps>
   ];
 
   return (
-    <ViewToggle value={viewMode} onChange={onViewModeChange} options={modes} ariaLabel="File view mode" />
+    <ViewToggle value={viewMode} onChange={onViewModeChange} options={modes} ariaLabel="File view mode" size="md" />
   );
 };

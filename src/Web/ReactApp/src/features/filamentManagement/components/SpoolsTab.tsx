@@ -702,6 +702,7 @@ export function SpoolsTab() {
           <ViewToggle
             value={viewMode}
             onChange={setViewMode}
+            size="md"
             ariaLabel="Spool view"
             options={[
               { mode: 'cards', icon: 'grid', title: 'Card view' },
@@ -835,6 +836,7 @@ export function SpoolsTab() {
               <ViewToggle
                 value={viewMode}
                 onChange={setViewMode}
+                size="md"
                 ariaLabel="Spool view"
                 options={[
                   { mode: 'cards', icon: 'grid', title: 'Card view' },

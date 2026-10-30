@@ -522,7 +522,7 @@ export function FilamentsCatalog() {
           />
         </form>
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Filament catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Filament catalog view" />
       </Toolbar>
 
       {/* Grid or Table view of filament cards */}

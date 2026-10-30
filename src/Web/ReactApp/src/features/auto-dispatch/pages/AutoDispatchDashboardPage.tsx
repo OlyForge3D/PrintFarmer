@@ -305,7 +305,7 @@ export function AutoDispatchDashboardPage() {
           {/* Filter/Sort toolbar — integrated command bar */}
           <Toolbar aria-label="Auto-dispatch controls">
             {/* Filter chips */}
-            <div className="pf-toolbar__group" role="group" aria-label="Filter printers by state">
+            <div className="pf-toolbar__group" role="radiogroup" aria-label="Filter printers by state">
               {([
                 ['all', 'All', undefined],
                 ['queued', 'Queued Jobs', queuedPrinterCount],
@@ -319,7 +319,8 @@ export function AutoDispatchDashboardPage() {
                   key={key}
                   type="button"
                   variant="unstyled"
-                  aria-pressed={stateFilter === key}
+                  role="radio"
+                  aria-checked={stateFilter === key}
                   data-role="button"
                   onClick={() => setStateFilter(key)}
                   className={clsx(

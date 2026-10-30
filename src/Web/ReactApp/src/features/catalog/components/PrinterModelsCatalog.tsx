@@ -281,7 +281,7 @@ export function PrinterModelsCatalog() {
           />
         </FormField>
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Printer models catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Printer models catalog view" />
       </Toolbar>
 
       {/* Helpful hint when no manufacturer selected */}

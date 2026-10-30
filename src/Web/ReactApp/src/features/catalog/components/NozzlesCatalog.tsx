@@ -372,7 +372,7 @@ export function NozzlesCatalog() {
       </div>
       <Toolbar aria-label="Nozzle catalog controls">
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Nozzle catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Nozzle catalog view" />
       </Toolbar>
 
       {/* Grid or Table view of nozzle cards */}

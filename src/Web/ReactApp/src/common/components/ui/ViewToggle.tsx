@@ -16,7 +16,7 @@ export interface ViewToggleProps<T extends string = string> {
   options: ViewModeOption<T>[];
   /** Additional CSS classes for the container */
   className?: string;
-  /** Button size - defaults to 'md' */
+  /** Button size - defaults to the legacy 'sm' size */
   size?: 'sm' | 'md' | 'lg';
   /** Aria label for the group */
   ariaLabel?: string;
@@ -82,7 +82,7 @@ export function ViewToggle<T extends string>({
   onChange, 
   options,
   className = '',
-  size = 'md',
+  size = 'sm',
   ariaLabel = 'View mode toggle',
 }: ViewToggleProps<T>) {
   return (

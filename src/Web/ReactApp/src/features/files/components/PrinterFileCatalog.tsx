@@ -358,7 +358,7 @@ export function PrinterFileCatalog() {
         <Toolbar.Spacer />
         <Toolbar.Group className="pf-toolbar__group--nowrap">
           {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} flush />
+          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
           {manageableSources.length > 0 && (
             <RefreshButton
               type="button"

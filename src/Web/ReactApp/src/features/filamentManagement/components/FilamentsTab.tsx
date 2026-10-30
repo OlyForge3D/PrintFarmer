@@ -584,6 +584,7 @@ export function FilamentsTab() {
           <ViewToggle
             value={viewMode}
             onChange={setViewMode}
+            size="md"
             ariaLabel="Filament view"
             options={[
               { mode: 'cards', icon: 'grid', title: 'Card view' },
@@ -700,6 +701,7 @@ export function FilamentsTab() {
             <ViewToggle
               value={viewMode}
               onChange={setViewMode}
+              size="md"
               ariaLabel="Filament view"
               options={[
                 { mode: 'cards', icon: 'grid', title: 'Card view' },

@@ -318,7 +318,7 @@ export function ExtrudersCatalog() {
       </div>
       <Toolbar aria-label="Extruder catalog controls">
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Extruder catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Extruder catalog view" />
       </Toolbar>
 
       {/* Grid or Table view of extruder cards */}

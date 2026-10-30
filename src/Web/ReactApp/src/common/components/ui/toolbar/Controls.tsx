@@ -90,6 +90,7 @@ export function Pagination({ page, totalPages, onPageChange, pageSize, pageSizeO
 }) {
   return <Toolbar aria-label="Pagination">
     {pageSize !== undefined && onPageSizeChange && <Select aria-label="Page size" value={pageSize}
+      className="pf-control" data-role="field"
       containerClassName="w-auto" disabled={disabled}
       onChange={(event: ChangeEvent<HTMLSelectElement>) => onPageSizeChange(Number(event.target.value))}>
       {(pageSizeOptions ?? [10, 25, 50, 100]).map(size => <option value={size} key={size}>{size} per page</option>)}

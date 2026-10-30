@@ -319,7 +319,7 @@ export function HotendsCatalog() {
       </div>
       <Toolbar aria-label="Hotend catalog controls">
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Hotend catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Hotend catalog view" />
       </Toolbar>
 
       {/* Grid or Table view of hotend cards */}

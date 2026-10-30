@@ -387,6 +387,7 @@ export function PartsInventoryTab() {
         <ViewToggle
           value={viewMode}
           onChange={setViewMode}
+          size="md"
           ariaLabel="Maintenance inventory view"
           options={[
             { mode: 'cards', icon: 'grid', title: 'Card view' },

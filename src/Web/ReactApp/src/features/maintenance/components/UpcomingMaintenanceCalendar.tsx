@@ -197,7 +197,7 @@ export function UpcomingMaintenanceCalendar({
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden ${className}`}>
       {/* Header */}
-      <Toolbar aria-label="Maintenance calendar navigation" className="px-4 py-3 border-b border-pf-border" style={{ marginBlockEnd: 0 }}>
+      <Toolbar aria-label="Maintenance calendar navigation" className="px-4 py-3 border-b border-pf-border mb-0">
         <div className="flex items-center gap-3">
           <CalendarIcon className="h-5 w-5 text-pf-text-tertiary" aria-hidden="true" />
           <div>

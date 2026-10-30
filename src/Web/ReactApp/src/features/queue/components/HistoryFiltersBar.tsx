@@ -87,7 +87,7 @@ export default function HistoryFiltersBar({
             <option value="model">Model</option>
           </Select>
           <Toolbar.Spacer />
-          <ViewToggle value={viewMode} onChange={onViewModeChange} className="pf-view-toggle--desktop"
+          <ViewToggle value={viewMode} onChange={onViewModeChange} size="md" className="pf-view-toggle--desktop"
             ariaLabel="History view mode" options={[
               { mode: 'cards', icon: 'grid', title: 'Card view' },
               { mode: 'table', icon: 'table', title: 'Table view' },

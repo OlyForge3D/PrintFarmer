@@ -133,6 +133,7 @@ export const ProjectsPage: React.FC = () => {
  <ViewToggle
  value={viewMode}
  onChange={handleViewModeChange}
+ size="md"
  options={[
  { mode: 'cards', icon: 'grid', title: 'Card view' },
  { mode: 'table', icon: 'table', title: 'Table view' },

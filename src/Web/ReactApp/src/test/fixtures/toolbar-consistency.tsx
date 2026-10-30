@@ -29,7 +29,7 @@ function Fixture() {
         </SortControl>
       </ToolbarField>
       <Toolbar.Spacer />
-      <ViewToggle value="grid" onChange={() => {}} options={[{ mode: 'grid', icon: 'grid', title: 'Grid view' }, { mode: 'table', icon: 'table', title: 'Table view' }]} />
+      <ViewToggle value="grid" onChange={() => {}} size="md" options={[{ mode: 'grid', icon: 'grid', title: 'Grid view' }, { mode: 'table', icon: 'table', title: 'Table view' }]} />
       <RefreshButton />
     </Toolbar>
     <h2>Queue</h2>

@@ -355,7 +355,7 @@ export function ToolheadsCatalog() {
       </div>
       <Toolbar aria-label="Toolhead catalog controls">
         <Toolbar.Spacer />
-        <ViewToggle value={view} onChange={setView} options={gridTableOptions} ariaLabel="Toolhead catalog view" />
+        <ViewToggle value={view} onChange={setView} size="md" options={gridTableOptions} ariaLabel="Toolhead catalog view" />
       </Toolbar>
 
       {/* Grid or Table view of toolhead cards */}

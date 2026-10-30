@@ -18,6 +18,15 @@ describe('ViewToggle', () => {
     );
     
     expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Grid view' })).toHaveAttribute('data-size', 'sm');
+  });
+
+  it('should use an explicitly requested button size', () => {
+    render(
+      <ViewToggle value="grid" onChange={() => {}} options={mockOptions} size="md" />
+    );
+
+    expect(screen.getByRole('button', { name: 'Grid view' })).toHaveAttribute('data-size', 'md');
   });
 
   it('should render with role group', () => {
