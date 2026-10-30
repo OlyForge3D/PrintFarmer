@@ -343,7 +343,7 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/Issue3259ControlIdleUITests/testUnsearchedFarmScrollReachesIdlePrinter
+              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
               -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
               -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
@@ -380,7 +380,7 @@ jobs:
             selectors: >-
               -only-testing:PrintFarmerUITests/PartsInventoryUITests
               -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/Issue3259ControlIdleUITests/testUnsearchedFarmScrollReachesIdlePrinter
+              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
               -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
               -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests

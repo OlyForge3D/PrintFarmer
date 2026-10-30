@@ -1224,9 +1224,22 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
 }
 
 @MainActor
-class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+final class FarmScrollControlUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
     override var additionalLaunchArguments: [String] {
-        super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
+        [
+            "--uitesting-issue3259-visual-acceptance",
+            "-pf_theme_mode", "dark",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+            "--uitesting-issue3259-control-idle",
+        ]
+    }
+
+    private func attachScreen(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Issue 3620 \(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     /// #3620: openFarmCard uses search, which bypasses the failing unsearched Farm swipe.
@@ -1282,6 +1295,13 @@ class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCap
         XCTAssertTrue(app.otherElements["printer.detail.identity"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["No active print"].waitForExistence(timeout: 8))
         attachScreen("idle-detail-from-unsearched-farm")
+    }
+}
+
+@MainActor
+class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
+    override var additionalLaunchArguments: [String] {
+        super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]
     }
 
     /// Speed, Flow and babystep only apply to a running print, so the Tune
