@@ -70,7 +70,9 @@ describe('FilesPage folder navigation with the real file browser', () => {
     const foldersButton = screen.getByRole('button', { name: 'Folders' });
     const sortButton = screen.getByRole('button', { name: 'Sort direction: descending' });
     expect(sortButton.closest('[data-tour="gcode-toolbar"]')).toHaveClass('pf-toolbar');
-    expect(screen.getByTitle('Grid view').parentElement).not.toHaveClass('p-1');
+    const viewToggle = screen.getByRole('button', { name: 'Grid view' }).closest('[role="group"]');
+    expect(viewToggle).toHaveClass('pf-toolbar__group--segmented');
+    expect(viewToggle).not.toHaveClass('p-1');
     for (const button of [foldersButton, sortButton]) {
       expect(button).toHaveClass('pf-control');
       expect(button).toHaveAttribute('data-size', 'md');
@@ -99,6 +101,11 @@ describe('FilesPage folder navigation with the real file browser', () => {
     const foldersButton = screen.getByRole('button', { name: 'Folders' });
     expect(foldersButton.textContent).toBe('');
     expect(foldersButton.querySelector('svg')).toBeInTheDocument();
+    const filtersButton = screen.getByRole('button', { name: 'Filters' });
+    expect(filtersButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'Type' })).not.toBeInTheDocument();
+    fireEvent.click(filtersButton);
+    expect(filtersButton).toHaveAttribute('aria-expanded', 'true');
     for (const [label, control] of [
       ['Search', screen.getByRole('searchbox', { name: 'Search' })],
       ['Type', screen.getByRole('combobox', { name: 'Type' })],
@@ -164,6 +171,7 @@ describe('FilesPage folder navigation with the real file browser', () => {
   it.each(['grid', 'explorer'] as const)('uses one URL-driven type dropdown and preserves folder scope in %s mode', async mode => {
     renderPage(mode, '/files?type=models&remoteSearch=usb');
     await screen.findByRole('checkbox', { name: 'Select part-1.stl' });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1)' }));
     const type = screen.getByRole('combobox', { name: 'Type' });
     expect(type).toHaveValue('models');
     expect(within(type).getAllByRole('option').map(option => option.textContent))
