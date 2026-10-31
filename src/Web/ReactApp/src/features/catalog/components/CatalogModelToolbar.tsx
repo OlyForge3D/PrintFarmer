@@ -55,7 +55,7 @@ export function CatalogModelToolbar({
         onChange={(event) => onSearchChange(event.target.value)}
         onClear={() => onSearchChange('')}
         label={`Search ${modelLabel}`}
-        placeholder={`Search ${modelLabel} by name or manufacturer`}
+        placeholder="Name or manufacturer"
       />
       <Toolbar.Spacer />
       <FiltersDisclosure

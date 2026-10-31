@@ -64,6 +64,13 @@ function CatalogHarness() {
 }
 
 describe('CatalogModelToolbar', () => {
+  it('keeps the search hint concise without losing the model-specific accessible label', () => {
+    render(<CatalogHarness />);
+
+    expect(screen.getByRole('searchbox', { name: 'Search toolhead models' }))
+      .toHaveAttribute('placeholder', 'Name or manufacturer');
+  });
+
   it('counts and resets the manufacturer filter without clearing search', () => {
     render(<CatalogHarness />);
 
