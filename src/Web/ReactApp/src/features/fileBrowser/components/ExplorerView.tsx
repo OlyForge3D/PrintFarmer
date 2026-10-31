@@ -526,7 +526,7 @@ export const ExplorerView = ({
          * folder tree's `max-h-[40vh]` pattern above) keeps the scrollbar within a
          * predictable, reachable area regardless of row count.
          */}
-        <div className={`flex-1 ${compact ? COMPACT_FILE_TABLE_FRAME_CLASS : 'overflow-x-auto'} ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
+        <div className={`flex-1 ${compact && showFolderNavigation ? COMPACT_FILE_TABLE_FRAME_CLASS : 'overflow-x-auto'} ${isMobile ? 'overflow-y-auto max-h-[50vh]' : ''}`}>
           <table className={compact ? COMPACT_FILE_TABLE_CLASS : 'w-full text-sm border-collapse'} role="table" aria-label="Files list">
             <thead className={FILE_TABLE_HEAD_CLASS}>
               <tr>

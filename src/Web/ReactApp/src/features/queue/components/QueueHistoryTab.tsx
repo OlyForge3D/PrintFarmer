@@ -5,6 +5,8 @@ import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
 import HistoryJobTable from "./HistoryJobTable";
+import { historySortModes, type HistorySortColumn, type HistorySortMode } from "./history-sort";
+import { nextTableSort, type SortState } from "@/common/hooks/useTableSort";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
@@ -58,11 +60,32 @@ export default function QueueHistoryTab({
   const dateEnd = dateTo;
 
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(["completed", "failed", "cancelled"]);
-  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "duration" | "model">("newest");
+  const [sortBy, setSortBy] = useState<HistorySortMode>("newest");
+  const [sortState, setSortState] = useState<SortState<HistorySortColumn>>({ column: null, direction: null });
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 50;
+
+  const handleSort = (column: string) => {
+    if (!(column in historySortModes)) return;
+    const next = nextTableSort(sortState, column as HistorySortColumn);
+    setSortState(next);
+    setSortBy(next.column && next.direction
+      ? historySortModes[next.column][next.direction === "asc" ? 0 : 1]
+      : "newest");
+    setCurrentPage(0);
+  };
+
+  const handleSortChange = (mode: HistorySortMode) => {
+    setSortBy(mode);
+    const column = (Object.keys(historySortModes) as HistorySortColumn[])
+      .find(key => historySortModes[key].some(value => value === mode));
+    setSortState(column
+      ? { column, direction: historySortModes[column][0] === mode ? "asc" : "desc" }
+      : { column: null, direction: null });
+    setCurrentPage(0);
+  };
   
   // Modal
   const [rerunJobId, setRerunJobId] = useState<string | null>(null);
@@ -273,7 +296,7 @@ export default function QueueHistoryTab({
         selectedStatuses={selectedStatuses}
         onStatusChange={setSelectedStatuses}
         sortBy={sortBy}
-        onSortChange={setSortBy}
+        onSortChange={handleSortChange}
         onRefresh={loadHistory}
         isLoading={loading}
         viewMode={viewMode}
@@ -311,6 +334,8 @@ export default function QueueHistoryTab({
               onViewDetails={onViewDetails}
               onHarvested={handleHarvested}
               onCloseAfterSuccess={loadHistory}
+              sortState={sortState}
+              onSort={handleSort}
             />
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -3,12 +3,13 @@ import { Button } from "@/common/components/ui/Button";
 import { Select } from "@/common/components/ui/Select";
 import { Toolbar, FiltersDisclosure, RefreshButton, ViewToggle, ControlIcon } from "@/common/components/ui";
 import { mdiCheck, mdiClose, mdiCircleOutline } from '@mdi/js';
+import type { HistorySortMode } from "./history-sort";
 
 interface HistoryFiltersBarProps {
   selectedStatuses: string[];
   onStatusChange: (statuses: string[]) => void;
-  sortBy: "newest" | "oldest" | "duration" | "model";
-  onSortChange: (sort: "newest" | "oldest" | "duration" | "model") => void;
+  sortBy: HistorySortMode;
+  onSortChange: (sort: HistorySortMode) => void;
   onRefresh: () => Promise<void>;
   isLoading: boolean;
   viewMode: "cards" | "table";
@@ -54,7 +55,7 @@ export default function HistoryFiltersBar({
           <Select
             value={sortBy}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-              onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
+              onSortChange(e.target.value as HistorySortMode)
             }
             containerClassName="w-auto"
             className="pf-control py-0"
@@ -65,6 +66,20 @@ export default function HistoryFiltersBar({
             <option value="oldest">Oldest</option>
             <option value="duration">Duration</option>
             <option value="model">Model</option>
+            <option value="model_desc">Model (descending)</option>
+            <option value="name">Job name</option>
+            <option value="name_desc">Job name (descending)</option>
+            <option value="printer">Printer</option>
+            <option value="printer_desc">Printer (descending)</option>
+            <option value="material">Material</option>
+            <option value="material_desc">Material (descending)</option>
+            <option value="status">Status</option>
+            <option value="status_desc">Status (descending)</option>
+            <option value="filament">Filament</option>
+            <option value="filament_desc">Filament (descending)</option>
+            <option value="cost">Cost</option>
+            <option value="cost_desc">Cost (descending)</option>
+            <option value="duration_asc">Duration (ascending)</option>
           </Select>
           <Toolbar.Spacer />
           <ViewToggle value={viewMode} onChange={onViewModeChange} size="md" className="pf-view-toggle--desktop"

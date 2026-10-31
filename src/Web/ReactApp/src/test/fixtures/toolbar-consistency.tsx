@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TableFiltersBar } from '@/features/queue/components/QueueFiltersBar';
 import HistoryFiltersBar from '@/features/queue/components/HistoryFiltersBar';
+import type { HistorySortMode } from '@/features/queue/components/history-sort';
 import QueueDateRangeBar, { type DateRange } from '@/features/queue/components/QueueDateRangeBar';
 import QueueTimelineTab from '@/features/queue/components/QueueTimelineTab';
 import { QueueViewModeSelector, type QueueViewMode } from '@/features/queue/components/QueueViewModeSelector';
@@ -11,7 +12,7 @@ import type { QueueOverviewDto, TimelineEventDto } from '@/types/api';
 
 function Fixture() {
   const [statuses, setStatuses] = useState(['completed', 'failed', 'cancelled']);
-  const [sort, setSort] = useState<'newest' | 'oldest' | 'duration' | 'model'>('newest');
+  const [sort, setSort] = useState<HistorySortMode>('newest');
   const [historyView, setHistoryView] = useState<'cards' | 'table'>('cards');
   const [view, setView] = useState<QueueViewMode>('table');
   const [search, setSearch] = useState('');

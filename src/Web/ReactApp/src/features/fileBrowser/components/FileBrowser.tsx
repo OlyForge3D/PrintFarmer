@@ -19,6 +19,7 @@ interface FileBrowserProps<TDomain> {
   extraToolbarActions?: ReactNode;
   /** Place selected-file actions after the filter toolbar instead of inside it. */
   extraToolbarActionsPlacement?: 'toolbar' | 'below';
+  toolbarClassName?: string;
   renderFolderNavigation?: (
     path: string, onNavigate: (path: string) => void, controls: { id: string; expanded: boolean },
   ) => ReactNode;
@@ -47,6 +48,7 @@ export function FileBrowser<TDomain>({
     filterActions,
     extraToolbarActions,
     extraToolbarActionsPlacement = 'toolbar',
+    toolbarClassName,
     renderFolderNavigation,
     viewMode,
     onViewModeChange,
@@ -71,6 +73,7 @@ export function FileBrowser<TDomain>({
         aria-busy={isBusy}
       >
         <FileBrowserToolbar
+          className={toolbarClassName}
           search={browser.search}
           onSearchChange={browser.setSearch}
           sortBy={browser.sortBy}

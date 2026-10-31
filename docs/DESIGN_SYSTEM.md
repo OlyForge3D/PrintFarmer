@@ -711,6 +711,14 @@ import { Tabs } from '@/common/components/ui';
 
 Table component with sorting, keyboard navigation, and row selection.
 
+Queue History is a sortable historical result set, not the manually ordered
+live queue. Its eight sortable headers use the shared ascending, descending,
+then default cycle and persistent direction indicators. Sorting is applied by
+the API before pagination; clearing a header restores newest-first ordering.
+Do not add a client comparator to the fetched page. The toolbar selector remains
+because printer-model sorting has no corresponding visible table column; header
+and selector changes stay synchronized and reset pagination to the first page.
+
 **Props:**
 ```tsx
 interface DataTableProps<T> {
@@ -973,6 +981,17 @@ as `mb-0` can override them.
 `ViewToggle` preserves its legacy `sm` default. Pass `size="md"` when using it
 as a shared toolbar control; the shared toolbar migration should be explicit
 rather than changing unrelated view toggles.
+
+Files uses `pf-toolbar--files` on both Local Library and On Printers.
+Its controls stay on one row: search shrinks to a 12rem minimum, then only
+that row scrolls horizontally. Controls retain their normal sizes; filters
+and selected-file actions remain outside the scrolling row. Both sources
+use a 16px gap from the toolbar to the outer content frame.
+
+Filament Inventory uses the same `Tabs.Panels` surface and shared `Table`,
+`TableHead`, `TableBody`, and `TableRow` primitives as Catalog. Keep panel
+background, table border/radius, and selected/hover colors owned by those
+primitives rather than duplicating their classes in inventory components.
 
 ## Usage Patterns
 

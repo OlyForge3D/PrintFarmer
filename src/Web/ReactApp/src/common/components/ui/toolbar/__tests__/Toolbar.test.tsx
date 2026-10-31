@@ -11,6 +11,33 @@ describe('Toolbar controls', () => {
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
   });
 
+  it.each([
+    { files: true, targetLeft: 285, offset: 25 },
+    { files: true, targetLeft: 80, offset: -24 },
+    { files: true, targetLeft: 160, offset: 0 },
+    { files: false, targetLeft: 285, offset: 0 },
+  ])('scrolls only an overflowing Files row for focus: $files/$targetLeft', ({ files, targetLeft, offset }) => {
+    const focus = vi.fn();
+    const { container } = render(<Toolbar aria-label="File controls" className={files ? 'pf-toolbar--files' : undefined}>
+      <Toolbar.Controls style={{ paddingInlineStart: '4px' }} onFocusCapture={focus}>
+        <RefreshButton />
+      </Toolbar.Controls>
+    </Toolbar>);
+    const row = container.querySelector<HTMLElement>('.pf-toolbar__controls')!;
+    const button = screen.getByRole('button', { name: 'Refresh' });
+    Object.defineProperties(row, {
+      clientWidth: { value: 200 },
+      scrollWidth: { value: 500 },
+      scrollBy: { value: vi.fn() },
+    });
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 0, 200, 44));
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(targetLeft, 4, 36, 36));
+    fireEvent.focus(button);
+    expect(focus).toHaveBeenCalledOnce();
+    if (offset) expect(row.scrollBy).toHaveBeenCalledExactlyOnceWith({ left: offset, behavior: 'instant' });
+    else expect(row.scrollBy).not.toHaveBeenCalled();
+  });
+
   it('keeps search controlled and clears through the supplied callback', () => {
     const change = vi.fn();
     const clear = vi.fn();

@@ -124,7 +124,118 @@ test('routed history filters, date labels and pagination boundaries', async ({ p
   const pagination = page.getByRole('group', { name: 'Pagination', exact: true });
   await expect(pagination.getByRole('button', { name: 'Previous', exact: true })).toBeDisabled();
   await expect(pagination.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
-  await refinementToolbar.getByRole('button', { name: 'Filters (2)', exact: true }).click();
+  await refinementToolbar.getByRole('button', { name: 'Filters (1)', exact: true }).click();
   await captureRoutedToolbarState(page, testInfo, 'history-collapsed-filters-dates', 1);
+  expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+});
+
+test('routed history headers cycle server sorting without reordering a fetched page', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: testInfo.project.name === 'chromium' ? 1440 : 390, height: 1000 });
+  const requests = await mountRoutedToolbarPage(page, '/printQueue/history', tracerRouteSeeds);
+  await expect(page.getByRole('row', { name: /Completed bracket/ })).toBeVisible();
+  const queries: URLSearchParams[] = [];
+  await page.route('**/api/job-queue-analytics/history?*', async route => {
+    const params = new URL(route.request().url()).searchParams;
+    queries.push(params);
+    await route.fulfill({ json: {
+      entries: ['Zulu fixture', 'Alpha fixture'].map((jobName, index) => ({
+        id: `history-${index}`, jobName, printerName: 'Printer Alpha',
+        status: 'Completed', completionPercentage: 100, actualPrintTimeSeconds: 3600,
+        startedAtUtc: '2026-10-30T12:00:00Z', completedAtUtc: '2026-10-30T13:00:00Z',
+        materialType: 'PLA', actualFilamentUsageGrams: 20, totalCostUsd: 3,
+        toolheadUsages: [],
+      })),
+      totalCount: 101, currentPage: Number(params.get('offset')) / 50, pageSize: 50,
+      stats: { totalCompleted: 101, totalFailed: 0, totalCancelled: 0, successRate: 100, averageDurationMinutes: 60, totalPrintTimeMinutes: 6060 },
+    } });
+  });
+  const controls = page.getByRole('group', { name: 'History controls', exact: true });
+  await controls.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('row', { name: /Zulu fixture/ })).toBeVisible();
+  const pagination = page.getByRole('group', { name: 'Pagination', exact: true });
+  await Promise.all([
+    page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === '/api/job-queue-analytics/history'
+        && url.searchParams.get('offset') === '50' && response.ok();
+    }),
+    pagination.getByRole('button', { name: 'Next', exact: true }).click(),
+  ]);
+  await expect.poll(() => queries.at(-1)?.get('offset')).toBe('50');
+  await expect(page.getByRole('row', { name: /Zulu fixture/ })).toBeVisible();
+
+  const modes = [
+    ['Job Name', 'name', 'name_desc'], ['Printer', 'printer', 'printer_desc'],
+    ['Material', 'material', 'material_desc'], ['Status', 'status', 'status_desc'],
+    ['Filament', 'filament', 'filament_desc'], ['Cost', 'cost', 'cost_desc'],
+    ['Duration', 'duration_asc', 'duration'], ['Completed', 'oldest', 'newest'],
+  ] as const;
+  await expect.poll(() => page.locator('table').evaluate(element =>
+    element.isConnected && element.getBoundingClientRect().width >= 1024,
+  )).toBe(true);
+  const tableGeometry = await page.locator('table').evaluate(element => ({
+      className: element.className,
+      width: element.getBoundingClientRect().width,
+      computedWidth: getComputedStyle(element).width,
+      minWidth: getComputedStyle(element).minWidth,
+      columns: Array.from(element.querySelectorAll('thead th')).map(cell => ({
+        label: cell.textContent, width: cell.getBoundingClientRect().width,
+      })),
+    }));
+  await testInfo.attach('history-table-geometry', {
+    body: JSON.stringify(tableGeometry),
+    contentType: 'application/json',
+  });
+  for (const [label, ascending, descending] of modes) {
+    const header = page.getByRole('columnheader', { name: label, exact: true });
+    const button = header.getByRole('button');
+    await expect(async () => {
+      const geometry = await header.evaluate(element => {
+        const cell = element.getBoundingClientRect();
+        const target = element.querySelector('button')!.getBoundingClientRect();
+        return {
+          connected: element.isConnected,
+          cellWidth: cell.width, targetWidth: target.width, targetHeight: target.height,
+        };
+      });
+      expect(geometry.connected).toBe(true);
+      expect(geometry.cellWidth, JSON.stringify(tableGeometry)).toBeGreaterThanOrEqual(96);
+      expect(geometry.targetWidth).toBeCloseTo(geometry.cellWidth, 0);
+      expect(geometry.targetHeight).toBeGreaterThanOrEqual(24);
+    }).toPass();
+    await button.focus();
+    await button.press('Enter');
+    await expect.poll(() => queries.at(-1)?.get('sortBy')).toBe(ascending);
+    await expect(header).toHaveAttribute('aria-sort', 'ascending');
+    await expect(controls.getByRole('combobox', { name: 'Sort by' })).toHaveValue(ascending);
+    expect(queries.at(-1)?.get('offset')).toBe('0');
+    await expect(header.locator('[aria-hidden="true"] svg')).toHaveCount(2);
+    await button.focus();
+    await button.press('Space');
+    await expect.poll(() => queries.at(-1)?.get('sortBy')).toBe(descending);
+    await expect(header).toHaveAttribute('aria-sort', 'descending');
+    await button.click();
+    await expect(header).toHaveAttribute('aria-sort', 'none');
+    await expect(controls.getByRole('combobox', { name: 'Sort by' })).toHaveValue('newest');
+    await expect.poll(() => queries.at(-1)?.get('sortBy')).toBe('newest');
+  }
+  await page.getByRole('group', { name: 'History filters', exact: true })
+    .getByRole('button', { name: 'Filters', exact: true }).click();
+  await page.getByRole('button', { name: 'Failed', exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.get('statuses')).toBe('completed,cancelled');
+  const duration = page.getByRole('columnheader', { name: 'Duration', exact: true });
+  await duration.getByRole('button').click();
+  await expect(duration).toHaveAttribute('aria-sort', 'ascending');
+  expect(queries.at(-1)?.get('statuses')).toBe('completed,cancelled');
+  expect(queries.at(-1)?.get('dateStart')).toBeTruthy();
+  expect(queries.at(-1)?.get('dateEnd')).toBeTruthy();
+  const rowNames = await page.locator('tbody tr td:first-child [title]').evaluateAll(
+    cells => cells.map(cell => cell.getAttribute('title')),
+  );
+  expect(rowNames).toEqual(['Zulu fixture', 'Alpha fixture']);
+  await page.getByRole('group', { name: 'History filters', exact: true })
+    .getByRole('button', { name: 'Filters (1)', exact: true }).click();
+  await duration.getByRole('button').scrollIntoViewIfNeeded();
+  await captureRoutedToolbarState(page, testInfo, 'history-server-sort-headers', 1);
   expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
 });

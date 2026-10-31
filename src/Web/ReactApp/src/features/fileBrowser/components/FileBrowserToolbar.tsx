@@ -17,6 +17,7 @@ interface FileBrowserToolbarProps {
   folderActions?: ReactNode;
   extraActions?: ReactNode;
   hideSortControl?: boolean;
+  className?: string;
 }
 
 export const FileBrowserToolbar = ({
@@ -33,6 +34,7 @@ export const FileBrowserToolbar = ({
   folderActions,
   extraActions,
   hideSortControl = false,
+  className,
 }: FileBrowserToolbarProps) => {
   const controls = (trigger: ReactNode) => (
     <Toolbar.Controls>
@@ -77,7 +79,7 @@ export const FileBrowserToolbar = ({
   );
 
   return (
-    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar">
+    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar" className={className}>
       {filterActions ? filterActions(controls) : controls(null)}
     </Toolbar>
   );

@@ -76,6 +76,156 @@ async function routeQueryPayloads(page: Page) {
   return payloads;
 }
 
+for (const width of [390, 639, 641, 1440, "below64rem", "above64rem"] as const) {
+  test(`paired Files toolbar rows preserve geometry and keyboard access at ${width}px`, async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: typeof width === "number" ? width : 1440, height: 1000 });
+    const measurements = [];
+    for (const source of ["local", "printers"] as const) {
+      const payloads = await routeQueryPayloads(page);
+      const requests = await openFilesState(page, source === "local" ? "/files" : "/files?source=printers");
+      const toolbar = page.getByRole("group", { name: source === "local" ? "File controls" : "Printer file controls", exact: true });
+      const row = toolbar.locator(":scope > .pf-toolbar__controls");
+      if (typeof width === "string") {
+        const threshold = await toolbar.evaluate(() => 64 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
+        const target = threshold + (width === "below64rem" ? -1 : 1);
+        // Sidebar, main padding and tab-panel borders consume viewport space.
+        // Resize from their measured total rather than treating viewport width as container width.
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const containerWidth = await toolbar.evaluate(element => {
+            const style = getComputedStyle(element);
+            return element.getBoundingClientRect().width - Number.parseFloat(style.paddingLeft) -
+              Number.parseFloat(style.paddingRight) - Number.parseFloat(style.borderLeftWidth) -
+              Number.parseFloat(style.borderRightWidth);
+          });
+          await page.setViewportSize({ width: Math.round(page.viewportSize()!.width + target - containerWidth), height: 1000 });
+        }
+        const measured = await toolbar.evaluate(element => {
+          const style = getComputedStyle(element);
+          return element.getBoundingClientRect().width - Number.parseFloat(style.paddingLeft) -
+            Number.parseFloat(style.paddingRight) - Number.parseFloat(style.borderLeftWidth) -
+            Number.parseFloat(style.borderRightWidth);
+        });
+        expect(measured, "measured toolbar content-box brackets its 64rem container query").toBeCloseTo(target, 1);
+      }
+      await expect(toolbar).toHaveClass(/pf-toolbar--files/);
+      await expect(page.getByRole("group", { name: "Selected file actions", exact: true })).toHaveCount(0);
+      const measureRow = () => row.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const inputs = Array.from(element.querySelectorAll<HTMLElement>('input:not([type="checkbox"]), select, button'));
+        const controls = inputs.map(input => {
+          const rect = input.getBoundingClientRect();
+          return { name: input.getAttribute("aria-label") || input.id || input.textContent, height: rect.height, bottom: rect.bottom };
+        });
+        const search = element.querySelector<HTMLInputElement>('input[type="search"]')!;
+        return {
+          width: bounds.width, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+          overflowX: getComputedStyle(element).overflowX,
+          searchWidth: search.getBoundingClientRect().width, controls,
+        };
+      });
+      const geometry = await measureRow();
+      expect(geometry.overflowX).toBe("auto");
+      expect(geometry.searchWidth).toBeGreaterThanOrEqual(192);
+      for (const control of geometry.controls) {
+        expect(control.height, `${source}: ${control.name} keeps its full size`).toBeGreaterThanOrEqual(36);
+        expect(Math.abs(control.bottom - geometry.controls[0].bottom), `${source}: controls stay in one row`).toBeLessThanOrEqual(0.5);
+      }
+      if (width === 390 && source === "local") expect(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth);
+      if (width === 1440) expect(geometry.scrollWidth).toBe(geometry.clientWidth);
+      const checkKeyboardAccess = async () => {
+      const tabbables = row.locator('input:not(:disabled):not([type="hidden"]), select:not(:disabled), button:not(:disabled)');
+      await tabbables.first().focus();
+      for (let index = 0; index < await tabbables.count(); index++) {
+        const control = tabbables.nth(index);
+        await expect(control).toBeFocused();
+        const visibility = await control.evaluate(element => {
+          const row = element.closest(".pf-toolbar__controls")!.getBoundingClientRect();
+          const box = element.getBoundingClientRect();
+          return {
+            name: element.getAttribute("aria-label") || element.id || element.textContent,
+            row: { left: row.left, right: row.right, top: row.top, bottom: row.bottom },
+            box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
+            visible: box.left >= row.left - 0.5 && box.right <= row.right + 0.5 && box.top >= row.top - 0.5 && box.bottom <= row.bottom + 0.5,
+          };
+        });
+        expect(visibility.visible, `Tab automatically reveals each complete control: ${JSON.stringify(visibility)}`).toBe(true);
+        if (index + 1 < await tabbables.count()) await page.keyboard.press("Tab");
+      }
+      await row.evaluate(element => { element.scrollLeft = 0; });
+      };
+      await checkKeyboardAccess();
+      const content = source === "local" ? page.locator('[data-tour="gcode-file-list"]')
+        : page.getByRole("region", { name: "Files on printers", exact: true });
+      const gap = (await content.boundingBox())!.y - ((await toolbar.boundingBox())!.y + (await toolbar.boundingBox())!.height);
+      expect(gap, `${source}: one standard toolbar/content gap`).toBeCloseTo(16, 1);
+      measurements.push({ source, testWidth: width, gap, ...geometry });
+      await page.screenshot({ path: testInfo.outputPath(`${source}-${width}.png`), fullPage: true });
+      const filters = toolbar.getByRole("button", { name: /^Filters/ });
+      await filters.click();
+      const panel = toolbar.getByRole("region", { name: "Filters", exact: true });
+      await expect(panel).toBeVisible();
+      expect(await panel.evaluate(element => element.closest(".pf-toolbar__controls") === null)).toBe(true);
+      if (source === "local") {
+        await toolbar.getByRole("combobox", { name: "Type" }).selectOption("models");
+        await expect.poll(() => payloads.at(-1)?.filter).toBe("models");
+        await filters.click();
+        await toolbar.getByRole("combobox", { name: "Sort by" }).selectOption("name");
+        await expect.poll(() => payloads.at(-1)?.sortBy).toBe("name");
+        await page.getByRole("checkbox", { name: "Select adapter.stl" }).check();
+        const actions = page.getByRole("group", { name: "Selected file actions", exact: true });
+        await expect(actions).toBeVisible();
+        expect(await actions.evaluate(element => element.closest(".pf-toolbar__controls") === null)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath(`local-selected-actions-${width}.png`), fullPage: true });
+        await page.getByRole("checkbox", { name: "Select adapter.stl" }).uncheck();
+        await expect(actions).toHaveCount(0);
+      } else {
+        await toolbar.getByRole("combobox", { name: "Printer" }).selectOption("toolbar-printer-1");
+        await expect.poll(() => new URL(page.url()).searchParams.get("printer")).toBe("toolbar-printer-1");
+        await filters.click();
+      }
+      await toolbar.getByRole("button", { name: "Explorer view", exact: true }).click();
+      await expect(toolbar.getByRole("button", { name: "Explorer view", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(filters).toHaveAttribute("aria-expanded", "false");
+      await expect(page.getByRole("group", { name: "Selected file actions", exact: true })).toHaveCount(0);
+      const table = source === "local" ? page.locator('[data-tour="gcode-file-list"] table')
+        : page.getByRole("table", { name: "Files on printers", exact: true });
+      await expect(table).toBeVisible();
+      const tableGeometry = await measureRow();
+      for (const control of tableGeometry.controls) {
+        expect(control.height, `${source} Explorer: ${control.name} keeps its full size`).toBeGreaterThanOrEqual(36);
+        expect(Math.abs(control.bottom - tableGeometry.controls[0].bottom), `${source} Explorer: one controls row`).toBeLessThanOrEqual(0.5);
+      }
+      expect(tableGeometry.searchWidth).toBeGreaterThanOrEqual(192);
+      await checkKeyboardAccess();
+      const toolbarBox = (await toolbar.boundingBox())!;
+      const actualTableTop = (await table.boundingBox())!.y;
+      const frame = source === "local"
+        ? page.getByRole("region", { name: "Explorer view", exact: true })
+        : table.locator("..");
+      const frameBox = (await frame.boundingBox())!;
+      const frameGap = frameBox.y - (toolbarBox.y + toolbarBox.height);
+      const tableInset = actualTableTop - frameBox.y;
+      expect(frameGap, `${source} Explorer: toolbar/table-frame gap`).toBeCloseTo(16, 1);
+      const frameBorderInset = 1;
+      expect(tableInset, `${source} Explorer: existing frame borders precede the actual table`).toBeCloseTo(frameBorderInset, 1);
+      const actualTableGap = actualTableTop - (toolbarBox.y + toolbarBox.height);
+      expect(actualTableGap, `${source} Explorer: actual rendered table top`).toBeCloseTo(16 + frameBorderInset, 1);
+      measurements.push({ source, testWidth: width, mode: "explorer", viewportWidth: page.viewportSize()!.width,
+        rootFontSize: await page.evaluate(() => getComputedStyle(document.documentElement).fontSize),
+        frameGap, actualTableTop, actualTableGap, ...tableGeometry });
+      await page.screenshot({ path: testInfo.outputPath(`${source}-explorer-${width}.png`), fullPage: true });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(requests.unhandled).toEqual([]);
+      expectSafeFixtureTraffic(requests);
+    }
+    const tableMeasurements = measurements.filter(measurement => "actualTableGap" in measurement);
+    expect(tableMeasurements).toHaveLength(2);
+    expect(tableMeasurements[0].actualTableGap, "both tabs place the actual table at the same gap").toBe(tableMeasurements[1].actualTableGap);
+    await testInfo.attach("paired-toolbar-measurements", { body: JSON.stringify(measurements, null, 2), contentType: "application/json" });
+  });
+}
+
 test.describe("actual Files routes: local library", () => {
   for (const { alias, filter } of [
     { alias: "models", filter: "models" },
@@ -118,14 +268,14 @@ test.describe("actual Files routes: local library", () => {
     });
   }
 
-  test("gives nested search its own row at compact desktop widths", async ({ page }) => {
+  test("keeps nested search usable in the single compact toolbar row", async ({ page }) => {
     await page.setViewportSize({ width: 705, height: 900 });
     const requests = await openFilesState(page, "/files");
     const toolbar = page.getByRole("group", { name: "File controls", exact: true });
     const search = toolbar.getByRole("searchbox", { name: "Search", exact: true });
     const toolbarBounds = await toolbar.boundingBox();
     const searchGeometry = await search.evaluate((element) => {
-      const toolbarElement = element.closest(".pf-toolbar");
+      const toolbarElement = element.closest(".pf-toolbar__controls");
       const field = toolbarElement
         ? Array.from(toolbarElement.children).find((child) =>
             child.contains(element),
@@ -157,7 +307,8 @@ test.describe("actual Files routes: local library", () => {
     expect(
       searchGeometry.fieldWidth,
       `search field width ${searchGeometry.fieldWidth}; toolbar width ${toolbarBounds!.width}; layout ancestors: ${JSON.stringify(searchGeometry.ancestors)}`,
-    ).toBeGreaterThan(toolbarBounds!.width - 4);
+    ).toBeGreaterThanOrEqual(192);
+    expect(searchGeometry.fieldWidth).toBeLessThan(toolbarBounds!.width);
     await search.fill("adapter");
     await expect(search).toHaveValue("adapter");
     expect(await search.evaluate(element => element.scrollWidth <= element.clientWidth + 1))

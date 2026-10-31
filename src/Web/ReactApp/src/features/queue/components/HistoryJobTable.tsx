@@ -1,8 +1,11 @@
 import { useCallback } from "react";
 import { Button } from "@/common/components/ui/Button";
+import { TableHeaderCell } from "@/common/components/ui/Table";
+import type { SortState } from "@/common/hooks/useTableSort";
 import { HarvestJobAction } from "@/features/harvest/components/HarvestJobAction";
 import type { HistoryJob } from "@/types/queue";
 import type { HarvestJobResponse } from "@/types/parts-inventory";
+import type { HistorySortColumn } from "./history-sort";
 
 /** Collapse repeated/duplicated material tokens (e.g. "PETG;PETG;PETG") to a compact list. */
 function formatMaterial(material?: string | null): string | null {
@@ -30,6 +33,8 @@ interface HistoryJobTableProps {
    * parent can run its deferred full refresh (#722 H5).
    */
   onCloseAfterSuccess?: () => void;
+  sortState?: SortState<HistorySortColumn>;
+  onSort?: (column: string) => void;
 }
 
 /**
@@ -44,7 +49,15 @@ export default function HistoryJobTable({
   onViewDetails,
   onHarvested,
   onCloseAfterSuccess,
+  sortState,
+  onSort,
 }: HistoryJobTableProps) {
+  const headerProps = (column: HistorySortColumn) => ({
+    sortable: onSort != null,
+    sortKey: column,
+    sortDirection: sortState?.column === column ? sortState.direction : null,
+    onSort,
+  });
   const formatDuration = useCallback((seconds: number) => {
     const minutes = Math.round(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -97,7 +110,7 @@ export default function HistoryJobTable({
   return (
     <div className="bg-pf-bg-0 border border-pf-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full table-fixed text-sm">
+        <table className="w-[64rem] min-w-full table-fixed text-sm">
           <colgroup>
             <col />
             <col className="w-28" />
@@ -111,14 +124,14 @@ export default function HistoryJobTable({
           </colgroup>
           <thead>
             <tr className="bg-pf-bg-1 border-b border-pf-border">
-              <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Job Name</th>
-              <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Printer</th>
-              <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Material</th>
-              <th className="text-left px-4 py-3 font-medium text-pf-text-secondary">Status</th>
-              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Filament</th>
-              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Cost</th>
-              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Duration</th>
-              <th className="text-right px-4 py-3 font-medium text-pf-text-secondary">Completed</th>
+              <TableHeaderCell {...headerProps("name")}>Job Name</TableHeaderCell>
+              <TableHeaderCell {...headerProps("printer")}>Printer</TableHeaderCell>
+              <TableHeaderCell {...headerProps("material")}>Material</TableHeaderCell>
+              <TableHeaderCell {...headerProps("status")}>Status</TableHeaderCell>
+              <TableHeaderCell {...headerProps("filament")} className="text-right">Filament</TableHeaderCell>
+              <TableHeaderCell {...headerProps("cost")} className="text-right">Cost</TableHeaderCell>
+              <TableHeaderCell {...headerProps("duration")} className="text-right">Duration</TableHeaderCell>
+              <TableHeaderCell {...headerProps("completed")} className="text-right">Completed</TableHeaderCell>
               <th className="text-center px-4 py-3 font-medium text-pf-text-secondary">Actions</th>
             </tr>
           </thead>

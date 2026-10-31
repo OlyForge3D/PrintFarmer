@@ -96,6 +96,26 @@
 }
 
 @layer utilities {
+  .pf-toolbar--files > .pf-toolbar__controls {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: .25rem;
+    scrollbar-width: thin;
+  }
+  .pf-toolbar--files > .pf-toolbar__controls > :has(.pf-toolbar__search) {
+    flex: 1 1 12rem;
+    min-inline-size: 12rem;
+  }
+  .pf-toolbar--files > .pf-toolbar__controls > :not(:has(.pf-toolbar__search)) {
+    flex-shrink: 0;
+  }
+  .pf-toolbar--files > .pf-toolbar__controls .pf-toolbar__group {
+    flex-wrap: nowrap;
+    max-inline-size: none;
+  }
+  .pf-toolbar--files > .pf-toolbar__controls .pf-toolbar__group > * {
+    flex-shrink: 0;
+  }
   .pf-control[data-role="button"] { border-radius: 2px; }
   .pf-control[data-role="field"] { border-radius: 4px; }
 

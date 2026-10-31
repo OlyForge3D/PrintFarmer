@@ -4,6 +4,85 @@ import { join } from 'node:path';
 import { captureRoutedToolbarState, mountRoutedToolbarPage, toolbarRouteUser } from './fixtures/toolbar-routed';
 import { inventoryRouteSeeds, inventoryRouteStates } from './fixtures/toolbar-routes-inventory';
 
+for (const width of [390, 1440]) {
+  test(`Filament Inventory uses Catalog panel and table surfaces at ${width}px`, async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width, height: 1000 });
+    await page.addInitScript(() => {
+      localStorage.setItem('catalog-view-printer-models', 'table');
+      localStorage.setItem('filaments-view-mode', 'table');
+      localStorage.setItem('spools-view-mode', 'table');
+    });
+    const measurements = [];
+    for (const path of ['/catalog', '/spools/filaments', '/spools/spools']) {
+      const requests = await mountRoutedToolbarPage(page, path, inventoryRouteSeeds());
+      const table = page.locator('main table').first();
+      await expect(table).toBeVisible();
+      const surfaces = await table.evaluate(element => {
+        const panel = element.closest('[role="tabpanel"]')!.parentElement!;
+        const frame = element.parentElement!;
+        const style = (node: Element) => {
+          const computed = getComputedStyle(node);
+          return {
+            background: computed.backgroundColor, borderColor: computed.borderTopColor,
+            borderWidth: computed.borderTopWidth, radius: computed.borderTopLeftRadius,
+          };
+        };
+        return {
+          panel: style(panel), frame: style(frame),
+          head: style(element.querySelector('thead')!), body: style(element.querySelector('tbody')!),
+          frameWidth: frame.clientWidth, tableWidth: element.scrollWidth,
+        };
+      });
+      expect(surfaces.panel.borderWidth).toBe('1px');
+      expect(surfaces.frame.borderWidth).toBe('1px');
+      expect(surfaces.frame.radius).toBe('8px');
+      expect(surfaces.body.background).toBe(surfaces.panel.background);
+      expect(surfaces.head.background).not.toBe(surfaces.body.background);
+      if (path !== '/catalog') {
+        const reference = measurements[0].surfaces;
+        expect(surfaces.panel).toEqual(reference.panel);
+        expect(surfaces.frame).toEqual(reference.frame);
+        expect(surfaces.head).toEqual(reference.head);
+        expect(surfaces.body).toEqual(reference.body);
+        if (width === 390) expect(surfaces.tableWidth).toBeGreaterThan(surfaces.frameWidth);
+        const row = table.locator('tbody tr').first();
+        const checkbox = row.getByRole('checkbox');
+        await checkbox.check();
+        await expect(checkbox).toBeChecked();
+        await expect(row).toHaveAttribute('data-selected', 'true');
+        const settledBackground = () => row.evaluate(async element => {
+          const animations = element.getAnimations();
+          for (const animation of animations) animation.finish();
+          await Promise.all(animations.map(animation => animation.finished));
+          return getComputedStyle(element).backgroundColor;
+        });
+        const selected = await settledBackground();
+        expect(selected).not.toBe(surfaces.body.background);
+        await row.hover();
+        expect(await settledBackground()).toBe(selected);
+        await checkbox.uncheck();
+        await expect(checkbox).not.toBeChecked();
+        await expect(table).not.toHaveAttribute('role', 'grid');
+        await expect(table).not.toHaveAttribute('tabindex');
+        await expect(row.getByRole('button', { name: /^Edit / })).toBeVisible();
+        await expect(row.getByRole('button', { name: /^Clone / })).toBeVisible();
+        await expect(row.getByRole('button', { name: /^Delete / })).toBeVisible();
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      measurements.push({ path, width, surfaces });
+      await page.screenshot({ path: testInfo.outputPath(`${path.replaceAll('/', '-')}-${width}.png`), fullPage: true });
+      expect(requests.errors).toEqual([]);
+      expect(requests.writes).toEqual([]);
+      expect(requests.external).toEqual([]);
+      expect(requests.unhandled).toEqual([]);
+    }
+    await testInfo.attach('inventory-shared-surface-measurements', {
+      body: JSON.stringify(measurements, null, 2), contentType: 'application/json',
+    });
+  });
+}
+
 async function assertGeometryAndOrder(page: Page) {
   const groups = page.locator('main .pf-toolbar:visible, main .pf-header-actions:visible');
   expect(await groups.count(), 'each audited state must expose its existing controls to geometry checks').toBeGreaterThan(0);

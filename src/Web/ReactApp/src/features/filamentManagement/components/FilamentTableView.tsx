@@ -1,8 +1,7 @@
-import { Button, TableHeaderCell } from '@/common/components/ui';
+import { Button, Table, TableHead, TableBody, TableRow, TableHeaderCell } from '@/common/components/ui';
 import { nextTableSort, type SortDirection } from '@/common/hooks/useTableSort';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { EditIcon, CopyIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { SpoolmanFilament } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 
@@ -41,10 +40,9 @@ export function FilamentTableView({
   const visibleColumns = tableColumns.filter(c => c.visible);
 
   return (
-    <div className="overflow-x-auto relative">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="text-left bg-pf-bg-2">
+      <Table className="text-sm">
+        <TableHead>
+          <tr className="text-left">
             <th className="px-3 py-2 w-10">
               <Checkbox
                 checked={allSelected}
@@ -71,10 +69,10 @@ export function FilamentTableView({
             })}
             <th className="px-3 py-2 font-medium w-16">Actions</th>
           </tr>
-        </thead>
-        <tbody>
+        </TableHead>
+        <TableBody>
           {filaments.map(f => (
-            <SelectableRow key={f.id} className="border-t border-pf-border" isSelected={selectedIds.has(f.id)}>
+            <TableRow key={f.id} isHoverable isSelected={selectedIds.has(f.id)}>
               <td className="px-3 py-2">
                 <Checkbox
                   checked={selectedIds.has(f.id)}
@@ -98,10 +96,9 @@ export function FilamentTableView({
                   </Button>
                 </div>
               </td>
-            </SelectableRow>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
   );
 }

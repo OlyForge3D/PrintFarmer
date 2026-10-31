@@ -335,7 +335,7 @@ export function PrinterFileCatalog() {
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
-      <Toolbar aria-label="Printer file controls" labelled>
+      <Toolbar aria-label="Printer file controls" labelled className="pf-toolbar--files">
         <FiltersDisclosure
         activeCount={printerId ? 1 : 0}
         onReset={() => changeFilter('printer', '')}

@@ -696,7 +696,7 @@ export function FilesPage() {
     </HeaderActions>
   );
 
-  const toolbarActions = (
+  const toolbarActions = selectedIds.length > 0 ? (
     <>
       {selectedModelIds.length > 0 && (
         <Button
@@ -739,7 +739,7 @@ export function FilesPage() {
         </Button>
       )}
     </>
-  );
+  ) : null;
 
   const fileTypeFilter = (
     <ToolbarField label="Type" htmlFor="local-library-type">
@@ -801,6 +801,7 @@ export function FilesPage() {
                     )}
                     extraToolbarActions={toolbarActions}
                     extraToolbarActionsPlacement="below"
+                    toolbarClassName="pf-toolbar--files mb-0"
                     renderFolderNavigation={(path, onNavigate, controls) => (
                       <LocalLibraryFolders
                         controls={controls}

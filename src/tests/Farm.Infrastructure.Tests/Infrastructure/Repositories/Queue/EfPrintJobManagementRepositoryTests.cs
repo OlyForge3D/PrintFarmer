@@ -13,6 +13,165 @@ namespace Farm.Infrastructure.Tests.Infrastructure.Repositories.Queue;
 
 public class EfPrintJobManagementRepositoryTests
 {
+    [Theory]
+    [InlineData("name", false)]
+    [InlineData("name_desc", true)]
+    [InlineData("printer", false)]
+    [InlineData("printer_desc", true)]
+    [InlineData("model", false)]
+    [InlineData("model_desc", true)]
+    [InlineData("material", false)]
+    [InlineData("material_desc", true)]
+    [InlineData("filament", false)]
+    [InlineData("filament_desc", true)]
+    [InlineData("FILAMENT_DESC", true)]
+    [InlineData("cost", false)]
+    [InlineData("cost_desc", true)]
+    [InlineData("duration_asc", false)]
+    [InlineData("duration", true)]
+    [InlineData("oldest", false)]
+    [InlineData("newest", true)]
+    [InlineData("completedAt", true)]
+    public async Task GetHistoryAsync_SqliteSortModes_OrderFullResultsBeforePaging(string mode, bool descending)
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=False");
+        await connection.OpenAsync();
+        await using AppDbContext db = new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        DateTime start = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var jobs = new List<PrintJob>();
+        foreach (int index in new[] { 3, 1, 2, 0 })
+        {
+            var model = new PrinterModel { Id = Guid.NewGuid(), Name = $"Model {index}" };
+            var printer = new Printer { Id = Guid.NewGuid(), Name = $"Printer {index}", ServerUrl = $"http://history-{index}.invalid", Model = model, ModelId = model.Id };
+            var file = new GcodeFile { Id = Guid.NewGuid(), Name = $"File {index}", FileHash = $"history-sort-{index}", RequiredMaterial = $"Material {index}", EstimatedFilamentWeightG = index + 1 };
+            PrintJob job = new PrintJobBuilder().WithId(Guid.Parse($"00000000-0000-0000-0000-{index + 1:000000000000}"))
+                .WithName($"Reverse name {3 - index}").WithGcodeFile(file).WithAssignedPrinter(printer)
+                .WithStatus(PrintJobStatus.Completed).WithActualEndTime(start.AddDays(index))
+                .WithActualPrintTime(TimeSpan.FromMinutes(index + 1)).Build();
+            job.MaterialCostUsd = index + 1;
+            // Totals must prefer toolheads, then actual usage, then the file estimate.
+            if (index == 1)
+            {
+                job.ActualFilamentUsage = 200;
+                job.MaterialCostUsd = 200;
+                job.ToolheadUsages.Add(new PrintJobToolheadUsage
+                {
+                    Id = Guid.NewGuid(),
+                    PrintJobId = job.Id,
+                    ToolheadIndex = 0,
+                    FilamentUsageGrams = 1,
+                    MaterialCostUsd = 1
+                });
+                job.ToolheadUsages.Add(new PrintJobToolheadUsage
+                {
+                    Id = Guid.NewGuid(),
+                    PrintJobId = job.Id,
+                    ToolheadIndex = 1,
+                    FilamentUsageGrams = 1,
+                    MaterialCostUsd = 1
+                });
+            }
+            if (index == 2)
+            {
+                job.ActualFilamentUsage = 3;
+            }
+
+            jobs.Add(job);
+        }
+        db.PrintJobs.AddRange(jobs);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var repository = new EfPrintJobManagementRepository(db);
+        Guid[] expected = jobs.OrderBy(job => job.Id).Select(job => job.Id).ToArray();
+        if (descending)
+        {
+            Array.Reverse(expected);
+        }
+
+        var first = await repository.GetHistoryAsync(limit: 2, sortBy: mode, dateStart: start, dateEnd: start.AddDays(3));
+        var second = await repository.GetHistoryAsync(limit: 2, offset: 2, sortBy: mode, dateStart: start, dateEnd: start.AddDays(3));
+
+        Assert.Equal(expected, first.jobs.Concat(second.jobs).Select(job => job.Id));
+        Assert.Equal(4, first.totalCount);
+        Assert.Equal(4, first.completedCount);
+        Assert.Equal(600, first.totalPrintTimeSeconds);
+        Assert.Equal(2, first.jobs.Concat(second.jobs).Single(job => job.Id == jobs.Single(value => value.ToolheadUsages.Count == 2).Id).ToolheadUsages.Count);
+        Assert.Empty(db.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task GetHistoryAsync_SqliteAscendingDuration_SortsMissingAsDisplayedZeroAcrossPages()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=False");
+        await connection.OpenAsync();
+        await using AppDbContext db = new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+        await db.Database.EnsureCreatedAsync();
+        DateTime now = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var jobs = new List<PrintJob>();
+        foreach (int index in new[] { 3, 1, 2, 0 })
+        {
+            PrintJob job = new PrintJobBuilder()
+                .WithId(Guid.Parse($"00000000-0000-0000-0000-{index + 1:000000000000}"))
+                .WithGcodeFile(new GcodeFile { Id = Guid.NewGuid(), Name = $"Duration {index}", FileHash = $"duration-sort-{index}" })
+                .WithStatus(PrintJobStatus.Completed).WithActualEndTime(now).Build();
+            job.ActualPrintTime = index == 0 ? null : TimeSpan.FromMinutes(index == 1 ? 0 : index * 5);
+            jobs.Add(job);
+        }
+        db.PrintJobs.AddRange(jobs);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var repository = new EfPrintJobManagementRepository(db);
+
+        var first = await repository.GetHistoryAsync(limit: 1, sortBy: "duration_asc");
+        var remaining = await repository.GetHistoryAsync(limit: 3, offset: 1, sortBy: "duration_asc");
+        PrintJob[] ordered = first.jobs.Concat(remaining.jobs).ToArray();
+
+        Assert.Equal(jobs.OrderBy(job => job.Id).Select(job => job.Id), ordered.Select(job => job.Id));
+        Assert.Equal(new[] { 0d, 0d, 600d, 900d }, ordered.Select(job => job.ActualPrintTime?.TotalSeconds ?? 0));
+        Assert.Equal(4, first.totalCount);
+        var legacy = await repository.GetHistoryAsync(sortBy: "duration");
+        Assert.Equal(new[] { 4, 3, 2, 1 }.Select(id => Guid.Parse($"00000000-0000-0000-0000-{id:000000000000}")),
+            legacy.jobs.Select(job => job.Id));
+    }
+
+    [Theory]
+    [InlineData("model")]
+    [InlineData("model_desc")]
+    [InlineData("material")]
+    [InlineData("material_desc")]
+    [InlineData("filament")]
+    [InlineData("filament_desc")]
+    [InlineData("cost")]
+    [InlineData("cost_desc")]
+    public async Task GetHistoryAsync_MissingValuesAndTies_AreStableAcrossPages(string mode)
+    {
+        await using AppDbContext db = new(CreateInMemoryOptions(Guid.NewGuid().ToString()));
+        DateTime now = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        PrintJob Job(int id, bool missing)
+        {
+            PrintJob job = new PrintJobBuilder().WithId(Guid.Parse($"00000000-0000-0000-0000-{id:000000000000}"))
+                .WithStatus(PrintJobStatus.Completed).WithActualEndTime(now).WithQueuedAt(now).Build();
+            job.AssignedPrinterId = null;
+            if (!missing)
+            {
+                job.AssignedPrinter = new Printer { Id = Guid.NewGuid(), Name = "Same", Model = new PrinterModel { Id = Guid.NewGuid(), Name = "Same" } };
+                job.RequiredMaterialType = "PLA";
+                job.ActualFilamentUsage = 10;
+                job.MaterialCostUsd = 1;
+            }
+            return job;
+        }
+        db.PrintJobs.AddRange(Job(3, false), Job(1, true), Job(2, false));
+        await db.SaveChangesAsync();
+        var repository = new EfPrintJobManagementRepository(db);
+        var first = await repository.GetHistoryAsync(limit: 1, sortBy: mode);
+        var second = await repository.GetHistoryAsync(limit: 1, offset: 1, sortBy: mode);
+        var third = await repository.GetHistoryAsync(limit: 1, offset: 2, sortBy: mode);
+        Assert.Equal(new[] { 2, 3, 1 }.Select(id => Guid.Parse($"00000000-0000-0000-0000-{id:000000000000}")),
+            first.jobs.Concat(second.jobs).Concat(third.jobs).Select(job => job.Id));
+    }
+
     [Fact]
     public async Task GetAverageWaitTimeMinutesAsync_FakeClock_PreservesCutoffAndFilters()
     {

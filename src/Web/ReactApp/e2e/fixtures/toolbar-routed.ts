@@ -255,6 +255,13 @@ export async function captureRoutedToolbarState(
       .map(control => {
         const rect = control.getBoundingClientRect();
         const style = getComputedStyle(control);
+        const filesRow = element.matches('.pf-toolbar--files')
+          ? control.closest<HTMLElement>('.pf-toolbar__controls')
+          : null;
+        const scrollBounds = filesRow?.getBoundingClientRect();
+        const containedInFilesRow = filesRow && scrollBounds && getComputedStyle(filesRow).overflowX === 'auto'
+          && rect.left >= scrollBounds.left - filesRow.scrollLeft - 1
+          && rect.right <= scrollBounds.left - filesRow.scrollLeft + filesRow.scrollWidth + 1;
         return {
           tag: control.tagName, name: control.getAttribute('aria-label') ?? control.textContent?.trim() ?? '',
           height: rect.height, width: rect.width, x: rect.x, y: rect.y,
@@ -269,7 +276,7 @@ export async function captureRoutedToolbarState(
           segmented: Boolean(control.closest('.pf-toolbar__group--segmented')),
           field: ['INPUT', 'SELECT'].includes(control.tagName) || control.dataset.role === 'field',
           clipped: control.scrollWidth > control.clientWidth + 1,
-          fits: rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1,
+          fits: Boolean(containedInFilesRow) || (rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1),
         };
       });
     return {

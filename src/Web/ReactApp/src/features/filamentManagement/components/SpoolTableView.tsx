@@ -1,8 +1,7 @@
-import { Button, TableHeaderCell } from '@/common/components/ui';
+import { Button, Table, TableHead, TableBody, TableRow, TableHeaderCell } from '@/common/components/ui';
 import { nextTableSort, type SortDirection } from '@/common/hooks/useTableSort';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { EditIcon, CopyIcon, DeleteIcon, TagIcon } from '@/common/components/icons/MdiIcons';
-import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { SpoolmanSpoolDto, SpoolTableColumn } from '@/features/filamentManagement/types';
 
 interface SpoolTableViewProps {
@@ -40,10 +39,9 @@ export function SpoolTableView({
   const visibleColumns = tableColumns.filter(c => c.visible);
 
   return (
-    <div className="overflow-x-auto relative">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="text-left bg-pf-bg-2">
+      <Table className="text-sm">
+        <TableHead>
+          <tr className="text-left">
             <th className="px-3 py-2 w-10">
               <Checkbox
                 checked={allSelected}
@@ -71,10 +69,10 @@ export function SpoolTableView({
             })}
             <th className="px-3 py-2 font-medium w-16">Actions</th>
           </tr>
-        </thead>
-        <tbody>
+        </TableHead>
+        <TableBody>
           {spools.map(spool => (
-            <SelectableRow key={spool.id} className="border-t border-pf-border" isSelected={selectedIds.has(spool.id)}>
+            <TableRow key={spool.id} isHoverable isSelected={selectedIds.has(spool.id)}>
               <td className="px-3 py-2">
                 <Checkbox
                   checked={selectedIds.has(spool.id)}
@@ -101,10 +99,9 @@ export function SpoolTableView({
                   </Button>
                 </div>
               </td>
-            </SelectableRow>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
   );
 }

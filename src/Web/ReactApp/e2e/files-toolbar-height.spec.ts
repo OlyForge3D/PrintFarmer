@@ -110,9 +110,7 @@ for (const width of [390, 1440]) {
           const printer = toolbar.getByRole('combobox', { name: 'Printer' });
           await expect(printer).toBeVisible();
           await expectUniformControls(toolbar, width === 1440);
-          await page.keyboard.press('Tab');
-          await expect(printer).toBeFocused();
-          // Reset remains in the tab order only when a refinement is active.
+          // The disclosed panel follows the complete controls row in DOM order.
           if (mode === 'grid') {
             const selectAll = toolbar.getByRole('checkbox', { name: 'Select all files on this page' });
             if (await selectAll.isEnabled()) {
@@ -122,6 +120,12 @@ for (const width of [390, 1440]) {
           }
           await page.keyboard.press('Tab');
           await expect(toolbar.getByRole('button', { name: 'Explorer view', exact: true })).toBeFocused();
+          await page.keyboard.press('Tab');
+          await expect(toolbar.getByRole('button', { name: 'Grid view', exact: true })).toBeFocused();
+          await page.keyboard.press('Tab');
+          await expect(toolbar.getByRole('button', { name: 'Force refresh all online printers' })).toBeFocused();
+          await page.keyboard.press('Tab');
+          await expect(printer).toBeFocused();
         } else {
           await expect(page.getByRole('checkbox', { name: 'Select part.stl' })).toBeVisible();
           await page.getByRole('checkbox', { name: 'Select part.stl' }).check();
