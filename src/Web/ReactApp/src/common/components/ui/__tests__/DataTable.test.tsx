@@ -55,6 +55,7 @@ describe('DataTable', () => {
     expect(button).toHaveClass('px-2', 'py-1', 'h-full', 'w-full', 'focus-visible:ring-inset');
     expect(button).not.toHaveClass('px-4', 'py-3', 'text-left');
     expect(button.style.textAlign).toBe('inherit');
+    expect(button.style.textTransform).toBe('inherit');
     expect(button.firstElementChild).toHaveClass('inline-flex', 'items-center');
     button.focus();
     await user.keyboard('{Enter}');

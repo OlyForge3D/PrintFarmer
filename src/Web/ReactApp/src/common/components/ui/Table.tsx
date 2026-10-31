@@ -440,7 +440,7 @@ export function TableHeaderCell({
         <button
           type="button"
           className={`block h-full w-full cursor-pointer [font:inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent ${paddingClasses.length ? paddingClasses.join(' ') : 'px-4 py-3'}`}
-          style={{ textAlign: 'inherit', color: 'inherit' }}
+          style={{ textAlign: 'inherit', textTransform: 'inherit', color: 'inherit' }}
           onClick={handleClick}
         >
           <span className="inline-flex items-center">
