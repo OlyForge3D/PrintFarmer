@@ -98,6 +98,9 @@ function stringAttribute(element: ts.JsxOpeningLikeElement, name: string): strin
 }
 
 function toolbarControlUses(source: string): ToolbarFieldUse[] {
+  if (!source.includes('ToolbarField') && !(source.includes('Toolbar') && source.includes('Select'))) {
+    return [];
+  }
   const file = ts.createSourceFile('feature.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const uses: ToolbarFieldUse[] = [];
 
