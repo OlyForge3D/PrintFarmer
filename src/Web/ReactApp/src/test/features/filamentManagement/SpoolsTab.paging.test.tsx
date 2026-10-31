@@ -68,10 +68,6 @@ vi.mock('@/features/filamentManagement/components/SpoolCard', () => ({
     `<div data-testid="spool-card">${spool.id}</div>`,
 }));
 
-vi.mock('@/features/filamentManagement/components/SpoolTableView', () => ({
-  SpoolTableView: () => '<div data-testid="spool-table" />',
-}));
-
 vi.mock('@/features/filamentManagement/components/SpoolCompactView', () => ({
   SpoolCompactView: () => '<div data-testid="spool-compact" />',
 }));
@@ -104,7 +100,8 @@ vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/components/ui')>(),
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,
@@ -142,6 +139,42 @@ describe('SpoolsTab — AbortController cancellation', () => {
       showEmpty: false, pageSize: 50, sortField: 'id', sortDir: 'asc', page: 0,
     });
     mockGetSpools.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('cycles the table header to server-default order without locally reordering the page', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    filterState.sortDir = 'desc';
+    filterState.page = 2;
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(2), makeSpool(1)], totalCount: 150 });
+    const { rerender } = render(<SpoolsTab />);
+    const header = await screen.findByRole('button', { name: 'ID' });
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.queryByRole('combobox', { name: /sort by/i })).not.toBeInTheDocument();
+    for (const label of ['Color', 'Used %', 'Archived']) {
+      expect(screen.getByRole('columnheader', { name: label })).not.toHaveAttribute('aria-sort');
+      expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
+    }
+    fireEvent.click(header);
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'none', sortDir: 'asc', page: 0 });
+
+    Object.assign(filterState, { sortField: 'none', sortDir: 'asc', page: 0 });
+    rerender(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools.mock.lastCall?.[0]).toMatchObject({ offset: 0, sort: undefined }));
+    expect(screen.getByRole('button', { name: 'ID' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getAllByRole('row').slice(1).map(row => row.textContent)).toEqual([
+      expect.stringContaining('Spool 2'), expect.stringContaining('Spool 1'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'ID' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'id', sortDir: 'asc', page: 0 });
+  });
+
+  it('retains the table sort dropdown when a sortable column is hidden', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    localStorage.setItem('spool-table-columns', JSON.stringify([{ id: 'vendor', visible: false }]));
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(1)], totalCount: 1 });
+    render(<SpoolsTab />);
+    expect(await screen.findByRole('combobox', { name: /sort by/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vendor' })).toBeInTheDocument();
   });
 
   it('passes AbortSignal to getSpools on mount', async () => {
@@ -358,5 +391,39 @@ describe('SpoolsTab — "Open Spoolman" link scheme safety (js/xss-through-dom)'
 
     await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
     expect(screen.queryByRole('link', { name: /open spoolman/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('SpoolsTab — filter disclosure reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: 'search term', material: 'PETG', vendor: 'Prusa', color: 'blue',
+      location: 'Shelf A', showEmpty: true, pageSize: 25,
+      sortField: 'vendor', sortDir: 'desc', page: 0, hasActiveFilters: true,
+    });
+    mockGetSpools.mockResolvedValue(pageOf([makeSpool(1)], 1));
+  });
+
+  it('resets only filters while preserving search, sort, and page size', async () => {
+    render(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: /filters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
+
+    expect(filterState.setMany).toHaveBeenCalledTimes(1);
+    expect(filterState.setMany).toHaveBeenCalledWith({
+      material: '',
+      vendor: '',
+      color: '',
+      location: '',
+      showEmpty: false,
+      page: 0,
+    });
+    expect(screen.getByPlaceholderText(/name, vendor, material/i)).toHaveValue('search term');
+    expect(screen.getByRole('combobox', { name: /sort by/i })).toHaveValue('vendor');
+    expect(filterState.pageSize).toBe(25);
   });
 });

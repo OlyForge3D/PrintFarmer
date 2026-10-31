@@ -1,6 +1,7 @@
-import { Button } from '@/common/components/ui';
+import { Button, TableHeaderCell } from '@/common/components/ui';
+import { nextTableSort, type SortDirection } from '@/common/hooks/useTableSort';
 import { Checkbox } from '@/common/components/ui/Checkbox';
-import { ArrowUpIcon, ArrowDownIcon, EditIcon, CopyIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { EditIcon, CopyIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { SpoolmanFilament } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
@@ -16,7 +17,7 @@ interface FilamentTableViewProps {
   tableColumns: FilamentTableColumn[];
   onToggleSelect: (id: number) => void;
   onToggleSelectAll: () => void;
-  onSort: (field: string, dir: 'asc' | 'desc') => void;
+  onSort: (field: string | null, dir: SortDirection) => void;
   onEdit: (f: SpoolmanFilament) => void;
   onClone: (f: SpoolmanFilament) => void;
   onDelete: (f: SpoolmanFilament) => void;
@@ -53,24 +54,19 @@ export function FilamentTableView({
             </th>
             {visibleColumns.map(col => {
               const isSorted = sortField === col.id;
-              const ariaSort: 'ascending' | 'descending' | undefined = isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined;
               return (
-                <th
+                <TableHeaderCell
                   key={col.id}
-                  className={`px-3 py-2 font-medium ${col.sortable ? 'cursor-pointer select-none' : ''}`}
-                  onClick={() => {
-                    if (!col.sortable) return;
-                    onSort(col.id, isSorted ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc');
+                  sortable={col.sortable}
+                  sortKey={col.id}
+                  sortDirection={isSorted ? sortDir : null}
+                  onSort={key => {
+                    const next = nextTableSort({ column: sortField, direction: sortDir }, key);
+                    onSort(next.column, next.direction);
                   }}
-                  {...(ariaSort ? { 'aria-sort': ariaSort } : {})}
                 >
-                  <span className="inline-flex items-center gap-1">
-                    {col.label}
-                    {col.sortable && isSorted && (
-                      sortDir === 'asc' ? <ArrowUpIcon className="h-3 w-3" /> : <ArrowDownIcon className="h-3 w-3" />
-                    )}
-                  </span>
-                </th>
+                  {col.label}
+                </TableHeaderCell>
               );
             })}
             <th className="px-3 py-2 font-medium w-16">Actions</th>

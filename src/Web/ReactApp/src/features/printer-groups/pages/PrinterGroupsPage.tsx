@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Spinner } from '@/common/components/ui';
+import { Button, Spinner, HeaderActions } from '@/common/components/ui';
 import { PlusIcon, PrinterIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
@@ -163,9 +163,11 @@ export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) 
       icon={PrinterIcon}
       embedded={embedded}
       actions={
-        <Button data-testid="create-printer-group-action" variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
-          Create Group
-        </Button>
+        <HeaderActions>
+          <Button data-testid="create-printer-group-action" variant="primary" control onClick={handleCreate} iconLeft={<PlusIcon />}>
+            Create Group
+          </Button>
+        </HeaderActions>
       }
     >
       {listContent}

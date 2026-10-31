@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Link } from 'react-router';
-import { Alert, Badge, Button, Card } from '@/common/components/ui';
+import { Alert, Badge, Button, Card, HeaderActions, RefreshButton } from '@/common/components/ui';
 import {
   AdminEmpty,
   AdminError,
@@ -434,11 +434,11 @@ export function AdminControlCenterPage() {
     dashboardDestinations.settings;
 
   const refreshButton = (
-    <div className="flex flex-wrap gap-2">
+    <HeaderActions className="justify-end mb-0">
       <Button
+        control
         ref={pinChooserButtonRef}
         variant={showPinChooser ? 'secondary' : 'subtle'}
-        size="sm"
         aria-expanded={showPinChooser}
         aria-controls="admin-pin-chooser"
         onClick={() => setShowPinChooser((open) => !open)}
@@ -446,19 +446,17 @@ export function AdminControlCenterPage() {
         Pin admin links
       </Button>
       {canViewOverview && (
-        <Button
+        <RefreshButton
           variant="secondary"
-          size="sm"
           onClick={() => {
             void refetch();
           }}
-          disabled={isFetching}
-          iconLeft={<RefreshIcon className="h-3.5 w-3.5" ariaLabel="" />}
-        >
-          {isFetching ? 'Refreshing…' : 'Refresh'}
-        </Button>
-      )}
-    </div>
+          busy={isFetching}
+          aria-label="Refresh admin overview"
+          title="Refresh admin overview"
+        />
+        )}
+    </HeaderActions>
   );
 
   return (

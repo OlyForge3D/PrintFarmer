@@ -213,6 +213,51 @@ describe('AutoDispatchDashboardPage', () => {
     expect(screen.getByText('Configure printers to enable auto-dispatch queue management.')).toBeInTheDocument();
   });
 
+  it('uses roving focus and wrapping arrow keys for the state filter radio group', async () => {
+    const user = userEvent.setup();
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
+      data: mockGlobalStatus,
+      isLoading: false,
+      error: null,
+    });
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    const allFilter = screen.getByRole('radio', { name: 'All' });
+    const queuedFilter = screen.getByRole('radio', { name: /queued jobs/i });
+    const radios = screen.getAllByRole('radio');
+    expect(allFilter).toHaveAttribute('tabindex', '0');
+    expect(radios.filter(radio => radio.getAttribute('tabindex') === '0')).toEqual([allFilter]);
+    expect(queuedFilter).toHaveAttribute('tabindex', '-1');
+
+    allFilter.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(queuedFilter).toHaveFocus();
+    expect(queuedFilter).toHaveAttribute('aria-checked', 'true');
+    expect(queuedFilter).toHaveAttribute('tabindex', '0');
+    expect(allFilter).toHaveAttribute('tabindex', '-1');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(allFilter).toHaveFocus();
+    expect(allFilter).toHaveAttribute('aria-checked', 'true');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.keyboard('{ArrowDown}');
+    expect(allFilter).toHaveFocus();
+    expect(allFilter).toHaveAttribute('aria-checked', 'true');
+
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveFocus();
+    expect(screen.getByRole('radio', { name: 'Offline' })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('displays ready-gate checks with pass/fail indicators', () => {
     autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,

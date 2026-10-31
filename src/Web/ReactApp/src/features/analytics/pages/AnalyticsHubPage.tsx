@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { ChartIcon, PrinterIcon, TrendingUpIcon } from '@/common/components/icons/MdiIcons';
-import { Badge, Card, Tabs, TimePeriodFilter } from '@/common/components/ui';
+import { Badge, Card, HeaderActions, Tabs, TimePeriodFilter, Toolbar } from '@/common/components/ui';
 import type { TimePeriodFilterValue } from '@/common/components/ui';
 import { useCostSummary, usePrinters } from '@/common/hooks/useApi';
 import { usePrinterUtilization, useStatisticsSummary, type PrinterUtilization } from '@/features/statistics/hooks/useStatistics';
@@ -218,12 +218,14 @@ export function AnalyticsHubPage() {
       icon={TrendingUpIcon}
       parent={adminHubParent}
       actions={
-        <div className="flex items-center gap-3">
-          <TimePeriodFilter value={period} onChange={setPeriod} />
+        <HeaderActions className="justify-end mb-0">
           <ExportMenu days={days} />
-        </div>
+        </HeaderActions>
       }
     >
+      <Toolbar aria-label="Analytics filters">
+        <TimePeriodFilter value={period} onChange={setPeriod} />
+      </Toolbar>
       <div className="space-y-6">
         <section aria-label="Analytics key performance indicators" className="space-y-3">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">

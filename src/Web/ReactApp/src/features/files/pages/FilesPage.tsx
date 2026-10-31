@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { FiltersDisclosure, HeaderActions, ToolbarField } from '@/common/components/ui/toolbar';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
@@ -56,7 +57,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Button, FormField, Select, Tabs } from '@/common/components/ui';
+import { Button, Select, Tabs } from '@/common/components/ui';
 import type { Model } from '@/types/models';
 import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -587,6 +588,7 @@ export function FilesPage() {
     },
     {
       key: 'fileName',
+      sortKey: 'name',
       label: 'Name',
       sortable: true,
       render: (file) => (
@@ -595,6 +597,7 @@ export function FilesPage() {
     },
     {
       key: 'fileSize',
+      sortKey: 'size',
       label: 'Size',
       sortable: true,
       align: 'right',
@@ -602,6 +605,7 @@ export function FilesPage() {
     },
     {
       key: 'uploadedAt',
+      sortKey: 'date',
       label: 'Uploaded',
       sortable: true,
       render: (file) => <FileDate value={file.uploadedAt} fallback="—" />,
@@ -652,13 +656,13 @@ export function FilesPage() {
   }, [activeDetailId, closeDetails, handleRefresh]);
 
   const headerActions = (
-    <div className="flex flex-wrap items-center gap-2">
+    <HeaderActions>
       {hasPermission('3d_models', 'create') && (
         <Button
           ref={printablesButtonRef}
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<PrintablesIcon />}
           onClick={() => setShowPrintablesBrowserModal(true)}
           onFocus={() => void PrintablesBrowserModal.preload()}
@@ -671,7 +675,7 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<CubeIcon className="h-4 w-4" />}
           onClick={() => setShowModelUploadModal(true)}
         >
@@ -682,14 +686,14 @@ export function FilesPage() {
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          control
           iconLeft={<UploadIcon className="h-4 w-4" />}
           onClick={() => setShowGcodeUploadModal(true)}
         >
           Upload G-Code
         </Button>
       )}
-    </div>
+    </HeaderActions>
   );
 
   const toolbarActions = (
@@ -738,8 +742,8 @@ export function FilesPage() {
   );
 
   const fileTypeFilter = (
-    <FormField label="Type" htmlFor="local-library-type">
-      <Select id="local-library-type" value={selectedFilter} className="min-w-32"
+    <ToolbarField label="Type" htmlFor="local-library-type">
+      <Select id="local-library-type" value={selectedFilter} className="pf-control py-0 min-w-32"
         onChange={event => {
           const option = FILE_TYPE_OPTIONS.find(option => option.value === event.target.value);
           if (option) handleFilterChange(option.value);
@@ -748,7 +752,7 @@ export function FilesPage() {
           <option key={option.value} value={option.value} title={option.hint}>{option.label}</option>
         ))}
       </Select>
-    </FormField>
+    </ToolbarField>
   );
 
   return (
@@ -786,8 +790,17 @@ export function FilesPage() {
                     columns={modelColumns}
                     renderItemActions={renderItemActions}
                     renderCard={renderCard}
-                    filterActions={fileTypeFilter}
+                    filterActions={(controls) => (
+                      <FiltersDisclosure
+                        controls={controls}
+                        activeCount={selectedFilter === 'all' ? 0 : 1}
+                        onReset={() => handleFilterChange('all')}
+                      >
+                        {fileTypeFilter}
+                      </FiltersDisclosure>
+                    )}
                     extraToolbarActions={toolbarActions}
+                    extraToolbarActionsPlacement="below"
                     renderFolderNavigation={(path, onNavigate, controls) => (
                       <LocalLibraryFolders
                         controls={controls}

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, Toggle, FormField, Select, Checkbox, Input, Badge } from '@/common/components/ui';
+import { Button, Toggle, FormField, Select, Checkbox, Input, Badge, HeaderActions } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, RefreshIcon, EyeIcon, EyeOffIcon } from '@/common/components/icons/MdiIcons';
 import {
   listApiKeys,
@@ -547,17 +547,6 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
             >
               Your API Keys
             </h2>
-            {!showCreateForm && (
-              <Button
-                variant="primary"
-                ref={createButtonRef}
-                onClick={() => setShowCreateForm(true)}
-                disabled={isSecretLocked}
-                iconLeft={<PlusIcon className="w-4 h-4" />}
-              >
-                Create New API Key
-              </Button>
-            )}
           </div>
 
           {showCreateForm && (
@@ -833,6 +822,22 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
       subtitle="Manage purpose-limited credentials for slicers and PrintFarmer Desktop"
       icon={KeyIcon}
       embedded={embedded}
+      actions={
+        <HeaderActions>
+          {!showCreateForm && (
+            <Button
+              variant="primary"
+              ref={createButtonRef}
+              control
+              onClick={() => setShowCreateForm(true)}
+              disabled={isSecretLocked}
+              iconLeft={<PlusIcon className="w-4 h-4" />}
+            >
+              Create New API Key
+            </Button>
+          )}
+        </HeaderActions>
+      }
     >
       {content}
     </PageTemplate>

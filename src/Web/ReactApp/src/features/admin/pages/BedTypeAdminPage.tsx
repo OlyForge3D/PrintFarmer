@@ -4,7 +4,7 @@ import { DeleteIcon, EditIcon, PlusIcon } from '@/common/components/icons/MdiIco
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, Input, FormField } from '@/common/components/ui';
+import { Button, HeaderActions, Input, FormField } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useBedTypes, queryKeys } from '@/common/hooks/useApi';
 import {
@@ -104,9 +104,11 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
       title="Bed Types"
       subtitle="Manage printer bed surface types"
       actions={
-        <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>
-          Add Bed Type
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>
+            Add Bed Type
+          </Button>
+        </HeaderActions>
       }
       embedded={embedded}
     >

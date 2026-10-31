@@ -29,7 +29,13 @@ vi.mock('sonner', () => ({
 
 // Mock PageTemplate to render children directly
 vi.mock('@/common/components/PageTemplate', () => ({
-  PageTemplate: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PageTemplate: ({
+    children,
+    actions,
+  }: {
+    children: React.ReactNode;
+    actions?: React.ReactNode;
+  }) => <div>{actions}{children}</div>,
 }));
 
 // Mock icons

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -41,13 +41,13 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
-function renderModal() {
+function renderModal(initialFileIds?: string[]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <CreateProjectModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} />
+      <CreateProjectModal isOpen onClose={vi.fn()} onSuccess={vi.fn()} initialFileIds={initialFileIds} />
     </QueryClientProvider>
   );
 }
@@ -55,6 +55,32 @@ function renderModal() {
 describe('CreateProjectModal - name length validation and error rendering (#2368)', () => {
   beforeEach(() => {
     createProjectMock.mockReset();
+  });
+
+  it('sorts file rows without changing submission order or quantity edit identity', async () => {
+    const user = userEvent.setup();
+    renderModal(['z-file', 'a-file']);
+    const order = () => screen.getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell')[0].textContent);
+    const header = screen.getByRole('columnheader', { name: 'File' });
+    const button = within(header).getByRole('button', { name: 'File' });
+    await user.click(button);
+    expect(order()).toEqual(['GCa-file', 'GCz-file']);
+    const alphaRow = screen.getAllByRole('row')[1];
+    const quantity = within(alphaRow).getAllByRole('spinbutton')[1];
+    await user.clear(quantity);
+    await user.type(quantity, '12');
+    await user.click(button);
+    expect(order()).toEqual(['GCz-file', 'GCa-file']);
+    await user.click(button);
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(order()).toEqual(['GCz-file', 'GCa-file']);
+    await user.type(screen.getByPlaceholderText('e.g., Voron 2.4 Build Kit'), 'Sorted project');
+    await user.click(screen.getByRole('button', { name: 'Create Project' }));
+    await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
+    expect(createProjectMock.mock.calls[0][0].files).toEqual([
+      { gcodeFileId: 'z-file', printCount: 1, spoolmanFilamentId: undefined },
+      { gcodeFileId: 'a-file', printCount: 112, spoolmanFilamentId: undefined },
+    ]);
   });
 
   it('caps the name input at 255 characters so the client cannot submit an over-length Unicode name', async () => {

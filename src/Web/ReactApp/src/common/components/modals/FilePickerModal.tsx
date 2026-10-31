@@ -2,20 +2,26 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Input, Select, Checkbox, Spinner, Badge, TagChip } from '@/common/components/ui';
-import { SearchIcon, FileIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Checkbox, Spinner, TagChip, FiltersDisclosure, SearchField, SortControl, Toolbar } from '@/common/components/ui';
+import { FileIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
 
 const PAGE_SIZE = 24;
 
-type SortOption = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc';
+type SortField = 'date' | 'name';
+type SortOrder = 'asc' | 'desc';
+type SortOption = `${SortField}-${SortOrder}`;
 
-const SORT_CONFIG: Record<SortOption, { sortBy: string; sortOrder: string; label: string }> = {
+const SORT_CONFIG: Record<SortOption, { sortBy: SortField; sortOrder: SortOrder; label: string }> = {
   'date-desc': { sortBy: 'date', sortOrder: 'desc', label: 'Newest first' },
   'date-asc': { sortBy: 'date', sortOrder: 'asc', label: 'Oldest first' },
   'name-asc': { sortBy: 'name', sortOrder: 'asc', label: 'Name A–Z' },
   'name-desc': { sortBy: 'name', sortOrder: 'desc', label: 'Name Z–A' },
+};
+const SORT_OPTION_BY_FIELD_ORDER: Record<SortField, Record<SortOrder, SortOption>> = {
+  date: { asc: 'date-asc', desc: 'date-desc' },
+  name: { asc: 'name-asc', desc: 'name-desc' },
 };
 
 interface TagInfo {
@@ -68,7 +74,6 @@ function FilePickerContent({
   const [allFiles, setAllFiles] = useState<GcodeFile[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const filesCacheRef = useRef<Map<string, GcodeFile>>(new Map());
@@ -210,7 +215,14 @@ function FilePickerContent({
   };
 
   const handleSortChange = (value: string) => {
-    setSort(value as SortOption);
+    if (value === 'date' || value === 'name') {
+      setSort(SORT_OPTION_BY_FIELD_ORDER[value][SORT_CONFIG[sort].sortOrder]);
+    }
+    resetPagination();
+  };
+  const toggleSortOrder = () => {
+    const nextDirection: SortOrder = SORT_CONFIG[sort].sortOrder === 'asc' ? 'desc' : 'asc';
+    setSort(SORT_OPTION_BY_FIELD_ORDER[SORT_CONFIG[sort].sortBy][nextDirection]);
     resetPagination();
   };
 
@@ -246,46 +258,39 @@ function FilePickerContent({
   return (
     <>
       <div className="space-y-3">
-        {/* Search + Sort bar */}
-        <div className="flex gap-2 items-center flex-wrap">
-          <div className="relative flex-1 min-w-50">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-tertiary" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by file name..."
-              className="pl-9"
-              aria-label="Search files"
-            />
-          </div>
-          <Select
-            value={sort}
-            onChange={(e) => handleSortChange(e.target.value)}
-            containerClassName="w-40"
-            aria-label="Sort files"
-          >
-            {Object.entries(SORT_CONFIG).map(([key, cfg]) => (
-              <option key={key} value={key}>{cfg.label}</option>
-            ))}
-          </Select>
-          <Button
-            variant={showFilters ? 'primary' : 'secondary'}
-            size="sm"
-            onClick={() => setShowFilters(prev => !prev)}
-            iconLeft={<FilterIcon />}
-            aria-expanded={showFilters}
-            aria-controls="file-picker-filters"
-          >
-            Filters
-            {selectedTagIds.length > 0 && (
-              <Badge variant="primary" size="sm" className="ml-1">{selectedTagIds.length}</Badge>
+        <Toolbar aria-label="File picker controls">
+          <FiltersDisclosure
+          activeCount={selectedTagIds.length}
+          onReset={() => {
+            setSelectedTagIds([]);
+            resetPagination();
+          }}
+            controls={trigger => (
+              <Toolbar.Controls>
+                <SearchField
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  onClear={() => setSearch('')}
+                  label="Search files"
+                  placeholder="Search by file name…"
+                />
+                {trigger}
+                <Toolbar.Group className="pf-toolbar__group--nowrap">
+                  <SortControl
+                    value={SORT_CONFIG[sort].sortBy}
+                    onChange={event => handleSortChange(event.target.value)}
+                    direction={SORT_CONFIG[sort].sortOrder}
+                    onDirectionChange={toggleSortOrder}
+                    containerClassName="w-40"
+                    aria-label="Sort by"
+                  >
+                    <option value="date">Date</option>
+                    <option value="name">Name</option>
+                  </SortControl>
+                </Toolbar.Group>
+              </Toolbar.Controls>
             )}
-          </Button>
-        </div>
-
-        {/* Expandable filter panel */}
-        {showFilters && (
-          <div id="file-picker-filters" className="p-3 bg-pf-bg-2 border border-pf-border rounded-lg space-y-2">
+          >
             {/* Tags */}
             {availableTags.length > 0 && (
               <div>
@@ -320,8 +325,8 @@ function FilePickerContent({
                 </div>
               </div>
             )}
-          </div>
-        )}
+          </FiltersDisclosure>
+        </Toolbar>
 
         {/* Select all + count */}
         {multiple && visibleFiles.length > 0 && (

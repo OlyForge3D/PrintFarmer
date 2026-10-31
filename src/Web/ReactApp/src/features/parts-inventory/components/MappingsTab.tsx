@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Select, Spinner } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Select, Spinner, HeaderActions, SearchField, Toolbar, ToolbarField, FiltersDisclosure, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   DeleteIcon,
-  SearchIcon,
   LayersIcon,
 } from '@/common/components/icons/MdiIcons';
 import {
@@ -22,6 +22,45 @@ interface GroupedMapping {
   kind: 'gcode' | 'project';
   sourceId: string;
   mappings: PartOutputMappingDto[];
+}
+
+function MappingTable({ mappings, onRemove }: {
+  mappings: PartOutputMappingDto[];
+  onRemove: (mapping: PartOutputMappingDto) => void;
+}) {
+  const { headerProps, sortDataByValues } = useTableSort<'sku' | 'quantity'>();
+  const sortedMappings = sortDataByValues(mappings, {
+    sku: mapping => mapping.sku,
+    quantity: mapping => mapping.quantity,
+  });
+  return (
+    <table className="min-w-full text-sm">
+      <thead className="text-pf-text-secondary">
+        <tr>
+          <TableHeaderCell {...headerProps('sku')} className="px-3 py-1 font-medium">SKU</TableHeaderCell>
+          <TableHeaderCell {...headerProps('quantity')} align="right" className="px-3 py-1 font-medium">Quantity</TableHeaderCell>
+          <th scope="col" className="px-3 py-1 text-right font-medium">Actions</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-pf-border">
+        {sortedMappings.map(mapping => (
+          <tr key={mapping.id}>
+            <td className="px-3 py-1.5 font-mono">{mapping.sku}</td>
+            <td className="px-3 py-1.5 text-right font-mono">{mapping.quantity}</td>
+            <td className="px-3 py-1.5 text-right">
+              <Button
+                variant="ghost"
+                size="sm"
+                iconCenter={<DeleteIcon className="w-4 h-4" ariaLabel={`Remove mapping for ${mapping.sku}`} />}
+                onClick={() => onRemove(mapping)}
+                aria-label={`Remove mapping for ${mapping.sku}`}
+              />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 /**
@@ -102,50 +141,49 @@ export function MappingsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="mappings-filter" className="sr-only">
-            Search mappings
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="mappings-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by SKU or file ID"
-            className="pl-8"
-          />
-        </div>
-        <div>
-          <label htmlFor="mappings-sku-filter" className="sr-only">
-            Filter by SKU
-          </label>
-          <Select
-            id="mappings-sku-filter"
-            value={skuFilter}
-            onChange={(event) => setSkuFilter(event.target.value)}
-            aria-label="Filter by SKU"
-          >
-            <option value="">All SKUs</option>
-            {parts.map((part) => (
-              <option key={part.sku} value={part.sku}>
-                {part.sku} — {part.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <HeaderActions>
         <Button
+          control
           variant="primary"
-          size="sm"
           iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
           onClick={openCreate}
         >
           Add mapping
         </Button>
-      </div>
+      </HeaderActions>
+      <Toolbar aria-label="Mapping filters">
+        <FiltersDisclosure activeCount={skuFilter ? 1 : 0} onReset={() => setSkuFilter('')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="mappings-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search mappings"
+                placeholder="Filter by SKU or file ID"
+              />
+              {trigger}
+            </Toolbar.Controls>
+          )}
+        >
+          <ToolbarField label="SKU" htmlFor="mappings-sku-filter">
+            <Select
+              id="mappings-sku-filter"
+              value={skuFilter}
+              onChange={(event) => setSkuFilter(event.target.value)}
+              aria-label="Filter by SKU"
+            >
+              <option value="">All SKUs</option>
+              {parts.map((part) => (
+                <option key={part.sku} value={part.sku}>
+                  {part.sku} — {part.name}
+                </option>
+              ))}
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">
@@ -203,37 +241,7 @@ export function MappingsTab() {
                   Add SKU
                 </Button>
               </div>
-              <table className="min-w-full text-sm">
-                <thead className="text-pf-text-secondary">
-                  <tr>
-                    <th scope="col" className="px-3 py-1 text-left font-medium">SKU</th>
-                    <th scope="col" className="px-3 py-1 text-right font-medium">Quantity</th>
-                    <th scope="col" className="px-3 py-1 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-pf-border">
-                  {group.mappings.map((mapping) => (
-                    <tr key={mapping.id}>
-                      <td className="px-3 py-1.5 font-mono">{mapping.sku}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{mapping.quantity}</td>
-                      <td className="px-3 py-1.5 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          iconCenter={
-                            <DeleteIcon
-                              className="w-4 h-4"
-                              ariaLabel={`Remove mapping for ${mapping.sku}`}
-                            />
-                          }
-                          onClick={() => setConfirmDelete(mapping)}
-                          aria-label={`Remove mapping for ${mapping.sku}`}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <MappingTable mappings={group.mappings} onRemove={setConfirmDelete} />
             </div>
           ))}
         </div>

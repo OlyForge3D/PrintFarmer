@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Button, FormField, Input } from '@/common/components/ui';
+import { Button, FormField, Input, HeaderActions } from '@/common/components/ui';
 import { KeyIcon, PlusIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import {
@@ -132,19 +132,6 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
   const content = (
     <>
       <div className="space-y-4">
-        <div className="flex justify-end">
-          <Button
-            variant="primary"
-            onClick={() => setShowRegisterModal(true)}
-            disabled={registerMutation.isPending}
-            explainedDisabled
-            title={registerMutation.isPending ? 'Passkey registration is in progress' : undefined}
-          >
-            <PlusIcon className="w-4 h-4" />
-            <span>Add passkey</span>
-          </Button>
-        </div>
-
         {isLoading && (
           <div className="py-8 text-center text-pf-text-secondary">Loading passkeys…</div>
         )}
@@ -331,6 +318,21 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
       icon={KeyIcon}
       subtitle="Manage your registered passkeys for passwordless sign-in."
       embedded={embedded}
+      actions={
+        <HeaderActions>
+          <Button
+            variant="primary"
+            onClick={() => setShowRegisterModal(true)}
+            control
+            disabled={registerMutation.isPending}
+            explainedDisabled
+            title={registerMutation.isPending ? 'Passkey registration is in progress' : undefined}
+            iconLeft={<PlusIcon className="w-4 h-4" />}
+          >
+            Add passkey
+          </Button>
+        </HeaderActions>
+      }
     >
       {content}
     </PageTemplate>

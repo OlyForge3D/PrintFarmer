@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { ChevronRightIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, HeaderActions } from '@/common/components/ui';
 
 export interface DashboardWidgetProps {
   /** Widget title */
@@ -100,7 +100,7 @@ export function DashboardWidget({
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden self-start ${className}`}>
       {/* Header - matches MaintenanceAlertsWidget styling exactly */}
-      <div className={`px-4 py-3 flex items-center justify-between ${!isCollapsed ? 'border-b border-pf-border' : ''}`}>
+      <div className={`px-4 py-3 flex flex-wrap items-center justify-between gap-2 ${!isCollapsed ? 'border-b border-pf-border' : ''}`}>
         {/* Left side: Icon + Title/Subtitle */}
         <div 
           className={`flex items-center gap-3 ${collapsible ? 'cursor-pointer' : ''}`}
@@ -136,20 +136,21 @@ export function DashboardWidget({
         </div>
         
         {/* Right side: More Info link and/or custom action */}
-        <div className="flex items-center gap-2">
+        <HeaderActions role="group" aria-label={`${title} actions`} className="mb-0">
           {headerAction}
           {moreInfoLink && (
             <Link to={moreInfoLink}>
               <Button 
+                control
                 variant="subtle" 
-                size="sm"
+                size="md"
                 iconRight={<ChevronRightIcon className="h-4 w-4 ml-1" />}
               >
                 {moreInfoText}
               </Button>
             </Link>
           )}
-        </div>
+        </HeaderActions>
       </div>
 
       {/* Content Area */}

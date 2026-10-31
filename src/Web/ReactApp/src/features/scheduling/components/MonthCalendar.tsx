@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge, Button, ControlIcon, Toolbar } from '@/common/components/ui';
+import { mdiChevronLeft, mdiChevronRight } from '@mdi/js';
 import type { ScheduledJob } from '@/types/api';
 import {
   scheduleWallClock,
@@ -70,34 +71,34 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
       {/* Calendar Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-pf-text-primary">{monthName}</h3>
-        <div className="flex gap-2">
+        <Toolbar aria-label="Calendar navigation" className="mb-0">
           <Button
             variant="unstyled"
-            size="sm"
             onClick={goToPreviousMonth}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            className="pf-control pf-control--icon bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            data-role="button"
             aria-label="Previous month"
           >
-            ←
+            <ControlIcon path={mdiChevronLeft} />
           </Button>
           <Button
             variant="unstyled"
-            size="sm"
             onClick={goToToday}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            className="pf-control px-3 bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            data-role="button"
           >
             Today
           </Button>
           <Button
             variant="unstyled"
-            size="sm"
             onClick={goToNextMonth}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            className="pf-control pf-control--icon bg-pf-panel hover:bg-pf-bg-2 text-pf-text-primary transition-colors"
+            data-role="button"
             aria-label="Next month"
           >
-            →
+            <ControlIcon path={mdiChevronRight} />
           </Button>
-        </div>
+        </Toolbar>
       </div>
 
       {/* Day of Week Headers */}

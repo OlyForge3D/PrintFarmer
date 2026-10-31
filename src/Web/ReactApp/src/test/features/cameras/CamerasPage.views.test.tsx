@@ -105,7 +105,7 @@ describe('CamerasPage views', () => {
 
     expect(await screen.findByRole('article', { name: 'Voron Nozzle camera' })).toBeInTheDocument();
     const switcher = screen.getByRole('group', { name: 'Camera view' });
-    expect(within(switcher).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(switcher).getByRole('button', { name: 'All cameras' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(switcher).getByRole('button', { name: 'By location' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getAllByRole('article')).toHaveLength(3);
     expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
@@ -144,7 +144,7 @@ describe('CamerasPage views', () => {
     expect(screen.getByRole('button', { name: 'By printer' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('region', { name: /Not linked to a printer/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'All cameras' }));
     expect(screen.getByTestId('location-search')).toHaveTextContent(/^\?foo=bar$/);
     expect(screen.queryByRole('region', { name: /Not linked to a printer/ })).not.toBeInTheDocument();
   });
@@ -152,7 +152,7 @@ describe('CamerasPage views', () => {
   it('falls back to the All view for an unknown ?view value', async () => {
     renderPage('/cameras?view=bogus');
     await screen.findByRole('article', { name: 'Door Webcam camera' });
-    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'All cameras' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });

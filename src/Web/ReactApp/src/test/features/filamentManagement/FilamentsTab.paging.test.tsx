@@ -5,7 +5,7 @@
  * Heavy child components are mocked so the tests are fast and deterministic.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test via a mutable ref ─────────────────
@@ -63,10 +63,6 @@ vi.mock('@/features/filamentManagement/components/FilamentCard', () => ({
     `<div data-testid="filament-card">${filament.name}</div>`,
 }));
 
-vi.mock('@/features/filamentManagement/components/FilamentTableView', () => ({
-  FilamentTableView: () => '<div data-testid="filament-table" />',
-}));
-
 vi.mock('@/features/filamentManagement/components/ColorFamilySelect', () => ({
   ColorFamilySelect: () => '<div />',
 }));
@@ -99,13 +95,15 @@ vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/components/ui')>(),
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,
-  Select: ({ children, value, onChange }: {
+  Select: ({ children, value, onChange, id, 'aria-label': ariaLabel }: {
     children?: React.ReactNode; value?: string | number; onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-  }) => <select value={value} onChange={onChange}>{children}</select>,
+    id?: string; 'aria-label'?: string;
+  }) => <select id={id} value={value} onChange={onChange} aria-label={ariaLabel}>{children}</select>,
   FileUpload: () => null,
 }));
 
@@ -144,6 +142,39 @@ describe('FilamentsTab — server-side paging', () => {
     mockGetFilamentsPaged.mockResolvedValue(pageOf([], 0));
     render(<FilamentsTab />);
     await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+  });
+
+  it('cycles the table header to server-default order and resets the page atomically', async () => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    filterState.sortDir = 'desc';
+    filterState.page = 2;
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(2), makeFilament(1)], totalCount: 150 });
+    const { rerender } = render(<FilamentsTab />);
+    const header = await screen.findByRole('button', { name: 'Name' });
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.getByRole('button', { name: 'Vendor' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.queryByRole('combobox', { name: /sort by/i })).not.toBeInTheDocument();
+    fireEvent.click(header);
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'none', sortDir: 'asc', page: 1 });
+
+    Object.assign(filterState, { sortField: 'none', sortDir: 'asc', page: 1 });
+    rerender(<FilamentsTab />);
+    await waitFor(() => expect(mockGetFilamentsPaged.mock.lastCall?.[0]).toMatchObject({ offset: undefined, sort: undefined }));
+    expect(screen.getByRole('button', { name: 'Name' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getAllByRole('row').slice(1).map(row => row.textContent)).toEqual([
+      expect.stringContaining('Filament 2'), expect.stringContaining('Filament 1'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'name', sortDir: 'asc', page: 1 });
+  });
+
+  it('retains the table sort dropdown when a sortable column is hidden', async () => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    localStorage.setItem('filament-table-columns', JSON.stringify([{ id: 'vendor', visible: false }]));
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    render(<FilamentsTab />);
+    expect(await screen.findByRole('combobox', { name: /sort by/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vendor' })).toBeInTheDocument();
   });
 
   it('passes limit derived from pageSize to the API', async () => {
@@ -487,5 +518,37 @@ describe('FilamentsTab — page value sanitization', () => {
       (c: unknown[]) => (c[0] as Record<string, unknown>)?.page !== undefined
     );
     expect(pageCalls.every((c: unknown[]) => (c[0] as Record<string, unknown>).page === 1)).toBe(true);
+  });
+});
+
+describe('FilamentsTab — filter disclosure reset', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: 'search term', material: 'PETG', vendor: 'Prusa', color: 'blue',
+      sortField: 'vendor', sortDir: 'desc', page: 1, hasActiveFilters: true,
+    });
+    localStorage.setItem('filaments-page-size', '25');
+    mockGetFilamentsPaged.mockResolvedValue(pageOf([makeFilament(1)], 10));
+  });
+
+  it('resets only filters while preserving search, sort, and page size', async () => {
+    render(<FilamentsTab />);
+    await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole('button', { name: /filters/i }));
+    fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
+
+    expect(filterState.setMany).toHaveBeenCalledTimes(1);
+    expect(filterState.setMany).toHaveBeenCalledWith({
+      material: '',
+      vendor: '',
+      color: '',
+      page: 1,
+    });
+    expect(screen.getByPlaceholderText(/name, vendor, material/i)).toHaveValue('search term');
+    expect(screen.getByRole('combobox', { name: /sort by/i })).toHaveValue('vendor');
+    expect(screen.getByRole('combobox', { name: /page size/i })).toHaveValue('25');
   });
 });

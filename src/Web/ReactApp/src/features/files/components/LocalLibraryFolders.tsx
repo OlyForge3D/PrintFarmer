@@ -1,12 +1,10 @@
 import { Fragment, useId, useMemo, useState } from 'react';
-import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Button, FormField, Input, Label, Select } from '@/common/components/ui';
+import { Button, Input, Label, Select, Toolbar, ToolbarField } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
-import { FILE_TOOLBAR_CONTROL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 interface LocalLibraryFoldersProps {
   controls?: { id: string; expanded: boolean };
@@ -131,22 +129,23 @@ export function LocalLibraryFolders({
   return (
     <>
       <div id={controls?.id} hidden={controls ? !controls.expanded : false}>
-        <div className={clsx('flex flex-wrap items-end gap-2', FILE_TOOLBAR_CONTROL_CLASS)}>
-          <FormField label="Folder" htmlFor={`${id}-folder`} className="min-w-0">
-            <Select id={`${id}-folder`} containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
+        <Toolbar aria-label="Folder controls" labelled className="mb-0">
+          <ToolbarField label="Folder" htmlFor={`${id}-folder`} className="min-w-0">
+            <Select id={`${id}-folder`} className="pf-control py-0" containerClassName="w-48 max-w-full" value={path} onChange={event => onNavigate(event.target.value)} disabled={busy}>
               <option value="">All folders</option>
               {folderOptions}
             </Select>
-          </FormField>
-          {canCreate && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
+          </ToolbarField>
+          {canCreate && <Button control variant="secondary" disabled={unavailable} onClick={() => {
             create.reset(); setName(''); setCreating(true);
           }}>New folder</Button>}
           {selectedCount > 0 && <span className="self-center text-xs text-pf-text-secondary">{selectedCount} selected</span>}
-          {selectedCount > 0 && canMove && <Button size="sm" variant="secondary" disabled={unavailable} onClick={() => {
+          {selectedCount > 0 && canMove && <Button control variant="secondary" disabled={unavailable} onClick={() => {
             move.reset(); setDestination(path || '/');
             setMoveSelection({ models: [...modelIds], gcode: [...gcodeIds] });
           }}>Move to folder...</Button>}
-          {path && <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
+        </Toolbar>
+        {path && <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-1 text-xs">
             <Button size="sm" variant="subtle" disabled={busy}
               onClick={() => onNavigate('')}>All folders</Button>
             <span aria-hidden="true">/</span>
@@ -159,8 +158,7 @@ export function LocalLibraryFolders({
                   onClick={() => onNavigate('/' + segments.slice(0, index + 1).join('/'))}>{segment}</Button>
               </Fragment>
             ))}
-          </nav>}
-        </div>
+        </nav>}
       </div>
       {folders.isError && <div role="alert" className="text-sm text-pf-error">
         Could not load folders: {getErrorMessage(folders.error, 'Request failed')}{' '}

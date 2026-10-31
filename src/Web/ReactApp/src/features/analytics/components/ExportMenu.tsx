@@ -101,6 +101,7 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
     <div className="relative inline-block" ref={menuRef}>
       <Button
         variant="secondary"
+        control
         iconLeft={<DownloadIcon />}
         loading={exporting}
         onClick={() => setOpen((prev) => !prev)}

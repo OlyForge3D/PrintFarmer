@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Input, Spinner, Toggle } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
   EditIcon,
   DeleteIcon,
   MinusIcon,
-  SearchIcon,
   AlertIcon,
   PackageIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -43,6 +43,7 @@ export function PartsTab() {
   const { data: parts = [], isLoading, error } = useParts({ includeInactive });
   const { data: bins = [] } = useBins({ includeInactive: true });
   const deletePart = useDeletePart();
+  const { headerProps, sortDataByValues } = useTableSort<'sku' | 'name' | 'bin' | 'onHand' | 'reorderPoint' | 'status'>();
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -52,6 +53,14 @@ export function PartsTab() {
       return haystack.includes(needle);
     });
   }, [parts, filter]);
+  const sortedParts = sortDataByValues(filtered, {
+    sku: part => part.sku,
+    name: part => part.name,
+    bin: part => part.defaultBinCode,
+    onHand: part => part.onHand,
+    reorderPoint: part => part.reorderPoint,
+    status: part => [part.needsReorder ? 'Reorder' : '', part.isActive ? '' : 'Inactive'].filter(Boolean).join(' '),
+  });
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -66,39 +75,44 @@ export function PartsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-        <div className="relative flex-1">
-          <label htmlFor="parts-filter" className="sr-only">
-            Search SKUs
-          </label>
-          <SearchIcon
-            className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-pf-text-secondary pointer-events-none"
-            ariaLabel="Search"
-          />
-          <Input
-            id="parts-filter"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter by SKU, name, or description"
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <Toggle
-            checked={includeInactive}
-            onChange={(event) => setIncludeInactive(event.target.checked)}
-            label="Show inactive"
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
-            onClick={() => setIsCreating(true)}
-          >
-            Add SKU
-          </Button>
-        </div>
-      </div>
+      <HeaderActions>
+        <Button
+          control
+          variant="primary"
+          iconLeft={<PlusIcon className="w-4 h-4" ariaLabel="Add" />}
+          onClick={() => setIsCreating(true)}
+          className="rounded-[2px]"
+        >
+          Add SKU
+        </Button>
+      </HeaderActions>
+      <Toolbar aria-label="SKU inventory filters">
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="parts-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search SKUs"
+                placeholder="Filter by SKU, name, or description"
+              />
+              {trigger}
+              <Toolbar.Spacer />
+            </Toolbar.Controls>
+          )}
+        >
+          {/* Enlarge both clickable labels, not the switch track or thumb. */}
+          <div data-filter-hit-target="inactive-skus" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
+            <Toggle
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+              label="Show inactive"
+            />
+          </div>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {isLoading && (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">
@@ -137,17 +151,17 @@ export function PartsTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-pf-bg-1 text-pf-text-secondary">
               <tr>
-                <th scope="col" className="px-3 py-2 text-left font-medium">SKU</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Name</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Default bin</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">On-hand</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Reorder pt</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+                <TableHeaderCell {...headerProps('sku')} className="px-3 py-2 font-medium">SKU</TableHeaderCell>
+                <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('bin')} className="px-3 py-2 font-medium">Default bin</TableHeaderCell>
+                <TableHeaderCell {...headerProps('onHand')} align="right" className="px-3 py-2 font-medium">On-hand</TableHeaderCell>
+                <TableHeaderCell {...headerProps('reorderPoint')} align="right" className="px-3 py-2 font-medium">Reorder pt</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')} className="px-3 py-2 font-medium">Status</TableHeaderCell>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {filtered.map((part) => (
+              {sortedParts.map((part) => (
                 <tr key={part.id} className={part.isActive ? '' : 'opacity-60'}>
                   <td className="px-3 py-2 font-mono text-pf-text-primary">{part.sku}</td>
                   <td className="px-3 py-2">

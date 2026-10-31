@@ -45,7 +45,8 @@ vi.mock('@/common/components/PageTemplate', () => ({
   ),
 }));
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/common/components/ui')>(),
   Spinner: ({ size }: { size?: string }) => <div data-testid="spinner" data-size={size}>Loading...</div>,
   Button: ({ children, onClick, iconLeft, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; iconLeft?: React.ReactNode }) => (
     <button onClick={onClick} {...rest}>{iconLeft}{children}</button>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ColumnDef, FileItem, UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { FILE_TABLE_PREVIEW_CELL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
@@ -41,12 +41,13 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
   const ReactModule = await import('react');
   return {
     FileBrowser: ReactModule.forwardRef(function FileBrowserMock(
-      { config, columns, renderCard, renderItemActions, compact }: {
+      { config, columns, renderCard, renderItemActions, compact, filterActions }: {
         config: UseFileBrowserConfig<unknown>;
         columns: ColumnDef[];
         renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => React.ReactNode;
         renderItemActions?: (file: FileItem) => React.ReactNode;
         compact?: boolean;
+        filterActions?: import('@/features/fileBrowser/types').FileBrowserFilterActions;
       },
       ref,
     ) {
@@ -58,6 +59,7 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
       }, [config]);
       return (
         <div>
+          {filterActions?.(trigger => <div className="pf-toolbar__controls">{trigger}</div>)}
           <output aria-label="compact">{String(compact)}</output>
           <table aria-label="Mock table">
             <thead><tr>{columns.map((column) => <th key={column.key} className={column.className}>{column.label}</th>)}<th>Actions</th></tr></thead>
@@ -105,12 +107,17 @@ function unifiedPage(extractedInfill = 15) {
   };
 }
 
-function renderPage() {
+function LocationProbe() {
+  return <output data-testid="url">{useLocation().search}</output>;
+}
+
+function renderPage(url = '/files') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/files']}>
+      <MemoryRouter initialEntries={[url]}>
         <FilesPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -128,6 +135,25 @@ describe('FilesPage local library', () => {
     vi.clearAllMocks();
     apiMocks.getUnifiedFiles.mockResolvedValue(unifiedPage());
     apiMocks.downloadModel3dFile.mockResolvedValue(undefined);
+  });
+
+  it('discloses the local type filter and resets its URL-backed selection', async () => {
+    const user = userEvent.setup();
+    renderPage('/files?type=gcode');
+    const filters = screen.getByRole('button', { name: 'Filters (1)' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    await user.click(filters);
+
+    const type = screen.getByRole('combobox', { name: 'Type' });
+    expect(type).toHaveValue('gcode');
+    await user.selectOptions(type, 'models');
+    await waitFor(() => expect(type).toHaveValue('models'));
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => expect(new URLSearchParams(screen.getByTestId('url').textContent ?? '').has('type')).toBe(false));
+    expect(screen.getByRole('combobox', { name: 'Type' })).toHaveValue('all');
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('uses the compact table without Type or Details columns and keeps date-only uploads', async () => {

@@ -7,8 +7,8 @@ import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
-import { Badge, Button, Card, Input } from '@/common/components/ui';
-import { CloseIcon, SearchIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { Badge, Button, Card, SearchField, Toolbar } from '@/common/components/ui';
+import { SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { settingsTour } from '@/features/admin/tours/settings.tour';
 import { HelpButton } from '@/common/components/HelpButton';
@@ -1357,33 +1357,19 @@ export function SettingsPage({
               <SettingsModeToggle mode={mode} onModeChange={setMode} />
             </SettingsHeaderPortal>
 
-            <div
-              className="flex flex-wrap items-center gap-x-3 gap-y-1"
+            <Toolbar
+              aria-label="Settings field filter"
               data-testid="settings-mode-controls"
+              className="mb-0"
             >
-              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-sm">
-                <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.currentTarget.value)}
-                  placeholder="Filter fields on this page…"
-                  aria-label="Filter setting fields on this page"
-                  className="flex-1"
-                />
-                {searchActive && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
-                    onClick={() => setQuery('')}
-                    aria-label="Clear field filter"
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
+              <SearchField
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                onClear={() => setQuery('')}
+                label="Filter setting fields on this page"
+                placeholder="Filter fields on this page…"
+                containerClassName="min-w-[200px] max-w-sm"
+              />
               <p className="text-xs text-pf-text-tertiary" aria-live="polite" role="status">
                 {toggleHelperText}
                 {searchActive && (
@@ -1392,7 +1378,7 @@ export function SettingsPage({
                   </span>
                 )}
               </p>
-            </div>
+            </Toolbar>
           </>
         )}
 

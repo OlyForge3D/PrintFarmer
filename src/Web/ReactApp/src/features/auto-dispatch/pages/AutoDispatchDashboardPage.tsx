@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { Spinner, Button, Toggle, Tooltip, Select } from '@/common/components/ui';
+import { Spinner, Button, Toggle, Tooltip, Select, Toolbar } from '@/common/components/ui';
 import { PlayIcon, CheckIcon, SkipForwardIcon, StopIcon, CheckCircleIcon } from '@/common/components/icons/MdiIcons';
 import { Zap, Activity, AlertTriangle, Power, Pause, Layers } from 'lucide-react';
 import {
@@ -303,9 +303,9 @@ export function AutoDispatchDashboardPage() {
           <FarmStatusBar stats={farmStats} globalEnabled={globalEnabled} />
 
           {/* Filter/Sort toolbar — integrated command bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
+          <Toolbar aria-label="Auto-dispatch controls">
             {/* Filter chips */}
-            <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Filter printers by state">
+            <div className="pf-toolbar__group" role="radiogroup" aria-label="Filter printers by state">
               {([
                 ['all', 'All', undefined],
                 ['queued', 'Queued Jobs', queuedPrinterCount],
@@ -321,9 +321,25 @@ export function AutoDispatchDashboardPage() {
                   variant="unstyled"
                   role="radio"
                   aria-checked={stateFilter === key}
+                  tabIndex={stateFilter === key ? 0 : -1}
+                  data-role="button"
                   onClick={() => setStateFilter(key)}
+                  onKeyDown={event => {
+                    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+                    event.preventDefault();
+                    const radios = Array.from(
+                      event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
+                    );
+                    const currentIndex = radios.indexOf(event.currentTarget);
+                    const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+                    const nextRadio = radios[(currentIndex + offset + radios.length) % radios.length];
+                    if (nextRadio) {
+                      nextRadio.focus();
+                      nextRadio.click();
+                    }
+                  }}
                   className={clsx(
-                    'px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-[0.1em] transition-all border',
+                    'pf-control text-sm font-bold transition-all border',
                     stateFilter === key
                       ? 'bg-pf-accent/15 border-pf-accent/40 text-pf-accent shadow-[0_0_10px_rgba(88,166,255,0.1)]'
                       : 'bg-pf-bg-2/50 border-pf-border/50 text-pf-text-muted hover:text-pf-text-secondary hover:border-pf-border',
@@ -339,19 +355,20 @@ export function AutoDispatchDashboardPage() {
 
             {/* Sort control — right-aligned */}
             <div className="flex items-center gap-2 sm:ml-auto shrink-0">
-              <label htmlFor="ad-sort-mode" className="text-[10px] uppercase tracking-[0.15em] font-semibold text-pf-text-muted">Sort</label>
+              <label htmlFor="ad-sort-mode" className="pf-toolbar__inline-label text-sm">Sort</label>
               <Select
                 id="ad-sort-mode"
                 value={sortMode}
                 onChange={e => setSortMode(e.target.value as AutoDispatchSortMode)}
-                aria-label="Sort printers by"
-                className="min-w-0 !text-xs"
+                aria-label="Sort by"
+                className="pf-control min-w-0 py-0"
+                data-role="field"
               >
                 <option value="state">By State</option>
                 <option value="name">By Name</option>
               </Select>
             </div>
-          </div>
+          </Toolbar>
 
           {filteredPrinters.length === 0 ? (
             <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-8 text-center">

@@ -53,8 +53,32 @@ async function saveCurrentEdit(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
+  it('keeps keyboard edit targets aligned with sorted rows and restores incoming order', async () => {
+    vi.mocked(apiClient.getTags).mockResolvedValue([
+      resin,
+      { ...resin, id: 'tag-2', name: 'ABS', description: 'ABS prints' },
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('ABS');
+    const rows = () => screen.getAllByRole('row').slice(1);
+    const button = screen.getByRole('button', { name: 'Tag Name' });
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('ABS');
+    await user.keyboard('{ArrowDown}e');
+    expect(screen.getByDisplayValue('ABS')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('Resin');
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(rows()[0]).toHaveTextContent('Resin');
+    expect(apiClient.getTags).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(apiClient.getTags).mockResolvedValue([resin]);
     vi.mocked(apiClient.get3DModels).mockResolvedValue([]);
     vi.mocked(apiClient.getGcodeFilesQuery).mockResolvedValue({
@@ -96,7 +120,9 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     renderPage();
     await screen.findAllByText('Resin');
 
-    await user.click(screen.getByRole('button', { name: /add tag/i }));
+    const addTagButton = screen.getByRole('button', { name: /add tag/i });
+    expect(addTagButton.closest('.pf-header-actions')).toBeInTheDocument();
+    await user.click(addTagButton);
 
     const preview = screen.getByLabelText('Tag preview: Tag Preview');
     expect(preview).toHaveAttribute('data-pf-radius', 'full');

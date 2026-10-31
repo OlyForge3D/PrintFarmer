@@ -953,6 +953,27 @@ import { Tooltip } from '@/common/components/ui';
 
 ---
 
+## Toolbar Controls
+
+Shared toolbar layout classes handle wrapping, grouping, search, and spacing.
+The layout does not resize or restyle child controls by default. Opt controls
+into the shared geometry with `pf-control` and declare their role with
+`data-role="button"` or `data-role="field"`; toolbar descendants that are not
+opted in retain their existing styles. Do not apply this contract blindly to
+slicer safety controls, jog pads, or row actions.
+
+The control-height tokens are `1.75rem` (`sm`), `2.25rem` (`md`), and
+`2.75rem` (`lg`). On coarse-pointer devices, `sm` becomes `2.25rem` and `md`
+becomes `2.75rem`. At the default 16px root size, `md` is 36px for fine
+pointers and 44px for coarse pointers. Opted-in buttons use 2px corners,
+fields use 4px corners, and segmented buttons keep square interior edges.
+These defaults are in the `components` cascade layer so utility classes such
+as `mb-0` can override them.
+
+`ViewToggle` preserves its legacy `sm` default. Pass `size="md"` when using it
+as a shared toolbar control; the shared toolbar migration should be explicit
+rather than changing unrelated view toggles.
+
 ## Usage Patterns
 
 ### Form with Validation

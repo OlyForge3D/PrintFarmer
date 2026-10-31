@@ -121,8 +121,170 @@ A strict **4px base unit**. Industrial UIs benefit from tight, predictable rhyth
 
 - **Cards**: `p-4` (16px) compact, `p-6` (24px) comfortable. Pick one per surface — never mix.
 - **Tables**: row height `40px` default, `32px` dense, `48px` comfortable. Cell padding `px-3 py-2`.
-- **Form fields**: `40px` standard height. Labels sit `8px` above their control.
-- **Buttons**: `sm = 28px`, `md = 36px`, `lg = 44px` height. `lg` is the minimum touch target on mobile.
+- **Form fields**: `40px` standard height. Labels sit `8px` above their control, except toolbar fields below.
+- **Buttons**: opt-in control sizes are `sm = 28px`, `md = 36px`, `lg = 44px` minimum block sizes. Toolbar controls use `md`; coarse-pointer toolbar targets use at least `44px`. Legacy consumers retain their existing sizing until explicitly migrated.
+
+### Toolbar and Header Controls
+
+The toolbar contract changes geometry, not theme colors, fonts, focus paint,
+permissions, loading, confirmations or action behavior. Slicer, jog pads,
+dispatch safety switches, danger paint, camera circles, calendar cells,
+clickable cards and row-action placement are excluded.
+
+Use the shared components exported by `common/components/ui/toolbar`:
+`Toolbar` with `Controls`, `Group`, `Spacer` and `Divider`, `ToolbarField`, `SearchField`,
+`SortControl`, `FilterChip`, `FilterButton`, `RefreshButton` and `Pagination`.
+`ViewToggle` is the canonical segmented view selector; the printer and Files
+adapters preserve their existing view values and persistence. View options are
+icon-only at every width, with their title available as both the accessible name
+and a hover/focus tooltip; do not add visible option labels or native `title`
+attributes.
+
+- Reading order is Search, Filters, Sort, spacer, View, Refresh. Keep only
+  existing controls. A missing search or refresh is not a request for a feature.
+- Create, import, export and upload commands use the page header actions slot
+  above the toolbar. Embedded tabs use `HeaderActions` in the same position.
+  At most one command is primary; pressed filters and view options are states,
+  not competing commands. Bulk selection actions stay below the toolbar.
+- `Toolbar` is a named `role="group"`, not an ARIA toolbar. Native Tab navigation
+  remains unchanged; do not imply an unimplemented arrow-key interaction model.
+- Participating buttons, fields, chips and view options have one minimum block
+  size per toolbar. Use rem tokens and horizontal padding, not fixed heights.
+  Text zoom may grow controls. Buttons/chips and outer segments have 2px radii;
+  fields have 4px radii and interior segments have square corners.
+- Independent controls have 8px gaps, related groups 4px, segments 0 and the
+  toolbar has 16px space below. At available toolbar width of 64rem or less,
+  search occupies a full row; groups wrap without horizontal toolbar scrolling.
+  Never hide commands to fit the row.
+- Visible `ToolbarField` labels use 12px/600 with `--pf-text-secondary` and a
+  `--pf-toolbar-label-gap` of 4px. This is the explicit exception to the 8px
+  form-label gap. Existing inline labels remain inline. Field identity is
+  essential text: do not use the lower-contrast `--pf-text-muted` token.
+  Nested search wrappers must not inherit the horizontal search flex basis as
+  their vertical size. Keep explicit auto-width select wrappers shrink-wrapped
+  inside toolbars rather than relying on conflicting `w-full`/`w-auto` utilities.
+- Icons use MDI paths at 16px (20px for large controls). Toolbar sort icons
+  describe the current direction, with names such as
+  `Sort direction: ascending` and title `Ascending (click for descending)`.
+  Table-header sort icons use `mdiArrowUp`/`mdiArrowDown` at 12px and `aria-sort`.
+  Sorting behavior and table-header placement do not change.
+- Vocabulary is Grid `mdiViewGrid`, List `mdiViewList`, Table `mdiTable`,
+  Explorer `mdiViewAgenda`, Detailed `mdiViewComfy`, Compact `mdiViewCompact`,
+  Refresh `mdiRefresh`, Rerun `mdiRestart`, pagers `mdiChevronLeft`/`Right`,
+  disclosure `mdiChevronDown`/`Right`. Toggles expose pressed or expanded state.
+  Icon-only controls have names; refresh keeps its name while busy and spins
+  only when reduced-motion preferences allow.
+
+Filter refinements belong inside the shared `FiltersDisclosure`. Keep primary
+query criteria, sorting, navigation and actions visible or within their own
+purpose-built expander; do not fold them into the refinements disclosure.
+Compose the complete main row in `Toolbar.Controls` through the disclosure's
+`controls` render prop, inserting its trigger between Search and Sort. The
+panel follows that entire row in DOM order; expanding it moves results, not
+the main controls, including when the row wraps on mobile. Group refinements
+and Reset together on the shared restrained surface without nested card paint.
+Reset clears only refinements and returns focus to the trigger; hidden fields
+retain their values but are not reachable through keyboard navigation.
+History counts deselected statuses as refinements so Reset remains available
+even when all status chips are off. File picker tag refinements use the same
+disclosure and bulk Reset; resetting tags preserves search, sort and selection.
+Unwrapped `ToolbarField` and direct toolbar `Select` exceptions are limited to
+these documented owners:
+
+| File | Unwrapped fields | Reason |
+|---|---|---|
+| `features/admin/components/SystemLogsContent.tsx` | `CorrelationId`, `Level`, `From`, `To`, `Metadata` | Primary simple-query fields; controls the active query mode and export. |
+| `features/admin/pages/LoginAuditPage.tsx` | `Username`, `Rows per page` | Primary username search and result page-size controls; date and status refinements use FiltersDisclosure. |
+| `features/filamentManagement/components/FilamentsTab.tsx` | `Search`, `Sort`, `Show` | Primary search, result ordering and page-size controls. |
+| `features/filamentManagement/components/SpoolsTab.tsx` | `Search`, `Sort` | Primary search and result-ordering controls. |
+| `features/queue/components/QueueDateRangeBar.tsx` | `From`, `To` | Primary range controls inside the date-range preset's own expander. |
+| `features/printers/components/PrinterFilesModal.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/auto-dispatch/pages/AutoDispatchDashboardPage.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/printers/pages/PrintersPage.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/queue/components/HistoryFiltersBar.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/queue/components/QueueFiltersBar.tsx` | `Sort by` | Sorting changes result order, not the result set. |
+| `features/fileBrowser/components/FileBrowserToolbar.tsx` | `Search`, `Sort` | Primary search and sorting controls for file browsing. |
+| `features/fileBrowser/components/FileBrowser.tsx` | `Folders` | Folder navigation toggle; not a result-set filter. |
+| `features/files/components/LocalLibraryFolders.tsx` | `Folder` | Folder navigation/selection/action controls. |
+| `features/files/components/PrinterFileCatalog.tsx` | `Search` | Primary search query for the printer-file catalog. |
+| `features/files/pages/FilesPage.tsx` | `Type` | Type filter is declared separately for page composition and rendered inside the shared disclosure. |
+
+Geometry is opt-in through `Toolbar`, `HeaderActions`, `.pf-inline-form` or
+`Button control`/`.pf-control`. Do not normalize every Button globally:
+`link`/`unstyled` bypass the automatic geometry, and excluded consumers must
+not change as a side effect. A deliberately sized unstyled control can use
+`.pf-control` with `data-role="button"`.
+
+The following defaults remain **provisional**, not usability conclusions:
+
+| Decision | Current default | Change location |
+|---|---|---|
+| D1 | 36px toolbar minimum | `styles/toolbar.css`: `--pf-control-h-md: 2.25rem` (one line) |
+| D2 | Commands in the header above the toolbar | `Toolbar.tsx`: `HeaderActions`, composed through each page's header slot (structural) |
+| D3 | Current-state MDI SortAscending/SortDescending | `toolbar/sortIcons.ts`: `SORT_DIRECTION_ICONS` (one constant) |
+| D4 | Primary fill for selected views | `ViewToggle.tsx`: `SELECTED_VIEW_VARIANT` (one line) |
+| D5 | Coarse pointer only, not a viewport heuristic | `styles/toolbar.css`: the single `(pointer: coarse)` sizing query (one line) |
+| D6 | Visible labels with 4px gap | `ToolbarField`, `.pf-toolbar-field__label`, `--pf-toolbar-label-gap` (structural) |
+| D7 | Icon-only view selectors with hover/focus tooltips | `ViewToggle.tsx`: all options use a named icon button wrapped in `Tooltip` |
+
+D3 is particularly uncertain: MDI's ascending arrow points down. Operator
+interpretation can falsify the default even when the accessible state and sort
+results are correct. Theme font metrics, touch mis-taps, clipped labels at 200%
+text zoom and shared-consumer regressions also falsify the geometry assumptions.
+Touch, keyboard and low-vision users, operators with action-location muscle
+memory and selector-based automation could be harmed by a mistaken migration.
+Changes are reversible per batch; printer actions are not, so visual validation
+must use isolated mocks and never issue physical commands. Geometry checks do
+not establish accessibility conformance or real-device usability.
+
+### Toolbar regression evidence
+
+`src/test/design-system/toolbar-glyphs.test.tsx` checks migrated control text,
+not arbitrary Unicode in prose. Printer spool-assignment popovers, jog pads,
+notification emoji and command-palette keyboard hints are outside this migration.
+The guard includes examples that must reject a deliberately reintroduced glyph.
+
+The additive `Toolbar consistency` block in `e2e/visual-regression.spec.ts`
+mounts actual Queue/History/date/timeline controls plus a shared-control specimen.
+HTTP and WebSocket traffic to APIs and external hosts is blocked; timeline data
+is seeded locally. It checks computed geometry, clipping, associated labels,
+keyboard/pressed state, constrained containers, long commands and deliberate
+height/overflow regressions across eight themes, narrow viewports, coarse-pointer
+emulation and 200% root text sizing. `e2e/files-toolbar-height.spec.ts` separately
+mounts the actual Files page and printer catalog in a controlled harness.
+
+`e2e/inventory-toolbar.spec.ts` mounts actual Parts, Bins and Spools tabs with
+seeded data and blocked API/external traffic. It verifies clickable filter labels
+at 36px/44px, unchanged 24px switch tracks and 16px checkbox visuals, and native
+label-click behavior. Run it with
+`npx playwright test e2e/inventory-toolbar.spec.ts --project=chromium --project=mobile-chrome --project=mobile-safari`.
+
+Run the isolated visual matrix with
+`npx playwright test e2e/visual-regression.spec.ts --grep "Toolbar consistency" --project=chromium --project=mobile-chrome --project=mobile-safari`.
+The original live-page visual tests remain intact and are not part of this
+isolated command. Narrow specimen screenshots are attached as review evidence,
+not committed pixel-diff baselines. Theme screenshots are also evidence, not
+pixel-diff baselines. These fixtures do **not** replay all 48 original live-audit
+route/tab states.
+
+The four `e2e/toolbar-routes-{tracer,files,inventory,admin}.spec.ts` suites
+separately exercise all 48 audited routes/tabs through the actual App and router
+with explicit synthetic API contracts. They capture populated states, associated
+labels and their actual 4px gaps, geometry, names, state and header placement at
+1440px desktop and 390px coarse-pointer widths. They also cover existing
+filter/sort/date/pagination behavior, persisted views, selected permission and
+disabled states, keyboard navigation and confirmation cancellation. HTTP APIs
+and WebSockets are intercepted locally; the Files search POST is a read query,
+not a mutation. No printer operation is submitted.
+
+Run the routed matrix with
+`npx playwright test toolbar-routes-tracer.spec.ts toolbar-routes-files.spec.ts toolbar-routes-inventory.spec.ts toolbar-routes-admin.spec.ts --project=chromium --project=mobile-chrome --project=mobile-safari`.
+Synthetic records, suppressed external fonts and disconnected services mean
+these are composition checks, not pixel-equivalent reproductions of the live
+farm. The existing narrow Queue/History table columns can collapse job-name
+text independently of the toolbar; do not infer whole-page mobile usability
+from a toolbar pass. Neither suite establishes browser-native text-only zoom
+behavior or replaces physical touch, screen-reader and operator usability checks.
 
 ---
 

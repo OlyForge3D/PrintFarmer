@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { workerService, WorkerResponse, WorkerStatus, WorkerJobResponse } from '@/services/workerService';
 import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
@@ -13,9 +13,12 @@ import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Select } from '@/common/components/ui/Select';
 import { Spinner } from '@/common/components/ui/Spinner';
-import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
+import { FiltersDisclosure, RefreshButton, Toolbar } from '@/common/components/ui';
+import { WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 interface WorkerManagementPageProps {
   tabQueryParamName?: string;
@@ -40,6 +43,11 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
   const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
   const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
+  const { headerProps, sortDataByValues } = useTableSort<'name' | 'status'>();
+  const sortedWorkers = sortDataByValues(workers, {
+    name: worker => worker.name,
+    status: worker => worker.status,
+  });
 
   const handleTabChange = (tab: 'workers' | 'jobs') => {
     setActiveTab(tab);
@@ -318,38 +326,43 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
       {activeTab === 'workers' && (
         <>
         {/* Worker-specific controls */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <Select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
-            containerClassName="w-52"
-            aria-label="Filter by worker status"
+        <Toolbar aria-label="Worker filters and status">
+          <FiltersDisclosure activeCount={filter === 'all' ? 0 : 1} onReset={() => setFilter('all')}
+            controls={trigger => (
+              <Toolbar.Controls>
+                {trigger}
+                <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+                    <span className="text-sm text-pf-text-secondary">
+                      {isConnected ? 'Real-time updates active' : 'Polling mode'}
+                    </span>
+                </div>
+
+                <Toolbar.Spacer />
+                <RefreshButton
+                    variant="ghost"
+                    onClick={loadWorkers}
+                    aria-label="Refresh workers"
+                    title="Refresh workers"
+                />
+              </Toolbar.Controls>
+            )}
           >
-            <option value="all">All Workers ({workers.length})</option>
-            {Object.values(WorkerStatus).map(status => (
-              <option key={status} value={status}>
-                {status} ({workers.filter(w => w.status === status).length})
-              </option>
-            ))}
-          </Select>
-
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
-            <span className="text-sm text-pf-text-secondary">
-              {isConnected ? 'Real-time updates active' : 'Polling mode'}
-            </span>
-          </div>
-
-          <div className="ml-auto">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={loadWorkers}
-              iconCenter={<RefreshIcon className="h-4 w-4" />}
-              aria-label="Refresh workers"
-            />
-          </div>
-        </div>
+            <Select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
+              containerClassName="w-52"
+              aria-label="Filter by worker status"
+            >
+              <option value="all">All Workers ({workers.length})</option>
+              {Object.values(WorkerStatus).map(status => (
+                <option key={status} value={status}>
+                  {status} ({workers.filter(w => w.status === status).length})
+                </option>
+              ))}
+            </Select>
+          </FiltersDisclosure>
+        </Toolbar>
 
         {/* Workers table */}
         <div className="bg-pf-bg-1 rounded-sm border border-pf-border">
@@ -357,8 +370,8 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
         <table className="w-full min-w-[900px]">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</th>
+              <TableHeaderCell {...headerProps('name')} className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</TableHeaderCell>
+              <TableHeaderCell {...headerProps('status')} className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</TableHeaderCell>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Capacity</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Statistics</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Performance</th>
@@ -366,8 +379,8 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
             </tr>
           </thead>
           <tbody className="divide-y divide-pf-border">
-            {workers.map(worker => (
-              <>
+            {sortedWorkers.map(worker => (
+              <Fragment key={worker.id}>
                 <tr key={worker.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-start gap-2">
@@ -541,7 +554,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
             ))}
           </tbody>
         </table>

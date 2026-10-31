@@ -3,10 +3,10 @@ import { Link, useSearchParams } from 'react-router';
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import clsx from 'clsx';
-import { Alert, Button, Checkbox, FormField, Input, Select, Spinner } from '@/common/components/ui';
+import { Alert, Button, Checkbox, FormField, Input, Select, Spinner, Toolbar, ToolbarField } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
-import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
+import { CopyLocalIcon, DeleteIcon, DownloadIcon, PlayIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { usePrinters } from '@/common/hooks/useApi';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
@@ -38,8 +38,8 @@ import {
   FILE_TABLE_ROW_CLASS,
   FILE_TABLE_HEADER_CELL_CLASS,
   FILE_TABLE_PREVIEW_CELL_CLASS,
-  FILE_TOOLBAR_CONTROL_CLASS,
 } from '@/features/fileBrowser/fileBrowserStyles';
+import { FiltersDisclosure, RefreshButton, SearchField } from '@/common/components/ui/toolbar';
 
 const CATALOG_POLL_MS = 30_000;
 const OPERATION_POLL_MS = 2_000;
@@ -335,36 +335,52 @@ export function PrinterFileCatalog() {
       {catalog.data?.automaticDiscoveryEnabled === false && (
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
-      <div role="group" aria-label="Printer file controls" className={clsx('flex flex-wrap items-end gap-3', FILE_TOOLBAR_CONTROL_CLASS)}>
-        <FormField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1 basis-48">
-          <Input id="catalog-search" type="search" placeholder="Search filenames or paths" value={search} maxLength={200} onChange={event => changeFilter('remoteSearch', event.target.value)} />
-        </FormField>
-        <FormField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
-          <Select id="catalog-printer" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
-            <option value="">All</option>
-            {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
-          </Select>
-        </FormField>
-        <div className="ml-auto flex items-center gap-1">
-          {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} flush />
-          {manageableSources.length > 0 && (
-            <Button
-              type="button"
-              size="md"
-              variant="secondary"
-              aria-label={REFRESH_ALL_LABEL}
-              title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
-              explainedDisabled
-              disabled={refreshTargets.length === 0 || refreshBusy}
-              aria-busy={refreshBusy}
-              className="px-3"
-              iconLeft={<RefreshIcon aria-hidden="true" className={clsx(ACTION_ICON_CLASS, refreshBusy && 'animate-spin')} />}
-              onClick={() => refreshAll.mutate(refreshTargets)}
-            />
+      <Toolbar aria-label="Printer file controls" labelled>
+        <FiltersDisclosure
+        activeCount={printerId ? 1 : 0}
+        onReset={() => changeFilter('printer', '')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <ToolbarField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1">
+                <SearchField
+                  id="catalog-search"
+                  label="Search"
+                  placeholder="Search filenames or paths"
+                  value={search}
+                  maxLength={200}
+                  onChange={event => changeFilter('remoteSearch', event.target.value)}
+                  onClear={() => changeFilter('remoteSearch', '')}
+                />
+              </ToolbarField>
+              {trigger}
+              <Toolbar.Spacer />
+              <Toolbar.Group className="pf-toolbar__group--nowrap">
+                {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
+                <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+                {manageableSources.length > 0 && (
+                  <RefreshButton
+                    type="button"
+                    variant="secondary"
+                    aria-label={REFRESH_ALL_LABEL}
+                    title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+                    explainedDisabled
+                    disabled={refreshTargets.length === 0 || refreshBusy}
+                    busy={refreshBusy}
+                    onClick={() => refreshAll.mutate(refreshTargets)}
+                  />
+                )}
+              </Toolbar.Group>
+            </Toolbar.Controls>
           )}
-        </div>
-      </div>
+        >
+          <ToolbarField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
+            <Select id="catalog-printer" data-role="field" className="pf-control py-0" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
+              <option value="">All</option>
+              {catalog.data?.printers.map(printer => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
+      </Toolbar>
       {catalog.isLoading && <div role="status"><Spinner /> Loading observations</div>}
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}
       <PrinterFileBulkActions

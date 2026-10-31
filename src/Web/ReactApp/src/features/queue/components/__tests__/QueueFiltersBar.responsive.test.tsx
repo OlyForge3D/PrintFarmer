@@ -22,7 +22,8 @@ describe("TableFiltersBar mobile control layout (issue #1754)", () => {
     const { container } = render(<TableFiltersBar {...mockHandlers} />);
 
     const row = container.firstElementChild;
-    expect(row).toHaveClass("flex-wrap");
+    expect(row).toHaveAttribute("role", "group");
+    expect(row).toHaveAttribute("aria-label", "Queue controls");
   });
 
   it("gives every filter control a full-width mobile size that only becomes fixed-width at the sm breakpoint", () => {
@@ -33,7 +34,7 @@ describe("TableFiltersBar mobile control layout (issue #1754)", () => {
     // for the plain <input> model filter.
     const statusSelect = screen.getByLabelText("Filter by status");
     const materialSelect = screen.getByLabelText("Filter by material");
-    const sortSelect = screen.getByLabelText("Sort queue jobs");
+    const sortSelect = screen.getByLabelText("Sort by");
     const modelInput = screen.getByLabelText("Filter by printer model");
 
     for (const control of [statusSelect, materialSelect, sortSelect]) {

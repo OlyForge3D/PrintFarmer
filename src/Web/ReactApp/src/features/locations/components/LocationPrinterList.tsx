@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Badge, Button, Card, Input, Select } from '@/common/components/ui';
-import { SearchIcon } from '@/common/components/icons/MdiIcons';
+import { Badge, Button, Card, FiltersDisclosure, Select, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import clsx from 'clsx';
 
 export interface LocationPrinterListPrinter {
@@ -75,30 +74,34 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1 relative">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-secondary" />
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search printers..."
-            className="pl-9"
-            aria-label="Search printers"
-          />
-        </div>
-        <Select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as StatusFilter)}
-          containerClassName="w-40"
-          aria-label="Filter by status"
+      <Toolbar aria-label="Location printer filters">
+        <FiltersDisclosure
+        activeCount={statusFilter === 'all' ? 0 : 1}
+        onReset={() => setStatusFilter('all')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search printers" placeholder="Search printers…" />
+              {trigger}
+            </Toolbar.Controls>
+          )}
         >
-          <option value="all">All Status</option>
-          <option value="online">Online</option>
-          <option value="offline">Offline</option>
-          <option value="printing">Printing</option>
-          <option value="idle">Idle</option>
-        </Select>
-      </div>
+          <ToolbarField label="Status" htmlFor="location-printer-status">
+            <Select
+              id="location-printer-status"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+              containerClassName="w-40"
+              aria-label="Filter by status"
+            >
+              <option value="all">All Status</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="printing">Printing</option>
+              <option value="idle">Idle</option>
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {filtered.length === 0 ? (
         <div className="text-center py-8 text-pf-text-secondary">
