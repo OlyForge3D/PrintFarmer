@@ -87,7 +87,7 @@
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@tailwindcss/postcss": "^4.1.18",
-    "@tanstack/react-query-devtools": "5.87.1",
+    "@tanstack/react-query-devtools": "5.105.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.0",
