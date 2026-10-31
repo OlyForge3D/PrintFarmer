@@ -390,7 +390,7 @@ export function PrintersPage() {
     setDeleteConfirmation({ isOpen: false, printers: [] });
   };
 
-  // Import/export handled by admin components (PrinterImportControls / PrinterExportControls)
+  // Import is handled by the admin PrinterImportControls component.
 
   // Stable identity so memoized printer cards don't re-render when the page does
   const handleEditPrinter = useCallback((printer: Printer) => {

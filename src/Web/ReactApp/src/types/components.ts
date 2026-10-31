@@ -154,20 +154,6 @@ export interface FileBrowserProps {
 // Slicer Component Props
 // ====================================
 
-export interface WorkerSelectorProps {
-  selectedWorkerId: string;
-  onWorkerChange: (workerId: string) => void;
-  requiredCapabilities?: string[];
-}
-
-export interface SlicerConfirmModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  title?: string;
-  message?: string;
-}
-
 export interface ProfileSelectorProps {
   selectedProfileId: string;
   onProfileChange: (profileId: string) => void;

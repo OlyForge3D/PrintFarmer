@@ -46,7 +46,7 @@ export interface UseSliceJobsRealtimeOptions {
 /**
  * Hook that joins the user's SignalR group and applies incoming
  * SliceJobEvent payloads directly to the TanStack Query cache,
- * giving the SliceJobsPage instant updates without waiting for
+ * giving the SliceJobsPanel instant updates without waiting for
  * the next polling cycle.
  *
  * Returns `isConnected` so the caller can adjust polling intervals.

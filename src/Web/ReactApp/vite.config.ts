@@ -89,7 +89,7 @@ function emitVersionJson(gitHash: string, buildTime: string) {
         writeFileSync(resolve(outDir, 'release-identity.json'), metadata);
       }
       const serviceWorkerPath = resolve(outDir, 'sw.js');
-      const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
+      const serviceWorker = readFileSync(resolve('public/sw.js'), 'utf8')
         .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)
         .replaceAll('__PRINTFARMER_GIT_HASH__', gitHash);
       writeFileSync(serviceWorkerPath, serviceWorker);

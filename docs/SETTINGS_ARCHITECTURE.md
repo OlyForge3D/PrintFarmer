@@ -17,8 +17,7 @@ show up in the UI without any React changes, and where the sharp edges are.
 
 `/settings?scope=user&tab=profile&sub=preferences` remains the canonical
 Preferences destination, including the user-menu entry and Printables links.
-`SettingsShell` owns the active route; `UserPreferencesPage.tsx` is an
-unreferenced legacy page, not the routed settings shell.
+`SettingsShell` owns the active route and renders the user preferences page.
 
 - **Preferences** starts with account settings: Guided/Expert printer-motion
   guidance, locale, items per page, and Printables username. Guided shows help

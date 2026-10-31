@@ -10,7 +10,6 @@ PrintFarmer uses a standardized set of shared UI components built with React and
 |-----------|----------|-------------|
 | [`Alert`](#alert) | `src/components/ui/Alert.tsx` | Success/error/info/warning messages |
 | [`Badge`](#badge) | `src/components/ui/Badge.tsx` | Status badges and tags |
-| [`Breadcrumbs`](#breadcrumbs) | `src/common/components/Breadcrumbs.tsx` | Navigation breadcrumb trail |
 | [`Button`](#button) | `src/components/ui/Button.tsx` | Consistent button variants |
 | [`Card`](#card) | `src/components/ui/Card.tsx` | Content container with header/footer |
 | [`Checkbox`](#checkbox) | `src/components/ui/Checkbox.tsx` | Checkbox with optional label |
@@ -902,73 +901,6 @@ import { Badge } from '@/components/ui/Badge';
 - `pill?: boolean` - Fully rounded corners (default: `false`)
 - `className?: string` - Additional classes
 - `children: React.ReactNode` - Badge content
-
----
-
-### Breadcrumbs
-
-Navigation breadcrumb trail showing hierarchy and current location.
-
-**Location**: `src/common/components/Breadcrumbs.tsx`
-
-**Usage**:
-```tsx
-import { Breadcrumbs } from '@/common/components/Breadcrumbs';
-
-// Basic breadcrumbs
-<Breadcrumbs items={[
-  { label: 'Home', href: '/' },
-  { label: 'Files', href: '/files' },
-  { label: 'Models', current: true }
-]} />
-
-// With navigation
-function ModelsPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  const breadcrumbs = [
-    { label: 'Dashboard', href: '/' },
-    { label: 'Files', href: '/files' },
-    { label: 'Models', current: true }
-  ];
-
-  return (
-    <>
-      <Breadcrumbs items={breadcrumbs} className="mb-4" />
-      {/* Page content */}
-    </>
-  );
-}
-```
-
-**BreadcrumbItem Interface**:
-```tsx
-interface BreadcrumbItem {
-  label: string;      // Display text
-  href?: string;      // Navigation link (omit for current page)
-  current?: boolean;  // Mark as current/active page
-}
-```
-
-**Props**:
-- `items: BreadcrumbItem[]` - Array of breadcrumb items
-- `className?: string` - Additional CSS classes
-
-**Features**:
-- Accessible navigation with `aria-label="Breadcrumb"`
-- Uses semantic `<nav>` and `<ol>` elements
-- Current page shown in bold with primary text color
-- Navigation items are links with hover state
-- Keyboard-accessible focus ring
-- Chevron separators between items
-
-**Best Practices**:
-- Always include the current page as the last item with `current: true`
-- Don't include the current page in the link (`href` optional for current)
-- Use for navigation pages (not modals or side panels)
-- Keep breadcrumbs to 3-5 levels maximum
-- Start with home/dashboard link
 
 ---
 
