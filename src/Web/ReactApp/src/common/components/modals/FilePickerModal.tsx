@@ -266,19 +266,6 @@ function FilePickerContent({
             label="Search files"
             placeholder="Search by file name…"
           />
-          <Toolbar.Group className="pf-toolbar__group--nowrap">
-            <SortControl
-              value={SORT_CONFIG[sort].sortBy}
-              onChange={event => handleSortChange(event.target.value)}
-              direction={SORT_CONFIG[sort].sortOrder}
-              onDirectionChange={toggleSortOrder}
-              containerClassName="w-40"
-              aria-label="Sort by"
-            >
-              <option value="date">Date</option>
-              <option value="name">Name</option>
-            </SortControl>
-          </Toolbar.Group>
           <FiltersDisclosure
             activeCount={selectedTagIds.length}
             onReset={() => {
@@ -321,6 +308,19 @@ function FilePickerContent({
               </div>
             )}
           </FiltersDisclosure>
+          <Toolbar.Group className="pf-toolbar__group--nowrap">
+            <SortControl
+              value={SORT_CONFIG[sort].sortBy}
+              onChange={event => handleSortChange(event.target.value)}
+              direction={SORT_CONFIG[sort].sortOrder}
+              onDirectionChange={toggleSortOrder}
+              containerClassName="w-40"
+              aria-label="Sort by"
+            >
+              <option value="date">Date</option>
+              <option value="name">Name</option>
+            </SortControl>
+          </Toolbar.Group>
         </Toolbar>
 
         {/* Select all + count */}

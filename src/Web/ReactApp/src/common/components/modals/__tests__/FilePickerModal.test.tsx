@@ -25,6 +25,10 @@ describe('FilePickerModal filters', () => {
     );
 
     const filters = screen.getByRole('button', { name: 'Filters' });
+    const search = screen.getByRole('searchbox', { name: 'Search files' });
+    const sort = screen.getByRole('combobox', { name: 'Sort by' });
+    expect(search.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(filters.compareDocumentPosition(sort) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(filters).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(filters);
     const panel = screen.getByRole('region', { name: 'Filters' });
