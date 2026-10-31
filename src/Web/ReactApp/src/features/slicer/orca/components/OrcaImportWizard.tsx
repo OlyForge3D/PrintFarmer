@@ -5,7 +5,7 @@
  * DESIGN SYSTEM REQUIREMENTS for workspace package UI:
  * - Use CSS variables from src/Web/ReactApp/src/styles/theme.css (pf-* variables)
  * - Import PrintFarmer components: PageTemplate, Button, Alert, FormField, Select
- * - Reference: src/Web/ReactApp/src/pages/ImportOfficialProfilesPage.tsx for correct styling patterns
+ * - Reference: src/Web/ReactApp/src/features/tasks/pages/ProfileImportWizardPage.tsx for styling patterns
  * - Do NOT use generic Tailwind colors (bg-pf-accent-bg, text-pf-error, etc)
  * - Use pf-* classes: bg-pf-panel, text-pf-text-primary, border-pf-border, etc.
  * - For interactive states: bg-pf-accent-2 (primary), bg-pf-error (danger), bg-pf-accent (success)
