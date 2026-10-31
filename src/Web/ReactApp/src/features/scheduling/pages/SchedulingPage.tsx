@@ -71,18 +71,21 @@ export function SchedulingPage() {
       key: 'jobName',
       header: 'Job Name',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.jobName,
       render: (job: ScheduledJob) => job.jobName,
     },
     {
       key: 'printerName',
       header: 'Printer',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.printerName,
       render: (job: ScheduledJob) => job.printerName,
     },
     {
       key: 'scheduledStartTimeUtc',
       header: 'Scheduled Time',
       sortable: true,
+      sortValue: (job: ScheduledJob) => Date.parse(job.scheduledStartTimeUtc),
       render: (job: ScheduledJob) =>
         formatScheduleWallTime(job.scheduledLocalTime, job.timeZone),
     },
@@ -90,6 +93,9 @@ export function SchedulingPage() {
       key: 'recurrencePattern',
       header: 'Recurrence',
       sortable: true,
+      sort: (a: ScheduledJob, b: ScheduledJob) =>
+        (a.recurrencePattern ?? 'Once').localeCompare(b.recurrencePattern ?? 'Once')
+        || a.recurrenceInterval - b.recurrenceInterval,
       render: (job: ScheduledJob) =>
         job.recurrencePattern
           ? `${job.recurrencePattern} × ${job.recurrenceInterval}`
@@ -99,6 +105,7 @@ export function SchedulingPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
+      sortValue: (job: ScheduledJob) => job.status,
       render: (job: ScheduledJob) => (
         <Badge variant={getStatusBadgeVariant(job.status)}>
           {job.status}

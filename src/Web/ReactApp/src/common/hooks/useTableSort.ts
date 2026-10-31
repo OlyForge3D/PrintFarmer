@@ -5,12 +5,36 @@ import { useState, useCallback } from 'react';
  */
 export type SortDirection = 'asc' | 'desc' | null;
 
+export type TableSortValue = string | number | boolean | null | undefined;
+
+export function compareTableValues(a: TableSortValue, b: TableSortValue, direction: Exclude<SortDirection, null>): number {
+  const aMissing = a == null || (typeof a === 'number' && !Number.isFinite(a));
+  const bMissing = b == null || (typeof b === 'number' && !Number.isFinite(b));
+  if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1;
+  const comparison = typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : typeof a === 'boolean' && typeof b === 'boolean'
+      ? Number(a) - Number(b)
+      : String(a).localeCompare(String(b));
+  return direction === 'desc' ? -comparison : comparison;
+}
+
 /**
  * Sort state for a table
  */
 export interface SortState<T extends string = string> {
   column: T | null;
   direction: SortDirection;
+}
+
+export function nextTableSort<T extends string>(state: SortState<T>, column: T): SortState<T> {
+  if (state.column === column && state.direction === 'asc') {
+    return { column, direction: 'desc' };
+  }
+  if (state.column === column && state.direction === 'desc') {
+    return { column: null, direction: null };
+  }
+  return { column, direction: 'asc' };
 }
 
 /**
@@ -37,18 +61,7 @@ export function useTableSort<T extends string>(defaultColumn?: T, defaultDirecti
   });
 
   const handleSort = useCallback((column: string) => {
-    setSortState(prev => {
-      if (prev.column === column) {
-        // Cycle: asc -> desc -> null
-        if (prev.direction === 'asc') {
-          return { column: column as T, direction: 'desc' };
-        } else if (prev.direction === 'desc') {
-          return { column: null, direction: null };
-        }
-      }
-      // New column or was null
-      return { column: column as T, direction: 'asc' };
-    });
+    setSortState(prev => nextTableSort(prev, column as T));
   }, []);
 
   const sortData = useCallback(<D,>(
@@ -64,8 +77,8 @@ export function useTableSort<T extends string>(defaultColumn?: T, defaultDirecti
       return data;
     }
 
-    const sorted = [...data].sort(comparator);
-    return sortState.direction === 'desc' ? sorted.reverse() : sorted;
+    const direction = sortState.direction === 'desc' ? -1 : 1;
+    return [...data].sort((a, b) => direction * comparator(a, b));
   }, [sortState]);
 
   return { sortState, handleSort, sortData, setSortState };

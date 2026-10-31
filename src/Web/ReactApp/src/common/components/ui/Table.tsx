@@ -374,7 +374,7 @@ export function TableRow({
 /**
  * Sort indicator icon
  */
-function SortIndicator({ direction }: { direction: SortDirection }) {
+export function SortIndicator({ direction }: { direction: SortDirection }) {
   return (
     <span className="ml-1 inline-flex flex-col text-xs leading-none" aria-hidden="true">
       <svg 
@@ -412,7 +412,7 @@ export function TableHeaderCell({
     }
   };
 
-  const sortableClass = sortable ? 'cursor-pointer select-none hover:bg-pf-bg-1 transition-colors' : '';
+  const sortableClass = sortable ? 'select-none hover:bg-pf-bg-1 transition-colors' : '';
   
   // Compute aria-sort value as a constant
   const ariaSortValue: 'ascending' | 'descending' | 'none' | undefined = 
@@ -422,17 +422,25 @@ export function TableHeaderCell({
   
   return (
     <th
-      className={`px-4 py-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${className}`}
-      onClick={sortable ? handleClick : undefined}
+      className={`${sortable ? '' : 'px-4 py-3'} text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${className}`}
       aria-sort={ariaSortValue}
       {...props}
       role={context?.keyboardNavigation ? 'columnheader' : props.role}
       scope={props.scope ?? 'col'}
     >
-      <div className="flex items-center">
-        {children}
-        {sortable && <SortIndicator direction={sortDirection} />}
-      </div>
+      {sortable ? (
+        // eslint-disable-next-line local/pf-no-raw-html-controls -- Low-level header primitive owns full-cell geometry, without Button's toolbar sizing.
+        <button
+          type="button"
+          className="flex w-full items-center px-4 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent"
+          onClick={handleClick}
+        >
+          {children}
+          <SortIndicator direction={sortDirection} />
+        </button>
+      ) : (
+        <div className="flex items-center">{children}</div>
+      )}
     </th>
   );
 }
