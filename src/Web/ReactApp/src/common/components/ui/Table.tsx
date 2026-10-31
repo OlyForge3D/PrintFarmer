@@ -416,6 +416,9 @@ export function TableHeaderCell({
   const sortableClass = sortable ? 'select-none hover:bg-pf-bg-1 transition-colors' : '';
   // Cell padding belongs to the button so the entire header remains interactive.
   const classes = className.split(/\s+/).filter(Boolean);
+  const alignmentClass = classes.some(value => /^!?text-(?:left|center|right|justify|start|end)!?$/.test(value))
+    ? ''
+    : 'text-left';
   const isPaddingClass = (value: string) => /^(?:[\w-]+:)*!?p[trblxyse]?-.+$/.test(value);
   const paddingClasses = classes.filter(isPaddingClass);
   const cellClassName = sortable ? classes.filter(value => !isPaddingClass(value)).join(' ') : className;
@@ -428,7 +431,7 @@ export function TableHeaderCell({
   
   return (
     <th
-      className={`${sortable ? '' : 'px-4 py-3'} text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${cellClassName}`}
+      className={`${sortable ? '' : 'px-4 py-3'} ${alignmentClass} text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${cellClassName}`}
       style={sortable ? { ...style, padding: 0, height: 1 } : style}
       aria-sort={ariaSortValue}
       {...props}

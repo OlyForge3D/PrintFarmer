@@ -42,6 +42,13 @@ const mockColumns: DataTableColumn<TestItem>[] = [
 describe('DataTable', () => {
   const rowNames = () => screen.getAllByRole('row').slice(1).map(row => row.querySelector('td')?.textContent);
 
+  it.each(['', 'md:text-right'])('retains default left alignment with only %s', headerClassName => {
+    render(<DataTable data={mockData} getRowKey={item => item.id} columns={[
+      { ...mockColumns[1], headerClassName },
+    ]} />);
+    expect(screen.getByRole('columnheader', { name: 'Value' })).toHaveClass('text-left');
+  });
+
   it.each(['text-center', 'text-right'])('keeps %s and custom padding on a full-cell sort target', async alignment => {
     const user = userEvent.setup();
     render(<DataTable data={mockData} getRowKey={item => item.id} columns={[
@@ -50,7 +57,7 @@ describe('DataTable', () => {
     const header = screen.getByRole('columnheader', { name: 'Value' });
     const button = screen.getByRole('button', { name: 'Value' });
     expect(header).toHaveClass(alignment, 'w-24', 'border');
-    expect(header).not.toHaveClass('px-2', 'py-1');
+    expect(header).not.toHaveClass('px-2', 'py-1', 'text-left');
     expect(header).toHaveStyle({ padding: '0px', height: '1px' });
     expect(button).toHaveClass('px-2', 'py-1', 'h-full', 'w-full', 'focus-visible:ring-inset');
     expect(button).not.toHaveClass('px-4', 'py-3', 'text-left');
