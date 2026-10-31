@@ -42,6 +42,26 @@ const mockColumns: DataTableColumn<TestItem>[] = [
 describe('DataTable', () => {
   const rowNames = () => screen.getAllByRole('row').slice(1).map(row => row.querySelector('td')?.textContent);
 
+  it.each(['text-center', 'text-right'])('keeps %s and custom padding on a full-cell sort target', async alignment => {
+    const user = userEvent.setup();
+    render(<DataTable data={mockData} getRowKey={item => item.id} columns={[
+      { ...mockColumns[1], headerClassName: `px-2 py-1 ${alignment} w-24 border` },
+    ]} />);
+    const header = screen.getByRole('columnheader', { name: 'Value' });
+    const button = screen.getByRole('button', { name: 'Value' });
+    expect(header).toHaveClass(alignment, 'w-24', 'border');
+    expect(header).not.toHaveClass('px-2', 'py-1');
+    expect(header).toHaveStyle({ padding: '0px', height: '1px' });
+    expect(button).toHaveClass('px-2', 'py-1', 'h-full', 'w-full', 'focus-visible:ring-inset');
+    expect(button).not.toHaveClass('px-4', 'py-3', 'text-left');
+    expect(button.style.textAlign).toBe('inherit');
+    expect(button.firstElementChild).toHaveClass('inline-flex', 'items-center');
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(button).toHaveFocus();
+  });
+
   it('cycles numeric sort with Enter and Space, restoring supplied order and keeping both glyphs', async () => {
     const user = userEvent.setup();
     render(<DataTable data={mockData} columns={mockColumns} getRowKey={item => item.id} />);

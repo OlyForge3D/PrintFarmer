@@ -403,6 +403,7 @@ export function TableHeaderCell({
   sortDirection = null,
   sortKey,
   onSort,
+  style,
   ...props 
 }: TableHeaderCellProps) {
   const context = useContext(TableContext);
@@ -413,6 +414,11 @@ export function TableHeaderCell({
   };
 
   const sortableClass = sortable ? 'select-none hover:bg-pf-bg-1 transition-colors' : '';
+  // Cell padding belongs to the button so the entire header remains interactive.
+  const classes = className.split(/\s+/).filter(Boolean);
+  const isPaddingClass = (value: string) => /^(?:[\w-]+:)*!?p[trblxyse]?-.+$/.test(value);
+  const paddingClasses = classes.filter(isPaddingClass);
+  const cellClassName = sortable ? classes.filter(value => !isPaddingClass(value)).join(' ') : className;
   
   // Compute aria-sort value as a constant
   const ariaSortValue: 'ascending' | 'descending' | 'none' | undefined = 
@@ -422,7 +428,8 @@ export function TableHeaderCell({
   
   return (
     <th
-      className={`${sortable ? '' : 'px-4 py-3'} text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${className}`}
+      className={`${sortable ? '' : 'px-4 py-3'} text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wider ${sortableClass} ${cellClassName}`}
+      style={sortable ? { ...style, padding: 0, height: 1 } : style}
       aria-sort={ariaSortValue}
       {...props}
       role={context?.keyboardNavigation ? 'columnheader' : props.role}
@@ -432,14 +439,17 @@ export function TableHeaderCell({
         // eslint-disable-next-line local/pf-no-raw-html-controls -- Low-level header primitive owns full-cell geometry, without Button's toolbar sizing.
         <button
           type="button"
-          className="flex w-full items-center px-4 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent"
+          className={`block h-full w-full cursor-pointer [font:inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent ${paddingClasses.length ? paddingClasses.join(' ') : 'px-4 py-3'}`}
+          style={{ textAlign: 'inherit', color: 'inherit' }}
           onClick={handleClick}
         >
-          {children}
-          <SortIndicator direction={sortDirection} />
+          <span className="inline-flex items-center">
+            {children}
+            <SortIndicator direction={sortDirection} />
+          </span>
         </button>
       ) : (
-        <div className="flex items-center">{children}</div>
+        <div className="inline-flex items-center">{children}</div>
       )}
     </th>
   );
