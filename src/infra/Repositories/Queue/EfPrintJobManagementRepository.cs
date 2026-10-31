@@ -464,7 +464,7 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
         string mode = sortBy.ToLowerInvariant();
         IOrderedQueryable<PrintJob> ordered = mode switch
         {
-            "duration" => query.OrderByDescending(pj => pj.ActualPrintTime),
+            "duration" => query.OrderByDescending(pj => pj.ActualPrintTime ?? TimeSpan.Zero),
             "duration_asc" => query.OrderBy(pj => pj.ActualPrintTime ?? TimeSpan.Zero),
             "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),
             "name_desc" => query.OrderByDescending(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),

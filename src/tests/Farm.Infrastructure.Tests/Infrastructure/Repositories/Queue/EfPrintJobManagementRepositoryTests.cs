@@ -100,39 +100,51 @@ public class EfPrintJobManagementRepositoryTests
         Assert.Empty(db.ChangeTracker.Entries());
     }
 
-    [Fact]
-    public async Task GetHistoryAsync_SqliteAscendingDuration_SortsMissingAsDisplayedZeroAcrossPages()
+    [Theory]
+    [InlineData("duration_asc", new[] { 1, 2, 3, 4, 5 }, new[] { 0d, 0d, 600d, 600d, 900d })]
+    [InlineData("duration", new[] { 5, 3, 4, 1, 2 }, new[] { 900d, 600d, 600d, 0d, 0d })]
+    public async Task GetHistoryAsync_SqliteDuration_SortsMissingAsDisplayedZeroAcrossPages(string mode, int[] expectedIds, double[] expectedSeconds)
     {
         await using SqliteConnection connection = new("Data Source=:memory:;Foreign Keys=False");
         await connection.OpenAsync();
-        await using AppDbContext db = new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options);
+        var interceptor = new PrintJobQueryInterceptor();
+        await using AppDbContext db = new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options);
         await db.Database.EnsureCreatedAsync();
         DateTime now = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var jobs = new List<PrintJob>();
-        foreach (int index in new[] { 3, 1, 2, 0 })
+        foreach (int index in new[] { 5, 2, 4, 1, 3 })
         {
             PrintJob job = new PrintJobBuilder()
-                .WithId(Guid.Parse($"00000000-0000-0000-0000-{index + 1:000000000000}"))
+                .WithId(Guid.Parse($"00000000-0000-0000-0000-{index:000000000000}"))
                 .WithGcodeFile(new GcodeFile { Id = Guid.NewGuid(), Name = $"Duration {index}", FileHash = $"duration-sort-{index}" })
                 .WithStatus(PrintJobStatus.Completed).WithActualEndTime(now).Build();
-            job.ActualPrintTime = index == 0 ? null : TimeSpan.FromMinutes(index == 1 ? 0 : index * 5);
+            job.ActualPrintTime = index == 2 ? null : TimeSpan.FromMinutes(index == 1 ? 0 : index == 5 ? 15 : 10);
             jobs.Add(job);
         }
         db.PrintJobs.AddRange(jobs);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var repository = new EfPrintJobManagementRepository(db);
+        interceptor.Reset();
 
-        var first = await repository.GetHistoryAsync(limit: 1, sortBy: "duration_asc");
-        var remaining = await repository.GetHistoryAsync(limit: 3, offset: 1, sortBy: "duration_asc");
-        PrintJob[] ordered = first.jobs.Concat(remaining.jobs).ToArray();
+        var first = await repository.GetHistoryAsync(limit: 2, sortBy: mode);
+        var second = await repository.GetHistoryAsync(limit: 2, offset: 2, sortBy: mode);
+        var third = await repository.GetHistoryAsync(limit: 2, offset: 4, sortBy: mode);
+        PrintJob[] ordered = first.jobs.Concat(second.jobs).Concat(third.jobs).ToArray();
 
-        Assert.Equal(jobs.OrderBy(job => job.Id).Select(job => job.Id), ordered.Select(job => job.Id));
-        Assert.Equal(new[] { 0d, 0d, 600d, 900d }, ordered.Select(job => job.ActualPrintTime?.TotalSeconds ?? 0));
-        Assert.Equal(4, first.totalCount);
-        var legacy = await repository.GetHistoryAsync(sortBy: "duration");
-        Assert.Equal(new[] { 4, 3, 2, 1 }.Select(id => Guid.Parse($"00000000-0000-0000-0000-{id:000000000000}")),
-            legacy.jobs.Select(job => job.Id));
+        Assert.Equal(expectedIds.Select(id => Guid.Parse($"00000000-0000-0000-0000-{id:000000000000}")), ordered.Select(job => job.Id));
+        Assert.Equal(expectedSeconds, ordered.Select(job => job.ActualPrintTime?.TotalSeconds ?? 0));
+        Assert.Equal(5, first.totalCount);
+        string[] pageQueries = interceptor.PrintJobCommands
+            .Where(sql => sql.Contains("LIMIT", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, pageQueries.Length);
+        foreach (string sql in pageQueries)
+        {
+            // Explicit SQL coalescing, not SQLite's default NULL placement, determines the order.
+            Assert.Contains("ORDER BY COALESCE(", sql, StringComparison.Ordinal);
+            Assert.Contains(mode == "duration" ? ", 0) DESC," : ", 0),", sql, StringComparison.Ordinal);
+        }
     }
 
     [Theory]
