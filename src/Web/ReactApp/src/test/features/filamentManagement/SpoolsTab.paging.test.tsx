@@ -68,10 +68,6 @@ vi.mock('@/features/filamentManagement/components/SpoolCard', () => ({
     `<div data-testid="spool-card">${spool.id}</div>`,
 }));
 
-vi.mock('@/features/filamentManagement/components/SpoolTableView', () => ({
-  SpoolTableView: () => '<div data-testid="spool-table" />',
-}));
-
 vi.mock('@/features/filamentManagement/components/SpoolCompactView', () => ({
   SpoolCompactView: () => '<div data-testid="spool-compact" />',
 }));
@@ -143,6 +139,42 @@ describe('SpoolsTab — AbortController cancellation', () => {
       showEmpty: false, pageSize: 50, sortField: 'id', sortDir: 'asc', page: 0,
     });
     mockGetSpools.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('cycles the table header to server-default order without locally reordering the page', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    filterState.sortDir = 'desc';
+    filterState.page = 2;
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(2), makeSpool(1)], totalCount: 150 });
+    const { rerender } = render(<SpoolsTab />);
+    const header = await screen.findByRole('button', { name: 'ID' });
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.queryByRole('combobox', { name: /sort by/i })).not.toBeInTheDocument();
+    for (const label of ['Color', 'Used %', 'Archived']) {
+      expect(screen.getByRole('columnheader', { name: label })).not.toHaveAttribute('aria-sort');
+      expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
+    }
+    fireEvent.click(header);
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'none', sortDir: 'asc', page: 0 });
+
+    Object.assign(filterState, { sortField: 'none', sortDir: 'asc', page: 0 });
+    rerender(<SpoolsTab />);
+    await waitFor(() => expect(mockGetSpools.mock.lastCall?.[0]).toMatchObject({ offset: 0, sort: undefined }));
+    expect(screen.getByRole('button', { name: 'ID' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getAllByRole('row').slice(1).map(row => row.textContent)).toEqual([
+      expect.stringContaining('Spool 2'), expect.stringContaining('Spool 1'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'ID' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'id', sortDir: 'asc', page: 0 });
+  });
+
+  it('retains the table sort dropdown when a sortable column is hidden', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    localStorage.setItem('spool-table-columns', JSON.stringify([{ id: 'vendor', visible: false }]));
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(1)], totalCount: 1 });
+    render(<SpoolsTab />);
+    expect(await screen.findByRole('combobox', { name: /sort by/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vendor' })).toBeInTheDocument();
   });
 
   it('passes AbortSignal to getSpools on mount', async () => {

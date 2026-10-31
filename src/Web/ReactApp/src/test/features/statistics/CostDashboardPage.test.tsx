@@ -36,6 +36,7 @@ function costFields(value: number) {
 
 const printerFixtures = orderedFixtures.map(({ name, value, total }) => ({
   printerId: name, printerName: name, jobCount: value, ...costFields(value), totalCostUsd: total,
+  averageCostPerJobUsd: total / value,
 })) satisfies CostByPrinter[];
 const jobFixtures = orderedFixtures.map(({ name, value, total, date }) => ({
   jobId: name, jobName: name, printerName: name, filamentName: name, materialType: 'PLA',

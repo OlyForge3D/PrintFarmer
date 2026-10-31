@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
     isPaused: false,
     requiresOperatorReauthorization: false,
     status: 'active',
-  },
+  } satisfies ScheduledJob,
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({

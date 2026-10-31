@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
@@ -31,6 +32,7 @@ export function BinsTab() {
 
   const { data: bins = [], isLoading, error } = useBins({ includeInactive });
   const deleteBin = useDeleteBin();
+  const { headerProps, sortDataByValues } = useTableSort<'code' | 'name' | 'location' | 'notes' | 'status'>();
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -42,6 +44,13 @@ export function BinsTab() {
       return haystack.includes(needle);
     });
   }, [bins, filter]);
+  const sortedBins = sortDataByValues(filtered, {
+    code: bin => bin.code,
+    name: bin => bin.name,
+    location: bin => bin.location,
+    notes: bin => bin.notes,
+    status: bin => bin.isActive ? 'Active' : 'Inactive',
+  });
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -139,16 +148,16 @@ export function BinsTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-pf-bg-1 text-pf-text-secondary">
               <tr>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Code</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Name</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Location</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Notes</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+                <TableHeaderCell {...headerProps('code')} className="px-3 py-2 font-medium">Code</TableHeaderCell>
+                <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('location')} className="px-3 py-2 font-medium">Location</TableHeaderCell>
+                <TableHeaderCell {...headerProps('notes')} className="px-3 py-2 font-medium">Notes</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')} className="px-3 py-2 font-medium">Status</TableHeaderCell>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {filtered.map((bin) => (
+              {sortedBins.map((bin) => (
                 <tr key={bin.id} className={bin.isActive ? '' : 'opacity-60'}>
                   <td className="px-3 py-2 font-mono text-pf-text-primary">{bin.code}</td>
                   <td className="px-3 py-2">{bin.name}</td>

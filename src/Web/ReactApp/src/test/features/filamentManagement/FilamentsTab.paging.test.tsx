@@ -63,10 +63,6 @@ vi.mock('@/features/filamentManagement/components/FilamentCard', () => ({
     `<div data-testid="filament-card">${filament.name}</div>`,
 }));
 
-vi.mock('@/features/filamentManagement/components/FilamentTableView', () => ({
-  FilamentTableView: () => '<div data-testid="filament-table" />',
-}));
-
 vi.mock('@/features/filamentManagement/components/ColorFamilySelect', () => ({
   ColorFamilySelect: () => '<div />',
 }));
@@ -146,6 +142,39 @@ describe('FilamentsTab — server-side paging', () => {
     mockGetFilamentsPaged.mockResolvedValue(pageOf([], 0));
     render(<FilamentsTab />);
     await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+  });
+
+  it('cycles the table header to server-default order and resets the page atomically', async () => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    filterState.sortDir = 'desc';
+    filterState.page = 2;
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(2), makeFilament(1)], totalCount: 150 });
+    const { rerender } = render(<FilamentsTab />);
+    const header = await screen.findByRole('button', { name: 'Name' });
+    expect(header.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(screen.getByRole('button', { name: 'Vendor' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.queryByRole('combobox', { name: /sort by/i })).not.toBeInTheDocument();
+    fireEvent.click(header);
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'none', sortDir: 'asc', page: 1 });
+
+    Object.assign(filterState, { sortField: 'none', sortDir: 'asc', page: 1 });
+    rerender(<FilamentsTab />);
+    await waitFor(() => expect(mockGetFilamentsPaged.mock.lastCall?.[0]).toMatchObject({ offset: undefined, sort: undefined }));
+    expect(screen.getByRole('button', { name: 'Name' }).closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(screen.getAllByRole('row').slice(1).map(row => row.textContent)).toEqual([
+      expect.stringContaining('Filament 2'), expect.stringContaining('Filament 1'),
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Name' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ sortField: 'name', sortDir: 'asc', page: 1 });
+  });
+
+  it('retains the table sort dropdown when a sortable column is hidden', async () => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    localStorage.setItem('filament-table-columns', JSON.stringify([{ id: 'vendor', visible: false }]));
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    render(<FilamentsTab />);
+    expect(await screen.findByRole('combobox', { name: /sort by/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vendor' })).toBeInTheDocument();
   });
 
   it('passes limit derived from pageSize to the API', async () => {
@@ -508,7 +537,7 @@ describe('FilamentsTab — filter disclosure reset', () => {
     render(<FilamentsTab />);
     await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: /filters/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /filters/i }));
     fireEvent.click(screen.getByRole('button', { name: /reset filters/i }));
 
     expect(filterState.setMany).toHaveBeenCalledTimes(1);

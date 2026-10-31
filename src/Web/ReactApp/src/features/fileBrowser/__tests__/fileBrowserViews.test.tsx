@@ -121,13 +121,13 @@ describe("ExplorerView", () => {
     expect(onSelectAll).toHaveBeenCalled();
 
     await userEvent.click(
-      screen.getByRole("button", { name: /Sort by Name/i }),
+      screen.getByRole("button", { name: "Name" }),
     );
     expect(onSort).toHaveBeenCalledWith("fileName");
-    const nameHeader = screen.getByRole("button", { name: "Sort by Name" });
+    const nameHeader = screen.getByRole("button", { name: "Name" });
     expect(nameHeader.closest("th")).toHaveAttribute("aria-sort", "ascending");
-    expect(nameHeader.querySelector("svg")).toHaveClass("h-3", "w-3");
-    expect(nameHeader.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(nameHeader.querySelectorAll("svg")).toHaveLength(2);
+    expect(nameHeader.querySelector("svg")?.closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it("keeps the folder delete action named, destructive, and operable", async () => {
@@ -212,15 +212,18 @@ describe("compact presentation (opt-in, used by /files)", () => {
     expect(table.parentElement).toHaveClass(COMPACT_FILE_TABLE_FRAME_CLASS);
     expect(table.querySelector("thead")).toHaveClass(FILE_TABLE_HEAD_CLASS);
     for (const header of within(table).getAllByRole("columnheader")) {
-      expect(header).toHaveClass(FILE_TABLE_HEADER_CELL_CLASS);
+      if (header.hasAttribute("aria-sort")) {
+        expect(header).toHaveClass("[&>button]:px-3", "[&>button]:py-2");
+      } else {
+        expect(header).toHaveClass(FILE_TABLE_HEADER_CELL_CLASS);
+      }
     }
     const row = within(table).getAllByRole("row")[1];
     expect(row).toHaveClass(FILE_TABLE_ROW_CLASS);
     for (const cell of within(row).getAllByRole("cell")) {
       expect(cell).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS);
     }
-    expect(within(table).getByRole("button", { name: "Sort by Name" })).toHaveAttribute("data-pf-variant", "unstyled");
-    expect(within(table).getByRole("button", { name: "Sort by Name" })).toHaveClass("uppercase", "font-semibold");
+    expect(within(table).getByRole("button", { name: "Name" })).toHaveClass("uppercase", "w-full");
     expect(table).not.toHaveClass("text-sm");
     expect(screen.getByText("file.gcode").closest("td")).toHaveClass("py-1.5");
   });
@@ -249,7 +252,7 @@ describe("compact presentation (opt-in, used by /files)", () => {
     const table = screen.getByRole("table", { name: "Files list" });
     expect(within(table).getByRole("columnheader", { name: "Preview" })).toHaveClass("w-px", "pr-0!");
     expect(screen.getByText("thumb").closest("td")).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS, "w-px", "pr-0!");
-    expect(within(table).getByRole("button", { name: "Sort by Name" }).closest("th")).not.toHaveClass("w-px");
+    expect(within(table).getByRole("button", { name: "Name" }).closest("th")).not.toHaveClass("w-px");
   });
 
   it("keeps the default table unchanged for other file browsers", () => {

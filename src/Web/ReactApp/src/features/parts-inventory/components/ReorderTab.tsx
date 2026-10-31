@@ -1,4 +1,5 @@
-import { Badge, Button, EmptyState, Spinner, RefreshButton, Toolbar } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, RefreshButton, Toolbar, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import {
   AlertIcon,
   CheckCircleIcon,
@@ -12,12 +13,21 @@ interface ReorderTabProps {
 /**
  * ReorderTab — lists SKUs at or below reorder point.
  *
- * The endpoint returns a sorted list of {@link ReorderCandidateDto},
- * so we simply render the pre-computed deficit. Empty state is
+ * The endpoint's deficit order is preserved when no column sort is active.
+ * Empty state is
  * treated as good news (all stock levels healthy).
  */
 export function ReorderTab({ onOpenSkusTab }: ReorderTabProps) {
   const { data: candidates = [], isLoading, error, refetch, isFetching } = useReorderCandidates();
+  const { headerProps, sortDataByValues } = useTableSort<'sku' | 'name' | 'onHand' | 'reorderPoint' | 'deficit' | 'status'>();
+  const sortedCandidates = sortDataByValues(candidates, {
+    sku: candidate => candidate.sku,
+    name: candidate => candidate.name,
+    onHand: candidate => candidate.onHand,
+    reorderPoint: candidate => candidate.reorderPoint,
+    deficit: candidate => candidate.deficit,
+    status: candidate => candidate.onHand <= 0 ? 'Out of stock' : 'Below reorder pt',
+  });
 
   if (isLoading) {
     return (
@@ -72,16 +82,16 @@ export function ReorderTab({ onOpenSkusTab }: ReorderTabProps) {
         <table className="min-w-full text-sm">
           <thead className="bg-pf-bg-1 text-pf-text-secondary">
             <tr>
-              <th scope="col" className="px-3 py-2 text-left font-medium">SKU</th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">Name</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">On-hand</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Reorder pt</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Deficit</th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+              <TableHeaderCell {...headerProps('sku')} className="px-3 py-2 font-medium">SKU</TableHeaderCell>
+              <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+              <TableHeaderCell {...headerProps('onHand')} align="right" className="px-3 py-2 font-medium">On-hand</TableHeaderCell>
+              <TableHeaderCell {...headerProps('reorderPoint')} align="right" className="px-3 py-2 font-medium">Reorder pt</TableHeaderCell>
+              <TableHeaderCell {...headerProps('deficit')} align="right" className="px-3 py-2 font-medium">Deficit</TableHeaderCell>
+              <TableHeaderCell {...headerProps('status')} className="px-3 py-2 font-medium">Status</TableHeaderCell>
             </tr>
           </thead>
           <tbody className="divide-y divide-pf-border">
-            {candidates.map((candidate) => (
+            {sortedCandidates.map((candidate) => (
               <tr key={candidate.partInventoryId}>
                 <td className="px-3 py-2 font-mono">{candidate.sku}</td>
                 <td className="px-3 py-2">{candidate.name}</td>

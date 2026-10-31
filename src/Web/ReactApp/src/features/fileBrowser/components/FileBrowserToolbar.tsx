@@ -16,6 +16,7 @@ interface FileBrowserToolbarProps {
   filterActions?: FileBrowserFilterActions;
   folderActions?: ReactNode;
   extraActions?: ReactNode;
+  hideSortControl?: boolean;
 }
 
 export const FileBrowserToolbar = ({
@@ -31,6 +32,7 @@ export const FileBrowserToolbar = ({
   filterActions,
   folderActions,
   extraActions,
+  hideSortControl = false,
 }: FileBrowserToolbarProps) => {
   const controls = (trigger: ReactNode) => (
     <Toolbar.Controls>
@@ -48,7 +50,7 @@ export const FileBrowserToolbar = ({
       {trigger}
       {folderActions}
 
-      <ToolbarField label="Sort" htmlFor="file-browser-sort">
+      {!hideSortControl && <ToolbarField label="Sort" htmlFor="file-browser-sort">
         <SortControl
           id="file-browser-sort"
           aria-label="Sort by"
@@ -56,14 +58,16 @@ export const FileBrowserToolbar = ({
           onChange={(event) => onSortChange(event.target.value)}
           direction={sortOrder}
           onDirectionChange={onToggleSortOrder}
+          directionDisabled={!sortBy}
         >
+            <option value="">Default order</option>
             {sortOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
         </SortControl>
-      </ToolbarField>
+      </ToolbarField>}
 
       <Toolbar.Spacer />
 

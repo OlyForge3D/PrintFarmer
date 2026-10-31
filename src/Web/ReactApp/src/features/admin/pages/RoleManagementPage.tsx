@@ -43,6 +43,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import { getErrorMessage, isApiError } from '@/common/utils/apiErrors';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import type {
   CreateCustomRoleRequest,
   PermissionCatalog,
@@ -192,6 +193,12 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   };
 
   const roles = rolesQuery.data ?? [];
+  const { sortDataByValues, headerProps } = useTableSort<'role' | 'members' | 'permissions'>();
+  const sortedRoles = sortDataByValues(roles, {
+    role: role => role.displayName,
+    members: role => role.memberCount,
+    permissions: role => role.hasImplicitTotalAccess ? null : role.permissionCount,
+  });
   const selectedRole = roles.find((r) => r.id === selectedRoleId) ?? null;
   const rolePermissions = rolePermissionsQuery.data;
 
@@ -497,14 +504,14 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
             <Table aria-label="Roles">
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Role</TableHeaderCell>
-                  <TableHeaderCell>Members</TableHeaderCell>
-                  <TableHeaderCell>Permissions</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('role')}>Role</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('members')}>Members</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('permissions')}>Permissions</TableHeaderCell>
                   <TableHeaderCell>Actions</TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {roles.map((role) => (
+                {sortedRoles.map((role) => (
                   <TableRow
                     key={role.id}
                     isSelected={role.id === selectedRoleId}

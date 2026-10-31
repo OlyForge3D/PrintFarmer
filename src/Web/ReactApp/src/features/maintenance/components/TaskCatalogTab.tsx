@@ -9,7 +9,8 @@
 
 import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge, Button, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 import { FiltersDisclosure, HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
@@ -112,6 +113,7 @@ interface TaskFormModalProps {
 }
 
 function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose, onTaskCreated }: TaskFormModalProps) {
+  const { sortDataByValues, headerProps } = useTableSort<'part' | 'category' | 'quantity' | 'sku' | 'stock' | 'notes'>();
   // Derive fresh task from the query-backed array so part mutations auto-refresh
   const task = taskId ? tasks.find(t => t.id === taskId) ?? null : null;
   const isEdit = !!task;
@@ -432,17 +434,24 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
                     <table className="w-full text-sm" role="grid" aria-label="Required parts">
                       <thead>
                         <tr className="bg-pf-bg-2 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
-                          <th scope="col" className="px-3 py-2">Part</th>
-                          <th scope="col" className="px-3 py-2">Category</th>
-                          <th scope="col" className="px-3 py-2 text-right">Qty</th>
-                          <th scope="col" className="px-3 py-2">SKU</th>
-                          <th scope="col" className="px-3 py-2 text-right">Stock</th>
-                          <th scope="col" className="px-3 py-2">Notes</th>
+                          <TableHeaderCell {...headerProps('part')} className="px-3 py-2">Part</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('category')} className="px-3 py-2">Category</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('quantity')} align="right" className="px-3 py-2">Qty</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('sku')} className="px-3 py-2">SKU</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('stock')} align="right" className="px-3 py-2">Stock</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('notes')} className="px-3 py-2">Notes</TableHeaderCell>
                           <th scope="col" className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-pf-border">
-                        {task!.taskComponents.map(tc => {
+                        {sortDataByValues(task!.taskComponents, {
+                          part: tc => tc.componentName ?? componentMap.get(tc.maintenanceComponentId)?.name ?? 'Unknown',
+                          category: tc => componentMap.get(tc.maintenanceComponentId)?.category,
+                          quantity: tc => tc.quantity,
+                          sku: tc => componentMap.get(tc.maintenanceComponentId)?.sku,
+                          stock: tc => componentMap.get(tc.maintenanceComponentId)?.inStock,
+                          notes: tc => tc.notes,
+                        }).map(tc => {
                           const comp = componentMap.get(tc.maintenanceComponentId);
                           const isLow = comp ? comp.inStock < comp.minimumStock : false;
                           return (

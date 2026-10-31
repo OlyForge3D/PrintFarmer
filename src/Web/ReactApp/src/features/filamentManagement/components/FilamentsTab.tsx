@@ -33,10 +33,8 @@ import type { SpoolmanFilament } from '@/types/api';
 import type { FilamentTableColumn } from '@/features/filamentManagement/types';
 import { toast } from 'sonner';
 
-type SortField = 'name' | 'vendor' | 'material' | 'diameter' | 'weight' | 'extruderTemp' | 'bedTemp' | 'price';
-
 /** Maps frontend sort field IDs to Spoolman API sort parameter names. */
-const FILAMENT_SORT_FIELD_MAP: Record<SortField, string> = {
+const FILAMENT_SORT_FIELD_MAP: Partial<Record<string, string>> = {
   name: 'name',
   vendor: 'vendor.name',
   material: 'material',
@@ -91,7 +89,7 @@ export function FilamentsTab() {
 
   // Only color is filtered client-side; server handles search, material, vendor, sort
   const deferredFilters = useMemo(() => ({ color: deferredColor }), [deferredColor]);
-  const sortField = urlSortField as SortField;
+  const sortField = urlSortField;
   const sortDir = urlSortDir as 'asc' | 'desc';
   const page = urlPage as number;
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -238,7 +236,7 @@ export function FilamentsTab() {
   const loadFilaments = useCallback(async (signal?: AbortSignal) => {
     try {
       setError(null);
-      const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField as SortField];
+      const spoolmanSortField = FILAMENT_SORT_FIELD_MAP[sortField];
       const sort = spoolmanSortField ? `${spoolmanSortField}:${sortDir}` : undefined;
       // Clamp page to ≥ 1 before computing offset (guards against stale/invalid URL values)
       const safePage = Math.max(1, page);
@@ -613,16 +611,18 @@ export function FilamentsTab() {
                   />
                 </ToolbarField>
                 {trigger}
-                {viewMode === 'cards' && (
+                {(viewMode !== 'table' || !Object.keys(FILAMENT_SORT_FIELD_MAP).every(key =>
+                  tableColumns.some(column => column.id === key && column.visible && column.sortable))) && (
                   <ToolbarField label="Sort" htmlFor="filament-sort">
                     <SortControl
                       id="filament-sort"
                       aria-label="Sort by"
                       value={sortField}
                       direction={sortDir}
-                      onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
-                      onChange={e => setMany({ sortField: e.target.value })}
+                      onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 1 })}
+                      onChange={e => setMany({ sortField: e.target.value, page: 1 })}
                     >
+                        <option value="none">Default order</option>
                         <option value="name">Name</option>
                         <option value="vendor">Vendor</option>
                         <option value="material">Material</option>
@@ -777,7 +777,7 @@ export function FilamentsTab() {
           tableColumns={tableColumns}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}
-          onSort={(field, dir) => setMany({ sortField: field, sortDir: dir })}
+          onSort={(field, dir) => setMany({ sortField: field ?? 'none', sortDir: dir ?? 'asc', page: 1 })}
           onEdit={f => setEditingFilament(f)}
           onClone={f => setCloningFilament(f)}
           onDelete={f => setDeleteConfirm({ type: 'single', filament: f })}

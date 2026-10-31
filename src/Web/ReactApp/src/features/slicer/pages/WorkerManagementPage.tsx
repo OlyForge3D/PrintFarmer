@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { workerService, WorkerResponse, WorkerStatus, WorkerJobResponse } from '@/services/workerService';
 import { slicerHubService, SlicerRegisteredEvent, SlicerHeartbeatEvent, SlicerDeregisteredEvent } from '@/services/slicerHubService';
@@ -17,6 +17,8 @@ import { FiltersDisclosure, RefreshButton, Toolbar } from '@/common/components/u
 import { WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 interface WorkerManagementPageProps {
   tabQueryParamName?: string;
@@ -41,6 +43,11 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
   const [workerJobs, setWorkerJobs] = useState<Map<string, WorkerJobResponse[]>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState<Set<string>>(new Set());
   const [workerToDelete, setWorkerToDelete] = useState<WorkerResponse | null>(null);
+  const { headerProps, sortDataByValues } = useTableSort<'name' | 'status'>();
+  const sortedWorkers = sortDataByValues(workers, {
+    name: worker => worker.name,
+    status: worker => worker.status,
+  });
 
   const handleTabChange = (tab: 'workers' | 'jobs') => {
     setActiveTab(tab);
@@ -363,8 +370,8 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
         <table className="w-full min-w-[900px]">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</th>
+              <TableHeaderCell {...headerProps('name')} className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</TableHeaderCell>
+              <TableHeaderCell {...headerProps('status')} className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Status</TableHeaderCell>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Capacity</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Statistics</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Performance</th>
@@ -372,8 +379,8 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
             </tr>
           </thead>
           <tbody className="divide-y divide-pf-border">
-            {workers.map(worker => (
-              <>
+            {sortedWorkers.map(worker => (
+              <Fragment key={worker.id}>
                 <tr key={worker.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-start gap-2">
@@ -547,7 +554,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
                   </td>
                 </tr>
               )}
-            </>
+            </Fragment>
             ))}
           </tbody>
         </table>

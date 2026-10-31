@@ -40,7 +40,7 @@ const formatBytes = (bytes?: number) => {
 };
 
 const modelColumns: ColumnDef[] = [
-  { key: 'fileName', label: 'Name', sortable: true },
+  { key: 'fileName', label: 'Name', sortable: true, sortKey: 'name' },
   {
     key: 'fileType',
     label: 'Type',
@@ -51,6 +51,7 @@ const modelColumns: ColumnDef[] = [
   },
   {
     key: 'fileSize',
+    sortKey: 'size',
     label: 'Size',
     sortable: true,
     align: 'right',
@@ -58,6 +59,7 @@ const modelColumns: ColumnDef[] = [
   },
   {
     key: 'uploadedAt',
+    sortKey: 'date',
     label: 'Uploaded',
     sortable: true,
     render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),

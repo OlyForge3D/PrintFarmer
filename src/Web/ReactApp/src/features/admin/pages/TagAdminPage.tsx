@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useOptimistic, useTransition, useEffectEvent, useMemo, useRef, useCallback } from 'react';
+import { useTableSort } from '@/common/hooks/useTableSort';
+import { TableHeaderCell } from '@/common/components/ui/Table';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
@@ -174,6 +176,16 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         (state: TagOption[], deletedTagId: string) => 
             state.filter(tag => tag.id !== deletedTagId)
     );
+    const { headerProps, handleSort, sortDataByValues } = useTableSort<'name' | 'description' | 'usage'>();
+    const sortedTags = sortDataByValues(optimisticTags, {
+        name: tag => tag.name,
+        description: tag => tag.description,
+        usage: tag => tag.usageCount ?? 0,
+    });
+    const handleTagSort = (column: string) => {
+        setFocusedIndex(-1);
+        handleSort(column);
+    };
 
     // Create tag mutation
     const createTagMutation = useMutation({
@@ -417,20 +429,20 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         }
         
         // Arrow keys for row navigation (only on management tab with tags)
-        if (activeTab === 'management' && tags.length > 0) {
+        if (activeTab === 'management' && sortedTags.length > 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 isKeyboardNavigating.current = true;
                 setFocusedIndex(prev => {
                     // If not focused, start from hovered row (or first row)
                     if (prev === -1) {
-                        const hoveredIndex = tags.findIndex(t => t.id === hoveredTagId);
-                        if (hoveredIndex >= 0 && hoveredIndex < tags.length - 1) {
+                        const hoveredIndex = sortedTags.findIndex(t => t.id === hoveredTagId);
+                        if (hoveredIndex >= 0 && hoveredIndex < sortedTags.length - 1) {
                             return hoveredIndex + 1; // Move down from hovered
                         }
                         return hoveredIndex >= 0 ? hoveredIndex : 0; // Stay on hovered or start at first
                     }
-                    return prev < tags.length - 1 ? prev + 1 : prev;
+                    return prev < sortedTags.length - 1 ? prev + 1 : prev;
                 });
                 return;
             }
@@ -440,11 +452,11 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 setFocusedIndex(prev => {
                     // If not focused, start from hovered row (or last row)
                     if (prev === -1) {
-                        const hoveredIndex = tags.findIndex(t => t.id === hoveredTagId);
+                        const hoveredIndex = sortedTags.findIndex(t => t.id === hoveredTagId);
                         if (hoveredIndex > 0) {
                             return hoveredIndex - 1; // Move up from hovered
                         }
-                        return hoveredIndex >= 0 ? hoveredIndex : tags.length - 1; // Stay on hovered or start at last
+                        return hoveredIndex >= 0 ? hoveredIndex : sortedTags.length - 1; // Stay on hovered or start at last
                     }
                     return prev > 0 ? prev - 1 : prev;
                 });
@@ -463,9 +475,9 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         if (e.key === 'e') {
             e.preventDefault();
             // Prefer keyboard-focused row, fall back to hovered
-            const targetTag = focusedIndex >= 0 && focusedIndex < tags.length 
-                ? tags[focusedIndex] 
-                : tags.find(t => t.id === hoveredTagId);
+            const targetTag = focusedIndex >= 0 && focusedIndex < sortedTags.length 
+                ? sortedTags[focusedIndex] 
+                : sortedTags.find(t => t.id === hoveredTagId);
             if (targetTag) {
                 handleStartEdit(targetTag);
             }
@@ -553,15 +565,15 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                 <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
                                     Color
                                 </th>
-                                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
+                                <TableHeaderCell {...headerProps('name')} onSort={handleTagSort} className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
                                     Tag Name
-                                </th>
-                                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
+                                </TableHeaderCell>
+                                <TableHeaderCell {...headerProps('description')} onSort={handleTagSort} className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
                                     Description
-                                </th>
-                                <th className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
+                                </TableHeaderCell>
+                                <TableHeaderCell {...headerProps('usage')} onSort={handleTagSort} className="px-6 py-3 text-left text-sm font-medium text-pf-text-primary">
                                     Usage
-                                </th>
+                                </TableHeaderCell>
                                 <th className="px-6 py-3 text-right text-sm font-medium text-pf-text-primary">
                                     Actions
                                 </th>
@@ -569,7 +581,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                         </thead>
                         <tbody>
                             {optimisticTags.length > 0 ? (
-                                optimisticTags.map((tag, index) => (
+                                sortedTags.map((tag, index) => (
                                     <SelectableRow
                                         key={tag.id}
                                         ref={(el: HTMLTableRowElement | null) => {

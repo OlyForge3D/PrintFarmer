@@ -23,7 +23,8 @@ import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSk
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
-import { FiltersDisclosure, Toolbar, HeaderActions } from '@/common/components/ui/toolbar';
+import { FiltersDisclosure, Toolbar, HeaderActions, SortDirectionButton } from '@/common/components/ui/toolbar';
+import { nextTableSort, type SortDirection } from '@/common/hooks/useTableSort';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -247,11 +248,22 @@ export function PrintersPage() {
     if (saved === 'state' || saved === 'name' || saved === 'backend') return saved;
     return 'state';
   });
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => {
+    const saved = localStorage.getItem('printerSortDirection');
+    return saved === 'none' ? null : saved === 'desc' ? 'desc' : 'asc';
+  });
 
   // Save sort mode preference to localStorage
   useEffect(() => {
     localStorage.setItem('printerSortMode', sortMode);
-  }, [sortMode]);
+    localStorage.setItem('printerSortDirection', sortDirection ?? 'none');
+  }, [sortMode, sortDirection]);
+
+  const handleTableSort = useCallback((column: PrinterSortMode) => {
+    const next = nextTableSort({ column: sortDirection === null ? null : sortMode, direction: sortDirection }, column);
+    if (next.column) setSortMode(next.column);
+    setSortDirection(next.direction);
+  }, [sortMode, sortDirection]);
 
   // Tabs removed — admin controls are now inline and permission-gated
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<string[]>([]);
@@ -307,8 +319,8 @@ export function PrintersPage() {
         return new Date(p.estimatedCompletionTimeUtc).getTime() <= cutoffMs;
       });
     }
-    return sortPrintersForDisplay(filtered, sortMode, pendingPrinterIds);
-  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds]);
+    return sortPrintersForDisplay(filtered, sortMode, pendingPrinterIds, sortDirection);
+  }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, sortDirection, pendingPrinterIds]);
 
   const deferredUserPrinters = useDeferredValue(userPrinters);
 
@@ -578,22 +590,32 @@ export function PrintersPage() {
                     <Toolbar.Controls>
                       {trigger}
                       {/* Sort Order */}
-                      <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
+                      {viewMode !== 'table' && <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
                         <label htmlFor="sort-mode" className="sr-only text-sm text-pf-text-secondary sm:not-sr-only">Sort:</label>
                         <Select
                           id="sort-mode"
                           data-role="field"
-                          value={sortMode}
-                          onChange={e => setSortMode(e.target.value as PrinterSortMode)}
+                          value={sortDirection === null ? '' : sortMode}
+                          onChange={e => {
+                            if (e.target.value === '') {
+                              setSortDirection(null);
+                            } else {
+                              setSortMode(e.target.value as PrinterSortMode);
+                              setSortDirection('asc');
+                            }
+                          }}
                           aria-label="Sort by"
                           className="pf-control min-w-0 py-0"
                           containerClassName="sm:w-40"
                         >
+                          <option value="">Default order</option>
                           <option value="state">State</option>
                           <option value="name">Name</option>
                           <option value="backend">Backend</option>
                         </Select>
-                      </div>
+                        <SortDirectionButton direction={sortDirection ?? 'asc'} disabled={sortDirection === null}
+                          onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')} />
+                      </div>}
 
                       <Toolbar.Spacer />
                       <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
@@ -756,6 +778,9 @@ export function PrintersPage() {
 
                   <PrinterTableView
                     printers={deferredUserPrinters}
+                    sortMode={sortMode}
+                    sortDirection={sortDirection}
+                    onSort={handleTableSort}
                     onEdit={handleEditPrinter}
                     onDelete={handleDeleteClick}
                     onBulkSetMaintenance={handleBulkSetMaintenance}

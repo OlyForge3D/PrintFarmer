@@ -73,6 +73,8 @@ export interface ColumnDef {
   key: string;
   label: string;
   sortable?: boolean;
+  /** Provider sort field when it differs from the displayed file property. */
+  sortKey?: string;
   align?: 'left' | 'right';
   width?: string;
   /** Extra classes applied to both the header and body cells of this column. */

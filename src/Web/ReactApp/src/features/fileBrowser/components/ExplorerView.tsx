@@ -1,7 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { mdiArrowDown, mdiArrowUp } from '@mdi/js';
-import { Button, Checkbox } from '@/common/components/ui';
-import { ControlIcon } from '@/common/components/ui/toolbar';
+import { Button, Checkbox, TableHeaderCell } from '@/common/components/ui';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { type ColumnDef, type FileItem, type FolderNode, type SortOrder } from '../types';
 import {
@@ -542,38 +540,19 @@ export const ExplorerView = ({
                 </th>
                 {columns.map((column) => {
                   const sortable = column.sortable;
-                  const isSorted = sortBy === column.key;
-                  const ariaSort = isSorted ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none';
+                  const sortKey = column.sortKey ?? column.key;
+                  const isSorted = sortBy === sortKey;
                   return (
-                    <th
+                    <TableHeaderCell
                       key={column.key}
-                      scope="col"
-                      className={`${FILE_TABLE_HEADER_CELL_CLASS} ${column.align === 'right' ? 'text-right' : ''} ${column.className ?? ''}`}
-                      aria-sort={sortable ? ariaSort : undefined}
+                      sortable={sortable}
+                      sortKey={sortKey}
+                      sortDirection={isSorted ? sortOrder : null}
+                      onSort={onSort}
+                      className={`${sortable ? '[&>button]:px-3 [&>button]:py-2' : FILE_TABLE_HEADER_CELL_CLASS} ${column.align === 'right' ? 'text-right [&>button]:justify-end' : ''} ${column.className ?? ''}`}
                     >
-                      {sortable ? (
-                        <Button
-                          type="button"
-                          variant={compact ? 'unstyled' : 'subtle'}
-                          size="sm"
-                          className={compact
-                            ? 'inline-flex items-center gap-1 cursor-pointer font-semibold uppercase tracking-wider hover:bg-pf-bg-2 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
-                            : 'inline-flex items-center gap-1 px-0 py-0 cursor-pointer hover:bg-pf-bg-2 transition-colors'}
-                          onClick={() => onSort(column.key)}
-                          aria-label={`Sort by ${column.label}`}
-                        >
-                          {column.label}
-                          {isSorted && (
-                            <ControlIcon
-                              path={sortOrder === 'asc' ? mdiArrowUp : mdiArrowDown}
-                              className="h-3 w-3"
-                            />
-                          )}
-                        </Button>
-                      ) : (
-                        <span className="text-pf-text-secondary">{column.label}</span>
-                      )}
-                    </th>
+                      {column.label}
+                    </TableHeaderCell>
                   );
                 })}
                 <th scope="col" className={`${FILE_TABLE_HEADER_CELL_CLASS} text-right`}>

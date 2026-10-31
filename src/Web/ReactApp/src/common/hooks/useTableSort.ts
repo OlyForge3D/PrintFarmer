@@ -81,5 +81,23 @@ export function useTableSort<T extends string>(defaultColumn?: T, defaultDirecti
     return [...data].sort((a, b) => direction * comparator(a, b));
   }, [sortState]);
 
-  return { sortState, handleSort, sortData, setSortState };
+  const sortDataByValues = useCallback(<D,>(
+    data: D[],
+    values: Partial<Record<T, (row: D) => TableSortValue>>,
+  ): D[] => {
+    if (!sortState.column || !sortState.direction) return data;
+    const value = values[sortState.column];
+    if (!value) return data;
+    const direction = sortState.direction;
+    return [...data].sort((a, b) => compareTableValues(value(a), value(b), direction));
+  }, [sortState]);
+
+  const headerProps = (column: T) => ({
+    sortable: true,
+    sortKey: column,
+    sortDirection: sortState.column === column ? sortState.direction : null,
+    onSort: handleSort,
+  });
+
+  return { sortState, handleSort, sortData, sortDataByValues, headerProps, setSortState };
 }

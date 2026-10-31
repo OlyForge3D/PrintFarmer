@@ -5,6 +5,8 @@ import { Button } from '@/common/components/ui';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { Model } from '@/types/models';
 import type { ModelListViewProps } from '@/types/components';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 export const ModelListView: React.FC<ModelListViewProps> = ({
   models,
@@ -14,6 +16,14 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
   formatFileSize
 }) => {
   const navigate = useNavigate();
+  const { headerProps, sortDataByValues } = useTableSort<'name' | 'type' | 'size' | 'tags' | 'uploaded'>();
+  const sortedModels = sortDataByValues(models, {
+    name: model => model.name,
+    type: model => model.fileType?.toUpperCase() || null,
+    size: model => model.fileSize,
+    tags: model => model.tags?.map(tag => tag.name).join(', ') || null,
+    uploaded: model => new Date(model.uploadedAt).getTime(),
+  });
 
   if (isLoading && models.length === 0) {
     return (
@@ -41,16 +51,16 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-pf-border bg-pf-bg-2 sticky top-0">
-            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</th>
-            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Type</th>
-            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Size</th>
-            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Tags</th>
-            <th className="px-4 py-3 text-left font-semibold text-pf-text-primary">Uploaded</th>
+            <TableHeaderCell {...headerProps('name')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Name</TableHeaderCell>
+            <TableHeaderCell {...headerProps('type')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Type</TableHeaderCell>
+            <TableHeaderCell {...headerProps('size')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Size</TableHeaderCell>
+            <TableHeaderCell {...headerProps('tags')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Tags</TableHeaderCell>
+            <TableHeaderCell {...headerProps('uploaded')} className="px-4 py-3 text-left font-semibold text-pf-text-primary">Uploaded</TableHeaderCell>
             <th className="px-4 py-3 text-right font-semibold text-pf-text-primary">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-pf-border">
-          {models.map((model: Model) => (
+          {sortedModels.map((model: Model) => (
             <SelectableRow key={model.id} isSelected={false}>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3 min-w-0">

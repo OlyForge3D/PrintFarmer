@@ -69,4 +69,41 @@ describe("useFileBrowser", () => {
 
     expect(result.current.selectedIds).toEqual(["1"]);
   });
+
+  it("cycles server sorting through ascending, descending, and the configured default without reordering a page", async () => {
+    const serverItems = [
+      { id: "2", path: "/z.gcode", name: "z.gcode" },
+      { id: "1", path: "/a.gcode", name: "a.gcode" },
+    ];
+    const fetcher = vi.fn(async (params: unknown) => ({
+      items: serverItems, totalItems: 4, totalPages: 2, page: (params as FileQueryState).page,
+    }));
+    const config = {
+      ...baseConfig, fetcher, mapQueryParams: (query: FileQueryState) => query,
+      defaultSort: { sortBy: "date", sortOrder: "desc" as const },
+    };
+    const { result } = renderHook(() => useFileBrowser(config), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    act(() => { result.current.setPage(2); result.current.toggleSelect("2"); });
+    await waitFor(() => expect(result.current.page).toBe(2));
+
+    act(() => result.current.cycleSort("name"));
+    await waitFor(() => expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "name", sortOrder: "asc", page: 1 }), expect.any(AbortSignal),
+    ));
+    act(() => result.current.cycleSort("name"));
+    await waitFor(() => expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "name", sortOrder: "desc", page: 1 }), expect.any(AbortSignal),
+    ));
+    act(() => result.current.cycleSort("name"));
+    await waitFor(() => expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "date", sortOrder: "desc", page: 1 }), expect.any(AbortSignal),
+    ));
+    expect(result.current.sortBy).toBe("");
+    expect(result.current.selectedIds).toEqual(["2"]);
+    expect(result.current.files.map(file => file.fileName)).toEqual(["z.gcode", "a.gcode"]);
+    act(() => result.current.cycleSort("name"));
+    expect(result.current.sortBy).toBe("name");
+    expect(result.current.sortOrder).toBe("asc");
+  });
 });

@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { WorkerManagementPage } from '../WorkerManagementPage';
@@ -120,6 +121,43 @@ describe('WorkerManagementPage responsive workers table', () => {
     vi.mocked(workerService.getAllWorkers).mockResolvedValue([mockWorker]);
     vi.mocked(workerService.getWorkersByStatus).mockResolvedValue([mockWorker]);
     vi.mocked(slicerHubService.start).mockResolvedValue(undefined);
+  });
+
+  it.each(['Worker', 'Status'])('cycles %s without changing worker or expansion identity', async label => {
+    const workers = [
+      { ...mockWorker, id: 'z', name: 'Zeta', status: WorkerStatus.Online },
+      { ...mockWorker, id: 'a', name: 'Alpha', status: WorkerStatus.Busy },
+    ];
+    vi.mocked(workerService.getAllWorkers).mockResolvedValue(workers);
+    vi.mocked(workerService.getWorkerJobs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Zeta');
+    const table = screen.getByRole('table');
+    const order = () => within(table).getAllByRole('row').slice(1)
+      .filter(row => row.querySelectorAll('td').length === 6)
+      .map(row => row.querySelector('td div.text-sm.font-medium')?.textContent);
+    const header = within(table).getByRole('columnheader', { name: label });
+    const button = within(header).getByRole('button', { name: label });
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    await user.click(button);
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(order()).toEqual(['Alpha', 'Zeta']);
+    await user.click(within(within(table).getAllByRole('row')[1]).getAllByRole('button')[0]);
+    expect(workerService.getWorkerJobs).toHaveBeenCalledWith('a');
+    expect(await screen.findByText('No active jobs')).toBeInTheDocument();
+    button.focus();
+    await user.keyboard(' ');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    expect(screen.getByText('No active jobs').closest('tr')?.previousElementSibling).toHaveTextContent('Alpha');
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'none');
+    expect(order()).toEqual(['Zeta', 'Alpha']);
+    expect(workers.map(worker => worker.id)).toEqual(['z', 'a']);
+    for (const name of ['Capacity', 'Statistics', 'Performance', 'Actions']) {
+      expect(within(table).getByRole('columnheader', { name })).not.toHaveAttribute('aria-sort');
+    }
   });
 
   it('discloses status refinements and resets the live filter without hiding refresh or connection status', async () => {

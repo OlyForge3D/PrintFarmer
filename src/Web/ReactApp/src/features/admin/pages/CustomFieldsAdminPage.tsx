@@ -4,7 +4,8 @@ import { DeleteIcon, EditIcon, PlusIcon } from '@/common/components/icons/MdiIco
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, HeaderActions, Input, Select, FormField, Textarea, Toggle, Toolbar } from '@/common/components/ui';
+import { Button, HeaderActions, Input, Select, FormField, Textarea, Toggle, Toolbar, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { apiClient } from '@/services/api';
 import { useCustomFieldDefinitions, queryKeys } from '@/common/hooks/useApi';
 import {
@@ -55,6 +56,14 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
   const [activeTab, setActiveTab] = useState<CustomFieldEntityType>('Printer');
 
   const { data: definitions = [], isLoading, error, refetch } = useCustomFieldDefinitions(activeTab);
+  const { sortDataByValues, headerProps } = useTableSort<'name' | 'key' | 'type' | 'required' | 'order'>();
+  const sortedDefinitions = sortDataByValues(definitions, {
+    name: def => def.fieldName,
+    key: def => def.fieldKey,
+    type: def => def.fieldType,
+    required: def => def.isRequired,
+    order: def => def.sortOrder,
+  });
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<CustomFieldDefinition | null>(null);
@@ -214,16 +223,16 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-pf-border bg-pf-bg-1 text-left text-pf-text-secondary">
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Key</th>
-                <th className="px-4 py-2 font-medium">Type</th>
-                <th className="px-4 py-2 font-medium">Required</th>
-                <th className="px-4 py-2 font-medium">Order</th>
+                <TableHeaderCell {...headerProps('name')} className="px-4 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('key')} className="px-4 py-2 font-medium">Key</TableHeaderCell>
+                <TableHeaderCell {...headerProps('type')} className="px-4 py-2 font-medium">Type</TableHeaderCell>
+                <TableHeaderCell {...headerProps('required')} className="px-4 py-2 font-medium">Required</TableHeaderCell>
+                <TableHeaderCell {...headerProps('order')} className="px-4 py-2 font-medium">Order</TableHeaderCell>
                 <th className="px-4 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {definitions.map(def => (
+              {sortedDefinitions.map(def => (
                 <tr key={def.id} className="border-b border-pf-border last:border-0">
                   <td className="px-4 py-2 text-pf-text-primary font-medium">{def.fieldName}</td>
                   <td className="px-4 py-2 font-mono text-xs text-pf-text-secondary">{def.fieldKey}</td>

@@ -36,9 +36,10 @@ const formatBytes = (bytes?: number) => {
 };
 
 const gcodeColumns: ColumnDef[] = [
-  { key: 'fileName', label: 'Name', sortable: true },
+  { key: 'fileName', label: 'Name', sortable: true, sortKey: 'name' },
   {
     key: 'fileSize',
+    sortKey: 'size',
     label: 'Size',
     sortable: true,
     align: 'right',
@@ -46,6 +47,7 @@ const gcodeColumns: ColumnDef[] = [
   },
   {
     key: 'uploadedAt',
+    sortKey: 'date',
     label: 'Modified',
     sortable: true,
     render: (file) => (file.uploadedAt ? new Date(file.uploadedAt).toLocaleString() : '—'),
@@ -67,7 +69,6 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'requiredMaterial',
     label: 'Material',
-    sortable: true,
     render: (file) => {
       const gcodeMeta = file.meta?.gcode;
       return gcodeMeta?.requiredMaterial || gcodeMeta?.extractedMaterial || '—';
@@ -76,7 +77,6 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'extractedNozzleDiameter',
     label: 'Nozzle',
-    sortable: true,
     align: 'right',
     render: (file) => {
       const nozzle = file.meta?.gcode?.extractedNozzleDiameter;
@@ -114,13 +114,11 @@ const gcodeColumns: ColumnDef[] = [
   {
     key: 'extractedPrinterModelName',
     label: 'Printer Model',
-    sortable: true,
     render: (file) => file.meta?.gcode?.extractedPrinterModelName || '—',
   },
   {
     key: 'totalLayers',
     label: 'Layers',
-    sortable: true,
     align: 'right',
     render: (file) => {
       const layers = file.meta?.gcode?.totalLayers;

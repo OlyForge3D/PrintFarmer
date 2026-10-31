@@ -14,6 +14,9 @@ import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, ProgressBar } from '@/common/components/ui';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import type { SortDirection } from '@/common/hooks/useTableSort';
+import { getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -25,6 +28,9 @@ interface PrinterTableViewProps {
   showEnableColumn?: boolean;
   onToggleEnabled?: (printer: Printer) => void;
   onSelectionChange?: (ids: string[]) => void;
+  sortMode?: PrinterSortMode;
+  sortDirection?: SortDirection;
+  onSort?: (column: PrinterSortMode) => void;
 }
 
 export function PrinterTableView({
@@ -36,7 +42,10 @@ export function PrinterTableView({
   onOpenMaintenance,
   showEnableColumn = false,
   onToggleEnabled,
-  onSelectionChange
+  onSelectionChange,
+  sortMode = 'state',
+  sortDirection = 'asc',
+  onSort,
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
   const displayPrinters = usePrinterDisplays(printers);
@@ -223,12 +232,18 @@ export function PrinterTableView({
                   }
                 ></Button>
               </th>
-              <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
+              <TableHeaderCell sortable={Boolean(onSort)} sortKey="name" sortDirection={sortMode === 'name' ? sortDirection : null}
+                onSort={() => onSort?.('name')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Printer
-              </th>
-              <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
+              </TableHeaderCell>
+              <TableHeaderCell sortable={Boolean(onSort)} sortKey="state" sortDirection={sortMode === 'state' ? sortDirection : null}
+                onSort={() => onSort?.('state')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Status
-              </th>
+              </TableHeaderCell>
+              <TableHeaderCell sortable={Boolean(onSort)} sortKey="backend" sortDirection={sortMode === 'backend' ? sortDirection : null}
+                onSort={() => onSort?.('backend')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
+                Backend
+              </TableHeaderCell>
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Progress
               </th>
@@ -347,6 +362,10 @@ export function PrinterTableView({
                         {displayPrinter.fileName ?? displayPrinter.jobName}
                       </div>
                     )}
+                  </td>
+
+                  <td className="px-4 py-4 text-sm text-pf-text-secondary">
+                    {getBackendName(printer.backend)}
                   </td>
 
                   {/* Progress */}

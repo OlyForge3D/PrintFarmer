@@ -1,4 +1,6 @@
 import { useState, useEffect, useEffectEvent, useContext } from 'react';
+import { useTableSort } from '@/common/hooks/useTableSort';
+import { TableHeaderCell } from '@/common/components/ui/Table';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -416,6 +418,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     (user.firstName && user.firstName.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (user.lastName && user.lastName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  const { headerProps, sortDataByValues } = useTableSort<'user' | 'roles' | 'status' | 'lastLogin' | 'created'>();
+  const sortedUsers = sortDataByValues(filteredUsers, {
+    user: user => user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username,
+    roles: user => user.roles.map(name => roles.find(role => role.name === name)?.displayName || name).join(', '),
+    status: user => user.isActive ? 'Active' : 'Inactive',
+    lastLogin: user => user.lastLogin ? Date.parse(user.lastLogin) : null,
+    created: user => Date.parse(user.createdAt),
+  });
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -522,16 +532,16 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
           <table>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Roles</th>
-                <th>Status</th>
-                <th>Last Login</th>
-                <th>Created</th>
+                <TableHeaderCell {...headerProps('user')}>User</TableHeaderCell>
+                <TableHeaderCell {...headerProps('roles')}>Roles</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')}>Status</TableHeaderCell>
+                <TableHeaderCell {...headerProps('lastLogin')}>Last Login</TableHeaderCell>
+                <TableHeaderCell {...headerProps('created')}>Created</TableHeaderCell>
                 <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((user) => (
+              {sortedUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-pf-bg-2">
                   <td className="px-6 py-4">
                     <div>

@@ -9,7 +9,8 @@
 import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge, Button, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { FileUpload } from '@/common/components/ui/FileUpload';
 import { FiltersDisclosure, HeaderActions, SearchField, Toolbar, ToolbarField, ViewToggle } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
@@ -203,6 +204,7 @@ function ComponentFormModal({ isOpen, component, isClone, categories, onClose }:
 // ──────────────────────── Main Component ────────────────────────
 
 export function PartsInventoryTab() {
+  const { sortDataByValues, headerProps } = useTableSort<'name' | 'category' | 'sku' | 'supplier' | 'cost' | 'stock' | 'minimum'>();
   const { data: components = [], isLoading, error } = useMaintenanceComponents();
   const { data: categories = [] } = useComponentCategories();
   const deleteComponent = useDeleteComponent();
@@ -517,18 +519,26 @@ export function PartsInventoryTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-pf-border text-left text-xs text-pf-text-tertiary uppercase">
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Category</th>
-                <th className="px-3 py-2 font-medium">SKU</th>
-                <th className="px-3 py-2 font-medium">Supplier</th>
-                <th className="px-3 py-2 font-medium text-right">Unit Cost</th>
-                <th className="px-3 py-2 font-medium text-center">Stock</th>
-                <th className="px-3 py-2 font-medium text-center">Min</th>
+                <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('category')} className="px-3 py-2 font-medium">Category</TableHeaderCell>
+                <TableHeaderCell {...headerProps('sku')} className="px-3 py-2 font-medium">SKU</TableHeaderCell>
+                <TableHeaderCell {...headerProps('supplier')} className="px-3 py-2 font-medium">Supplier</TableHeaderCell>
+                <TableHeaderCell {...headerProps('cost')} align="right" className="px-3 py-2 font-medium">Unit Cost</TableHeaderCell>
+                <TableHeaderCell {...headerProps('stock')} align="center" className="px-3 py-2 font-medium">Stock</TableHeaderCell>
+                <TableHeaderCell {...headerProps('minimum')} align="center" className="px-3 py-2 font-medium">Min</TableHeaderCell>
                 <th className="px-3 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {filtered.map((comp) => {
+              {sortDataByValues(filtered, {
+                name: comp => comp.name,
+                category: comp => comp.category,
+                sku: comp => comp.sku,
+                supplier: comp => comp.supplier,
+                cost: comp => comp.unitCost,
+                stock: comp => comp.inStock,
+                minimum: comp => comp.minimumStock,
+              }).map((comp) => {
                 const isLow = comp.inStock < comp.minimumStock;
                 return (
                   <tr key={comp.id} className="hover:bg-pf-bg-2 transition-colors">

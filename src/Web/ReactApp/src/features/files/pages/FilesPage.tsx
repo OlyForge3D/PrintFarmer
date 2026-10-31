@@ -588,6 +588,7 @@ export function FilesPage() {
     },
     {
       key: 'fileName',
+      sortKey: 'name',
       label: 'Name',
       sortable: true,
       render: (file) => (
@@ -596,6 +597,7 @@ export function FilesPage() {
     },
     {
       key: 'fileSize',
+      sortKey: 'size',
       label: 'Size',
       sortable: true,
       align: 'right',
@@ -603,6 +605,7 @@ export function FilesPage() {
     },
     {
       key: 'uploadedAt',
+      sortKey: 'date',
       label: 'Uploaded',
       sortable: true,
       render: (file) => <FileDate value={file.uploadedAt} fallback="—" />,

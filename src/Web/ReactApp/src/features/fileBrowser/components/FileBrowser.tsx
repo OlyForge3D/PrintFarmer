@@ -76,6 +76,8 @@ export function FileBrowser<TDomain>({
           sortBy={browser.sortBy}
           sortOrder={browser.sortOrder}
           sortOptions={sortOptions}
+          hideSortControl={browser.viewMode === 'explorer' && sortOptions.every(option =>
+            columns.some(column => column.sortable && (column.sortKey ?? column.key) === option.value))}
           onSortChange={(value) => browser.setSort(value)}
           onToggleSortOrder={() => browser.setSort(browser.sortBy)}
           viewMode={browser.viewMode}
@@ -154,7 +156,7 @@ export function FileBrowser<TDomain>({
             renderActions={renderItemActions}
             sortBy={browser.sortBy}
             sortOrder={browser.sortOrder}
-            onSort={(key) => browser.setSort(key)}
+            onSort={browser.cycleSort}
             page={browser.page}
             totalPages={browser.totalPages}
             onPageChange={browser.setPage}

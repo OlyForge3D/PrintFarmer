@@ -29,6 +29,30 @@ describe('useTableSort', () => {
     { name: 'Gamma', value: 30, date: new Date('2024-01-03') },
   ];
 
+  it('sorts selected raw values with stable ties and missing values last, then restores the same input array', () => {
+    const rows = [
+      { id: 'ten', value: 10 },
+      { id: 'missing', value: null },
+      { id: 'two', value: 2 },
+      { id: 'two-again', value: 2 },
+      { id: 'invalid', value: Number.NaN },
+    ];
+    const selectors = { value: (row: typeof rows[number]) => row.value };
+    const { result } = renderHook(() => useTableSort<'value'>());
+    expect(result.current.sortDataByValues(rows, selectors)).toBe(rows);
+    expect(result.current.headerProps('value').sortDirection).toBeNull();
+    act(() => result.current.headerProps('value').onSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors).map(row => row.id))
+      .toEqual(['two', 'two-again', 'ten', 'missing', 'invalid']);
+    expect(result.current.headerProps('value').sortDirection).toBe('asc');
+    act(() => result.current.handleSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors).map(row => row.id))
+      .toEqual(['ten', 'two', 'two-again', 'missing', 'invalid']);
+    act(() => result.current.handleSort('value'));
+    expect(result.current.sortDataByValues(rows, selectors)).toBe(rows);
+    expect(rows.map(row => row.id)).toEqual(['ten', 'missing', 'two', 'two-again', 'invalid']);
+  });
+
   it('should initialize with no sorting', () => {
     const { result } = renderHook(() => useTableSort<'name' | 'value'>());
 

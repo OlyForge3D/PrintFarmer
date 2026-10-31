@@ -49,12 +49,12 @@ export function SortDirectionButton({ direction, onClick, ...props }: Omit<Butto
     iconCenter={<ControlIcon path={SORT_DIRECTION_ICONS[direction]} />} />;
 }
 
-export function SortControl({ direction, onDirectionChange, children, ...props }: SelectProps & {
-  direction: 'asc' | 'desc'; onDirectionChange: () => void;
+export function SortControl({ direction, onDirectionChange, directionDisabled, children, ...props }: SelectProps & {
+  direction: 'asc' | 'desc'; onDirectionChange: () => void; directionDisabled?: boolean;
 }) {
   return <Toolbar.Group className="pf-toolbar__group--nowrap">
     <SortSelect {...props}>{children}</SortSelect>
-    <SortDirectionButton direction={direction} onClick={onDirectionChange} disabled={props.disabled} />
+    <SortDirectionButton direction={direction} onClick={onDirectionChange} disabled={props.disabled || directionDisabled} />
   </Toolbar.Group>;
 }
 

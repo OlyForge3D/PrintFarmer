@@ -13,6 +13,9 @@ vi.mock('@/features/admin/utils/adminHubParentState', () => ({
 import type { Printer } from '@/types/api';
 import { PrintersPage } from '../PrintersPage';
 import { LG_BREAKPOINT_QUERY } from '@/common/hooks/useMediaQuery';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import type { PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
+import type { SortDirection } from '@/common/hooks/useTableSort';
 
 const mockRefetchPrinters = vi.fn();
 const mockUsePrinters = vi.fn();
@@ -135,10 +138,19 @@ vi.mock('@/features/printers/components/DetailedPrinterCard', () => ({
 }));
 
 vi.mock('@/features/printers/components/PrinterTableView', () => ({
-  PrinterTableView: ({ printers }: { printers: Printer[] }) => (
-    <div data-testid="printer-table">
-      {printers.map(printer => <div key={printer.id}>{printer.name}</div>)}
-    </div>
+  PrinterTableView: ({ printers, sortMode, sortDirection, onSort }: {
+    printers: Printer[]; sortMode: PrinterSortMode; sortDirection: SortDirection;
+    onSort: (column: PrinterSortMode) => void;
+  }) => (
+    <table data-testid="printer-table">
+      <thead><tr>{(['name', 'state', 'backend'] as const).map(column => (
+        <TableHeaderCell key={column} sortable sortKey={column}
+          sortDirection={sortMode === column ? sortDirection : null} onSort={() => onSort(column)}>
+          {column}
+        </TableHeaderCell>
+      ))}</tr></thead>
+      <tbody>{printers.map(printer => <tr key={printer.id}><td>{printer.name}</td></tr>)}</tbody>
+    </table>
   ),
 }));
 
@@ -282,6 +294,42 @@ describe('PrintersPage', () => {
     mockUsePrinterCameraUrls.mockReturnValue({ data: [] });
     mockUseBedTypes.mockClear();
     mockUseBedTypes.mockReturnValue({ data: [{ id: 'textured', name: 'Textured' }] });
+  });
+
+  it('reads legacy sort preferences and persists the header cycle, restoring default state order', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('printerViewMode', 'table');
+    localStorage.setItem('printerSortMode', 'name');
+    const { unmount } = renderPage('/printers');
+    const rows = () => within(screen.getByTestId('printer-table')).getAllByRole('cell').map(cell => cell.textContent);
+    const header = screen.getByRole('columnheader', { name: 'name' });
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(rows()).toEqual(['Printer Alpha', 'Printer Beta']);
+    expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+    const button = within(header).getByRole('button', { name: 'name' });
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(rows()).toEqual(['Printer Beta', 'Printer Alpha']);
+    expect(localStorage.getItem('printerSortMode')).toBe('name');
+    expect(localStorage.getItem('printerSortDirection')).toBe('desc');
+    unmount();
+    const next = renderPage('/printers');
+    expect(screen.getByRole('columnheader', { name: 'name' })).toHaveAttribute('aria-sort', 'descending');
+    const reloadedButton = screen.getByRole('button', { name: 'name' });
+    reloadedButton.focus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('columnheader', { name: 'name' })).toHaveAttribute('aria-sort', 'none');
+    expect(rows()).toEqual(['Printer Beta', 'Printer Alpha']);
+    expect(localStorage.getItem('printerSortDirection')).toBe('none');
+    next.unmount();
+    renderPage('/printers');
+    expect(screen.getByRole('columnheader', { name: 'name' })).toHaveAttribute('aria-sort', 'none');
+    await user.click(screen.getByRole('button', { name: 'name' }));
+    expect(rows()).toEqual(['Printer Alpha', 'Printer Beta']);
+    await user.click(screen.getByRole('button', { name: 'Collapsed view' }));
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveValue('name');
+    expect(screen.getByRole('button', { name: 'Sort direction: ascending' })).toBeEnabled();
   });
 
   it('feeds each card the primary linked camera routes from /printers/camera-urls, keyed by printer id (#3331)', async () => {
@@ -630,7 +678,8 @@ describe('PrintersPage', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveFocus();
     expect(screen.getByRole('group', { name: 'Printer filters' })).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Sort by' })).toHaveValue('name');
+    expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'name' })).toHaveAttribute('aria-sort', 'ascending');
     expect(localStorage.getItem('printerSortMode')).toBe('name');
     expect(localStorage.getItem('printerViewMode')).toBe('table');
     expect(within(screen.getByTestId('printer-table')).getAllByText(/Printer/).map(row => row.textContent))

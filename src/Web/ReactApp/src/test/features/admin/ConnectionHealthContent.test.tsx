@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ConnectionDiagnosticsResponse } from '../../../types/api';
@@ -75,6 +76,41 @@ function renderWithQueryClient(ui: React.ReactElement) {
 describe('ConnectionHealthContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('cycles numeric headers using keyboard and restores the diagnostics order with sortable aria on every column', async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithQueryClient(<ConnectionHealthContent />);
+    await screen.findByText('Voron');
+    const names = () => Array.from(container.querySelectorAll('tbody tr'))
+      .map(row => row.textContent?.includes('Voron') ? 'Voron' : 'Saturn');
+    const headers = screen.getAllByRole('columnheader');
+    expect(headers).toHaveLength(8);
+    headers.forEach(header => expect(header).toHaveAttribute('aria-sort', 'none'));
+    const button = screen.getByRole('button', { name: 'Reconnects' });
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    expect(names()).toEqual(['Voron', 'Saturn']);
+    await user.keyboard('{Enter}');
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    expect(names()).toEqual(['Saturn', 'Voron']);
+    await user.keyboard(' ');
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(names()).toEqual(['Voron', 'Saturn']);
+  });
+
+  it('keeps a missing timestamp last in both directions', async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithQueryClient(<ConnectionHealthContent />);
+    await screen.findByText('Voron');
+    const button = screen.getByRole('button', { name: 'Last Disconnected' });
+    const firstRow = () => container.querySelector('tbody tr');
+    await user.click(button);
+    expect(firstRow()).toHaveTextContent('Saturn');
+    await user.click(button);
+    expect(firstRow()).toHaveTextContent('Saturn');
+    await user.click(button);
+    expect(firstRow()).toHaveTextContent('Voron');
   });
 
   it('renders summary cards with correct counts', async () => {

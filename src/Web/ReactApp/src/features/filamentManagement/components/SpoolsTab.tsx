@@ -157,14 +157,14 @@ export function SpoolsTab() {
 
   const defaultColumns: SpoolTableColumn[] = [
     { id: 'id', label: 'ID', visible: true, sortable: true, render: s => s.id, sortValue: s => s.id },
-    { id: 'color', label: 'Color', visible: true, sortable: true, render: s => <ColorSwatch color={s.colorHex || '#888888'} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
+    { id: 'color', label: 'Color', visible: true, sortable: false, render: s => <ColorSwatch color={s.colorHex || '#888888'} label={classifyColor(s.colorHex)} />, sortValue: s => classifyColor(s.colorHex).toLowerCase() },
     { id: 'vendor', label: 'Vendor', visible: true, sortable: true, render: s => (s.vendor || '—'), sortValue: s => (s.vendor || '').toLowerCase() },
     { id: 'material', label: 'Material', visible: true, sortable: true, render: s => (s.material || '—'), sortValue: s => (s.material || '').toLowerCase() },
     { id: 'name', label: 'Name', visible: true, sortable: true, render: s => (s.filamentName || s.name || '—'), sortValue: s => (s.filamentName || s.name || '').toLowerCase() },
     { id: 'remaining', label: 'Remaining', visible: true, sortable: true, render: s => formatSpoolWeight(s.remainingWeightG), sortValue: s => (s.remainingWeightG ?? -Infinity) },
-    { id: 'usedPercent', label: 'Used %', visible: true, sortable: true, render: s => getUsagePercentage(s).toFixed(1), sortValue: s => getUsagePercentage(s) },
+    { id: 'usedPercent', label: 'Used %', visible: true, sortable: false, render: s => getUsagePercentage(s).toFixed(1), sortValue: s => getUsagePercentage(s) },
     { id: 'location', label: 'Location', visible: true, sortable: true, render: s => (s.location || ''), sortValue: s => (s.location || '').toLowerCase() },
-    { id: 'archived', label: 'Archived', visible: true, sortable: true, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
+    { id: 'archived', label: 'Archived', visible: true, sortable: false, render: s => (s.archived ? 'Yes' : ''), sortValue: s => (s.archived ? 1 : 0) },
   ];
 
   const [tableColumns, setTableColumns] = useState<SpoolTableColumn[]>(() => {
@@ -741,7 +741,8 @@ export function SpoolsTab() {
                     />
                   </ToolbarField>
                   {trigger}
-                  {(viewMode === 'cards' || viewMode === 'compact') && (
+                  {(viewMode !== 'table' || !Object.keys(SORT_FIELD_MAP).every(key =>
+                    tableColumns.some(column => column.id === key && column.visible && column.sortable))) && (
                     <ToolbarField label="Sort" htmlFor="sort-field">
                       <SortControl
                         id="sort-field"
@@ -751,6 +752,7 @@ export function SpoolsTab() {
                         onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
                         onChange={e => setMany({ sortField: e.target.value, page: 0 })}
                       >
+                          <option value="none">Default order</option>
                           <option value="id">ID</option>
                           <option value="vendor">Vendor</option>
                           <option value="material">Material</option>
@@ -943,7 +945,7 @@ export function SpoolsTab() {
               allSelected={allSelected}
               sortField={sortField}
               sortDir={sortDir}
-              onSort={(field, dir) => setMany({ sortField: field, sortDir: dir, page: 0 })}
+              onSort={(field, dir) => setMany({ sortField: field ?? 'none', sortDir: dir ?? 'asc', page: 0 })}
               onToggleSelect={toggleSelect}
               onToggleSelectAll={toggleSelectAll}
               onEdit={(s) => setEditingSpool(s)}

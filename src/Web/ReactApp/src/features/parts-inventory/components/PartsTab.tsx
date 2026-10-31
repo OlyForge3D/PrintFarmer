@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure } from '@/common/components/ui';
+import { Badge, Button, EmptyState, Spinner, Toggle, HeaderActions, SearchField, Toolbar, FiltersDisclosure, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   PlusIcon,
@@ -42,6 +43,7 @@ export function PartsTab() {
   const { data: parts = [], isLoading, error } = useParts({ includeInactive });
   const { data: bins = [] } = useBins({ includeInactive: true });
   const deletePart = useDeletePart();
+  const { headerProps, sortDataByValues } = useTableSort<'sku' | 'name' | 'bin' | 'onHand' | 'reorderPoint' | 'status'>();
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -51,6 +53,14 @@ export function PartsTab() {
       return haystack.includes(needle);
     });
   }, [parts, filter]);
+  const sortedParts = sortDataByValues(filtered, {
+    sku: part => part.sku,
+    name: part => part.name,
+    bin: part => part.defaultBinCode,
+    onHand: part => part.onHand,
+    reorderPoint: part => part.reorderPoint,
+    status: part => [part.needsReorder ? 'Reorder' : '', part.isActive ? '' : 'Inactive'].filter(Boolean).join(' '),
+  });
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -141,17 +151,17 @@ export function PartsTab() {
           <table className="min-w-full text-sm">
             <thead className="bg-pf-bg-1 text-pf-text-secondary">
               <tr>
-                <th scope="col" className="px-3 py-2 text-left font-medium">SKU</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Name</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Default bin</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">On-hand</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Reorder pt</th>
-                <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+                <TableHeaderCell {...headerProps('sku')} className="px-3 py-2 font-medium">SKU</TableHeaderCell>
+                <TableHeaderCell {...headerProps('name')} className="px-3 py-2 font-medium">Name</TableHeaderCell>
+                <TableHeaderCell {...headerProps('bin')} className="px-3 py-2 font-medium">Default bin</TableHeaderCell>
+                <TableHeaderCell {...headerProps('onHand')} align="right" className="px-3 py-2 font-medium">On-hand</TableHeaderCell>
+                <TableHeaderCell {...headerProps('reorderPoint')} align="right" className="px-3 py-2 font-medium">Reorder pt</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')} className="px-3 py-2 font-medium">Status</TableHeaderCell>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {filtered.map((part) => (
+              {sortedParts.map((part) => (
                 <tr key={part.id} className={part.isActive ? '' : 'opacity-60'}>
                   <td className="px-3 py-2 font-mono text-pf-text-primary">{part.sku}</td>
                   <td className="px-3 py-2">
