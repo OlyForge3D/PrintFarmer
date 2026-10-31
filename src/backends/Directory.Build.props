@@ -12,7 +12,7 @@
   <!-- These versions are synchronized across all backend projects -->
   <!-- Logging and dependency injection match the EF Core 10.0.12 dependency floor. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.12" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.13" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
