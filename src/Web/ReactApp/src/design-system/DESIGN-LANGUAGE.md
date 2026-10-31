@@ -178,6 +178,9 @@ attributes.
 Filter refinements belong inside the shared `FiltersDisclosure`. Keep primary
 query criteria, sorting, navigation and actions visible or within their own
 purpose-built expander; do not fold them into the refinements disclosure.
+History counts deselected statuses as refinements so Reset remains available
+even when all status chips are off. File picker tag refinements use the same
+disclosure and bulk Reset; resetting tags preserves search, sort and selection.
 Unwrapped `ToolbarField` and direct toolbar `Select` exceptions are limited to
 these documented owners:
 

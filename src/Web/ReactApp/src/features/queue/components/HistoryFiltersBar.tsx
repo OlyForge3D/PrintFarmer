@@ -24,7 +24,7 @@ interface HistoryFiltersBarProps {
  * - View mode toggle (cards / table)
  * - Refresh button
  *
- * Date range is controlled globally by QueueDateRangeBar above the tab strip.
+ * Date range is controlled by QueueDateRangeBar inside the History panel.
  */
 export default function HistoryFiltersBar({
   selectedStatuses,
@@ -77,7 +77,7 @@ export default function HistoryFiltersBar({
 
       <Toolbar aria-label="History filters">
         <FiltersDisclosure
-          activeCount={selectedStatuses.length === 3 ? 0 : selectedStatuses.length}
+          activeCount={3 - selectedStatuses.length}
           onReset={() => onStatusChange(["completed", "failed", "cancelled"])}
         >
             {/* Status Filter */}

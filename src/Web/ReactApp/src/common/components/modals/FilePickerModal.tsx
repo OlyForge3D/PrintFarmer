@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Checkbox, Spinner, TagChip, FilterButton, SearchField, SortControl, Toolbar } from '@/common/components/ui';
+import { Button, Checkbox, Spinner, TagChip, FiltersDisclosure, SearchField, SortControl, Toolbar } from '@/common/components/ui';
 import { FileIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
@@ -74,7 +74,6 @@ function FilePickerContent({
   const [allFiles, setAllFiles] = useState<GcodeFile[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const filesCacheRef = useRef<Map<string, GcodeFile>>(new Map());
@@ -267,15 +266,6 @@ function FilePickerContent({
             label="Search files"
             placeholder="Search by file name…"
           />
-          <Toolbar.Group>
-            <FilterButton
-              variant={showFilters ? 'primary' : 'secondary'}
-              count={selectedTagIds.length}
-              expanded={showFilters}
-              onClick={() => setShowFilters(previous => !previous)}
-              aria-controls="file-picker-filters"
-            />
-          </Toolbar.Group>
           <Toolbar.Group className="pf-toolbar__group--nowrap">
             <SortControl
               value={SORT_CONFIG[sort].sortBy}
@@ -289,11 +279,13 @@ function FilePickerContent({
               <option value="name">Name</option>
             </SortControl>
           </Toolbar.Group>
-        </Toolbar>
-
-        {/* Expandable filter panel */}
-        {showFilters && (
-          <div id="file-picker-filters" className="p-3 bg-pf-bg-2 border border-pf-border rounded-lg space-y-2">
+          <FiltersDisclosure
+            activeCount={selectedTagIds.length}
+            onReset={() => {
+              setSelectedTagIds([]);
+              resetPagination();
+            }}
+          >
             {/* Tags */}
             {availableTags.length > 0 && (
               <div>
@@ -328,8 +320,8 @@ function FilePickerContent({
                 </div>
               </div>
             )}
-          </div>
-        )}
+          </FiltersDisclosure>
+        </Toolbar>
 
         {/* Select all + count */}
         {multiple && visibleFiles.length > 0 && (
