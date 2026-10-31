@@ -992,6 +992,11 @@ Filament Inventory uses the same `Tabs.Panels` surface and shared `Table`,
 `TableHead`, `TableBody`, and `TableRow` primitives as Catalog. Keep panel
 background, table border/radius, and selected/hover colors owned by those
 primitives rather than duplicating their classes in inventory components.
+Filaments and Spools place `Show` in the filter controls row and pagination
+below the results, without redundant showing/range counters. Spools retains
+bounded server page sizes (10, 25, 50, 100); Filaments keeps its existing All
+mode. Shared `Pagination` gives Previous and Next equal button dimensions
+and retains the Page N of M indicator.
 
 ## Usage Patterns
 

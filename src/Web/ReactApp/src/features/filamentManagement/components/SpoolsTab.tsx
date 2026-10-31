@@ -763,13 +763,22 @@ export function SpoolsTab() {
                     </ToolbarField>
                   )}
 
-                  <span className="text-sm text-pf-text-secondary">
-                    {totalCount > 0
-                      ? !filters.showEmpty && displayedSpools.length < spools.length
-                        ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
-                        : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
-                      : '0 results'}
-                  </span>
+                  <ToolbarField label="Show" htmlFor="spool-page-size">
+                    <Select
+                      id="spool-page-size"
+                      aria-label="Page size"
+                      value={String(filters.pageSize)}
+                      onChange={e => setMany({ pageSize: Number(e.target.value), page: 0 })}
+                      className="pf-control w-20 py-0"
+                      data-role="field"
+                      disabled={loading}
+                    >
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </Select>
+                  </ToolbarField>
                   <Toolbar.Spacer />
                   <ViewToggle
                     value={viewMode}
@@ -854,15 +863,6 @@ export function SpoolsTab() {
               </label>
             </FiltersDisclosure>
           </Toolbar>
-          <Pagination
-            page={clampedPage + 1}
-            totalPages={totalPages}
-            onPageChange={(page) => setMany({ page: page - 1 })}
-            pageSize={filters.pageSize}
-            pageSizeOptions={[10, 25, 50, 100]}
-            onPageSizeChange={(pageSize) => setMany({ pageSize, page: 0 })}
-            disabled={loading}
-          />
 
           {viewMode === 'cards' && (
             <div className="text-xs text-pf-text-secondary flex flex-wrap gap-4 items-center">
@@ -952,6 +952,14 @@ export function SpoolsTab() {
               onClone={(s) => setCloningSpool(s)}
               onDelete={(s) => setDeleteConfirm({ type: 'single', spool: s })}
               onPrintLabel={(s) => setLabelSpool(s)}
+            />
+          )}
+          {totalPages > 1 && (
+            <Pagination
+              page={clampedPage + 1}
+              totalPages={totalPages}
+              onPageChange={page => setMany({ page: page - 1 })}
+              disabled={loading}
             />
           )}
           {displayedSpools.length === 0 && (totalCount > 0 || hasActiveSpoolFilters) && (

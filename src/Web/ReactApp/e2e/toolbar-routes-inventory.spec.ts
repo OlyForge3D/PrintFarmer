@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { captureRoutedToolbarState, mountRoutedToolbarPage, toolbarRouteUser } from './fixtures/toolbar-routed';
 import { inventoryRouteSeeds, inventoryRouteStates } from './fixtures/toolbar-routes-inventory';
 
-for (const width of [390, 1440]) {
+// Equal fractional grid tracks can differ by one layout subpixel, doubled at 200% zoom.
+const pagerWidthRoundingTolerance = 1 / 32;
+
+for (const width of [390, 720, 1440]) {
   test(`Filament Inventory uses Catalog panel and table surfaces at ${width}px`, async ({ page }, testInfo) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width, height: 1000 });
@@ -68,6 +71,24 @@ for (const width of [390, 1440]) {
         await expect(row.getByRole('button', { name: /^Edit / })).toBeVisible();
         await expect(row.getByRole('button', { name: /^Clone / })).toBeVisible();
         await expect(row.getByRole('button', { name: /^Delete / })).toBeVisible();
+        const filters = page.getByRole('group', { name: path.endsWith('/filaments') ? 'Filament filters' : 'Spool filters', exact: true });
+        const size = filters.getByRole('combobox', { name: 'Page size', exact: true });
+        await expect(size).toHaveValue('50');
+        expect(await size.evaluate(element => element.closest('.pf-toolbar__controls') !== null)).toBe(true);
+        const pager = page.getByRole('group', { name: 'Pagination', exact: true });
+        await expect(pager.getByRole('combobox')).toHaveCount(0);
+        await expect(pager).toContainText('Page 1 of 2');
+        const previous = await pager.getByRole('button', { name: 'Previous', exact: true }).boundingBox();
+        const next = await pager.getByRole('button', { name: 'Next', exact: true }).boundingBox();
+        expect(Math.abs(previous!.width - next!.width)).toBeLessThanOrEqual(pagerWidthRoundingTolerance);
+        expect(previous!.height).toBe(next!.height);
+        expect(previous!.y).toBe(next!.y);
+        const pageIndicator = await pager.getByText('Page 1 of 2', { exact: true }).boundingBox();
+        expect(Math.abs(pageIndicator!.y + pageIndicator!.height / 2 - previous!.y - previous!.height / 2)).toBeLessThanOrEqual(pagerWidthRoundingTolerance);
+        expect(await pager.locator('button').first().locator('..').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        expect(previous!.height).toBeGreaterThanOrEqual(36);
+        expect((await pager.boundingBox())!.y).toBeGreaterThanOrEqual((await table.boundingBox())!.y + (await table.boundingBox())!.height);
+        await expect(filters).not.toContainText(/Showing|on page|\d+[–-]\d+ of/);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       measurements.push({ path, width, surfaces });
@@ -84,6 +105,13 @@ for (const width of [390, 1440]) {
 }
 
 async function assertGeometryAndOrder(page: Page) {
+  for (const pager of await page.getByRole('group', { name: 'Pagination', exact: true }).all()) {
+    const previous = await pager.getByRole('button', { name: 'Previous', exact: true }).boundingBox();
+    const next = await pager.getByRole('button', { name: 'Next', exact: true }).boundingBox();
+    expect(Math.abs(previous!.width - next!.width)).toBeLessThanOrEqual(pagerWidthRoundingTolerance);
+    expect(previous!.height).toBe(next!.height);
+    expect(previous!.y).toBe(next!.y);
+  }
   const groups = page.locator('main .pf-toolbar:visible, main .pf-header-actions:visible');
   expect(await groups.count(), 'each audited state must expose its existing controls to geometry checks').toBeGreaterThan(0);
   for (const group of await groups.all()) {
@@ -121,6 +149,34 @@ async function assertGeometryAndOrder(page: Page) {
     }
   }
 }
+
+test('Inventory pagination stays together at 200% zoom', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 780, height: 1000 });
+  await page.addInitScript(() => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    localStorage.setItem('spools-view-mode', 'table');
+  });
+  for (const path of ['/spools/filaments', '/spools/spools']) {
+    const requests = await mountRoutedToolbarPage(page, path, inventoryRouteSeeds());
+    const pager = page.getByRole('group', { name: 'Pagination', exact: true });
+    await expect(pager).toContainText('Page 1 of 2');
+    await page.locator('html').evaluate(element => { element.style.zoom = '2'; });
+    await assertGeometryAndOrder(page);
+    const group = pager.locator('button').first().locator('..');
+    expect(await group.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const next = pager.getByRole('button', { name: 'Next', exact: true });
+    await next.focus();
+    await next.press('Enter');
+    await expect(pager).toContainText('Page 2 of 2');
+    await pager.getByRole('button', { name: 'Previous', exact: true }).click();
+    await expect(pager).toContainText('Page 1 of 2');
+    await page.screenshot({ path: testInfo.outputPath(`${path.replaceAll('/', '-')}-zoom-200.png`), fullPage: true });
+    expect(requests.errors).toEqual([]);
+    expect(requests.writes).toEqual([]);
+    expect(requests.unhandled).toEqual([]);
+  }
+});
 
 for (const state of inventoryRouteStates) {
   test(`${state.name}: populated routed toolbar parity`, async ({ page, isMobile }, testInfo) => {

@@ -5,7 +5,7 @@
  * Heavy child components are mocked so the tests are fast and deterministic.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test via a mutable ref ─────────────────
@@ -142,6 +142,22 @@ describe('FilamentsTab — server-side paging', () => {
     mockGetFilamentsPaged.mockResolvedValue(pageOf([], 0));
     render(<FilamentsTab />);
     await waitFor(() => expect(mockGetFilamentsPaged).toHaveBeenCalled());
+  });
+
+  it('keeps Show in the filters row and pagination after the table without a Showing counter', async () => {
+    localStorage.setItem('filaments-view-mode', 'table');
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 150 });
+    render(<FilamentsTab />);
+    const table = await screen.findByRole('table');
+    const size = screen.getByRole('combobox', { name: 'Page size' });
+    expect(size.closest('.pf-toolbar__controls')).not.toBeNull();
+    const pager = screen.getByRole('group', { name: 'Pagination' });
+    expect(table.compareDocumentPosition(pager) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(pager).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+    fireEvent.change(size, { target: { value: '25' } });
+    await waitFor(() => expect(mockGetFilamentsPaged.mock.lastCall?.[0]).toMatchObject({ limit: 25 }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ page: 1 });
   });
 
   it('cycles the table header to server-default order and resets the page atomically', async () => {

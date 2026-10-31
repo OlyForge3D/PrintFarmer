@@ -650,9 +650,6 @@ export function FilamentsTab() {
                       <option value="0">All</option>
                     </Select>
                 </ToolbarField>
-                <span className="text-sm text-pf-text-secondary">
-                    Showing {pagedFilaments.length} of {totalCount}
-                </span>
                 <Toolbar.Spacer />
                 <ViewToggle
                   value={viewMode}

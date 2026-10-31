@@ -142,10 +142,12 @@ export function Pagination({ page, totalPages, onPageChange, pageSize, pageSizeO
       {(pageSizeOptions ?? [10, 25, 50, 100]).map(size => <option value={size} key={size}>{size} per page</option>)}
     </Select>}
     <Toolbar.Spacer />
-    <Button type="button" variant="secondary" control disabled={disabled || page <= 1} onClick={() => onPageChange(page - 1)}
-      iconLeft={<ControlIcon path={mdiChevronLeft} />}>Previous</Button>
-    <span className="text-sm text-pf-text-secondary">Page {page} of {totalPages}</span>
-    <Button type="button" variant="secondary" control disabled={disabled || page >= totalPages} onClick={() => onPageChange(page + 1)}
-      iconRight={<ControlIcon path={mdiChevronRight} />}>Next</Button>
+    <div className="grid w-full max-w-84 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+      <Button type="button" variant="secondary" control className="min-w-0 gap-1 px-2 justify-center" disabled={disabled || page <= 1} onClick={() => onPageChange(page - 1)}
+        iconLeft={<ControlIcon path={mdiChevronLeft} />}>Previous</Button>
+      <span className="whitespace-nowrap text-center text-sm text-pf-text-secondary">Page {page} of {totalPages}</span>
+      <Button type="button" variant="secondary" control className="min-w-0 gap-1 px-2 justify-center" disabled={disabled || page >= totalPages} onClick={() => onPageChange(page + 1)}
+        iconRight={<ControlIcon path={mdiChevronRight} />}>Next</Button>
+    </div>
   </Toolbar>;
 }

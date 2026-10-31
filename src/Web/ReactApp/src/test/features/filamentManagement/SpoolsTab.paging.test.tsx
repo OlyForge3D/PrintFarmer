@@ -3,7 +3,7 @@
  * guard, page-value sanitization, and showEmpty/color filter semantics.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ── URL filter state — controlled per-test ───────────────────────────────────
@@ -105,9 +105,10 @@ vi.mock('@/common/components/ui', async (importOriginal) => ({
   Button: ({ children, onClick, disabled, 'aria-label': label }: {
     children?: React.ReactNode; onClick?: () => void; disabled?: boolean; 'aria-label'?: string;
   }) => <button onClick={onClick} disabled={disabled} aria-label={label}>{children}</button>,
-  Select: ({ children, value, onChange }: {
+  Select: ({ children, value, onChange, id, 'aria-label': ariaLabel }: {
     children?: React.ReactNode; value?: string | number; onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void;
-  }) => <select value={value} onChange={onChange}>{children}</select>,
+    id?: string; 'aria-label'?: string;
+  }) => <select id={id} value={value} onChange={onChange} aria-label={ariaLabel}>{children}</select>,
   Checkbox: ({ checked, onChange }: { checked?: boolean; onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void }) =>
     <input type="checkbox" checked={checked} onChange={onChange} />,
   FileUpload: () => null,
@@ -139,6 +140,29 @@ describe('SpoolsTab — AbortController cancellation', () => {
       showEmpty: false, pageSize: 50, sortField: 'id', sortDir: 'asc', page: 0,
     });
     mockGetSpools.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('keeps Show in the filters row and bounded pagination after the table without range counts', async () => {
+    localStorage.setItem('spools-view-mode', 'table');
+    filterState.page = 1;
+    mockGetSpools.mockResolvedValue({ items: [makeSpool(1)], totalCount: 150 });
+    render(<SpoolsTab />);
+    const table = await screen.findByRole('table');
+    const filters = screen.getByRole('group', { name: 'Spool filters' });
+    const size = within(filters).getByRole('combobox', { name: 'Page size' });
+    expect(size).toHaveValue('50');
+    expect(within(size).getAllByRole('option').map(option => option.textContent)).toEqual(['10', '25', '50', '100']);
+    const pager = screen.getByRole('group', { name: 'Pagination' });
+    expect(table.compareDocumentPosition(pager) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(pager).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(pager).getByText('Page 2 of 3')).toBeVisible();
+    expect(screen.queryByText(/Showing|on page|51.100 of 150/)).not.toBeInTheDocument();
+    fireEvent.click(within(pager).getByRole('button', { name: 'Next' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ page: 2 });
+    fireEvent.click(within(pager).getByRole('button', { name: 'Previous' }));
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ page: 0 });
+    fireEvent.change(size, { target: { value: '25' } });
+    expect(filterState.setMany).toHaveBeenLastCalledWith({ pageSize: 25, page: 0 });
   });
 
   it('cycles the table header to server-default order without locally reordering the page', async () => {
