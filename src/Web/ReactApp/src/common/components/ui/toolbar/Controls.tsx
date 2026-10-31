@@ -76,10 +76,11 @@ export const FilterButton = forwardRef<HTMLButtonElement, ButtonProps & {
   </Button>;
 });
 
-export function FiltersDisclosure({ activeCount, onReset, children, expanded, onExpandedChange, dataTour }: {
+export function FiltersDisclosure({ activeCount, onReset, children, controls, expanded, onExpandedChange, dataTour }: {
   activeCount: number;
   onReset: () => void;
   children: ReactNode;
+  controls: (trigger: ReactNode) => ReactNode;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
   dataTour?: string;
@@ -102,15 +103,19 @@ export function FiltersDisclosure({ activeCount, onReset, children, expanded, on
     triggerRef.current?.focus();
   };
 
-  return <>
+  const trigger = (
     <Toolbar.Group>
       <FilterButton ref={triggerRef} count={activeCount} expanded={isExpanded} aria-controls={panelId}
         data-tour={dataTour}
         onClick={handleToggle} />
     </Toolbar.Group>
+  );
+
+  return <>
+    {controls(trigger)}
     <div id={panelId} className="pf-toolbar__filters" role="region" aria-label="Filters" hidden={!isExpanded}>
       <div className="pf-toolbar__filters-content">{children}</div>
-      <Button type="button" variant="secondary" control disabled={activeCount === 0} onClick={handleReset}>
+      <Button type="button" variant="secondary" control className="pf-toolbar__filters-reset" disabled={activeCount === 0} onClick={handleReset}>
         Reset filters
       </Button>
     </div>

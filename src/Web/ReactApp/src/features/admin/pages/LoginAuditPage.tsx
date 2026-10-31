@@ -102,22 +102,40 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
         className="bg-pf-bg-1 border border-pf-border rounded-md p-4 mb-4"
         labelled
       >
-          <ToolbarField label="Username" htmlFor="audit-username">
-            <Input
-              id="audit-username"
-              className="pf-control py-0"
-              data-role="field"
-              type="text"
-              value={username as string}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Partial match…"
-              aria-label="Filter by username"
-            />
-          </ToolbarField>
-
         <FiltersDisclosure
-          activeCount={refinementCount}
-          onReset={() => handleFilterWithPageReset({ from: '', to: '', success: '' })}
+        activeCount={refinementCount}
+        onReset={() => handleFilterWithPageReset({ from: '', to: '', success: '' })}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <ToolbarField label="Username" htmlFor="audit-username">
+                <Input
+                  id="audit-username"
+                  className="pf-control py-0"
+                  data-role="field"
+                  type="text"
+                  value={username as string}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Partial match…"
+                  aria-label="Filter by username"
+                />
+              </ToolbarField>
+              {trigger}
+              {hasActiveFilters && (
+                <>
+                  <Toolbar.Spacer />
+                  <Button
+                    variant="ghost"
+                    control
+                    onClick={resetAll}
+                    iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
+                    aria-label="Clear all filters"
+                  >
+                    Clear filters
+                  </Button>
+                </>
+              )}
+            </Toolbar.Controls>
+          )}
         >
           <ToolbarField label="From" htmlFor="audit-from">
             <Input
@@ -158,21 +176,6 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
             </Select>
           </ToolbarField>
         </FiltersDisclosure>
-
-        {hasActiveFilters && (
-          <>
-            <Toolbar.Spacer />
-            <Button
-              variant="ghost"
-              control
-              onClick={resetAll}
-              iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
-              aria-label="Clear all filters"
-            >
-              Clear filters
-            </Button>
-          </>
-        )}
       </Toolbar>
 
       {/* Table area */}

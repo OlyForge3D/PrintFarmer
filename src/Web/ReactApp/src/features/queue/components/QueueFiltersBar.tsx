@@ -95,7 +95,37 @@ export function TableFiltersBar({
 
   return (
     <Toolbar aria-label="Queue controls" className="bg-pf-bg-1 border border-pf-border rounded-lg px-3 py-2">
-      <FiltersDisclosure activeCount={activeFilterCount} onReset={handleClearFilters}>
+      <FiltersDisclosure activeCount={activeFilterCount} onReset={handleClearFilters}
+        controls={trigger => (
+          <Toolbar.Controls>
+            {trigger}
+            <div className="w-full sm:w-40 shrink-0">
+              <Select
+                value={selectedSortBy}
+                onChange={handleSortChange}
+                className="pf-control w-full py-0 text-sm"
+                data-role="field"
+                aria-label="Sort by"
+              >
+                <option value="priority">Sort: Priority</option>
+                <option value="deadline">Sort: Deadline (Soonest)</option>
+                <option value="deadline_desc">Sort: Deadline (Latest)</option>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
+              {viewControls}
+              <RefreshButton
+                onClick={onRefresh}
+                busy={isLoading}
+                variant="subtle"
+                title="Refresh data"
+                aria-label="Refresh data"
+              />
+            </div>
+          </Toolbar.Controls>
+        )}
+      >
         <div className="w-full sm:w-36 shrink-0">
           <Select
             value={selectedStatus || ""}
@@ -142,31 +172,6 @@ export function TableFiltersBar({
           </Select>
         </div>
       </FiltersDisclosure>
-
-      <div className="w-full sm:w-40 shrink-0">
-        <Select
-          value={selectedSortBy}
-          onChange={handleSortChange}
-          className="pf-control w-full py-0 text-sm"
-          data-role="field"
-          aria-label="Sort by"
-        >
-          <option value="priority">Sort: Priority</option>
-          <option value="deadline">Sort: Deadline (Soonest)</option>
-          <option value="deadline_desc">Sort: Deadline (Latest)</option>
-        </Select>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1 w-full sm:w-auto sm:ml-auto justify-end shrink-0">
-        {viewControls}
-        <RefreshButton
-          onClick={onRefresh}
-          busy={isLoading}
-          variant="subtle"
-          title="Refresh data"
-          aria-label="Refresh data"
-        />
-      </div>
     </Toolbar>
   );
 }

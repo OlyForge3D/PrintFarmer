@@ -6,7 +6,7 @@ import { useFileBrowser } from '../useFileBrowser';
 import { Button, ToolbarField } from '@/common/components/ui';
 import { getErrorMessage } from '@/common/utils/apiErrors';
 import { FolderIcon } from '@/common/components/icons/MdiIcons';
-import { type ColumnDef, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
+import { type ColumnDef, type FileBrowserFilterActions, type FileItem, type UseFileBrowserConfig, type ViewMode } from '../types';
 
 interface FileBrowserProps<TDomain> {
   config: UseFileBrowserConfig<TDomain>;
@@ -15,7 +15,7 @@ interface FileBrowserProps<TDomain> {
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
-  filterActions?: ReactNode;
+  filterActions?: FileBrowserFilterActions;
   extraToolbarActions?: ReactNode;
   /** Place selected-file actions after the filter toolbar instead of inside it. */
   extraToolbarActionsPlacement?: 'toolbar' | 'below';
@@ -80,8 +80,8 @@ export function FileBrowser<TDomain>({
           onToggleSortOrder={() => browser.setSort(browser.sortBy)}
           viewMode={browser.viewMode}
           onViewModeChange={browser.setViewMode}
-          filterActions={renderFolderNavigation ? <>
-            {filterActions}
+          filterActions={filterActions}
+          folderActions={renderFolderNavigation ? (
             <ToolbarField label="Folders" htmlFor={`${folderControlsId}-toggle`}>
               <Button id={`${folderControlsId}-toggle`} control
                 variant={browser.currentPath ? 'primary' : 'secondary'}
@@ -92,7 +92,7 @@ export function FileBrowser<TDomain>({
                 title={`Folders: ${browser.currentPath === '/' ? 'Root' : browser.currentPath || 'All folders'}`}
               />
             </ToolbarField>
-          </> : filterActions}
+          ) : undefined}
           extraActions={extraToolbarActionsPlacement === 'toolbar' ? extraToolbarActions : undefined}
         />
         {extraToolbarActionsPlacement === 'below' && extraToolbarActions && (

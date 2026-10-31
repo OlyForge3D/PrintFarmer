@@ -2,15 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { FileBrowserFilterActions } from '@/features/fileBrowser/types';
 import { GcodeLibraryPage } from '@/features/gcode/pages/GcodeLibraryPage';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 
 vi.mock('@/features/gcode/components/GcodeFileBrowser', () => ({
-  GcodeFileBrowser: ({ filterActions }: { filterActions?: ReactNode }) => (
+  GcodeFileBrowser: ({ filterActions }: { filterActions?: FileBrowserFilterActions }) => (
     <div>
       <div>GcodeFileBrowser</div>
-      {filterActions}
+      {filterActions?.(trigger => <div className="pf-toolbar__controls">{trigger}</div>)}
     </div>
   )
 }));

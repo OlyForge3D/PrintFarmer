@@ -7,16 +7,16 @@ import { ViewToggle } from '@/common/components/ui/ViewToggle';
 import { Button, Select, EmptyState, ProgressBar } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
-import { 
- PlusIcon, 
+import {
+ PlusIcon,
  DeleteIcon,
  CheckIcon,
 } from '@/common/components/icons/MdiIcons';
 import { CreateProjectModal } from '@/features/projects/components/CreateProjectModal';
 import { ProjectDetailModal } from '@/features/projects/components/ProjectDetailModal';
 import { ProjectsTableView } from '@/features/projects/components/ProjectsTableView';
-import type { 
- PrintProjectListDto, 
+import type {
+ PrintProjectListDto,
  PrintProjectStatus,
  PrintProjectDetailDto,
 } from '@/types/api';
@@ -113,35 +113,41 @@ export const ProjectsPage: React.FC = () => {
  <div className="space-y-4 h-full flex flex-col">
  {/* Search, filter and view controls stay together; page actions are in the header above. */}
  <Toolbar aria-label="Project filters">
- <SearchField value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onClear={() => setSearchQuery('')} label="Search projects" placeholder="Search projects…" />
- <FiltersDisclosure activeCount={statusFilter ? 1 : 0} onReset={() => setStatusFilter('')}>
- <ToolbarField label="Status" htmlFor="project-status-filter">
- <Select
- id="project-status-filter"
- value={statusFilter}
- onChange={(e) => setStatusFilter(e.target.value as PrintProjectStatus | '')}
- aria-label="Filter by status"
- >
- <option value="">All Status</option>
- <option value="Open">Open</option>
- <option value="InProgress">In Progress</option>
- <option value="Completed">Completed</option>
- <option value="OnHold">On Hold</option>
- <option value="Cancelled">Cancelled</option>
- </Select>
- </ToolbarField>
- </FiltersDisclosure>
- <Toolbar.Spacer />
- <ViewToggle
- value={viewMode}
- onChange={handleViewModeChange}
- size="md"
- options={[
- { mode: 'cards', kind: 'cards', title: 'Card view' },
- { mode: 'table', kind: 'table', title: 'Table view' },
- ]}
- ariaLabel="Project view"
- />
+   <FiltersDisclosure activeCount={statusFilter ? 1 : 0} onReset={() => setStatusFilter('')}
+     controls={trigger => (
+       <Toolbar.Controls>
+         <SearchField value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onClear={() => setSearchQuery('')} label="Search projects" placeholder="Search projects…" />
+         {trigger}
+         <Toolbar.Spacer />
+         <ViewToggle
+         value={viewMode}
+         onChange={handleViewModeChange}
+         size="md"
+         options={[
+         { mode: 'cards', kind: 'cards', title: 'Card view' },
+         { mode: 'table', kind: 'table', title: 'Table view' },
+         ]}
+         ariaLabel="Project view"
+         />
+       </Toolbar.Controls>
+     )}
+   >
+     <ToolbarField label="Status" htmlFor="project-status-filter">
+     <Select
+     id="project-status-filter"
+     value={statusFilter}
+     onChange={(e) => setStatusFilter(e.target.value as PrintProjectStatus | '')}
+     aria-label="Filter by status"
+     >
+     <option value="">All Status</option>
+     <option value="Open">Open</option>
+     <option value="InProgress">In Progress</option>
+     <option value="Completed">Completed</option>
+     <option value="OnHold">On Hold</option>
+     <option value="Cancelled">Cancelled</option>
+     </Select>
+     </ToolbarField>
+   </FiltersDisclosure>
  </Toolbar>
 
  {/* Summary cards */}
@@ -331,7 +337,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  </span>
  )}
  </div>
- 
+
  {project.dueDate && (
  <span>Due: {new Date(project.dueDate).toLocaleDateString()}</span>
  )}

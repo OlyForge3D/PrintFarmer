@@ -132,7 +132,7 @@ dispatch safety switches, danger paint, camera circles, calendar cells,
 clickable cards and row-action placement are excluded.
 
 Use the shared components exported by `common/components/ui/toolbar`:
-`Toolbar` with `Group`, `Spacer` and `Divider`, `ToolbarField`, `SearchField`,
+`Toolbar` with `Controls`, `Group`, `Spacer` and `Divider`, `ToolbarField`, `SearchField`,
 `SortControl`, `FilterChip`, `FilterButton`, `RefreshButton` and `Pagination`.
 `ViewToggle` is the canonical segmented view selector; the printer and Files
 adapters preserve their existing view values and persistence. View options are
@@ -178,6 +178,13 @@ attributes.
 Filter refinements belong inside the shared `FiltersDisclosure`. Keep primary
 query criteria, sorting, navigation and actions visible or within their own
 purpose-built expander; do not fold them into the refinements disclosure.
+Compose the complete main row in `Toolbar.Controls` through the disclosure's
+`controls` render prop, inserting its trigger between Search and Sort. The
+panel follows that entire row in DOM order; expanding it moves results, not
+the main controls, including when the row wraps on mobile. Group refinements
+and Reset together on the shared restrained surface without nested card paint.
+Reset clears only refinements and returns focus to the trigger; hidden fields
+retain their values but are not reachable through keyboard navigation.
 History counts deselected statuses as refinements so Reset remains available
 even when all status chips are off. File picker tag refinements use the same
 disclosure and bulk Reset; resetting tags preserves search, sort and selection.

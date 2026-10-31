@@ -14,7 +14,7 @@
 }
 
 @layer components {
-  .pf-toolbar, .pf-header-actions, .pf-inline-form, .pf-search { display: flex; }
+  .pf-toolbar, .pf-toolbar__controls, .pf-header-actions, .pf-inline-form, .pf-search { display: flex; }
   .pf-toolbar__group, .pf-toolbar-field, .pf-control { display: inline-flex; }
   .pf-toolbar__filters, .pf-toolbar__filters-content { display: flex; }
 
@@ -28,6 +28,15 @@
     container-type: inline-size;
   }
   .pf-toolbar--labelled { align-items: flex-end; }
+  .pf-toolbar__controls {
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pf-toolbar-gap);
+    min-inline-size: 0;
+  }
+  .pf-toolbar--labelled > .pf-toolbar__controls { align-items: flex-end; }
   .pf-toolbar__group { flex-wrap: wrap; align-items: center; gap: .25rem; min-inline-size: 0; max-inline-size: 100%; }
   .pf-toolbar__group--segmented { flex-wrap: nowrap; gap: 0; }
   .pf-toolbar__group--nowrap { flex-wrap: nowrap; }
@@ -36,13 +45,16 @@
   .pf-toolbar__filters {
     flex: 1 1 100%;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-end;
     gap: var(--pf-toolbar-gap);
     min-inline-size: 0;
-    padding-block-start: .5rem;
-    border-block-start: 1px solid var(--pf-border);
+    padding: .75rem;
+    border: 1px solid var(--pf-border);
+    border-radius: 4px;
+    background: var(--pf-bg-1);
   }
-  .pf-toolbar__filters-content { flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: var(--pf-toolbar-gap); min-inline-size: 0; }
+  .pf-toolbar__filters-content { flex: 0 1 auto; flex-wrap: wrap; align-items: flex-end; gap: var(--pf-toolbar-gap); min-inline-size: 0; max-inline-size: 100%; }
+  .pf-toolbar__filters-reset { flex-shrink: 0; }
   .pf-toolbar__search { flex: 1 1 16rem; min-inline-size: min(12rem, 100%); max-inline-size: 28rem; }
   .pf-toolbar__divider { align-self: stretch; inline-size: 1px; margin-block: .375rem; background: var(--pf-border); }
   .pf-toolbar-field { flex-direction: column; gap: var(--pf-toolbar-label-gap); min-inline-size: 0; max-inline-size: 100%; }
@@ -95,6 +107,6 @@
   .pf-toolbar__group--segmented > .relative:last-child > button[data-pf-button] { border-start-end-radius: 2px; border-end-end-radius: 2px; }
 
   @container (max-width: 64rem) {
-    .pf-toolbar > :has(.pf-toolbar__search) { flex: 1 1 100%; }
+    :is(.pf-toolbar, .pf-toolbar__controls) > :has(.pf-toolbar__search) { flex: 1 1 100%; }
   }
 }

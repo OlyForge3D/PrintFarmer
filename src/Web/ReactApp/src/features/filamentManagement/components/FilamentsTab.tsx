@@ -599,17 +599,75 @@ export function FilamentsTab() {
       )}
       {filaments.length > 0 && (
         <Toolbar labelled aria-label="Filament filters">
-          <ToolbarField label="Search" htmlFor="filament-search">
-            <SearchField
-              id="filament-search"
-              value={urlSearch}
-              onChange={e => setSearch(e.target.value)}
-              onClear={() => setSearch('')}
-              label="Search filaments"
-              placeholder="Name, vendor, material…"
-            />
-          </ToolbarField>
-          <FiltersDisclosure activeCount={activeFilterCount} onReset={resetFilters}>
+          <FiltersDisclosure activeCount={activeFilterCount} onReset={resetFilters}
+            controls={trigger => (
+              <Toolbar.Controls>
+                <ToolbarField label="Search" htmlFor="filament-search">
+                  <SearchField
+                    id="filament-search"
+                    value={urlSearch}
+                    onChange={e => setSearch(e.target.value)}
+                    onClear={() => setSearch('')}
+                    label="Search filaments"
+                    placeholder="Name, vendor, material…"
+                  />
+                </ToolbarField>
+                {trigger}
+                {viewMode === 'cards' && (
+                  <ToolbarField label="Sort" htmlFor="filament-sort">
+                    <SortControl
+                      id="filament-sort"
+                      aria-label="Sort by"
+                      value={sortField}
+                      direction={sortDir}
+                      onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
+                      onChange={e => setMany({ sortField: e.target.value })}
+                    >
+                        <option value="name">Name</option>
+                        <option value="vendor">Vendor</option>
+                        <option value="material">Material</option>
+                        <option value="diameter">Diameter</option>
+                        <option value="weight">Weight</option>
+                        <option value="extruderTemp">Extruder Temp</option>
+                        <option value="bedTemp">Bed Temp</option>
+                        <option value="price">Price</option>
+                    </SortControl>
+                  </ToolbarField>
+                )}
+                <ToolbarField label="Show" htmlFor="filament-page-size">
+                    <Select
+                      id="filament-page-size"
+                      aria-label="Page size"
+                      value={String(pageSize)}
+                      onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
+                      className="pf-control w-20 py-0"
+                      data-role="field"
+                    >
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                      <option value="0">All</option>
+                    </Select>
+                </ToolbarField>
+                <span className="text-sm text-pf-text-secondary">
+                    Showing {pagedFilaments.length} of {totalCount}
+                </span>
+                <Toolbar.Spacer />
+                <ViewToggle
+                  value={viewMode}
+                  onChange={setViewMode}
+                  size="md"
+                  ariaLabel="Filament view"
+                  options={[
+                    { mode: 'cards', kind: 'cards', title: 'Card view' },
+                    { mode: 'table', kind: 'table', title: 'Table view' },
+                  ]}
+                />
+                <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />
+              </Toolbar.Controls>
+            )}
+          >
             <ToolbarField label="Material" htmlFor="filament-material">
               <Select
                 id="filament-material"
@@ -651,58 +709,6 @@ export function FilamentsTab() {
               </div>
             </ToolbarField>
           </FiltersDisclosure>
-            {viewMode === 'cards' && (
-              <ToolbarField label="Sort" htmlFor="filament-sort">
-                <SortControl
-                  id="filament-sort"
-                  aria-label="Sort by"
-                  value={sortField}
-                  direction={sortDir}
-                  onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })}
-                  onChange={e => setMany({ sortField: e.target.value })}
-                >
-                    <option value="name">Name</option>
-                    <option value="vendor">Vendor</option>
-                    <option value="material">Material</option>
-                    <option value="diameter">Diameter</option>
-                    <option value="weight">Weight</option>
-                    <option value="extruderTemp">Extruder Temp</option>
-                    <option value="bedTemp">Bed Temp</option>
-                    <option value="price">Price</option>
-                </SortControl>
-              </ToolbarField>
-            )}
-            <ToolbarField label="Show" htmlFor="filament-page-size">
-                <Select
-                  id="filament-page-size"
-                  aria-label="Page size"
-                  value={String(pageSize)}
-                  onChange={e => { const v = Number(e.target.value); setPageSize(v); setMany({ page: 1 }); }}
-                  className="pf-control w-20 py-0"
-                  data-role="field"
-                >
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                  <option value="0">All</option>
-                </Select>
-            </ToolbarField>
-            <span className="text-sm text-pf-text-secondary">
-                Showing {pagedFilaments.length} of {totalCount}
-            </span>
-            <Toolbar.Spacer />
-            <ViewToggle
-              value={viewMode}
-              onChange={setViewMode}
-              size="md"
-              ariaLabel="Filament view"
-              options={[
-                { mode: 'cards', kind: 'cards', title: 'Card view' },
-                { mode: 'table', kind: 'table', title: 'Table view' },
-              ]}
-            />
-            <RefreshButton busy={loading} onClick={reload} aria-label="Refresh filaments" />
         </Toolbar>
       )}
 

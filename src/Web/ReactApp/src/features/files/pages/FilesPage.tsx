@@ -787,8 +787,9 @@ export function FilesPage() {
                     columns={modelColumns}
                     renderItemActions={renderItemActions}
                     renderCard={renderCard}
-                    filterActions={(
+                    filterActions={(controls) => (
                       <FiltersDisclosure
+                        controls={controls}
                         activeCount={selectedFilter === 'all' ? 0 : 1}
                         onReset={() => handleFilterChange('all')}
                       >

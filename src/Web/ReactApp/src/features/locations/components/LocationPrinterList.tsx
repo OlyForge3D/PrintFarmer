@@ -75,10 +75,15 @@ export const LocationPrinterList: React.FC<LocationPrinterListProps> = ({
   return (
     <div className="space-y-4">
       <Toolbar aria-label="Location printer filters">
-        <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search printers" placeholder="Search printers…" />
         <FiltersDisclosure
-          activeCount={statusFilter === 'all' ? 0 : 1}
-          onReset={() => setStatusFilter('all')}
+        activeCount={statusFilter === 'all' ? 0 : 1}
+        onReset={() => setStatusFilter('all')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search printers" placeholder="Search printers…" />
+              {trigger}
+            </Toolbar.Controls>
+          )}
         >
           <ToolbarField label="Status" htmlFor="location-printer-status">
             <Select

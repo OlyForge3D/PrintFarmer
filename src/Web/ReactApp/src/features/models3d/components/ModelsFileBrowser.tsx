@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState, useRef, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, useRef } from 'react';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
+  type FileBrowserFilterActions,
   type FileItem,
   type FileQueryState,
   type UseFileBrowserConfig,
@@ -105,7 +106,7 @@ interface ModelsFileBrowserProps {
   onDeleteModels?: (modelIds: string[]) => Promise<void>;
   onShowTagModal?: () => void;
   onShowSingleTagModal?: (model: Model) => void;
-  filterActions?: ReactNode;
+  filterActions?: FileBrowserFilterActions;
   selectedModelIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
   onOpenModel?: (model: Model) => void;
@@ -375,7 +376,7 @@ export const ModelsFileBrowser = ({
   const renderActions = useCallback(
     (file: FileItem) => {
       if (file.isDirectory) return null;
-      
+
       const model = file.meta?.model3d as Model | undefined;
       if (!model) return null;
 

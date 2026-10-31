@@ -336,20 +336,42 @@ export function PrinterFileCatalog() {
         <Alert variant="info">Automatic discovery is globally disabled. Force refresh, Copy, and Queue remain available as separate actions.</Alert>
       )}
       <Toolbar aria-label="Printer file controls" labelled>
-        <ToolbarField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1">
-          <SearchField
-            id="catalog-search"
-            label="Search"
-            placeholder="Search filenames or paths"
-            value={search}
-            maxLength={200}
-            onChange={event => changeFilter('remoteSearch', event.target.value)}
-            onClear={() => changeFilter('remoteSearch', '')}
-          />
-        </ToolbarField>
         <FiltersDisclosure
-          activeCount={printerId ? 1 : 0}
-          onReset={() => changeFilter('printer', '')}
+        activeCount={printerId ? 1 : 0}
+        onReset={() => changeFilter('printer', '')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <ToolbarField label="Search" htmlFor="catalog-search" className="min-w-0 flex-1">
+                <SearchField
+                  id="catalog-search"
+                  label="Search"
+                  placeholder="Search filenames or paths"
+                  value={search}
+                  maxLength={200}
+                  onChange={event => changeFilter('remoteSearch', event.target.value)}
+                  onClear={() => changeFilter('remoteSearch', '')}
+                />
+              </ToolbarField>
+              {trigger}
+              <Toolbar.Spacer />
+              <Toolbar.Group className="pf-toolbar__group--nowrap">
+                {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
+                <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+                {manageableSources.length > 0 && (
+                  <RefreshButton
+                    type="button"
+                    variant="secondary"
+                    aria-label={REFRESH_ALL_LABEL}
+                    title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
+                    explainedDisabled
+                    disabled={refreshTargets.length === 0 || refreshBusy}
+                    busy={refreshBusy}
+                    onClick={() => refreshAll.mutate(refreshTargets)}
+                  />
+                )}
+              </Toolbar.Group>
+            </Toolbar.Controls>
+          )}
         >
           <ToolbarField label="Printer" htmlFor="catalog-printer" className="w-full sm:w-64">
             <Select id="catalog-printer" data-role="field" className="pf-control py-0" value={printerId} onChange={event => changeFilter('printer', event.target.value)}>
@@ -358,23 +380,6 @@ export function PrinterFileCatalog() {
             </Select>
           </ToolbarField>
         </FiltersDisclosure>
-        <Toolbar.Spacer />
-        <Toolbar.Group className="pf-toolbar__group--nowrap">
-          {catalog.data && viewMode === 'grid' && selectAllCheckbox('Select all files on this page')}
-          <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-          {manageableSources.length > 0 && (
-            <RefreshButton
-              type="button"
-              variant="secondary"
-              aria-label={REFRESH_ALL_LABEL}
-              title={refreshTargets.length > 0 ? REFRESH_ALL_TITLE : REFRESH_ALL_UNAVAILABLE_TITLE}
-              explainedDisabled
-              disabled={refreshTargets.length === 0 || refreshBusy}
-              busy={refreshBusy}
-              onClick={() => refreshAll.mutate(refreshTargets)}
-            />
-          )}
-        </Toolbar.Group>
       </Toolbar>
       {catalog.isLoading && <div role="status"><Spinner /> Loading observations</div>}
       {catalog.error && <Alert variant="error">Failed to load observations: {catalog.error.message}</Alert>}

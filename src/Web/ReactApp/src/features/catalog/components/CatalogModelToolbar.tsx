@@ -50,17 +50,29 @@ export function CatalogModelToolbar({
 
   return (
     <Toolbar aria-label={`${modelLabel} catalog controls`}>
-      <SearchField
-        value={searchValue}
-        onChange={(event) => onSearchChange(event.target.value)}
-        onClear={() => onSearchChange('')}
-        label={`Search ${modelLabel}`}
-        placeholder="Name or manufacturer"
-      />
-      <Toolbar.Spacer />
       <FiltersDisclosure
-        activeCount={activeCount}
-        onReset={() => onManufacturerChange(undefined)}
+      activeCount={activeCount}
+      onReset={() => onManufacturerChange(undefined)}
+        controls={trigger => (
+          <Toolbar.Controls>
+            <SearchField
+              value={searchValue}
+              onChange={(event) => onSearchChange(event.target.value)}
+              onClear={() => onSearchChange('')}
+              label={`Search ${modelLabel}`}
+              placeholder="Name or manufacturer"
+            />
+            <Toolbar.Spacer />
+            {trigger}
+            <ViewToggle
+              value={view}
+              onChange={onViewChange}
+              size="md"
+              options={gridTableOptions}
+              ariaLabel={`${modelLabel} catalog view`}
+            />
+          </Toolbar.Controls>
+        )}
       >
         <FormField label="Manufacturer" className="flex-1 sm:flex-initial sm:min-w-[280px]">
           <ManufacturerSelector
@@ -73,13 +85,6 @@ export function CatalogModelToolbar({
           />
         </FormField>
       </FiltersDisclosure>
-      <ViewToggle
-        value={view}
-        onChange={onViewChange}
-        size="md"
-        options={gridTableOptions}
-        ariaLabel={`${modelLabel} catalog view`}
-      />
     </Toolbar>
   );
 }

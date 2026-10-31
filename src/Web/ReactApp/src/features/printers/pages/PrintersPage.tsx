@@ -82,7 +82,7 @@ export function PrintersPage() {
   useFleetPrinterTags();
   useFleetQueueSummaries();
   const queryClient = useQueryClient();
-  
+
   const {
     data: printers,
     isLoading,
@@ -153,16 +153,16 @@ export function PrintersPage() {
     });
     return map;
   }, [printerBackendCapabilitiesQuery.data]);
-  
+
   // React 19: useTransition for async delete operations
   const [,startTransition] = useTransition();
-  
+
   // React 19: useOptimistic for optimistic printer deletion
   const [optimisticPrinters, addOptimisticDelete] = useOptimistic<Printer[], string>(
     displayPrinters,
     (state, deletedPrinterId) => state.filter(p => p.id !== deletedPrinterId)
   );
-  
+
   const deletePrinterMutation = useDeletePrinter();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const displayPrinterStateById = useMemo(
@@ -369,9 +369,9 @@ export function PrintersPage() {
         for (const printer of deleteConfirmation.printers) {
           addOptimisticDelete(printer.id);
         }
-        
+
         // Execute deletions in background
-        await Promise.all(deleteConfirmation.printers.map(printer => 
+        await Promise.all(deleteConfirmation.printers.map(printer =>
           deletePrinterMutation.mutateAsync(printer.id)
         ));
         setDeleteConfirmation({ isOpen: false, printers: [] });
@@ -436,7 +436,7 @@ export function PrintersPage() {
       if (window.PrintFarmerDebug?.printers) {
         console.log(`Starting maintenance update for ${printers.length} printer(s), inMaintenance=${inMaintenance}`);
       }
-      
+
       await Promise.all(printers.map(async (printer) => {
         if (window.PrintFarmerDebug?.printers) {
           console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
@@ -452,8 +452,8 @@ export function PrintersPage() {
           printer.rowVersion
         );
       }));
-      
-      
+
+
       if (window.PrintFarmerDebug?.printers) {
         console.log('Maintenance status updated successfully');
         console.log('Refetching printer queries...');
@@ -571,16 +571,41 @@ export function PrintersPage() {
           <div data-tour={filtersExpanded ? 'printers-filters' : undefined} className="flex flex-col gap-4 mb-6">
               <Toolbar aria-label="Printer controls" data-tour={filtersExpanded ? undefined : 'printers-filters'}>
                 <FiltersDisclosure
-                  activeCount={activeFilterCount}
-                  onReset={handleClearFilters}
-                  onExpandedChange={setFiltersExpanded}
+                activeCount={activeFilterCount}
+                onReset={handleClearFilters}
+                onExpandedChange={setFiltersExpanded}
+                  controls={trigger => (
+                    <Toolbar.Controls>
+                      {trigger}
+                      {/* Sort Order */}
+                      <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
+                        <label htmlFor="sort-mode" className="sr-only text-sm text-pf-text-secondary sm:not-sr-only">Sort:</label>
+                        <Select
+                          id="sort-mode"
+                          data-role="field"
+                          value={sortMode}
+                          onChange={e => setSortMode(e.target.value as PrinterSortMode)}
+                          aria-label="Sort by"
+                          className="pf-control min-w-0 py-0"
+                          containerClassName="sm:w-40"
+                        >
+                          <option value="state">State</option>
+                          <option value="name">Name</option>
+                          <option value="backend">Backend</option>
+                        </Select>
+                      </div>
+
+                      <Toolbar.Spacer />
+                      <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+                    </Toolbar.Controls>
+                  )}
                 >
                   <div
                     role="group"
                     aria-label="Printer filters"
-                    className="pf-inline-form rounded-lg border border-pf-border bg-pf-bg-1 p-3"
+                    className="min-w-0"
                   >
-                    <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 sm:w-[32rem] sm:max-w-full">
                       <div className="pf-toolbar-field">
                         <label htmlFor="state-filter" className="pf-toolbar-field__label">State</label>
                         <Select
@@ -641,27 +666,6 @@ export function PrintersPage() {
                     </div>
                   </div>
                 </FiltersDisclosure>
-
-                {/* Sort Order */}
-                <div className="flex min-w-[8.5rem] flex-1 items-center gap-2 sm:flex-none">
-                  <label htmlFor="sort-mode" className="sr-only text-sm text-pf-text-secondary sm:not-sr-only">Sort:</label>
-                  <Select
-                    id="sort-mode"
-                    data-role="field"
-                    value={sortMode}
-                    onChange={e => setSortMode(e.target.value as PrinterSortMode)}
-                    aria-label="Sort by"
-                    className="pf-control min-w-0 py-0"
-                    containerClassName="sm:w-40"
-                  >
-                    <option value="state">State</option>
-                    <option value="name">Name</option>
-                    <option value="backend">Backend</option>
-                  </Select>
-                </div>
-
-                <Toolbar.Spacer />
-                <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
               </Toolbar>
           </div>
 
@@ -819,7 +823,7 @@ export function PrintersPage() {
           onConfirm={handleDeleteConfirm}
           onCancel={handleDeleteCancel}
         />
-        
+
         {showEditModal && (
           <Suspense fallback={null}>
             <EditPrinterModal

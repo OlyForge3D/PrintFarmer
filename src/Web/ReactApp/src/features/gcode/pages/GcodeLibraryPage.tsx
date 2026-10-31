@@ -97,8 +97,9 @@ export const GcodeLibraryPage: React.FC = () => {
             viewMode={viewMode as 'grid' | 'explorer'}
             onViewModeChange={setViewMode}
             selectedTags={selectedTags}
-            filterActions={
+            filterActions={(controls) => (
               <FiltersDisclosure
+                controls={controls}
                 activeCount={selectedTags.length + selectedPrinterModels.length}
                 expanded={filtersExpanded}
                 onExpandedChange={setFiltersExpanded}
@@ -136,7 +137,7 @@ export const GcodeLibraryPage: React.FC = () => {
                   </div>
                 </div>
               </FiltersDisclosure>
-            }
+            )}
             selectedFileIds={selectedFileIds}
             onSelectionChange={setSelectedFileIds}
             onShowTagModal={() => setShowBulkTagModal(true)}

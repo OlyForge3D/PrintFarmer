@@ -1,7 +1,7 @@
 import { Fragment, ReactNode } from 'react';
 import { SearchField, SortControl, Toolbar, ToolbarField } from '@/common/components/ui';
 import { FileBrowserViewModeToggle } from '@/common/components/FileBrowserViewModeToggle';
-import { type SortOrder, type ViewMode } from '../types';
+import { type FileBrowserFilterActions, type SortOrder, type ViewMode } from '../types';
 
 interface FileBrowserToolbarProps {
   search: string;
@@ -13,7 +13,8 @@ interface FileBrowserToolbarProps {
   onToggleSortOrder: () => void;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  filterActions?: ReactNode;
+  filterActions?: FileBrowserFilterActions;
+  folderActions?: ReactNode;
   extraActions?: ReactNode;
 }
 
@@ -28,10 +29,11 @@ export const FileBrowserToolbar = ({
   viewMode,
   onViewModeChange,
   filterActions,
+  folderActions,
   extraActions,
 }: FileBrowserToolbarProps) => {
-  return (
-    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar">
+  const controls = (trigger: ReactNode) => (
+    <Toolbar.Controls>
       <ToolbarField label="Search" htmlFor="file-browser-search" className="min-w-0 flex-1">
         <SearchField
           id="file-browser-search"
@@ -43,11 +45,8 @@ export const FileBrowserToolbar = ({
         />
       </ToolbarField>
 
-      {filterActions && (
-        <Toolbar.Group aria-label="File filters">
-          {filterActions}
-        </Toolbar.Group>
-      )}
+      {trigger}
+      {folderActions}
 
       <ToolbarField label="Sort" htmlFor="file-browser-sort">
         <SortControl
@@ -70,6 +69,12 @@ export const FileBrowserToolbar = ({
 
       <FileBrowserViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
       {extraActions && <Toolbar.Group><Fragment>{extraActions}</Fragment></Toolbar.Group>}
+    </Toolbar.Controls>
+  );
+
+  return (
+    <Toolbar aria-label="File controls" labelled data-tour="gcode-toolbar">
+      {filterActions ? filterActions(controls) : controls(null)}
     </Toolbar>
   );
 };

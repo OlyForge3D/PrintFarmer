@@ -259,19 +259,37 @@ function FilePickerContent({
     <>
       <div className="space-y-3">
         <Toolbar aria-label="File picker controls">
-          <SearchField
-            value={search}
-            onChange={event => setSearch(event.target.value)}
-            onClear={() => setSearch('')}
-            label="Search files"
-            placeholder="Search by file name…"
-          />
           <FiltersDisclosure
-            activeCount={selectedTagIds.length}
-            onReset={() => {
-              setSelectedTagIds([]);
-              resetPagination();
-            }}
+          activeCount={selectedTagIds.length}
+          onReset={() => {
+            setSelectedTagIds([]);
+            resetPagination();
+          }}
+            controls={trigger => (
+              <Toolbar.Controls>
+                <SearchField
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  onClear={() => setSearch('')}
+                  label="Search files"
+                  placeholder="Search by file name…"
+                />
+                {trigger}
+                <Toolbar.Group className="pf-toolbar__group--nowrap">
+                  <SortControl
+                    value={SORT_CONFIG[sort].sortBy}
+                    onChange={event => handleSortChange(event.target.value)}
+                    direction={SORT_CONFIG[sort].sortOrder}
+                    onDirectionChange={toggleSortOrder}
+                    containerClassName="w-40"
+                    aria-label="Sort by"
+                  >
+                    <option value="date">Date</option>
+                    <option value="name">Name</option>
+                  </SortControl>
+                </Toolbar.Group>
+              </Toolbar.Controls>
+            )}
           >
             {/* Tags */}
             {availableTags.length > 0 && (
@@ -308,19 +326,6 @@ function FilePickerContent({
               </div>
             )}
           </FiltersDisclosure>
-          <Toolbar.Group className="pf-toolbar__group--nowrap">
-            <SortControl
-              value={SORT_CONFIG[sort].sortBy}
-              onChange={event => handleSortChange(event.target.value)}
-              direction={SORT_CONFIG[sort].sortOrder}
-              onDirectionChange={toggleSortOrder}
-              containerClassName="w-40"
-              aria-label="Sort by"
-            >
-              <option value="date">Date</option>
-              <option value="name">Name</option>
-            </SortControl>
-          </Toolbar.Group>
         </Toolbar>
 
         {/* Select all + count */}

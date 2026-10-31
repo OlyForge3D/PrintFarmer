@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import type { FileBrowserFilterActions } from '@/features/fileBrowser/types';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
 import { ModelsPage } from '@/features/models3d/pages/ModelsPage';
 
 vi.mock('@/features/models3d/components/ModelsFileBrowser', () => ({
-  ModelsFileBrowser: ({ filterActions }: { filterActions?: ReactNode }) => <>{filterActions}</>,
+  ModelsFileBrowser: ({ filterActions }: { filterActions?: FileBrowserFilterActions }) =>
+    <>{filterActions?.(trigger => <div className="pf-toolbar__controls">{trigger}</div>)}</>,
 }));
 
 vi.mock('@/features/models3d/components/collections/CollectionsNav', () => ({

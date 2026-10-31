@@ -130,8 +130,9 @@ export const ModelsPage: React.FC = () => {
               onShowSingleTagModal={(model) => {
                 setSelectedModelForTagging(model);
               }}
-              filterActions={
+              filterActions={(controls) => (
                 <FiltersDisclosure
+                  controls={controls}
                   activeCount={selectedTags.length}
                   expanded={filtersExpanded}
                   onExpandedChange={setFiltersExpanded}
@@ -147,7 +148,7 @@ export const ModelsPage: React.FC = () => {
                     />
                   </div>
                 </FiltersDisclosure>
-              }
+              )}
               collectionModelIds={collectionModelIds}
               onShowCollectionModal={() => setShowAddToCollectionModal(true)}
             />

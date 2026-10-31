@@ -1,5 +1,7 @@
 import { ReactNode } from 'react';
 
+export type FileBrowserFilterActions = (controls: (trigger: ReactNode) => ReactNode) => ReactNode;
+
 export type SortOrder = 'asc' | 'desc';
 export type ViewMode = 'grid' | 'explorer';
 

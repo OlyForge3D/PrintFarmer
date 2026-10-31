@@ -3,7 +3,9 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/common/components/ui', () => ({
+vi.mock('@/common/components/ui', async () => {
+  const { Toolbar, FiltersDisclosure } = await import('@/common/components/ui/toolbar');
+  return {
   Card: Object.assign(
     ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
     {
@@ -29,28 +31,11 @@ vi.mock('@/common/components/ui', () => ({
   Select: ({ value, onChange, children, containerClassName, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { containerClassName?: string }) => (
     <select value={value} onChange={onChange} data-container-class-name={containerClassName} {...rest}>{children}</select>
   ),
-  Toolbar: ({ children, ...rest }: React.HTMLAttributes<HTMLDivElement>) => <div role="group" {...rest}>{children}</div>,
+  Toolbar,
   ToolbarField: ({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) => (
     <div><label htmlFor={htmlFor}>{label}</label>{children}</div>
   ),
-  FiltersDisclosure: ({ activeCount, onReset, children }: {
-    activeCount: number;
-    onReset: () => void;
-    children: React.ReactNode;
-  }) => {
-    const [expanded, setExpanded] = React.useState(false);
-    return (
-      <>
-        <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          Filters{activeCount > 0 ? ` (${activeCount})` : ''}
-        </button>
-        <div role="region" aria-label="Filters" hidden={!expanded}>
-          {children}
-          <button type="button" disabled={activeCount === 0} onClick={onReset}>Reset filters</button>
-        </div>
-      </>
-    );
-  },
+  FiltersDisclosure,
   SearchField: ({ value, onChange, onClear, label, id, placeholder }: {
     value: string;
     onChange: React.ChangeEventHandler<HTMLInputElement>;
@@ -70,7 +55,8 @@ vi.mock('@/common/components/ui', () => ({
   Button: ({ children, onClick, className, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => (
     <button className={className} onClick={onClick} {...rest}>{children}</button>
   ),
-}));
+  };
+});
 
 vi.mock('@/common/components/icons/MdiIcons', () => ({
   SearchIcon: ({ className }: { className?: string }) => <span data-testid="search-icon" className={className} />,

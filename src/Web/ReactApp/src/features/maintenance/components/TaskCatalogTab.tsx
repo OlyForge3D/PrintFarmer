@@ -698,8 +698,15 @@ export function TaskCatalogTab() {
         <Button control variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
       </HeaderActions>
       <Toolbar aria-label="Task catalog controls">
-        <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search task catalog" placeholder="Search tasks…" />
-        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}>
+        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search task catalog" placeholder="Search tasks…" />
+              {trigger}
+              <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
+            </Toolbar.Controls>
+          )}
+        >
           <ToolbarField label="Category" htmlFor="task-category-filter">
             <Select
               id="task-category-filter"
@@ -715,7 +722,6 @@ export function TaskCatalogTab() {
             </Select>
           </ToolbarField>
         </FiltersDisclosure>
-        <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
       </Toolbar>
 
       {/* Summary */}

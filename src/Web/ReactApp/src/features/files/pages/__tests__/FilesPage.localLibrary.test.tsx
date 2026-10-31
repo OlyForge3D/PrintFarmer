@@ -47,7 +47,7 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
         renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => React.ReactNode;
         renderItemActions?: (file: FileItem) => React.ReactNode;
         compact?: boolean;
-        filterActions?: React.ReactNode;
+        filterActions?: import('@/features/fileBrowser/types').FileBrowserFilterActions;
       },
       ref,
     ) {
@@ -59,7 +59,7 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
       }, [config]);
       return (
         <div>
-          {filterActions}
+          {filterActions?.(trigger => <div className="pf-toolbar__controls">{trigger}</div>)}
           <output aria-label="compact">{String(compact)}</output>
           <table aria-label="Mock table">
             <thead><tr>{columns.map((column) => <th key={column.key} className={column.className}>{column.label}</th>)}<th>Actions</th></tr></thead>

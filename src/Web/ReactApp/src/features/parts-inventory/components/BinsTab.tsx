@@ -75,15 +75,22 @@ export function BinsTab() {
         </Button>
       </HeaderActions>
       <Toolbar aria-label="Bin inventory filters">
-        <SearchField
-          id="bins-filter"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          onClear={() => setFilter('')}
-          label="Search bins"
-          placeholder="Filter by code, name, location, or notes"
-        />
-        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}>
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="bins-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search bins"
+                placeholder="Filter by code, name, location, or notes"
+              />
+              {trigger}
+              <Toolbar.Spacer />
+            </Toolbar.Controls>
+          )}
+        >
           {/* Keep the thumb positioned against its track as the label target grows. */}
           <div data-filter-hit-target="inactive-bins" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
             <Toggle
@@ -93,7 +100,6 @@ export function BinsTab() {
             />
           </div>
         </FiltersDisclosure>
-        <Toolbar.Spacer />
       </Toolbar>
 
       {isLoading && (

@@ -727,125 +727,130 @@ export function SpoolsTab() {
         <>
           {/* Filters */}
           <Toolbar labelled aria-label="Spool filters" data-testid="spool-filters">
-              <ToolbarField label="Search" htmlFor="spool-search">
-                <SearchField
-                  id="spool-search"
-                  value={filters.search}
-                  onChange={e => setSearch(e.target.value)}
-                  onClear={() => setSearch('')}
-                  label="Search spools"
-                  placeholder="Name, vendor, material…"
-                />
-              </ToolbarField>
-              <FiltersDisclosure activeCount={activeSpoolFilterCount} onReset={resetSpoolFilters}>
-                <ToolbarField label="Material" htmlFor="spool-material">
-                  <Select
-                    id="spool-material"
-                    aria-label="Filter by material"
-                    value={filters.material}
-                    onChange={(e) => setMany({ material: e.target.value, page: 0 })}
-                    className="w-40"
-                  >
-                    <option value="">All Materials</option>
-                    {materialOptions.map(material => (
-                      <option key={material} value={material}>{material}</option>
-                    ))}
-                  </Select>
-                </ToolbarField>
-
-                <ToolbarField label="Vendor" htmlFor="spool-vendor">
-                  <Select
-                    id="spool-vendor"
-                    aria-label="Filter by vendor"
-                    value={filters.vendor}
-                    onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
-                    className="w-40"
-                  >
-                    <option value="">All Vendors</option>
-                    {vendorOptions.map(vendor => (
-                      <option key={vendor} value={vendor}>{vendor}</option>
-                    ))}
-                  </Select>
-                </ToolbarField>
-
-                <ToolbarField label="Color" htmlFor="spool-color" className={isPaginated ? 'opacity-60' : undefined}>
-                  <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
-                    <ColorFamilySelect
-                      id="spool-color"
-                      value={isPaginated ? '' : filters.color}
-                      onChange={(val) => setMany({ color: val, page: 0 })}
-                      options={getColorFamilyOptions()}
-                      placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
-                      disabled={isPaginated}
+            <FiltersDisclosure activeCount={activeSpoolFilterCount} onReset={resetSpoolFilters}
+              controls={trigger => (
+                <Toolbar.Controls>
+                  <ToolbarField label="Search" htmlFor="spool-search">
+                    <SearchField
+                      id="spool-search"
+                      value={filters.search}
+                      onChange={e => setSearch(e.target.value)}
+                      onClear={() => setSearch('')}
+                      label="Search spools"
+                      placeholder="Name, vendor, material…"
                     />
-                  </div>
-                </ToolbarField>
+                  </ToolbarField>
+                  {trigger}
+                  {(viewMode === 'cards' || viewMode === 'compact') && (
+                    <ToolbarField label="Sort" htmlFor="sort-field">
+                      <SortControl
+                        id="sort-field"
+                        aria-label="Sort by"
+                        value={sortField}
+                        direction={sortDir}
+                        onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
+                        onChange={e => setMany({ sortField: e.target.value, page: 0 })}
+                      >
+                          <option value="id">ID</option>
+                          <option value="vendor">Vendor</option>
+                          <option value="material">Material</option>
+                          <option value="remaining">Remaining (g)</option>
+                          <option value="location">Location</option>
+                          <option value="name">Name</option>
+                      </SortControl>
+                    </ToolbarField>
+                  )}
 
-                <ToolbarField label="Location" htmlFor="spool-location">
-                  <Select
-                    id="spool-location"
-                    aria-label="Filter by location"
-                    value={filters.location}
-                    onChange={(e) => setMany({ location: e.target.value, page: 0 })}
-                    className="w-40"
-                  >
-                    <option value="">All Locations</option>
-                    {locationOptions.map(loc => (
-                      <option key={loc} value={loc}>{loc}</option>
-                    ))}
-                  </Select>
-                </ToolbarField>
-
-                <label data-filter-hit-target="empty-spools" className="flex min-h-[var(--pf-control-h-md)] items-center gap-1 text-xs cursor-pointer">
-                  <Checkbox
-                    aria-label="Show empty spools"
-                    checked={filters.showEmpty}
-                    onChange={e => setMany({ showEmpty: Boolean(e.target.checked), page: 0 })}
+                  <span className="text-sm text-pf-text-secondary">
+                    {totalCount > 0
+                      ? !filters.showEmpty && displayedSpools.length < spools.length
+                        ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
+                        : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
+                      : '0 results'}
+                  </span>
+                  <Toolbar.Spacer />
+                  <ViewToggle
+                    value={viewMode}
+                    onChange={setViewMode}
+                    size="md"
+                    ariaLabel="Spool view"
+                    options={[
+                      { mode: 'cards', kind: 'cards', title: 'Card view' },
+                      { mode: 'compact', kind: 'list', title: 'Compact list view' },
+                      { mode: 'table', kind: 'table', title: 'Table view' },
+                    ]}
                   />
-                  Show empty
-                </label>
-              </FiltersDisclosure>
-
-              {(viewMode === 'cards' || viewMode === 'compact') && (
-                <ToolbarField label="Sort" htmlFor="sort-field">
-                  <SortControl
-                    id="sort-field"
-                    aria-label="Sort by"
-                    value={sortField}
-                    direction={sortDir}
-                    onDirectionChange={() => setMany({ sortDir: sortDir === 'asc' ? 'desc' : 'asc', page: 0 })}
-                    onChange={e => setMany({ sortField: e.target.value, page: 0 })}
-                  >
-                      <option value="id">ID</option>
-                      <option value="vendor">Vendor</option>
-                      <option value="material">Material</option>
-                      <option value="remaining">Remaining (g)</option>
-                      <option value="location">Location</option>
-                      <option value="name">Name</option>
-                  </SortControl>
-                </ToolbarField>
+                  <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />
+                </Toolbar.Controls>
               )}
+            >
+              <ToolbarField label="Material" htmlFor="spool-material">
+                <Select
+                  id="spool-material"
+                  aria-label="Filter by material"
+                  value={filters.material}
+                  onChange={(e) => setMany({ material: e.target.value, page: 0 })}
+                  className="w-40"
+                >
+                  <option value="">All Materials</option>
+                  {materialOptions.map(material => (
+                    <option key={material} value={material}>{material}</option>
+                  ))}
+                </Select>
+              </ToolbarField>
 
-              <span className="text-sm text-pf-text-secondary">
-                {totalCount > 0
-                  ? !filters.showEmpty && displayedSpools.length < spools.length
-                    ? `${displayedSpools.length} of ${spools.length} on page (${totalCount} total)`
-                    : `${clampedPage * filters.pageSize + 1}–${Math.min((clampedPage + 1) * filters.pageSize, totalCount)} of ${totalCount}`
-                  : '0 results'}
-              </span>
-              <Toolbar.Spacer />
-              <ViewToggle
-                value={viewMode}
-                onChange={setViewMode}
-                size="md"
-                ariaLabel="Spool view"
-                options={[
-                  { mode: 'cards', kind: 'cards', title: 'Card view' },
-                  { mode: 'compact', kind: 'list', title: 'Compact list view' },
-                  { mode: 'table', kind: 'table', title: 'Table view' },
-                ]}
-              />
-              <RefreshButton busy={loading} onClick={reload} disabled={!spoolmanBaseUrl} aria-label="Refresh spools" />
+              <ToolbarField label="Vendor" htmlFor="spool-vendor">
+                <Select
+                  id="spool-vendor"
+                  aria-label="Filter by vendor"
+                  value={filters.vendor}
+                  onChange={(e) => setMany({ vendor: e.target.value, page: 0 })}
+                  className="w-40"
+                >
+                  <option value="">All Vendors</option>
+                  {vendorOptions.map(vendor => (
+                    <option key={vendor} value={vendor}>{vendor}</option>
+                  ))}
+                </Select>
+              </ToolbarField>
+
+              <ToolbarField label="Color" htmlFor="spool-color" className={isPaginated ? 'opacity-60' : undefined}>
+                <div title={isPaginated ? 'Color filter unavailable in paginated mode — set page size to All to enable' : undefined}>
+                  <ColorFamilySelect
+                    id="spool-color"
+                    value={isPaginated ? '' : filters.color}
+                    onChange={(val) => setMany({ color: val, page: 0 })}
+                    options={getColorFamilyOptions()}
+                    placeholder={isPaginated ? 'Paged mode' : 'All Colors'}
+                    disabled={isPaginated}
+                  />
+                </div>
+              </ToolbarField>
+
+              <ToolbarField label="Location" htmlFor="spool-location">
+                <Select
+                  id="spool-location"
+                  aria-label="Filter by location"
+                  value={filters.location}
+                  onChange={(e) => setMany({ location: e.target.value, page: 0 })}
+                  className="w-40"
+                >
+                  <option value="">All Locations</option>
+                  {locationOptions.map(loc => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
+                </Select>
+              </ToolbarField>
+
+              <label data-filter-hit-target="empty-spools" className="flex min-h-[var(--pf-control-h-md)] items-center gap-1 text-xs cursor-pointer">
+                <Checkbox
+                  aria-label="Show empty spools"
+                  checked={filters.showEmpty}
+                  onChange={e => setMany({ showEmpty: Boolean(e.target.checked), page: 0 })}
+                />
+                Show empty
+              </label>
+            </FiltersDisclosure>
           </Toolbar>
           <Pagination
             page={clampedPage + 1}

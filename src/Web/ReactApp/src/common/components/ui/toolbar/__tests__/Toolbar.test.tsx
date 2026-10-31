@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Toolbar, ToolbarField, SearchField, SortControl, FilterChip, FilterButton, FiltersDisclosure, RefreshButton, Pagination } from '@/common/components/ui/toolbar';
 import { ViewToggle } from '@/common/components/ui/ViewToggle';
+import { useState } from 'react';
 
 describe('Toolbar controls', () => {
   it('uses a named group without claiming toolbar keyboard navigation', () => {
@@ -61,11 +62,17 @@ describe('Toolbar controls', () => {
     const reset = vi.fn();
     const expandedChange = vi.fn();
     render(<Toolbar aria-label="Inventory controls">
-      <FiltersDisclosure activeCount={2} onReset={reset} onExpandedChange={expandedChange}>
+      <FiltersDisclosure activeCount={2} onReset={reset} onExpandedChange={expandedChange}
+        controls={trigger => (
+          <Toolbar.Controls>
+            {trigger}
+            <SearchField value="" onChange={vi.fn()} onClear={vi.fn()} />
+          </Toolbar.Controls>
+        )}
+      >
         <label htmlFor="material">Material</label>
         <select id="material"><option>PLA</option></select>
       </FiltersDisclosure>
-      <SearchField value="" onChange={vi.fn()} onClear={vi.fn()} />
     </Toolbar>);
 
     const trigger = screen.getByRole('button', { name: 'Filters (2)' });
@@ -89,7 +96,13 @@ describe('Toolbar controls', () => {
 
   it('disables Reset filters when no filters are active', () => {
     render(<Toolbar aria-label="Inventory controls">
-      <FiltersDisclosure activeCount={0} onReset={vi.fn()}>
+      <FiltersDisclosure activeCount={0} onReset={vi.fn()}
+        controls={trigger => (
+          <Toolbar.Controls>
+            {trigger}
+          </Toolbar.Controls>
+        )}
+      >
         <span>Material</span>
       </FiltersDisclosure>
     </Toolbar>);
@@ -97,6 +110,58 @@ describe('Toolbar controls', () => {
     expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
+  });
+
+  it('keeps the complete controls row before the panel without remounting controls', () => {
+    const reset = vi.fn();
+    function ControlledToolbar() {
+      const [expanded, setExpanded] = useState(false);
+      return <Toolbar aria-label="File controls">
+        <FiltersDisclosure activeCount={1} onReset={reset} expanded={expanded}
+          onExpandedChange={setExpanded} dataTour="file-filters"
+          controls={trigger => <Toolbar.Controls>
+            <SearchField value="gear" onChange={vi.fn()} onClear={vi.fn()} label="Search files" />
+            {trigger}
+            <SortControl value="name" onChange={vi.fn()} direction="asc" onDirectionChange={vi.fn()}>
+              <option value="name">Name</option>
+            </SortControl>
+            <RefreshButton />
+          </Toolbar.Controls>}
+        >
+          <label htmlFor="tag">Tag</label>
+          <input id="tag" defaultValue="PLA" />
+        </FiltersDisclosure>
+      </Toolbar>;
+    }
+    const { container } = render(<ControlledToolbar />);
+    const controls = container.querySelector('.pf-toolbar__controls')!;
+    const trigger = screen.getByRole('button', { name: 'Filters (1)' });
+    const search = screen.getByRole('searchbox', { name: 'Search files' });
+    const sort = screen.getByRole('combobox', { name: 'Sort by' });
+    const refresh = screen.getByRole('button', { name: 'Refresh' });
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!)!;
+    expect(controls.nextElementSibling).toBe(panel);
+    expect([...controls.querySelectorAll('input, button, select')]).toEqual([
+      search, screen.getByRole('button', { name: 'Clear search' }), trigger, sort,
+      screen.getByRole('button', { name: 'Sort direction: ascending' }), refresh,
+    ]);
+    expect(trigger).toHaveAttribute('data-tour', 'file-filters');
+    expect(screen.queryByRole('textbox', { name: 'Tag' })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('searchbox', { name: 'Search files' })).toBe(search);
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toBe(sort);
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBe(refresh);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Tag' }), { target: { value: 'PETG' } });
+    fireEvent.click(trigger);
+    expect(panel).toHaveAttribute('hidden');
+    expect(screen.queryByRole('textbox', { name: 'Tag' })).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('textbox', { name: 'Tag' })).toHaveValue('PETG');
+    fireEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(reset).toHaveBeenCalledOnce();
+    expect(trigger).toHaveFocus();
+    expect(panel).not.toHaveAttribute('hidden');
   });
 
   it('retains the refresh name while busy and prevents activation', () => {

@@ -18,12 +18,17 @@ function Divider() {
   return <div className="pf-toolbar__divider" aria-hidden="true" />;
 }
 
+function Controls({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={clsx('pf-toolbar__controls', className)} {...props} />;
+}
+
 export function Toolbar({ labelled, className, ...props }: ToolbarProps) {
   return <div role="group" className={clsx('pf-toolbar', labelled && 'pf-toolbar--labelled', className)} {...props} />;
 }
 Toolbar.Group = Group;
 Toolbar.Spacer = Spacer;
 Toolbar.Divider = Divider;
+Toolbar.Controls = Controls;
 
 export function HeaderActions({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return <div className={clsx('pf-header-actions', className)} {...props} />;

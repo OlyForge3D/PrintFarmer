@@ -77,15 +77,22 @@ export function PartsTab() {
         </Button>
       </HeaderActions>
       <Toolbar aria-label="SKU inventory filters">
-        <SearchField
-          id="parts-filter"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          onClear={() => setFilter('')}
-          label="Search SKUs"
-          placeholder="Filter by SKU, name, or description"
-        />
-        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}>
+        <FiltersDisclosure activeCount={includeInactive ? 1 : 0} onReset={() => setIncludeInactive(false)}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="parts-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search SKUs"
+                placeholder="Filter by SKU, name, or description"
+              />
+              {trigger}
+              <Toolbar.Spacer />
+            </Toolbar.Controls>
+          )}
+        >
           {/* Enlarge both clickable labels, not the switch track or thumb. */}
           <div data-filter-hit-target="inactive-skus" className="[&_label]:min-h-[var(--pf-control-h-md)] [&_label]:inline-flex [&_label]:items-center [&_label>div]:relative">
             <Toggle
@@ -95,7 +102,6 @@ export function PartsTab() {
             />
           </div>
         </FiltersDisclosure>
-        <Toolbar.Spacer />
       </Toolbar>
 
       {isLoading && (

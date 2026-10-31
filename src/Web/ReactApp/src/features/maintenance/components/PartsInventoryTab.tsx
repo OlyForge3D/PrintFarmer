@@ -371,8 +371,24 @@ export function PartsInventoryTab() {
         <Button control variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
       </HeaderActions>
       <Toolbar aria-label="Maintenance inventory filters">
-        <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search parts inventory" placeholder="Search parts…" />
-        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}>
+        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search parts inventory" placeholder="Search parts…" />
+              {trigger}
+              <ViewToggle
+                value={viewMode}
+                onChange={setViewMode}
+                size="md"
+                ariaLabel="Maintenance inventory view"
+                options={[
+                  { mode: 'cards', kind: 'cards', title: 'Card view' },
+                  { mode: 'table', kind: 'table', title: 'Table view' },
+                ]}
+              />
+            </Toolbar.Controls>
+          )}
+        >
           <ToolbarField label="Category" htmlFor="maintenance-inventory-category">
             <Select
               id="maintenance-inventory-category"
@@ -386,16 +402,6 @@ export function PartsInventoryTab() {
             </Select>
           </ToolbarField>
         </FiltersDisclosure>
-        <ViewToggle
-          value={viewMode}
-          onChange={setViewMode}
-          size="md"
-          ariaLabel="Maintenance inventory view"
-          options={[
-            { mode: 'cards', kind: 'cards', title: 'Card view' },
-            { mode: 'table', kind: 'table', title: 'Table view' },
-          ]}
-        />
       </Toolbar>
       <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
 

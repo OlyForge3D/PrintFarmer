@@ -320,7 +320,27 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
         <>
         {/* Worker-specific controls */}
         <Toolbar aria-label="Worker filters and status">
-          <FiltersDisclosure activeCount={filter === 'all' ? 0 : 1} onReset={() => setFilter('all')}>
+          <FiltersDisclosure activeCount={filter === 'all' ? 0 : 1} onReset={() => setFilter('all')}
+            controls={trigger => (
+              <Toolbar.Controls>
+                {trigger}
+                <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
+                    <span className="text-sm text-pf-text-secondary">
+                      {isConnected ? 'Real-time updates active' : 'Polling mode'}
+                    </span>
+                </div>
+
+                <Toolbar.Spacer />
+                <RefreshButton
+                    variant="ghost"
+                    onClick={loadWorkers}
+                    aria-label="Refresh workers"
+                    title="Refresh workers"
+                />
+              </Toolbar.Controls>
+            )}
+          >
             <Select
               value={filter}
               onChange={(e) => setFilter(e.target.value as 'all' | WorkerStatus)}
@@ -335,21 +355,6 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
               ))}
             </Select>
           </FiltersDisclosure>
-
-          <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-pf-success' : 'bg-pf-text-muted'}`}></div>
-              <span className="text-sm text-pf-text-secondary">
-                {isConnected ? 'Real-time updates active' : 'Polling mode'}
-              </span>
-          </div>
-
-          <Toolbar.Spacer />
-          <RefreshButton
-              variant="ghost"
-              onClick={loadWorkers}
-              aria-label="Refresh workers"
-              title="Refresh workers"
-          />
         </Toolbar>
 
         {/* Workers table */}

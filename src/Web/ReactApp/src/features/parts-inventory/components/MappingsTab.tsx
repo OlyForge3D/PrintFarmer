@@ -112,15 +112,21 @@ export function MappingsTab() {
         </Button>
       </HeaderActions>
       <Toolbar aria-label="Mapping filters">
-        <SearchField
-          id="mappings-filter"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          onClear={() => setFilter('')}
-          label="Search mappings"
-          placeholder="Filter by SKU or file ID"
-        />
-        <FiltersDisclosure activeCount={skuFilter ? 1 : 0} onReset={() => setSkuFilter('')}>
+        <FiltersDisclosure activeCount={skuFilter ? 1 : 0} onReset={() => setSkuFilter('')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField
+                id="mappings-filter"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                onClear={() => setFilter('')}
+                label="Search mappings"
+                placeholder="Filter by SKU or file ID"
+              />
+              {trigger}
+            </Toolbar.Controls>
+          )}
+        >
           <ToolbarField label="SKU" htmlFor="mappings-sku-filter">
             <Select
               id="mappings-sku-filter"

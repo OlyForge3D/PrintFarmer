@@ -105,11 +105,12 @@ function toolbarControlUses(source: string): ToolbarFieldUse[] {
   const uses: ToolbarFieldUse[] = [];
 
   function visit(node: ts.Node, insideDisclosure: boolean, insideToolbar: boolean, insideField: boolean): void {
-    const inDisclosure = insideDisclosure || (
+    const inDisclosure = ts.isJsxAttribute(node) && node.name.getText(file) === 'controls'
+      ? false : insideDisclosure || (
       ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === 'FiltersDisclosure'
     );
     const tag = ts.isJsxElement(node) ? node.openingElement.tagName.getText(file) : undefined;
-    const inToolbar = insideToolbar || tag === 'Toolbar' || tag === 'Toolbar.Group';
+    const inToolbar = insideToolbar || tag === 'Toolbar' || tag === 'Toolbar.Group' || tag === 'Toolbar.Controls';
     const inField = insideField || tag === 'ToolbarField';
 
     if (
@@ -149,7 +150,8 @@ function filesTypeFieldIsRenderedInsideDisclosure(source: string): boolean {
   }
 
   function visit(node: ts.Node, insideDisclosure: boolean): void {
-    const inDisclosure = insideDisclosure || (
+    const inDisclosure = ts.isJsxAttribute(node) && node.name.getText(file) === 'controls'
+      ? false : insideDisclosure || (
       ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === 'FiltersDisclosure'
     );
 
@@ -224,6 +226,29 @@ describe('Toolbar filter disclosure policy', () => {
       { label: 'Material', insideDisclosure: true },
       { label: 'Search', insideDisclosure: false },
     ]);
+  });
+
+  it('classifies render-prop controls by rendered ownership rather than lexical disclosure ancestry', () => {
+    const source = `
+      <FiltersDisclosure controls={trigger => (
+        <Toolbar.Controls>
+          <ToolbarField label="Search" />
+          {trigger}
+          <Select aria-label="Sort by" />
+        </Toolbar.Controls>
+      )}>
+        <ToolbarField label="Material" />
+      </FiltersDisclosure>
+    `;
+    expect(toolbarControlUses(source)).toEqual([
+      { label: 'Search', insideDisclosure: false },
+      { label: 'Sort by', insideDisclosure: false },
+      { label: 'Material', insideDisclosure: true },
+    ]);
+    expect(filesTypeFieldIsRenderedInsideDisclosure(`
+      const fileTypeFilter = <ToolbarField label="Type" />;
+      <FiltersDisclosure controls={() => <>{fileTypeFilter}</>} />
+    `)).toBe(false);
   });
 
   it('catches a direct toolbar Select outside the disclosure without double-counting labelled fields', () => {
