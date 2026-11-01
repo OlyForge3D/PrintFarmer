@@ -2668,6 +2668,31 @@ describe('NewSliceJobPage', () => {
         vi.useRealTimers();
       }
     });
+    it('hides the stale in-flight progress message once the job completes', async () => {
+      await submitAndFail();
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Processing',
+          error: null,
+          progressPercent: 85,
+          progressMessage: 'Slicing in progress (85%).',
+        });
+      });
+      expect(screen.getAllByText('Slicing in progress (85%).').length).toBeGreaterThan(0);
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Completed',
+          progressPercent: 100,
+          artifactsRoute: '/api/artifacts/job/job-1',
+        });
+      });
+
+      expect(screen.queryAllByText('Slicing in progress (85%).')).toHaveLength(0);
+    });
   });
 
   describe('Retry on a failed slice resubmits (issue #2374)', () => {

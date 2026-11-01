@@ -3545,7 +3545,7 @@ function SliceJobProgressPanel({
             {isCompleted ? '100' : percent}%
           </span>
         </div>
-        {progress.progressMessage && (
+        {progress.progressMessage && !isTerminal && (
           <p className="text-xs text-pf-text-tertiary">{progress.progressMessage}</p>
         )}
       </div>
