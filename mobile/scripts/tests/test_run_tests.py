@@ -261,6 +261,7 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/HarvestUITests",
             "PrintFarmerUITests/PartsInventoryUITests",
             "PrintFarmerUITests/PrinterListUITests",
+            "PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter",
             "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset",
             "PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType",
             "PrintFarmerUITests/FilamentCoverageUITests",
