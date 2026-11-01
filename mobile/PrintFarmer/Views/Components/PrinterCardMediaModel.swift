@@ -24,6 +24,10 @@ final class PrinterCardMediaModel {
         revision = UUID()
     }
 
+    func printTimeLeftSeconds(for request: PrinterCardRequestID) -> Double? {
+        self.request == request ? printTimeLeftSeconds : nil
+    }
+
     func load(request: PrinterCardRequestID, service: (any PrinterServiceProtocol)?) async {
         cancel()
         let revision = self.revision

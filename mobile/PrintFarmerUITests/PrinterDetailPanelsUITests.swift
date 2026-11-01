@@ -1280,9 +1280,17 @@ final class FarmScrollControlUITests: PrintFarmerUITestCase {
             return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
         }
 
-        for _ in 0..<16 where tapPoint() == nil {
+        var swipeCount = 0
+        for _ in 0..<16 {
             farmScroll.swipeUp()
+            swipeCount += 1
+            if tapPoint() != nil { break }
         }
+        XCTAssertGreaterThan(swipeCount, 0, "The unsearched control must exercise a real Farm swipe")
+        let scrollEvidence = XCTAttachment(string: "swipeCount=\(swipeCount)")
+        scrollEvidence.name = "Issue 3620 executed Farm swipes"
+        scrollEvidence.lifetime = .keepAlways
+        add(scrollEvidence)
         attachScreen("farm-unsearched-after-scroll")
         XCTAssertFalse(app.searchFields.firstMatch.exists, "Scrolling must not activate Farm search")
         guard let point = tapPoint() else {

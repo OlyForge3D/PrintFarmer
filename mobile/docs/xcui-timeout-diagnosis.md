@@ -22,8 +22,11 @@ responses. The `.task` remains responsible for cancelling its async children.
 Media loading, card appearance, search/return behavior and watchdog enforcement
 are unchanged.
 
+Both thumbnail and ETA presentation are qualified by the current request, so
+retained media cannot accompany a changed job or service before its new load.
 Focused lifecycle tests prove cancellation does not invalidate observed media,
-late responses cannot publish, and a replacement load clears retained media.
+including a non-nil ETA, late responses cannot publish, and a replacement load
+clears retained media while its thumbnail and ETA responses are still blocked.
 The existing same-card scroll control remains the runtime regression. Xcode
 27.2 results do not certify pinned Xcode 26.6 CI or golden snapshots; the local
 pinned toolchain cannot connect XCTest on macOS 27.2 (see #3627).
@@ -35,6 +38,10 @@ Its 16 responsive swipes followed by tap-point rejection were not watchdog
 evidence. Qualifying the scroll query by its target-card descendant selects the
 printer viewport; the existing viewport containment and Scan/keyboard clearance
 guards remain unchanged. Failure attachments retain scalar geometry for diagnosis.
+The control always synthesizes at least one swipe on either device family and
+records its count, stopping immediately when the same card is reachable, within
+the original 16-swipe bound. A visible initial card can no longer bypass the
+scroll gesture.
 
 ### Filament detail query stall (iPhone shard 3)
 

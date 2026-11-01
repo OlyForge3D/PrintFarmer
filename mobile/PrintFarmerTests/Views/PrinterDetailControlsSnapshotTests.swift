@@ -237,6 +237,38 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertEqual(model.request, new)
     }
 
+    private func seedRenderedETA(
+        model: PrinterCardMediaModel, request: PrinterCardRequestID, service: MockPrinterService
+    ) async {
+        let statusBarrier = AsyncBarrier()
+        defer { statusBarrier.close() }
+        service.statusHandler = { id in
+            await statusBarrier.arriveAndWait()
+            return PrinterStatusDetail(
+                id: id, isOnline: true, state: request.state, progress: 0.5,
+                jobName: request.jobName, thumbnailUrl: nil,
+                cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+                x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+                hotendTarget: nil, bedTarget: nil, spoolInfo: nil, mmuStatus: nil,
+                printTimeLeftSeconds: 120
+            )
+        }
+        let load = Task { await model.load(request: request, service: service) }
+        defer { load.cancel() }
+        await statusBarrier.waitUntilArrived()
+        let published = expectation(description: "Non-nil ETA published")
+        withObservationTracking {
+            _ = model.printTimeLeftSeconds
+        } onChange: {
+            published.fulfill()
+        }
+        statusBarrier.release()
+        await fulfillment(of: [published], timeout: 2)
+        load.cancel()
+        await load.value
+        XCTAssertEqual(model.printTimeLeftSeconds, 120)
+    }
+
     func testDisappearanceCancellationDoesNotInvalidateRenderedCardMedia() async throws {
         let service = MockPrinterService()
         let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
@@ -251,7 +283,7 @@ final class PrinterCardSnapshotTests: XCTestCase {
             serviceID: ObjectIdentifier(service)
         )
         let model = PrinterCardMediaModel()
-        await model.load(request: request, service: service)
+        await seedRenderedETA(model: model, request: request, service: service)
         let renderedImage = try XCTUnwrap(model.image)
         withObservationTracking {
             _ = model.request
@@ -265,7 +297,8 @@ final class PrinterCardSnapshotTests: XCTestCase {
 
         XCTAssertEqual(model.request, request)
         XCTAssertTrue(model.image === renderedImage)
-        XCTAssertNil(model.printTimeLeftSeconds)
+        XCTAssertEqual(model.printTimeLeftSeconds, 120)
+        XCTAssertEqual(model.printTimeLeftSeconds(for: request), 120)
     }
 
     func testDisappearanceCancellationRejectsLateThumbnailAndETA() async throws {
@@ -330,15 +363,81 @@ final class PrinterCardSnapshotTests: XCTestCase {
             jobName: "benchy", state: "printing", isFailureSuspected: false,
             serviceID: ObjectIdentifier(service)
         )
-        await model.load(request: request, service: service)
+        await seedRenderedETA(model: model, request: request, service: service)
         XCTAssertNotNil(model.image)
+        XCTAssertEqual(model.printTimeLeftSeconds, 120)
         model.cancel()
 
-        await model.load(request: request, service: nil)
+        let thumbnailBarrier = AsyncBarrier()
+        let statusBarrier = AsyncBarrier()
+        defer {
+            thumbnailBarrier.close()
+            statusBarrier.close()
+        }
+        service.thumbnailHandler = { _, _ in
+            await thumbnailBarrier.arriveAndWait()
+            return data
+        }
+        service.statusHandler = { id in
+            await statusBarrier.arriveAndWait()
+            return PrinterStatusDetail(
+                id: id, isOnline: true, state: "printing", progress: 0.5,
+                jobName: "replacement", thumbnailUrl: nil,
+                cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+                x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+                hotendTarget: nil, bedTarget: nil, spoolInfo: nil, mmuStatus: nil,
+                printTimeLeftSeconds: 240
+            )
+        }
+        let replacement = PrinterCardRequestID(
+            printerID: request.printerID, path: "/replacement",
+            jobName: "replacement", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        let load = Task { await model.load(request: replacement, service: service) }
+        defer { load.cancel() }
+        await thumbnailBarrier.waitUntilArrived()
+        await statusBarrier.waitUntilArrived()
 
-        XCTAssertEqual(model.request, request)
+        XCTAssertEqual(model.request, replacement)
+        XCTAssertNil(model.image, "Old thumbnail must clear before replacement responds")
+        XCTAssertNil(model.printTimeLeftSeconds, "Old ETA must clear before replacement responds")
+
+        model.cancel()
+        thumbnailBarrier.release()
+        statusBarrier.release()
+        await load.value
+
+        XCTAssertEqual(model.request, replacement)
         XCTAssertNil(model.image)
         XCTAssertNil(model.printTimeLeftSeconds)
+    }
+
+    func testRetainedETAIsOnlyPresentedForCurrentRequest() async {
+        let service = MockPrinterService()
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: nil,
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        let model = PrinterCardMediaModel()
+        await seedRenderedETA(model: model, request: request, service: service)
+        model.cancel()
+        XCTAssertEqual(model.printTimeLeftSeconds(for: request), 120)
+
+        let changedJob = PrinterCardRequestID(
+            printerID: request.printerID, path: nil,
+            jobName: "replacement", state: request.state, isFailureSuspected: false,
+            serviceID: request.serviceID
+        )
+        let changedService = PrinterCardRequestID(
+            printerID: request.printerID, path: nil,
+            jobName: request.jobName, state: request.state, isFailureSuspected: false,
+            serviceID: nil
+        )
+        XCTAssertNil(model.printTimeLeftSeconds(for: changedJob))
+        XCTAssertNil(model.printTimeLeftSeconds(for: changedService))
+        XCTAssertEqual(model.printTimeLeftSeconds, 120, "Qualifying ETA must not mutate retained media")
     }
 
     func testAuthenticatedThumbnailIsDecodedAndDownsampledForCurrentRevision() async throws {
