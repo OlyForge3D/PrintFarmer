@@ -2293,7 +2293,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         GcodeMetadata metadata = new GcodeMetadata();
         Regex printTimeRegex = MyRegex();
         Regex printTimeSecondsRegex = new Regex(@";\s*estimated printing time.*?(\d+)s", RegexOptions.IgnoreCase);
-        Regex filamentRegex = new Regex(@";\s*filament used.*?(\d+\.?\d*)(?:mm|g)", RegexOptions.IgnoreCase);
+        Regex filamentRegex = FilamentUsedRegex();
+        double? totalFilamentGrams = null;
+        double? perExtruderFilamentGrams = null;
         Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
         Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
         int maxLayer = 0;
@@ -2338,10 +2340,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
 
                 Match fm = filamentRegex.Match(line);
-                if (fm.Success)
+                if (fm.Success && TryParseFilamentGrams(fm, out double grams))
                 {
-                    double amount = double.Parse(fm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-                    metadata.FilamentUsageGrams = line.Contains("mm", StringComparison.Ordinal) ? amount * 0.0025 : amount;
+                    if (fm.Groups["total"].Success)
+                    {
+                        totalFilamentGrams = grams;
+                    }
+                    else
+                    {
+                        perExtruderFilamentGrams = grams;
+                    }
                 }
 
                 Match lc = layerRegex.Match(line);
@@ -2357,6 +2365,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
             }
         }
+
+        metadata.FilamentUsageGrams = totalFilamentGrams ?? perExtruderFilamentGrams ?? 0;
 
         if (metadata.LayerCount == 0 && maxLayer > 0)
         {
@@ -2398,6 +2408,31 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     [GeneratedRegex(@";\s*estimated printing time.*?(\d+)h\s*(\d+)m", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex MyRegex();
+
+    // Orca/Prusa footers: "; filament used [g] = 1.50, 2.25" (one value per extruder) and
+    // "; total filament used [g] = 3.75". The [mm] and [cm3] lines are deliberately not matched:
+    // converting them to grams needs the filament density, which the footer already applied.
+    // The legacy unbracketed form "; filament used = 10.5g" is still accepted.
+    [GeneratedRegex(@"^\s*;\s*(?<total>total\s+)?filament used\s*(?:\[g\]\s*=\s*(?<values>[\d.,\s]+?)\s*g?|=\s*(?<values>[\d.]+)\s*g)\s*$", RegexOptions.IgnoreCase, "en-US")]
+    private static partial Regex FilamentUsedRegex();
+
+    private static bool TryParseFilamentGrams(Match match, out double grams)
+    {
+        grams = 0;
+        bool parsedAny = false;
+        foreach (string part in match.Groups["values"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value) || value < 0)
+            {
+                return false;
+            }
+
+            grams += value;
+            parsedAny = true;
+        }
+
+        return parsedAny;
+    }
 
     /// <summary>
     /// Parsed transform result: CLI flags and whether a custom position or a non-uniform scale
