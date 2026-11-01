@@ -195,6 +195,6 @@ describe('admin surface accessibility floor (#1016)', () => {
     expect(headings.slice(1).every((level) => level === 2)).toBe(true);
     expect(headings.length).toBeGreaterThanOrEqual(4);
     expect(screen.getByRole('link', { name: /System Status/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh admin overview' })).toBeInTheDocument();
   });
 });

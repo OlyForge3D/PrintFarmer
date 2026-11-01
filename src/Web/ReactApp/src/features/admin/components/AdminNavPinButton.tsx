@@ -22,7 +22,8 @@ export function AdminNavPinButton({ destinationId }: AdminNavPinButtonProps) {
     <Button
       type="button"
       variant={pinned ? 'secondary' : 'subtle'}
-      size="sm"
+      control
+      className="rounded-[2px]"
       aria-pressed={pinned}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${destination.label} from navbar`}
       onClick={() => setPinned(destinationId, !pinned)}

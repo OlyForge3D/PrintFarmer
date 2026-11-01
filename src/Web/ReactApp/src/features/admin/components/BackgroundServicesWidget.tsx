@@ -11,12 +11,11 @@ import { apiClient } from '@/services/api';
 import {
   CheckCircleIcon,
   AlertCircleIcon,
-  RefreshIcon,
   GearIcon,
   PlayIcon,
   PauseIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { RefreshButton } from '@/common/components/ui';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import type { BackgroundServiceStatus, BackgroundServicesSummary } from '@/types/api';
 import { formatDistanceToNow } from 'date-fns';
@@ -256,18 +255,13 @@ export function BackgroundServicesWidget({
   );
 
   const headerAction = (
-    <Button
+    <RefreshButton
       variant="subtle"
-      size="sm"
+      busy={isLoading}
       onClick={() => refetch()}
-      disabled={isLoading}
-      className="p-1.5 rounded-lg"
       aria-label="Refresh services"
-    >
-      <RefreshIcon
-        className={`h-4 w-4 text-pf-text-secondary ${isLoading ? 'animate-spin' : ''}`}
-      />
-    </Button>
+      title="Refresh services"
+    />
   );
 
   return (

@@ -144,13 +144,11 @@ describe('settings shell header actions (#1010)', () => {
     expect(header?.className).not.toContain('lg:mr-72');
   });
 
-  it('lets the actions row wrap rather than overflow on narrow viewports', () => {
+  it('groups the launcher in the shared settings header actions', () => {
     renderShell();
 
     const launcher = screen.getByRole('button', { name: /search settings/i });
-    const actionsRow = launcher.closest('.flex-wrap');
-
-    expect(actionsRow).not.toBeNull();
+    expect(screen.getByRole('group', { name: 'Settings actions' })).toContainElement(launcher);
   });
 });
 

@@ -10,7 +10,7 @@
  */
 
 import { useState, useMemo } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, Toolbar } from '@/common/components/ui';
 import { 
   format, 
   startOfMonth, 
@@ -197,7 +197,7 @@ export function UpcomingMaintenanceCalendar({
   return (
     <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden ${className}`}>
       {/* Header */}
-      <div className="px-4 py-3 border-b border-pf-border flex items-center justify-between">
+      <Toolbar aria-label="Maintenance calendar navigation" className="px-4 py-3 border-b border-pf-border mb-0">
         <div className="flex items-center gap-3">
           <CalendarIcon className="h-5 w-5 text-pf-text-tertiary" aria-hidden="true" />
           <div>
@@ -215,10 +215,11 @@ export function UpcomingMaintenanceCalendar({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <Toolbar.Spacer />
+        <Toolbar.Group>
           <Button
             variant="subtle"
-            size="sm"
+            control
             onClick={handlePrevMonth}
             aria-label="Previous month"
           >
@@ -226,21 +227,21 @@ export function UpcomingMaintenanceCalendar({
           </Button>
           <Button
             variant="subtle"
-            size="sm"
+            control
             onClick={handleToday}
           >
             Today
           </Button>
           <Button
             variant="subtle"
-            size="sm"
+            control
             onClick={handleNextMonth}
             aria-label="Next month"
           >
             <ChevronRightIcon className="h-4 w-4" />
           </Button>
-        </div>
-      </div>
+        </Toolbar.Group>
+      </Toolbar>
 
       {/* Calendar grid */}
       <div className="overflow-x-auto">

@@ -9,6 +9,8 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /** Opt in to the shared target geometry and role radius for this button. */
+  control?: boolean;
   loading?: boolean;
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
@@ -65,6 +67,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   {
     variant = 'primary',
     size = 'md',
+    control = false,
     loading = false,
     disabled,
     explainedDisabled = false,
@@ -94,7 +97,14 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   const applySizeClasses = variant !== 'link' && variant !== 'unstyled';
   const applyBaseStyles = variant !== 'unstyled';
   const applyRingOffset = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
-  const defaultRadiusClass = variant === 'tab' ? 'rounded-none' : 'rounded-xs';
+  const defaultRadiusClass = variant === 'tab'
+    ? 'rounded-none'
+    : control
+      ? undefined
+      : 'rounded-xs';
+  const controlClasses = applySizeClasses && control
+    ? clsx('pf-control', { sm: 'text-xs', md: 'text-sm', lg: 'text-base' }[size])
+    : undefined;
 
   // "Explained disabled" only takes effect when the button is actually disabled
   // (via `disabled` or `loading`); otherwise it's a no-op so callers can pass the
@@ -119,6 +129,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     <button
       ref={ref}
       data-pf-button
+      data-size={control && applySizeClasses ? size : undefined}
+      data-role={control && applySizeClasses ? 'button' : undefined}
       data-pf-variant={variant}
       data-pf-active={isActiveTab ? '' : undefined}
       data-pf-disabled-explained={useExplainedDisabled ? '' : undefined}
@@ -134,7 +146,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         applyBaseStyles && !hasRadiusOverride(className) && defaultRadiusClass,
         applyRingOffset && 'focus-visible:ring-offset-2',
         variantClasses[variant],
-        applySizeClasses && sizeClasses[size],
+        applySizeClasses && !control && sizeClasses[size],
+        controlClasses,
         // center icon style when iconCenter provided
         iconCenter && 'justify-center',
         // Reproduces disabled:opacity-50 disabled:cursor-not-allowed above, since

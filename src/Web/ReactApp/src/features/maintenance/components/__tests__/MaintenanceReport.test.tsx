@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MaintenanceReport } from '../MaintenanceReport';
@@ -91,5 +91,35 @@ describe('MaintenanceReport', () => {
         startY: 22,
       })
     );
+  });
+
+  it('cycles numeric cost and chronological date ordering while preserving export order', async () => {
+    const rows = [
+      { date: '2026-10-01', printer: 'Alpha', component: 'Nozzle', action: 'Replace', cost: 10 },
+      { date: '2026-02-01', printer: 'Beta', component: 'Nozzle', action: 'Replace', cost: 2 },
+      { date: '2026-12-01', printer: 'Zulu', component: 'Nozzle', action: 'Replace', cost: 100 },
+    ];
+    mockedUseMaintenanceTrends.mockReturnValue({
+      data: rows, isLoading: false, error: null,
+    } as ReturnType<typeof useMaintenanceTrends>);
+    const user = userEvent.setup();
+    render(<MaintenanceReport />);
+    const names = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
+      .map(row => row.children[1].textContent);
+    const cost = screen.getByRole('button', { name: 'Cost' });
+    await user.click(cost);
+    expect(names()).toEqual(['Beta', 'Alpha', 'Zulu']);
+    await user.keyboard('{Enter}');
+    expect(names()).toEqual(['Zulu', 'Alpha', 'Beta']);
+    await user.keyboard(' ');
+    expect(names()).toEqual(['Alpha', 'Beta', 'Zulu']);
+    expect(cost.closest('th')).toHaveAttribute('aria-sort', 'none');
+    await user.click(screen.getByRole('button', { name: 'Date' }));
+    expect(names()).toEqual(['Beta', 'Alpha', 'Zulu']);
+    await user.click(screen.getByText('Export PDF'));
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+    expect(autoTableMock).toHaveBeenCalledWith(expect.objectContaining({
+      body: rows.map(row => [row.date, row.printer, row.component, row.action, row.cost]),
+    }));
   });
 });

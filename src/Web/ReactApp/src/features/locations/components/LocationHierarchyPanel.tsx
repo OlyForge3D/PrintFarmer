@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Button, Card, Input, Badge } from '@/common/components/ui';
-import { PlusIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Card, Badge } from '@/common/components/ui';
+import { SearchField, Toolbar } from '@/common/components/ui';
+import { PlusIcon } from '@/common/components/icons/MdiIcons';
 import type { LocationTreeNode } from '@/types/api';
 
 interface LocationHierarchyPanelProps {
@@ -174,16 +175,15 @@ export function LocationHierarchyPanel({
               Search rooms, zones, and placement areas.
             </p>
           </div>
-          <div className="relative">
-            <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pf-text-secondary" />
-            <Input
+          <Toolbar aria-label="Location hierarchy filters">
+            <SearchField
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search locations"
-              aria-label="Search locations"
-              className="pl-9"
+              onClear={() => setSearchTerm('')}
+              label="Search locations"
+              placeholder="Search locations…"
             />
-          </div>
+          </Toolbar>
         </div>
       </Card.Header>
       <Card.Body className="max-h-[68vh] overflow-y-auto p-2">
