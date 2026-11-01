@@ -5,6 +5,7 @@ import {
   GCODE_TO_SCENE_ROTATION,
   buildBedGridPositions,
   computeCameraFit,
+  computeFitDistance,
   computeToolpathBounds,
   gcodeToScene,
   resolveBedBounds,
@@ -144,5 +145,37 @@ describe('computeCameraFit', () => {
     expect(fit.target[1]).toBeCloseTo(centre.y, 6);
     expect(fit.target[2]).toBeCloseTo(centre.z, 6);
     expect(fit.position[1]).toBeGreaterThan(fit.target[1]);
+  });
+
+  it.each([[2, 0.4], [0.4, 2], [1.6, 0.46]])(
+    'keeps every corner in view after rescaling a fit from aspect %d to %d',
+    (from, to) => {
+      const box = boxes[0];
+      const fov = 45;
+      const fit = computeCameraFit(box, fov, from);
+      const scale = computeFitDistance(box, fov, to) / computeFitDistance(box, fov, from);
+      const target = new THREE.Vector3(...fit.target);
+      const position = new THREE.Vector3(...fit.position).sub(target).multiplyScalar(scale).add(target);
+      const camera = new THREE.PerspectiveCamera(fov, to, fit.near * scale, fit.far * scale);
+      camera.position.copy(position);
+      camera.lookAt(target);
+      camera.updateMatrixWorld();
+      camera.updateProjectionMatrix();
+
+      for (const x of [box.minX, box.maxX]) {
+        for (const y of [box.minY, box.maxY]) {
+          for (const z of [box.minZ, box.maxZ]) {
+            const ndc = toScene(x, y, z).project(camera);
+            expect(Math.abs(ndc.x)).toBeLessThanOrEqual(1);
+            expect(Math.abs(ndc.y)).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+    },
+  );
+
+  it('needs more distance for a narrower canvas', () => {
+    const box = boxes[0];
+    expect(computeFitDistance(box, 45, 0.46)).toBeGreaterThan(computeFitDistance(box, 45, 1.6));
   });
 });

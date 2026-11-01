@@ -124,19 +124,24 @@ const FIT_MARGIN = 1.15;
  * horizontal fields of view, so the model is never cropped on tall or
  * narrow canvases.
  */
-export function computeCameraFit(bounds: GcodeBounds, fovDeg: number, aspect: number): CameraFit {
-  const center = gcodeToScene(
-    (bounds.minX + bounds.maxX) / 2,
-    (bounds.minY + bounds.maxY) / 2,
-    (bounds.minZ + bounds.maxZ) / 2,
-  );
+/** Camera-to-centre distance that keeps the toolpath bounding sphere in view. */
+export function computeFitDistance(bounds: GcodeBounds, fovDeg: number, aspect: number): number {
   const radius = Math.max(
     1,
     Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ) / 2,
   );
   const halfV = (fovDeg * Math.PI) / 360;
   const halfH = Math.atan(Math.tan(halfV) * Math.max(aspect, 1e-3));
-  const distance = (radius / Math.sin(Math.min(halfV, halfH))) * FIT_MARGIN;
+  return (radius / Math.sin(Math.min(halfV, halfH))) * FIT_MARGIN;
+}
+
+export function computeCameraFit(bounds: GcodeBounds, fovDeg: number, aspect: number): CameraFit {
+  const center = gcodeToScene(
+    (bounds.minX + bounds.maxX) / 2,
+    (bounds.minY + bounds.maxY) / 2,
+    (bounds.minZ + bounds.maxZ) / 2,
+  );
+  const distance = computeFitDistance(bounds, fovDeg, aspect);
 
   return {
     target: center,
