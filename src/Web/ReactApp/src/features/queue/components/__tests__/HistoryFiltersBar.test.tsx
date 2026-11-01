@@ -30,6 +30,23 @@ const renderHistoryFilters = ({
 };
 
 describe("HistoryFiltersBar accessibility", () => {
+  it("keeps Reset enabled when every status is deselected", () => {
+    const onStatusChange = vi.fn();
+    renderHistoryFilters({ selectedStatuses: [], onStatusChange });
+
+    expect(screen.getByRole("button", { name: "Filters (3)" })).toBeInTheDocument();
+    const reset = screen.getByRole("button", { name: "Reset filters" });
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    expect(onStatusChange).toHaveBeenCalledWith(["completed", "failed", "cancelled"]);
+  });
+
+  it("disables Reset only for the all-statuses default", () => {
+    renderHistoryFilters({ selectedStatuses: ["completed", "failed", "cancelled"] });
+    expect(screen.getByRole("button", { name: "Reset filters" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+  });
+
   it("exposes stable names and selected state for every status toggle", () => {
     renderHistoryFilters();
 
@@ -80,7 +97,7 @@ describe("HistoryFiltersBar accessibility", () => {
     renderHistoryFilters({ onSortChange });
 
     const sortControl = screen.getByRole("combobox", {
-      name: "Sort history jobs",
+      name: "Sort by",
     });
     expect(screen.getByRole("option", { name: "Model" })).toBeInTheDocument();
 

@@ -106,6 +106,7 @@ describe('TasksWidget', () => {
     await waitFor(() => {
       expect(screen.getByTestId('tasks-widget-empty')).toBeInTheDocument();
     });
+    expect(screen.getByRole('group', { name: 'Pending Tasks actions' })).toHaveClass('pf-header-actions');
   });
 
   it('renders shift-plan groups Now → Timeline → AnytimeToday preserving server order', async () => {

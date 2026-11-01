@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { nextTableSort } from '@/common/hooks/useTableSort';
 import {
   type ColumnDef,
   type FileItem,
@@ -59,6 +60,7 @@ export interface UseFileBrowserResult {
   pageSize: number;
   setSearch: (value: string) => void;
   setSort: (sortBy: string, sortOrder?: SortOrder) => void;
+  cycleSort: (sortBy: string) => void;
   setPage: (page: number) => void;
   setPageSize: (size: number) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -122,8 +124,12 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
   );
 
   const queryState: FileQueryState = useMemo(
-    () => ({ path, search, sortBy, sortOrder, page, pageSize }),
-    [page, pageSize, path, search, sortBy, sortOrder]
+    () => ({
+      path, search, page, pageSize,
+      sortBy: sortBy || defaultSort.sortBy,
+      sortOrder: sortBy ? sortOrder : defaultSort.sortOrder ?? 'asc',
+    }),
+    [page, pageSize, path, search, sortBy, sortOrder, defaultSort.sortBy, defaultSort.sortOrder]
   );
 
   // Compute actual query params that will be sent to the API
@@ -241,6 +247,13 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
     setPage(1);
   }, []);
 
+  const cycleSort = useCallback((column: string) => {
+    const next = nextTableSort({ column: sortBy || null, direction: sortBy ? sortOrder : null }, column);
+    setSortBy(next.column ?? '');
+    setSortOrder(next.direction ?? 'asc');
+    setPage(1);
+  }, [sortBy, sortOrder]);
+
   const navigate = useCallback((nextPath: string) => {
     setPath(nextPath);
     setPage(1);
@@ -278,6 +291,7 @@ export function useFileBrowser<TDomain>(config: UseFileBrowserConfig<TDomain>): 
     pageSize,
     setSearch: setSearchTerm,
     setSort,
+    cycleSort,
     setPage,
     setPageSize: (size: number) => {
       setPageSize(size);

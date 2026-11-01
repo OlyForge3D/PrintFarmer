@@ -35,6 +35,8 @@ import { Textarea } from '@/common/components/ui/Textarea';
 import { Modal } from '@/common/components/modals/Modal';
 import { useMachineCompatibleProfiles } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 import { isApiError } from '@/common/utils/apiErrors';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 type LibraryProfile =
   | (OrcaMachineProfile & { profileType: 'machine' })
@@ -98,6 +100,8 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
   // Paging state
   const [pageSize, setPageSize] = useState<number>(25);
   const [pageNumber, setPageNumber] = useState<number>(1);
+  const librarySort = useTableSort<'name' | 'material' | 'quality' | 'diameter' | 'infill'>();
+  const customSort = useTableSort<'name' | 'profileType' | 'description' | 'createdAt' | 'updatedAt'>();
 
   // UI state
   const [importError, setImportError] = useState<string | null>(null);
@@ -514,6 +518,13 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       return true;
     });
   }, [customProfilesData, searchQuery]);
+  const sortedCustomProfiles = customSort.sortDataByValues(filteredCustomProfiles, {
+    name: profile => profile.name,
+    profileType: profile => profile.profileType,
+    description: profile => profile.description || null,
+    createdAt: profile => profile.createdAt ? Date.parse(profile.createdAt) : null,
+    updatedAt: profile => profile.updatedAt ? Date.parse(profile.updatedAt) : null,
+  });
 
   const onImport = (e: React.FormEvent) => {
     e.preventDefault();
@@ -620,6 +631,15 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     // 'custom' tab handles its own rendering
     return [];
   }, [activeTab, filteredFilamentProfiles, filteredMachineProfiles, filteredProcessProfiles]);
+  const sortedProfiles = librarySort.sortDataByValues(visibleProfiles, {
+    name: profile => profile.name,
+    material: profile => profile.profileType === 'filament' ? profile.material
+      : profile.profileType === 'machine' ? profile.manufacturer : null,
+    quality: profile => profile.profileType === 'process' ? profile.quality : null,
+    diameter: profile => profile.profileType === 'process' ? profile.layerHeight
+      : profile.profileType === 'machine' ? profile.nozzleDiameter || null : null,
+    infill: profile => profile.profileType === 'process' ? profile.infillPercentage : null,
+  });
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(visibleProfiles.length / pageSize));
@@ -629,8 +649,8 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
   const pagedProfiles = useMemo(() => {
     const start = (safePageNumber - 1) * pageSize;
-    return visibleProfiles.slice(start, start + pageSize);
-  }, [pageSize, safePageNumber, visibleProfiles]);
+    return sortedProfiles.slice(start, start + pageSize);
+  }, [pageSize, safePageNumber, sortedProfiles]);
 
   const handleDeleteSelected = () => {
     if (selectedProfileIds.size === 0) return;
@@ -645,7 +665,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
   React.useEffect(() => {
     setPageNumber(1);
-  }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineModelId, selectedMachineProfileId]);
+  }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineModelId, selectedMachineProfileId, librarySort.sortState.column, librarySort.sortState.direction]);
 
   React.useEffect(() => {
     // When manufacturer changes, clear dependent selections
@@ -1039,16 +1059,16 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                               aria-label="Select all custom profiles"
                             />
                           </th>
-                          <th className="p-2">Name</th>
-                          <th className="p-2">Type</th>
-                          <th className="p-2">Description</th>
-                          <th className="p-2">Created</th>
-                          <th className="p-2">Updated</th>
+                          <TableHeaderCell className="p-2" {...customSort.headerProps('name')}>Name</TableHeaderCell>
+                          <TableHeaderCell className="p-2" {...customSort.headerProps('profileType')}>Type</TableHeaderCell>
+                          <TableHeaderCell className="p-2" {...customSort.headerProps('description')}>Description</TableHeaderCell>
+                          <TableHeaderCell className="p-2" {...customSort.headerProps('createdAt')}>Created</TableHeaderCell>
+                          <TableHeaderCell className="p-2" {...customSort.headerProps('updatedAt')}>Updated</TableHeaderCell>
                           <th className="p-2">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredCustomProfiles.map(p => renderCustomProfileRow(p))}
+                        {sortedCustomProfiles.map(p => renderCustomProfileRow(p))}
                       </tbody>
                     </table>
                     </div>
@@ -1065,12 +1085,12 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-pf-bg-1 text-left">
-                      <th className="p-2">Name</th>
+                      <TableHeaderCell className="p-2" {...librarySort.headerProps('name')}>Name</TableHeaderCell>
                       <th className="p-2">Engine</th>
-                      <th className="p-2">Material/Manufacturer</th>
-                      <th className="p-2">Quality/Type</th>
-                      <th className="p-2">Layer/Nozzle</th>
-                      <th className="p-2">Infill</th>
+                      <TableHeaderCell className="p-2" {...librarySort.headerProps('material')}>Material/Manufacturer</TableHeaderCell>
+                      <TableHeaderCell className="p-2" {...librarySort.headerProps('quality')}>Quality/Type</TableHeaderCell>
+                      <TableHeaderCell className="p-2" {...librarySort.headerProps('diameter')}>Layer/Nozzle</TableHeaderCell>
+                      <TableHeaderCell className="p-2" {...librarySort.headerProps('infill')}>Infill</TableHeaderCell>
                       <th className="p-2">Flags</th>
                     </tr>
                   </thead>

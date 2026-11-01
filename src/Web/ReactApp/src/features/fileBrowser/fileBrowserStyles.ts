@@ -12,4 +12,3 @@ export const COMPACT_FILE_TABLE_CELL_CLASS = 'px-3 py-1.5 align-middle text-pf-t
 // Shrinks the preview column to its thumbnail and drops its trailing padding so the name sits close by.
 export const FILE_TABLE_PREVIEW_CELL_CLASS = 'w-px whitespace-nowrap pr-0!';
 export const FILE_TABLE_ROW_CLASS = 'border-b border-pf-border last:border-b-0 transition-colors';
-export const FILE_TOOLBAR_CONTROL_CLASS = '[&_input:not([type=checkbox])]:h-10 [&_select]:h-10 [&_button]:h-10';

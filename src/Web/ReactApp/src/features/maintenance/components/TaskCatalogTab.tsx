@@ -9,8 +9,10 @@
 
 import React, { useRef, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Badge, Button } from '@/common/components/ui';
+import { Badge, Button, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { FileUpload } from '@/common/components/ui/FileUpload';
+import { FiltersDisclosure, HeaderActions, SearchField, Toolbar, ToolbarField } from '@/common/components/ui';
 import { Input } from '@/common/components/ui/Input';
 import { Select } from '@/common/components/ui/Select';
 import { Textarea } from '@/common/components/ui/Textarea';
@@ -22,7 +24,6 @@ import {
   DeleteIcon,
   PlusIcon,
   SearchIcon,
-  FilterIcon,
   DownloadIcon,
   UploadIcon,
   CopyIcon,
@@ -112,6 +113,7 @@ interface TaskFormModalProps {
 }
 
 function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose, onTaskCreated }: TaskFormModalProps) {
+  const { sortDataByValues, headerProps } = useTableSort<'part' | 'category' | 'quantity' | 'sku' | 'stock' | 'notes'>();
   // Derive fresh task from the query-backed array so part mutations auto-refresh
   const task = taskId ? tasks.find(t => t.id === taskId) ?? null : null;
   const isEdit = !!task;
@@ -432,17 +434,24 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
                     <table className="w-full text-sm" role="grid" aria-label="Required parts">
                       <thead>
                         <tr className="bg-pf-bg-2 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
-                          <th scope="col" className="px-3 py-2">Part</th>
-                          <th scope="col" className="px-3 py-2">Category</th>
-                          <th scope="col" className="px-3 py-2 text-right">Qty</th>
-                          <th scope="col" className="px-3 py-2">SKU</th>
-                          <th scope="col" className="px-3 py-2 text-right">Stock</th>
-                          <th scope="col" className="px-3 py-2">Notes</th>
+                          <TableHeaderCell {...headerProps('part')} className="px-3 py-2">Part</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('category')} className="px-3 py-2">Category</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('quantity')} align="right" className="px-3 py-2">Qty</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('sku')} className="px-3 py-2">SKU</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('stock')} align="right" className="px-3 py-2">Stock</TableHeaderCell>
+                          <TableHeaderCell {...headerProps('notes')} className="px-3 py-2">Notes</TableHeaderCell>
                           <th scope="col" className="px-3 py-2 w-10"><span className="sr-only">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-pf-border">
-                        {task!.taskComponents.map(tc => {
+                        {sortDataByValues(task!.taskComponents, {
+                          part: tc => tc.componentName ?? componentMap.get(tc.maintenanceComponentId)?.name ?? 'Unknown',
+                          category: tc => componentMap.get(tc.maintenanceComponentId)?.category,
+                          quantity: tc => tc.quantity,
+                          sku: tc => componentMap.get(tc.maintenanceComponentId)?.sku,
+                          stock: tc => componentMap.get(tc.maintenanceComponentId)?.inStock,
+                          notes: tc => tc.notes,
+                        }).map(tc => {
                           const comp = componentMap.get(tc.maintenanceComponentId);
                           const isLow = comp ? comp.inStock < comp.minimumStock : false;
                           return (
@@ -692,43 +701,37 @@ export function TaskCatalogTab() {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-pf-text-muted" aria-hidden="true" />
-          <Input
-            className="pl-9"
-            placeholder="Search tasks…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            aria-label="Search task catalog"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <FilterIcon className="h-4 w-4 text-pf-text-muted shrink-0" aria-hidden="true" />
-          <Select
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            aria-label="Filter by category"
-            className="min-w-[140px]"
-          >
-            <option value="">All categories</option>
-            {categories.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </Select>
-        </div>
-        <Button variant="primary" size="sm" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />} className="shrink-0">
-          New Task
-        </Button>
-        <Button variant="secondary" size="sm" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending} className="shrink-0">
-          Export
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending} className="shrink-0">
-          Import
-        </Button>
-        <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
-      </div>
+      <HeaderActions>
+        <Button control variant="primary" onClick={handleCreate} iconLeft={<PlusIcon className="h-4 w-4" />}>New Task</Button>
+        <Button control variant="secondary" onClick={handleExport} iconLeft={<DownloadIcon className="h-4 w-4" />} loading={exportMutation.isPending}>Export</Button>
+        <Button control variant="secondary" onClick={() => importFileRef.current?.click()} iconLeft={<UploadIcon className="h-4 w-4" />} loading={importMutation.isPending}>Import</Button>
+      </HeaderActions>
+      <Toolbar aria-label="Task catalog controls">
+        <FiltersDisclosure activeCount={categoryFilter ? 1 : 0} onReset={() => setCategoryFilter('')}
+          controls={trigger => (
+            <Toolbar.Controls>
+              <SearchField value={search} onChange={e => setSearch(e.target.value)} onClear={() => setSearch('')} label="Search task catalog" placeholder="Search tasks…" />
+              {trigger}
+              <FileUpload ref={importFileRef} accept=".json" className="hidden" onChange={handleImportFile} />
+            </Toolbar.Controls>
+          )}
+        >
+          <ToolbarField label="Category" htmlFor="task-category-filter">
+            <Select
+              id="task-category-filter"
+              value={categoryFilter}
+              onChange={e => setCategoryFilter(e.target.value)}
+              aria-label="Filter by category"
+              className="min-w-[140px]"
+            >
+              <option value="">All categories</option>
+              {categories.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </ToolbarField>
+        </FiltersDisclosure>
+      </Toolbar>
 
       {/* Summary */}
       <p className="text-sm text-pf-text-muted">

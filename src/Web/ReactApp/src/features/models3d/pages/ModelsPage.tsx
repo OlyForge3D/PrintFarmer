@@ -8,6 +8,7 @@ import { BulkTagAssignmentModal } from '@/common/components/modals/BulkTagAssign
 import { FloatingActionButton } from '@/common/components/FloatingActionButton';
 import { TaggingModal } from '@/components/TaggingModal';
 import { Button } from '@/common/components/ui';
+import { FiltersDisclosure } from '@/common/components/ui/toolbar';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
@@ -35,7 +36,7 @@ export const ModelsPage: React.FC = () => {
   const [viewerModel, setViewerModel] = useState<Model | null>(null);
   const [gcodeViewer, setGcodeViewer] = useState<GCodeFile | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
@@ -83,7 +84,7 @@ export const ModelsPage: React.FC = () => {
     },
     {
       key: 'f',
-      handler: () => setShowFiltersPanel(!showFiltersPanel),
+      handler: () => setFiltersExpanded(expanded => !expanded),
       description: 'Toggle filters'
     },
     {
@@ -106,36 +107,6 @@ export const ModelsPage: React.FC = () => {
       backgroundColor="bg-pf-bg-2"
     >
       <div className="space-y-4 h-full flex flex-col">
-        {/* Tag Filter Panel */}
-        {showFiltersPanel && (
-          <div className="bg-pf-bg-1 rounded-lg border border-pf-border p-4 space-y-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-pf-text-primary">Filter by Tags</h3>
-              <div className="flex items-center gap-2">
-                {selectedTags.length > 0 && (
-                  <Button onClick={() => setSelectedTags([])} variant="secondary" size="sm" className="text-xs">
-                    Clear ({selectedTags.length})
-                  </Button>
-                )}
-                <Button
-                  onClick={() => setShowFiltersPanel(false)}
-                  variant="secondary"
-                  size="sm"
-                  title="Close filters"
-                >
-                  <CloseIcon className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-            <TagInput
-              selectedTags={allTags && Array.isArray(allTags) ? allTags.filter((t: ModelTag) => selectedTags.includes((t as unknown as { id: string }).id)) : []}
-              onChange={(tags) => setSelectedTags(tags.map(t => t.id))}
-              placeholder="Select tags to filter models..."
-              maxTags={undefined}
-            />
-          </div>
-        )}
-
         {/* Content */}
         <div className="flex-1 min-h-0 flex gap-4">
           <aside className="w-56 shrink-0 overflow-y-auto border-r border-pf-border pr-3">
@@ -159,7 +130,25 @@ export const ModelsPage: React.FC = () => {
               onShowSingleTagModal={(model) => {
                 setSelectedModelForTagging(model);
               }}
-              onToggleTagFilterPanel={() => setShowFiltersPanel(!showFiltersPanel)}
+              filterActions={(controls) => (
+                <FiltersDisclosure
+                  controls={controls}
+                  activeCount={selectedTags.length}
+                  expanded={filtersExpanded}
+                  onExpandedChange={setFiltersExpanded}
+                  onReset={() => setSelectedTags([])}
+                >
+                  <div className="max-w-xl space-y-1">
+                    <label className="text-xs font-medium text-pf-text-secondary">Tags</label>
+                    <TagInput
+                      selectedTags={Array.isArray(allTags) ? allTags.filter(tag => selectedTags.includes(tag.id)) : []}
+                      onChange={(tags) => setSelectedTags(tags.map(tag => tag.id))}
+                      placeholder="Select tags to filter models..."
+                      maxTags={undefined}
+                    />
+                  </div>
+                </FiltersDisclosure>
+              )}
               collectionModelIds={collectionModelIds}
               onShowCollectionModal={() => setShowAddToCollectionModal(true)}
             />

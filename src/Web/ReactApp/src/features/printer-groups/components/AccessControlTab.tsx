@@ -7,6 +7,8 @@ import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 import type { PrinterGroupAccessRule, SetAccessRuleItem, RoleDto } from '@/types/api';
 import { PrinterGroupAccessLevel } from '@/types/api';
+import { TableHeaderCell } from '@/common/components/ui/Table';
+import { useTableSort } from '@/common/hooks/useTableSort';
 
 interface AccessControlTabProps {
   groupId: string;
@@ -47,6 +49,11 @@ export function AccessControlTab({ groupId }: AccessControlTabProps) {
     queryKey: ['roles'],
     queryFn: () => apiClient.getRoles(),
     staleTime: 300_000,
+  });
+  const { headerProps, sortDataByValues } = useTableSort<'role' | 'level'>();
+  const sortedRules = sortDataByValues(rules, {
+    role: rule => rule.roleName,
+    level: rule => rule.accessLevel,
   });
 
   const saveMutation = useMutation({
@@ -159,13 +166,13 @@ export function AccessControlTab({ groupId }: AccessControlTabProps) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-pf-bg-1 text-left text-pf-text-secondary">
-                <th className="px-4 py-2 font-medium">Role</th>
-                <th className="px-4 py-2 font-medium">Access Level</th>
+                <TableHeaderCell {...headerProps('role')} className="px-4 py-2 font-medium">Role</TableHeaderCell>
+                <TableHeaderCell {...headerProps('level')} className="px-4 py-2 font-medium">Access Level</TableHeaderCell>
                 <th className="px-4 py-2 font-medium w-24 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pf-border">
-              {rules.map((rule) => (
+              {sortedRules.map((rule) => (
                 <tr key={rule.id} className="hover:bg-pf-bg-1/50">
                   <td className="px-4 py-2 text-pf-text-primary">{rule.roleName}</td>
                   <td className="px-4 py-2">

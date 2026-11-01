@@ -3,7 +3,7 @@ import { Card } from '@/common/components/ui/Card';
 import { DataTable } from '@/common/components/ui/DataTable';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { Tabs } from '@/common/components/ui/Tabs';
-import { TimePeriodFilter } from '@/common/components/ui/TimePeriodFilter';
+import { TimePeriodFilter, Toolbar } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { TrendingUpIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -127,8 +127,10 @@ export const CostDashboardPage: React.FC = () => {
       title="Cost Analytics"
       subtitle="Track print job costs and analyze spending patterns"
       icon={TrendingUpIcon}
-      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
     >
+      <Toolbar aria-label="Cost analytics filters">
+        <TimePeriodFilter value={period} onChange={setPeriod} />
+      </Toolbar>
       <CostDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );
@@ -136,14 +138,14 @@ export const CostDashboardPage: React.FC = () => {
 
 function CostByPrinterTab({ data, loading }: { data?: CostByPrinter[]; loading: boolean }) {
   const columns = [
-    { key: 'printerName', header: 'Printer', sortable: true, render: (r: CostByPrinter) => r.printerName },
-    { key: 'jobCount', header: 'Jobs', sortable: true, render: (r: CostByPrinter) => String(r.jobCount) },
-    { key: 'materialCostUsd', header: 'Material', sortable: true, render: (r: CostByPrinter) => formatCurrency(r.materialCostUsd) },
-    { key: 'energyCostUsd', header: 'Energy', sortable: true, render: (r: CostByPrinter) => formatCurrency(r.energyCostUsd) },
-    { key: 'machineTimeCostUsd', header: 'Machine Time', sortable: true, render: (r: CostByPrinter) => formatCurrency(r.machineTimeCostUsd) },
-    { key: 'laborCostUsd', header: 'Labor', sortable: true, render: (r: CostByPrinter) => formatCurrency(r.laborCostUsd) },
-    { key: 'totalCostUsd', header: 'Total', sortable: true, render: (r: CostByPrinter) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
-    { key: 'avgCost', header: 'Avg/Job', sortable: true, render: (r: CostByPrinter) => formatCurrency(r.jobCount > 0 ? r.totalCostUsd / r.jobCount : 0) },
+    { key: 'printerName', header: 'Printer', sortable: true, sortValue: (r: CostByPrinter) => r.printerName, render: (r: CostByPrinter) => r.printerName },
+    { key: 'jobCount', header: 'Jobs', sortable: true, sortValue: (r: CostByPrinter) => r.jobCount, render: (r: CostByPrinter) => String(r.jobCount) },
+    { key: 'materialCostUsd', header: 'Material', sortable: true, sortValue: (r: CostByPrinter) => r.materialCostUsd, render: (r: CostByPrinter) => formatCurrency(r.materialCostUsd) },
+    { key: 'energyCostUsd', header: 'Energy', sortable: true, sortValue: (r: CostByPrinter) => r.energyCostUsd, render: (r: CostByPrinter) => formatCurrency(r.energyCostUsd) },
+    { key: 'machineTimeCostUsd', header: 'Machine Time', sortable: true, sortValue: (r: CostByPrinter) => r.machineTimeCostUsd, render: (r: CostByPrinter) => formatCurrency(r.machineTimeCostUsd) },
+    { key: 'laborCostUsd', header: 'Labor', sortable: true, sortValue: (r: CostByPrinter) => r.laborCostUsd, render: (r: CostByPrinter) => formatCurrency(r.laborCostUsd) },
+    { key: 'totalCostUsd', header: 'Total', sortable: true, sortValue: (r: CostByPrinter) => r.totalCostUsd, render: (r: CostByPrinter) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
+    { key: 'avgCost', header: 'Avg/Job', sortable: true, sortValue: (r: CostByPrinter) => r.jobCount > 0 ? r.totalCostUsd / r.jobCount : 0, render: (r: CostByPrinter) => formatCurrency(r.jobCount > 0 ? r.totalCostUsd / r.jobCount : 0) },
   ];
 
   return (
@@ -163,18 +165,19 @@ function CostByPrinterTab({ data, loading }: { data?: CostByPrinter[]; loading: 
 
 function CostByJobTab({ data, loading }: { data?: CostByJob[]; loading: boolean }) {
   const columns = [
-    { key: 'jobName', header: 'Job', sortable: true, render: (r: CostByJob) => <span className="max-w-48 truncate block" title={r.jobName}>{r.jobName}</span> },
-    { key: 'printerName', header: 'Printer', sortable: true, render: (r: CostByJob) => r.printerName ?? '—' },
-    { key: 'filamentName', header: 'Filament', sortable: true, render: (r: CostByJob) => r.filamentName ?? r.materialType ?? '—' },
-    { key: 'filamentUsedGrams', header: 'Weight (g)', sortable: true, render: (r: CostByJob) => r.filamentUsedGrams ? `${r.filamentUsedGrams.toFixed(1)}g` : '—' },
-    { key: 'printTimeSeconds', header: 'Print Time', sortable: true, render: (r: CostByJob) => formatDuration(r.printTimeSeconds) },
-    { key: 'materialCostUsd', header: 'Material', sortable: true, render: (r: CostByJob) => formatCurrency(r.materialCostUsd) },
-    { key: 'energyCostUsd', header: 'Energy', sortable: true, render: (r: CostByJob) => formatCurrency(r.energyCostUsd) },
-    { key: 'machineTimeCostUsd', header: 'Machine', sortable: true, render: (r: CostByJob) => formatCurrency(r.machineTimeCostUsd) },
-    { key: 'laborCostUsd', header: 'Labor', sortable: true, render: (r: CostByJob) => formatCurrency(r.laborCostUsd) },
-    { key: 'totalCostUsd', header: 'Total', sortable: true, render: (r: CostByJob) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
+    { key: 'jobName', header: 'Job', sortable: true, sortValue: (r: CostByJob) => r.jobName, render: (r: CostByJob) => <span className="max-w-48 truncate block" title={r.jobName}>{r.jobName}</span> },
+    { key: 'printerName', header: 'Printer', sortable: true, sortValue: (r: CostByJob) => r.printerName, render: (r: CostByJob) => r.printerName ?? '—' },
+    { key: 'filamentName', header: 'Filament', sortable: true, sortValue: (r: CostByJob) => r.filamentName ?? r.materialType, render: (r: CostByJob) => r.filamentName ?? r.materialType ?? '—' },
+    { key: 'filamentUsedGrams', header: 'Weight (g)', sortable: true, sortValue: (r: CostByJob) => r.filamentUsedGrams, render: (r: CostByJob) => r.filamentUsedGrams ? `${r.filamentUsedGrams.toFixed(1)}g` : '—' },
+    { key: 'printTimeSeconds', header: 'Print Time', sortable: true, sortValue: (r: CostByJob) => r.printTimeSeconds, render: (r: CostByJob) => formatDuration(r.printTimeSeconds) },
+    { key: 'materialCostUsd', header: 'Material', sortable: true, sortValue: (r: CostByJob) => r.materialCostUsd, render: (r: CostByJob) => formatCurrency(r.materialCostUsd) },
+    { key: 'energyCostUsd', header: 'Energy', sortable: true, sortValue: (r: CostByJob) => r.energyCostUsd, render: (r: CostByJob) => formatCurrency(r.energyCostUsd) },
+    { key: 'machineTimeCostUsd', header: 'Machine', sortable: true, sortValue: (r: CostByJob) => r.machineTimeCostUsd, render: (r: CostByJob) => formatCurrency(r.machineTimeCostUsd) },
+    { key: 'laborCostUsd', header: 'Labor', sortable: true, sortValue: (r: CostByJob) => r.laborCostUsd, render: (r: CostByJob) => formatCurrency(r.laborCostUsd) },
+    { key: 'totalCostUsd', header: 'Total', sortable: true, sortValue: (r: CostByJob) => r.totalCostUsd, render: (r: CostByJob) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
     {
       key: 'completedAt', header: 'Completed', sortable: true,
+      sortValue: (r: CostByJob) => r.completedAt ? Date.parse(r.completedAt) : null,
       render: (r: CostByJob) => r.completedAt ? new Date(r.completedAt).toLocaleDateString() : '—',
     },
   ];
@@ -196,11 +199,11 @@ function CostByJobTab({ data, loading }: { data?: CostByJob[]; loading: boolean 
 
 function CostByMaterialTab({ data, loading }: { data?: CostByMaterial[]; loading: boolean }) {
   const columns = [
-    { key: 'materialType', header: 'Material', sortable: true, render: (r: CostByMaterial) => r.materialType },
-    { key: 'jobCount', header: 'Jobs', sortable: true, render: (r: CostByMaterial) => String(r.jobCount) },
-    { key: 'totalFilamentUsageGrams', header: 'Weight (kg)', sortable: true, render: (r: CostByMaterial) => (r.totalFilamentUsageGrams / 1000).toFixed(2) },
-    { key: 'averageCostPerJobUsd', header: 'Avg/Job', sortable: true, render: (r: CostByMaterial) => formatCurrency(r.averageCostPerJobUsd) },
-    { key: 'totalCostUsd', header: 'Total Cost', sortable: true, render: (r: CostByMaterial) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
+    { key: 'materialType', header: 'Material', sortable: true, sortValue: (r: CostByMaterial) => r.materialType, render: (r: CostByMaterial) => r.materialType },
+    { key: 'jobCount', header: 'Jobs', sortable: true, sortValue: (r: CostByMaterial) => r.jobCount, render: (r: CostByMaterial) => String(r.jobCount) },
+    { key: 'totalFilamentUsageGrams', header: 'Weight (kg)', sortable: true, sortValue: (r: CostByMaterial) => r.totalFilamentUsageGrams, render: (r: CostByMaterial) => (r.totalFilamentUsageGrams / 1000).toFixed(2) },
+    { key: 'averageCostPerJobUsd', header: 'Avg/Job', sortable: true, sortValue: (r: CostByMaterial) => r.averageCostPerJobUsd, render: (r: CostByMaterial) => formatCurrency(r.averageCostPerJobUsd) },
+    { key: 'totalCostUsd', header: 'Total Cost', sortable: true, sortValue: (r: CostByMaterial) => r.totalCostUsd, render: (r: CostByMaterial) => <span className="font-semibold">{formatCurrency(r.totalCostUsd)}</span> },
   ];
 
   return (
@@ -245,4 +248,3 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
     )}
   </Card>
 );
-

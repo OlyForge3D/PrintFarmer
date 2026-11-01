@@ -2,23 +2,21 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectService } from '@/services/projectService';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { HeaderActions, SearchField, Toolbar, ToolbarField, FiltersDisclosure } from '@/common/components/ui';
+import { ViewToggle } from '@/common/components/ui/ViewToggle';
 import { Button, Select, EmptyState, ProgressBar } from '@/common/components/ui';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
-import { 
- PlusIcon, 
- SearchIcon, 
- FilterIcon, 
+import {
+ PlusIcon,
  DeleteIcon,
  CheckIcon,
- GridIcon,
- TableIcon,
 } from '@/common/components/icons/MdiIcons';
 import { CreateProjectModal } from '@/features/projects/components/CreateProjectModal';
 import { ProjectDetailModal } from '@/features/projects/components/ProjectDetailModal';
 import { ProjectsTableView } from '@/features/projects/components/ProjectsTableView';
-import type { 
- PrintProjectListDto, 
+import type {
+ PrintProjectListDto,
  PrintProjectStatus,
  PrintProjectDetailDto,
 } from '@/types/api';
@@ -108,74 +106,49 @@ export const ProjectsPage: React.FC = () => {
  <PageTemplate
  title="Projects"
  subtitle="Track multi-print jobs and progress"
+ actions={<HeaderActions><Button control variant="primary" onClick={() => setShowCreateModal(true)} iconLeft={<PlusIcon className="w-4 h-4" />}>New Project</Button></HeaderActions>}
  padding="px-4"
  backgroundColor="bg-pf-bg-2"
  >
  <div className="space-y-4 h-full flex flex-col">
- {/* Header with search and filters */}
- <div className="flex flex-wrap items-center gap-3 bg-pf-bg-1 rounded-lg border border-pf-border p-3">
- {/* Search */}
- <div className="relative flex-1 min-w-[200px]">
- <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-tertiary" />
- <input
- type="text"
- placeholder="Search projects..."
- value={searchQuery}
- onChange={(e) => setSearchQuery(e.target.value)}
- className="w-full pl-9 pr-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-sm text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent"
- />
- </div>
-
- {/* Status filter */}
- <div className="flex items-center gap-2">
- <FilterIcon className="w-4 h-4 text-pf-text-tertiary" />
- <Select
- value={statusFilter}
- onChange={(e) => setStatusFilter(e.target.value as PrintProjectStatus | '')}
- className="bg-pf-bg-2 border-pf-border !rounded-lg !px-3 !py-2 !text-sm"
- >
- <option value="">All Status</option>
- <option value="Open">Open</option>
- <option value="InProgress">In Progress</option>
- <option value="Completed">Completed</option>
- <option value="OnHold">On Hold</option>
- <option value="Cancelled">Cancelled</option>
- </Select>
- </div>
-
- {/* View mode toggle */}
- <div className="flex rounded-sm overflow-hidden border border-pf-border">
- <Button
- variant={viewMode === 'cards' ? 'primary' : 'secondary'}
- size="sm"
- aria-label="Card view"
- title="Card view"
- onClick={() => handleViewModeChange('cards')}
- className="flex items-center gap-1"
- >
- <GridIcon className="h-4 w-4" />
- </Button>
- <Button
- variant={viewMode === 'table' ? 'primary' : 'secondary'}
- size="sm"
- aria-label="Table view"
- title="Table view"
- onClick={() => handleViewModeChange('table')}
- className="flex items-center gap-1"
- >
- <TableIcon className="h-4 w-4" />
- </Button>
- </div>
-
- {/* Create button */}
- <Button
- variant="primary"
- onClick={() => setShowCreateModal(true)}
- iconLeft={<PlusIcon className="w-4 h-4" />}
- >
- New Project
- </Button>
- </div>
+ {/* Search, filter and view controls stay together; page actions are in the header above. */}
+ <Toolbar aria-label="Project filters">
+   <FiltersDisclosure activeCount={statusFilter ? 1 : 0} onReset={() => setStatusFilter('')}
+     controls={trigger => (
+       <Toolbar.Controls>
+         <SearchField value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onClear={() => setSearchQuery('')} label="Search projects" placeholder="Search projects…" />
+         {trigger}
+         <Toolbar.Spacer />
+         <ViewToggle
+         value={viewMode}
+         onChange={handleViewModeChange}
+         size="md"
+         options={[
+         { mode: 'cards', kind: 'cards', title: 'Card view' },
+         { mode: 'table', kind: 'table', title: 'Table view' },
+         ]}
+         ariaLabel="Project view"
+         />
+       </Toolbar.Controls>
+     )}
+   >
+     <ToolbarField label="Status" htmlFor="project-status-filter">
+     <Select
+     id="project-status-filter"
+     value={statusFilter}
+     onChange={(e) => setStatusFilter(e.target.value as PrintProjectStatus | '')}
+     aria-label="Filter by status"
+     >
+     <option value="">All Status</option>
+     <option value="Open">Open</option>
+     <option value="InProgress">In Progress</option>
+     <option value="Completed">Completed</option>
+     <option value="OnHold">On Hold</option>
+     <option value="Cancelled">Cancelled</option>
+     </Select>
+     </ToolbarField>
+   </FiltersDisclosure>
+ </Toolbar>
 
  {/* Summary cards */}
  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -364,7 +337,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  </span>
  )}
  </div>
- 
+
  {project.dueDate && (
  <span>Due: {new Date(project.dueDate).toLocaleDateString()}</span>
  )}
