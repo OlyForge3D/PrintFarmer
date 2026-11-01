@@ -24,8 +24,8 @@ const exceptions = {
     reason: 'Primary search, result ordering and page-size controls.',
   },
   'features/filamentManagement/components/SpoolsTab.tsx': {
-    fields: ['Search', 'Sort'],
-    reason: 'Primary search and result-ordering controls.',
+    fields: ['Search', 'Sort', 'Show'],
+    reason: 'Primary search, result ordering and page-size controls.',
   },
   'features/queue/components/QueueDateRangeBar.tsx': {
     fields: ['From', 'To'],

@@ -703,10 +703,21 @@ describe('Printer file catalog', () => {
     expect(printer).toHaveValue('');
     expect(search).toHaveAttribute('placeholder', 'Search filenames or paths');
     expect(toolbar.querySelector('.pf-toolbar-field')).toContainElement(search);
-    expect(toolbar.children[1]).toContainElement(filters);
-    expect(within(toolbar).getByRole('button', { name: 'Explorer view' })).toBeVisible();
-    expect(within(toolbar).getByRole('button', { name: 'Grid view' })).toBeVisible();
-    expect(await within(toolbar).findByRole('button', { name: 'Force refresh all online printers' })).toBeVisible();
+    const controls = toolbar.querySelector('.pf-toolbar__controls');
+    expect(controls).toContainElement(search);
+    expect(controls).toContainElement(filters);
+    const disclosure = within(toolbar).getByRole('region', { name: 'Filters' });
+    expect(disclosure).toContainElement(printer);
+    expect(controls).not.toContainElement(printer);
+    expect(filters).toHaveAttribute('aria-controls', disclosure.id);
+    expect(filters).toHaveAttribute('aria-expanded', 'true');
+    const explorerView = within(toolbar).getByRole('button', { name: 'Explorer view' });
+    const gridView = within(toolbar).getByRole('button', { name: 'Grid view' });
+    const refresh = await within(toolbar).findByRole('button', { name: 'Force refresh all online printers' });
+    for (const control of [explorerView, gridView, refresh]) {
+      expect(control).toBeVisible();
+      expect(controls).toContainElement(control);
+    }
     expect(screen.queryByText('Availability', { selector: 'label' })).not.toBeInTheDocument();
     expect(screen.queryByText('Freshness', { selector: 'label' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Availability' })).not.toBeInTheDocument();

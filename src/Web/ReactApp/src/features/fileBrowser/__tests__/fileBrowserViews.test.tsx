@@ -223,7 +223,11 @@ describe("compact presentation (opt-in, used by /files)", () => {
     for (const cell of within(row).getAllByRole("cell")) {
       expect(cell).toHaveClass(COMPACT_FILE_TABLE_CELL_CLASS);
     }
-    expect(within(table).getByRole("button", { name: "Name" })).toHaveClass("uppercase", "w-full");
+    const nameSort = within(table).getByRole("button", { name: "Name" });
+    expect(nameSort).toHaveClass("[font:inherit]", "w-full", "h-full");
+    expect(nameSort.style.textTransform).toBe("inherit");
+    expect(nameSort.style.textAlign).toBe("inherit");
+    expect(nameSort.closest("th")).toHaveAttribute("aria-sort", "ascending");
     expect(table).not.toHaveClass("text-sm");
     expect(screen.getByText("file.gcode").closest("td")).toHaveClass("py-1.5");
   });

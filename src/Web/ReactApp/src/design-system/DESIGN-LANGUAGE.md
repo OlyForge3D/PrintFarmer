@@ -196,7 +196,7 @@ these documented owners:
 | `features/admin/components/SystemLogsContent.tsx` | `CorrelationId`, `Level`, `From`, `To`, `Metadata` | Primary simple-query fields; controls the active query mode and export. |
 | `features/admin/pages/LoginAuditPage.tsx` | `Username`, `Rows per page` | Primary username search and result page-size controls; date and status refinements use FiltersDisclosure. |
 | `features/filamentManagement/components/FilamentsTab.tsx` | `Search`, `Sort`, `Show` | Primary search, result ordering and page-size controls. |
-| `features/filamentManagement/components/SpoolsTab.tsx` | `Search`, `Sort` | Primary search and result-ordering controls. |
+| `features/filamentManagement/components/SpoolsTab.tsx` | `Search`, `Sort`, `Show` | Primary search, result ordering and page-size controls. |
 | `features/queue/components/QueueDateRangeBar.tsx` | `From`, `To` | Primary range controls inside the date-range preset's own expander. |
 | `features/printers/components/PrinterFilesModal.tsx` | `Sort by` | Sorting changes result order, not the result set. |
 | `features/auto-dispatch/pages/AutoDispatchDashboardPage.tsx` | `Sort by` | Sorting changes result order, not the result set. |
