@@ -1018,6 +1018,7 @@ public partial class SliceJobController(
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/artifacts")]
     [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
+    [WorkerArtifactUploadLimits]
     public async Task<IActionResult> UploadWorkerArtifactAsync(
         Guid id,
         IFormFile file,
