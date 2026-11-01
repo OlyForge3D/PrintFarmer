@@ -249,7 +249,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
     fireEvent.change(searchInput, { target: { value: 'thread' } });
     expect(await screen.findByLabelText('Thread Pool Size')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /clear (filter|field filter)/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
 
     // Essential mode is back, so the advanced section disappears again.
     expect(screen.queryByLabelText('Thread Pool Size')).not.toBeInTheDocument();

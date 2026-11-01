@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "@/common/components/ui/Alert";
-import { Button } from "@/common/components/ui/Button";
+import { Pagination } from "@/common/components/ui/toolbar";
 import HistoryFiltersBar from "./HistoryFiltersBar";
 import HistoryStatisticsPanel from "./HistoryStatisticsPanel";
 import HistoryJobCard from "./HistoryJobCard";
 import HistoryJobTable from "./HistoryJobTable";
+import { historySortModes, type HistorySortColumn, type HistorySortMode } from "./history-sort";
+import { nextTableSort, type SortState } from "@/common/hooks/useTableSort";
 import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal";
 import { apiClient } from "@/services/api";
 import type { HistoryJob } from "@/types/queue";
@@ -58,11 +60,32 @@ export default function QueueHistoryTab({
   const dateEnd = dateTo;
 
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(["completed", "failed", "cancelled"]);
-  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "duration" | "model">("newest");
+  const [sortBy, setSortBy] = useState<HistorySortMode>("newest");
+  const [sortState, setSortState] = useState<SortState<HistorySortColumn>>({ column: null, direction: null });
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 50;
+
+  const handleSort = (column: string) => {
+    if (!(column in historySortModes)) return;
+    const next = nextTableSort(sortState, column as HistorySortColumn);
+    setSortState(next);
+    setSortBy(next.column && next.direction
+      ? historySortModes[next.column][next.direction === "asc" ? 0 : 1]
+      : "newest");
+    setCurrentPage(0);
+  };
+
+  const handleSortChange = (mode: HistorySortMode) => {
+    setSortBy(mode);
+    const column = (Object.keys(historySortModes) as HistorySortColumn[])
+      .find(key => historySortModes[key].some(value => value === mode));
+    setSortState(column
+      ? { column, direction: historySortModes[column][0] === mode ? "asc" : "desc" }
+      : { column: null, direction: null });
+    setCurrentPage(0);
+  };
   
   // Modal
   const [rerunJobId, setRerunJobId] = useState<string | null>(null);
@@ -258,8 +281,6 @@ export default function QueueHistoryTab({
   };
 
   const totalPages = Math.ceil(totalCount / pageSize);
-  const hasNextPage = currentPage < totalPages - 1;
-  const hasPrevPage = currentPage > 0;
 
   return (
     <div className="space-y-4">
@@ -275,7 +296,7 @@ export default function QueueHistoryTab({
         selectedStatuses={selectedStatuses}
         onStatusChange={setSelectedStatuses}
         sortBy={sortBy}
-        onSortChange={setSortBy}
+        onSortChange={handleSortChange}
         onRefresh={loadHistory}
         isLoading={loading}
         viewMode={viewMode}
@@ -313,6 +334,8 @@ export default function QueueHistoryTab({
               onViewDetails={onViewDetails}
               onHarvested={handleHarvested}
               onCloseAfterSuccess={loadHistory}
+              sortState={sortState}
+              onSort={handleSort}
             />
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -330,26 +353,12 @@ export default function QueueHistoryTab({
           )}
 
           {/* Pagination */}
-          <div className="flex items-center justify-between py-4">
+          <div className="py-4">
             <div className="text-sm text-pf-text-secondary">
-              Page {currentPage + 1} of {Math.max(1, totalPages)} | {totalCount} total jobs
+              {totalCount} total jobs
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                disabled={!hasPrevPage || loading}
-                variant="secondary"
-              >
-                ← Previous
-              </Button>
-              <Button
-                onClick={() => setCurrentPage(p => p + 1)}
-                disabled={!hasNextPage || loading}
-                variant="secondary"
-              >
-                Next →
-              </Button>
-            </div>
+            <Pagination page={currentPage + 1} totalPages={Math.max(1, totalPages)}
+              onPageChange={page => setCurrentPage(page - 1)} disabled={loading} />
           </div>
         </>
       )}

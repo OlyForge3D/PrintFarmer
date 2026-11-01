@@ -8,8 +8,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { maintenanceService } from '@/services/maintenanceService';
-import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { ClockIcon, CheckCircleIcon, AlertCircleIcon, WrenchIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
+import { Button, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import type { FleetPrinterStatistics } from '@/types/maintenance';
 
 export interface FleetStatisticsTableProps {
@@ -90,6 +91,7 @@ function MaintenanceBadge({ days, task }: { days?: number | null; task?: string 
 
 export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
   const navigate = useNavigate();
+  const { sortDataByValues, headerProps } = useTableSort<'printer' | 'model' | 'status' | 'hours' | 'jobs' | 'filament' | 'maintenance'>();
 
   const { data: stats, isLoading, error } = useQuery({
     queryKey: ['fleetStatistics'],
@@ -119,7 +121,16 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
     );
   }
 
-  const displayStats = maxRows ? stats?.slice(0, maxRows) : stats;
+  const sortedStats = sortDataByValues(stats ?? [], {
+    printer: printer => printer.printerName,
+    model: printer => printer.modelName || null,
+    status: printer => printer.inMaintenance ? 'Maintenance' : printer.isOnline ? 'Online' : 'Offline',
+    hours: printer => printer.totalPrintHours,
+    jobs: printer => printer.totalJobsCompleted,
+    filament: printer => printer.totalFilamentUsedGrams,
+    maintenance: printer => printer.daysUntilNextMaintenance,
+  });
+  const displayStats = maxRows ? sortedStats.slice(0, maxRows) : sortedStats;
 
   if (!displayStats || displayStats.length === 0) {
     return (
@@ -136,13 +147,13 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-pf-border text-left">
-            <th className="py-3 px-4 font-medium text-pf-text-secondary">Printer</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary">Model</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary text-center">Status</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary text-right">Print Hours</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary text-right">Jobs</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary text-right">Filament</th>
-            <th className="py-3 px-4 font-medium text-pf-text-secondary">Next Maintenance</th>
+            <TableHeaderCell {...headerProps('printer')} className="py-3 px-4 font-medium text-pf-text-secondary">Printer</TableHeaderCell>
+            <TableHeaderCell {...headerProps('model')} className="py-3 px-4 font-medium text-pf-text-secondary">Model</TableHeaderCell>
+            <TableHeaderCell {...headerProps('status')} align="center" className="py-3 px-4 font-medium text-pf-text-secondary">Status</TableHeaderCell>
+            <TableHeaderCell {...headerProps('hours')} align="right" className="py-3 px-4 font-medium text-pf-text-secondary">Print Hours</TableHeaderCell>
+            <TableHeaderCell {...headerProps('jobs')} align="right" className="py-3 px-4 font-medium text-pf-text-secondary">Jobs</TableHeaderCell>
+            <TableHeaderCell {...headerProps('filament')} align="right" className="py-3 px-4 font-medium text-pf-text-secondary">Filament</TableHeaderCell>
+            <TableHeaderCell {...headerProps('maintenance')} className="py-3 px-4 font-medium text-pf-text-secondary">Next Maintenance</TableHeaderCell>
           </tr>
         </thead>
         <tbody>
@@ -213,7 +224,7 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
             className="text-sm text-pf-accent hover:text-pf-accent-text"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
-            View all {stats.length} printers →
+            View all {stats.length} printers <ArrowRightIcon className="inline h-4 w-4" />
           </Button>
         </div>
       )}

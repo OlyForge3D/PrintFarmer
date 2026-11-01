@@ -35,7 +35,8 @@ export function FarmCostSummaryWidget({ className = '' }: { className?: string }
         <Button
           key={p}
           variant={period === p ? 'primary' : 'ghost'}
-          size="sm"
+          control
+          size="md"
           onClick={() => setPeriod(p)}
           aria-pressed={period === p}
         >

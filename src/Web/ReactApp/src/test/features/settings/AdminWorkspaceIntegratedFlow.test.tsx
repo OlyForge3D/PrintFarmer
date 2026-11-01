@@ -711,7 +711,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Saved System Logging. Failed to save Network Discovery');
-    expect(screen.getByTestId('admin-save-bar')).toHaveTextContent('1 change in Network Discovery');
+    await waitFor(() => expect(screen.getByTestId('admin-save-bar')).toHaveTextContent('1 change in Network Discovery'));
     expect(toastMocks.error).toHaveBeenCalledWith('Saved System Logging. Failed to save Network Discovery', undefined);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
