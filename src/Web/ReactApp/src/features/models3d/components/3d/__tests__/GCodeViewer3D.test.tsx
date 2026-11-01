@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { GCodeViewer } from '../GCodeViewer3D';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
-import type { IGcodePreviewService, DetailedParsedGCode, DetailedLayer } from '@/features/slicer/services';
+import type { IGcodePreviewService, DetailedParsedGCode, DetailedLayer, BedBounds } from '@/features/slicer/services';
+import type { GcodeBounds } from '../gcodeSceneMath';
 
 // Captures every merged line stream the viewer mounts, so tests can verify
 // the render-object count stays constant while vertex counts track the data.
@@ -19,6 +20,20 @@ vi.mock('@react-three/fiber', () => ({
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
   Grid: () => null,
+}));
+
+const renderedBeds: Array<{ bed: BedBounds; showGrid: boolean }> = [];
+const cameraFitBounds: Array<GcodeBounds | null> = [];
+
+vi.mock('../GcodeSceneHelpers', () => ({
+  GcodeBed: ({ bed, showGrid }: { bed: BedBounds; showGrid: boolean }) => {
+    renderedBeds.push({ bed, showGrid });
+    return <div data-testid="gcode-bed" />;
+  },
+  GcodeCameraFit: ({ bounds }: { bounds: GcodeBounds | null }) => {
+    cameraFitBounds.push(bounds);
+    return null;
+  },
 }));
 
 vi.mock('../GcodeLineSegments', () => ({
@@ -109,6 +124,69 @@ describe('GCodeViewer3D', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     renderedStreams.length = 0;
+    renderedBeds.length = 0;
+    cameraFitBounds.length = 0;
+  });
+
+  it('draws the printer bed declared in the G-code under the model', async () => {
+    const declaredBed: BedBounds = { minX: 0, minY: 0, maxX: 256, maxY: 256 };
+    const service = createMockService({
+      layerCount: 1,
+      layers: [makeDetailedLayer(0, 0.2, [{ x: 10, y: 10, z: 0.2, e: 1, feedRate: 1500, type: 'extrude', tool: 0 }])],
+      tools: [0],
+      bed: declaredBed,
+    });
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+    await waitFor(() => expect(screen.getByText(/Layer 1 \/ 1/)).toBeInTheDocument());
+
+    expect(renderedBeds.at(-1)).toEqual({ bed: declaredBed, showGrid: true });
+  });
+
+  it('falls back to a bed covering the toolpath when the file declares none', async () => {
+    const service = createMockService();
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+    await waitFor(() => expect(screen.getByText(/Layer 3 \/ 3/)).toBeInTheDocument());
+
+    // Default fixture spans x/y 5..20 -> origin-inclusive, 10 mm margin, 10 mm snapped.
+    expect(renderedBeds.at(-1)?.bed).toEqual({ minX: -10, minY: -10, maxX: 30, maxY: 30 });
+  });
+
+  it('fits the camera to extrusion bounds, ignoring far-away travel moves', async () => {
+    const service = createMockService({
+      layerCount: 2,
+      layers: [
+        makeDetailedLayer(0, 0.2, [
+          { x: 50, y: 60, z: 0.2, e: 1, feedRate: 1500, type: 'extrude', tool: 0 },
+          { x: 70, y: 80, z: 0.2, e: 2, feedRate: 1500, type: 'extrude', tool: 0 },
+        ]),
+        makeDetailedLayer(1, 10, [
+          { x: 60, y: 70, z: 10, e: 3, feedRate: 1500, type: 'extrude', tool: 0 },
+          { x: 0, y: 250, z: 50, e: 3, feedRate: 9000, type: 'move', tool: 0 },
+        ]),
+      ],
+      tools: [0],
+    });
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+    await waitFor(() => expect(screen.getByText(/Layer 2 \/ 2/)).toBeInTheDocument());
+
+    expect(cameraFitBounds.at(-1)).toEqual({ minX: 50, minY: 60, minZ: Math.fround(0.2), maxX: 70, maxY: 80, maxZ: 10 });
+  });
+
+  it('keeps the same camera-fit bounds object while scrubbing layers', async () => {
+    const service = createMockService();
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+    await waitFor(() => expect(screen.getByText(/Layer 3 \/ 3/)).toBeInTheDocument());
+    const fitted = cameraFitBounds.at(-1);
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Layer slider'), { target: { value: '0' } });
+    });
+
+    expect(cameraFitBounds.at(-1)).toBe(fitted);
   });
 
   it('shows loading spinner while parsing', () => {

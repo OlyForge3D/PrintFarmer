@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLayersCore, parseDetailedLayersCore, detailedParseBuffersTransferList } from '../gcodeParserCore';
+import { parseLayersCore, parseDetailedLayersCore, detailedParseBuffersTransferList, parseBedBounds } from '../gcodeParserCore';
 
 const THREE_LAYER_GCODE = `; generated test fixture
 G28 ; home
@@ -148,5 +148,29 @@ describe('detailedParseBuffersTransferList', () => {
     expect(transferList).toHaveLength(10);
     expect(transferList).toContain(buffers.x.buffer);
     expect(transferList).toContain(buffers.tools.buffer);
+  });
+});
+
+describe('parseBedBounds', () => {
+  it('reads the OrcaSlicer printable_area corner list', () => {
+    const text = `${THREE_LAYER_GCODE}; CONFIG_BLOCK_START\n; printable_area = 0x0,256x0,256x256,0x256\n; CONFIG_BLOCK_END\n`;
+    expect(parseBedBounds(text)).toEqual({ minX: 0, minY: 0, maxX: 256, maxY: 256 });
+  });
+
+  it('reads the PrusaSlicer bed_shape corner list, including negative origins', () => {
+    const text = `${THREE_LAYER_GCODE}; bed_shape = -2x-4,252x-4,252x212,-2x212\n`;
+    expect(parseBedBounds(text)).toEqual({ minX: -2, minY: -4, maxX: 252, maxY: 212 });
+  });
+
+  it('returns null when the file declares no bed or an unparsable one', () => {
+    expect(parseBedBounds(THREE_LAYER_GCODE)).toBeNull();
+    expect(parseBedBounds('; printable_area = garbage\n')).toBeNull();
+    expect(parseBedBounds('; printable_area = 0x0,0x0\n')).toBeNull();
+  });
+
+  it('is exposed on the detailed parse buffers', () => {
+    expect(parseDetailedLayersCore(`${THREE_LAYER_GCODE}; printable_area = 0x0,220x0,220x220,0x220\n`).bed)
+      .toEqual({ minX: 0, minY: 0, maxX: 220, maxY: 220 });
+    expect(parseDetailedLayersCore(THREE_LAYER_GCODE).bed).toBeNull();
   });
 });

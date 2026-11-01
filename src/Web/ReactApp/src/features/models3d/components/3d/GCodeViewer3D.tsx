@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { GearIcon, SkipForwardIcon, PlayIcon, PauseIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -10,6 +10,8 @@ import {
 } from '@/features/slicer/services';
 import { buildGcodeLineBuffers } from './gcodeLineBuffers';
 import { GcodeLineSegments } from './GcodeLineSegments';
+import { GcodeBed, GcodeCameraFit } from './GcodeSceneHelpers';
+import { GCODE_TO_SCENE_ROTATION, computeToolpathBounds, resolveBedBounds } from './gcodeSceneMath';
 
 interface ColorMode {
   id: number;
@@ -126,6 +128,15 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   // All visible geometry lives in two merged vertex streams (extrusion and
   // travel), so object/draw-call counts stay constant regardless of file size.
   // The layer slider only changes each stream's draw range.
+  const toolpathBounds = useMemo(
+    () => (parseResult ? computeToolpathBounds(parseResult.layers) : null),
+    [parseResult],
+  );
+  const bed = useMemo(
+    () => resolveBedBounds(parseResult?.bed, toolpathBounds),
+    [parseResult, toolpathBounds],
+  );
+
   const lineBuffers = useMemo(() => {
     if (!parseResult) return null;
     const allToolsEnabled = enabledTools.size >= parseResult.tools.length;
@@ -431,30 +442,33 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
       {/* 3D Viewer */}
       <div className={`${className} border border-pf-border rounded-lg overflow-hidden`}>
         <Canvas
-          camera={{ position: [100, 100, 100], fov: 45 }}
+          camera={{ position: [100, 100, 100], fov: 45, far: 5000 }}
           style={{ background: backgroundColor }}
         >
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
           <pointLight position={[-10, -10, -10]} intensity={0.5} />
 
-          {showGrid && <Grid args={[200, 200]} cellColor={gridColor} sectionColor={gridColor} />}
+          {/* G-code is Z-up; this group maps machine coordinates onto the Y-up scene. */}
+          <group rotation={GCODE_TO_SCENE_ROTATION}>
+            <GcodeBed bed={bed} showGrid={showGrid} gridColor={gridColor} />
+            {lineBuffers && (
+              <GcodeLineSegments
+                stream={lineBuffers.extrude}
+                drawCount={lineBuffers.extrude.layerEnds[currentLayer] ?? 0}
+              />
+            )}
+            {lineBuffers && showMoves && (
+              <GcodeLineSegments
+                stream={lineBuffers.travel}
+                drawCount={lineBuffers.travel.layerEnds[currentLayer] ?? 0}
+                opacity={0.35}
+              />
+            )}
+          </group>
 
-          {lineBuffers && (
-            <GcodeLineSegments
-              stream={lineBuffers.extrude}
-              drawCount={lineBuffers.extrude.layerEnds[currentLayer] ?? 0}
-            />
-          )}
-          {lineBuffers && showMoves && (
-            <GcodeLineSegments
-              stream={lineBuffers.travel}
-              drawCount={lineBuffers.travel.layerEnds[currentLayer] ?? 0}
-              opacity={0.35}
-            />
-          )}
-
-          <OrbitControls />
+          <GcodeCameraFit bounds={toolpathBounds} />
+          <OrbitControls makeDefault />
         </Canvas>
       </div>
     </div>

@@ -37,6 +37,55 @@ export interface DetailedParseBuffers {
   tools: Int32Array;
   pointCount: number;
   layerCount: number;
+  /** Printable bed area declared in the slicer config block, when present. */
+  bed: BedBounds | null;
+}
+
+/** Printable bed rectangle in G-code (machine) X/Y millimetres. */
+export interface BedBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+// OrcaSlicer/Bambu Studio write `printable_area`; PrusaSlicer writes `bed_shape`.
+const BED_AREA_KEYS = ['; printable_area =', '; bed_shape ='];
+
+/**
+ * Reads the printable bed rectangle from the slicer's config comments
+ * (e.g. `; printable_area = 0x0,256x0,256x256,0x256`). The config block sits
+ * at the end of the file, so the last occurrence is used.
+ */
+export function parseBedBounds(gcodeText: string): BedBounds | null {
+  for (const key of BED_AREA_KEYS) {
+    const at = gcodeText.lastIndexOf(key);
+    if (at < 0) continue;
+    const lineEnd = gcodeText.indexOf('\n', at);
+    const value = gcodeText.slice(at + key.length, lineEnd < 0 ? undefined : lineEnd);
+    const bounds = parseCornerList(value);
+    if (bounds) return bounds;
+  }
+  return null;
+}
+
+function parseCornerList(value: string): BedBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const corner of value.split(',')) {
+    const [xs, ys] = corner.trim().split('x');
+    const x = Number.parseFloat(xs);
+    const y = Number.parseFloat(ys);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (!(maxX > minX && maxY > minY)) return null;
+  return { minX, minY, maxX, maxY };
 }
 
 const LAYER_CHANGE_MARKER = ';LAYER_CHANGE';
@@ -316,6 +365,7 @@ export function parseDetailedLayersCore(gcodeText: string): DetailedParseBuffers
     tools: Int32Array.from(Array.from(state.tools).sort((a, b) => a - b)),
     pointCount,
     layerCount: starts.length,
+    bed: parseBedBounds(gcodeText),
   };
 }
 
