@@ -348,7 +348,7 @@ test_slicer_promotion_wiring() {
 
     assert_contains "$compose_content" 'SlicerHost__BaseUrl=${SLICER_HOST_URL:-http://slicer-host:5246}' "API should use the private Docker DNS address for slicer-host"
     assert_equals "2" "$(grep -c 'SlicerPromotion__SharedKey=${PROMOTION_SHARED_API_KEY:-}' "$outdir/docker-compose.yml")" "API and slicer-host should receive the same promotion key"
-    assert_contains "$compose_content" "ArtifactStorage__RootPath=/data/artifacts" "Slicer-host should stage artifacts under its persistent data mount"
+    assert_contains "$compose_content" 'ArtifactStorage__RootPath=${SLICER_ARTIFACT_STORAGE_ROOT_PATH:-/data/artifacts}' "Slicer-host artifact storage should be configurable under its persistent data mount"
     assert_contains "$compose_content" '${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data' "Slicer-host data should use persistent storage"
     assert_contains "$monolith_content" "ArtifactStorage__RootPath=/app/data/artifacts" "Monolith should stage artifacts under persistent application data"
     assert_contains "$monolith_content" "printfarmer-data:/app/data" "Monolith application data should use a persistent volume"
