@@ -1257,14 +1257,17 @@ final class FarmScrollControlUITests: PrintFarmerUITestCase {
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
         XCTAssertTrue(farm.waitForExistence(timeout: 8))
         farm.tap()
+        let cardIdentifier = "farm-card-10000000-0001-0000-0000-000000000001"
+        // On iPad the inherited farm.root ID also labels the horizontal filter scroll.
         let farmScroll = app.scrollViews
             .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .containing(.button, identifier: cardIdentifier)
             .firstMatch
         XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
         XCTAssertFalse(app.searchFields.firstMatch.exists)
         attachScreen("farm-unsearched-before-scroll")
 
-        let card = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
+        let card = app.buttons[cardIdentifier]
         func tapPoint() -> CGPoint? {
             guard card.exists, card.isHittable else { return nil }
             let frame = card.frame
@@ -1283,6 +1286,17 @@ final class FarmScrollControlUITests: PrintFarmerUITestCase {
         attachScreen("farm-unsearched-after-scroll")
         XCTAssertFalse(app.searchFields.firstMatch.exists, "Scrolling must not activate Farm search")
         guard let point = tapPoint() else {
+            let geometry = XCTAttachment(string: [
+                "scrollIdentifier=\(farmScroll.identifier)",
+                "scrollFrame=\(farmScroll.frame)",
+                "cardExists=\(card.exists)",
+                "cardHittable=\(card.isHittable)",
+                "cardFrame=\(card.frame)",
+                "scanFrame=\(app.buttons["navigation.scan"].frame)",
+            ].joined(separator: "\n"))
+            geometry.name = "Issue 3620 rejected tap-point geometry"
+            geometry.lifetime = .keepAlways
+            add(geometry)
             XCTFail("The top of Prusa MK4 #1 must be reachable without search")
             return
         }

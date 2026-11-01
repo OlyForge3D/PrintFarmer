@@ -28,6 +28,14 @@ The existing same-card scroll control remains the runtime regression. Xcode
 27.2 results do not certify pinned Xcode 26.6 CI or golden snapshots; the local
 pinned toolchain cannot connect XCTest on macOS 27.2 (see #3627).
 
+The iPad control failure was separate: the OR/`firstMatch` scroll query selected
+the horizontal filter row (`farm.root`, frame `(0,94,1032,44)`), while the
+same target card was hittable at `(685,640,331,80)` and Scan began at `y=1304`.
+Its 16 responsive swipes followed by tap-point rejection were not watchdog
+evidence. Qualifying the scroll query by its target-card descendant selects the
+printer viewport; the existing viewport containment and Scan/keyboard clearance
+guards remain unchanged. Failure attachments retain scalar geometry for diagnosis.
+
 ### Filament detail query stall (iPhone shard 3)
 
 Run `39143583699`, job `117727392869`, failed at
