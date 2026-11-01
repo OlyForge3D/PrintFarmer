@@ -1224,6 +1224,103 @@ final class Issue3259MockupNormalUITests: PrinterDetailPanelsUITests.Issue3259Mo
 }
 
 @MainActor
+final class FarmScrollControlUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-issue3259-visual-acceptance",
+            "-pf_theme_mode", "dark",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL",
+            "--uitesting-issue3259-control-idle",
+        ]
+    }
+
+    private func attachScreen(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Issue 3620 \(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// #3620: openFarmCard uses search, which bypasses the failing unsearched Farm swipe.
+    func testUnsearchedFarmScrollReachesIdlePrinter() {
+        let provenance = XCTAttachment(string: [
+            "launchArguments=\(app.launchArguments.joined(separator: " "))",
+            "device=\(ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown")",
+            "systemVersion=\(UIDevice.current.systemVersion)",
+            "windowPoints=\(app.windows.firstMatch.frame)",
+        ].joined(separator: "\n"))
+        provenance.name = "Issue 3620 unsearched Farm provenance"
+        provenance.lifetime = .keepAlways
+        add(provenance)
+
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 8)
+        XCTAssertTrue(farm.waitForExistence(timeout: 8))
+        farm.tap()
+        let cardIdentifier = "farm-card-10000000-0001-0000-0000-000000000001"
+        // On iPad the inherited farm.root ID also labels the horizontal filter scroll.
+        let farmScroll = app.scrollViews
+            .matching(NSPredicate(format: "identifier IN %@", ["farm.printerList", "farm.root"]))
+            .containing(.button, identifier: cardIdentifier)
+            .firstMatch
+        XCTAssertTrue(farmScroll.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.searchFields.firstMatch.exists)
+        attachScreen("farm-unsearched-before-scroll")
+
+        let card = app.buttons[cardIdentifier]
+        func tapPoint() -> CGPoint? {
+            guard card.exists, card.isHittable else { return nil }
+            let frame = card.frame
+            let point = CGPoint(x: frame.midX, y: frame.minY + min(44, frame.height / 2))
+            var bottom = farmScroll.frame.maxY
+            let scan = app.buttons["navigation.scan"]
+            if scan.exists { bottom = min(bottom, scan.frame.minY - 8) }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists { bottom = min(bottom, keyboard.frame.minY - 8) }
+            return farmScroll.frame.contains(point) && point.y < bottom ? point : nil
+        }
+
+        var swipeCount = 0
+        for _ in 0..<16 {
+            farmScroll.swipeUp()
+            swipeCount += 1
+            if tapPoint() != nil { break }
+        }
+        XCTAssertGreaterThan(swipeCount, 0, "The unsearched control must exercise a real Farm swipe")
+        let scrollEvidence = XCTAttachment(string: "swipeCount=\(swipeCount)")
+        scrollEvidence.name = "Issue 3620 executed Farm swipes"
+        scrollEvidence.lifetime = .keepAlways
+        add(scrollEvidence)
+        attachScreen("farm-unsearched-after-scroll")
+        XCTAssertFalse(app.searchFields.firstMatch.exists, "Scrolling must not activate Farm search")
+        guard let point = tapPoint() else {
+            let geometry = XCTAttachment(string: [
+                "scrollIdentifier=\(farmScroll.identifier)",
+                "scrollFrame=\(farmScroll.frame)",
+                "cardExists=\(card.exists)",
+                "cardHittable=\(card.isHittable)",
+                "cardFrame=\(card.frame)",
+                "scanFrame=\(app.buttons["navigation.scan"].frame)",
+            ].joined(separator: "\n"))
+            geometry.name = "Issue 3620 rejected tap-point geometry"
+            geometry.lifetime = .keepAlways
+            add(geometry)
+            XCTFail("The top of Prusa MK4 #1 must be reachable without search")
+            return
+        }
+        XCTAssertTrue(card.label.contains("Prusa MK4 #1"))
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: point.x, dy: point.y))
+            .tap()
+
+        XCTAssertTrue(app.buttons["printer.detail.farm"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.otherElements["printer.detail.identity"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["No active print"].waitForExistence(timeout: 8))
+        attachScreen("idle-detail-from-unsearched-farm")
+    }
+}
+
+@MainActor
 class Issue3259ControlIdleUITests: PrinterDetailPanelsUITests.Issue3259MockupCaptureUITests {
     override var additionalLaunchArguments: [String] {
         super.additionalLaunchArguments + ["--uitesting-issue3259-control-idle"]

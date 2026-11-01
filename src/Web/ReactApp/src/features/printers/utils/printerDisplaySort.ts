@@ -1,5 +1,6 @@
 import { PrinterBackend, type Printer } from '@/types/api';
 import { getPrinterBackendName } from '@/common/utils/enumHelpers';
+import type { SortDirection } from '@/common/hooks/useTableSort';
 
 export type PrinterSortMode = 'state' | 'name' | 'backend';
 
@@ -57,23 +58,26 @@ export function sortPrintersForDisplay(
   printers: readonly Printer[],
   sortMode: PrinterSortMode,
   pendingPrinterIds: ReadonlySet<string>,
+  direction: SortDirection = 'asc',
 ): Printer[] {
+  const activeMode = direction === null ? 'state' : sortMode;
+  const multiplier = direction === 'desc' ? -1 : 1;
   const decorated: DecoratedPrinterForSort[] = printers.map(printer => ({
     printer,
     statePriority: getStateSortPriority(printer, pendingPrinterIds),
     backendName: getBackendName(printer.backend),
   }));
   decorated.sort((a, b) => {
-    if (sortMode === 'state') {
-      if (a.statePriority !== b.statePriority) return a.statePriority - b.statePriority;
+    if (activeMode === 'state') {
+      if (a.statePriority !== b.statePriority) return multiplier * (a.statePriority - b.statePriority);
       return PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
     }
-    if (sortMode === 'name') {
-      return PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
+    if (activeMode === 'name') {
+      return multiplier * PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
     }
-    if (sortMode === 'backend') {
+    if (activeMode === 'backend') {
       const cmp = PRINTER_NAME_COLLATOR.compare(a.backendName, b.backendName);
-      if (cmp !== 0) return cmp;
+      if (cmp !== 0) return multiplier * cmp;
       return PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
     }
     return 0;

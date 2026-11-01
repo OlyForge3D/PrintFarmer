@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/services/api';
 import type { UnifiedFilesQueryRequest, UnifiedFilesQueryResponse } from '@/types/api';
 import { FilesPage } from '../FilesPage';
-import { FILE_TOOLBAR_CONTROL_CLASS } from '@/features/fileBrowser/fileBrowserStyles';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -69,18 +68,44 @@ describe('FilesPage folder navigation with the real file browser', () => {
     renderPage(mode);
     await screen.findByRole('checkbox', { name: 'Select part-1.stl' });
     const foldersButton = screen.getByRole('button', { name: 'Folders' });
-    const sortButton = screen.getByRole('button', { name: 'Sort ascending' });
-    expect(sortButton.closest('[data-tour="gcode-toolbar"]')).toHaveClass(FILE_TOOLBAR_CONTROL_CLASS);
-    expect(screen.getByTitle('Grid view').parentElement).not.toHaveClass('p-1');
-    for (const button of [foldersButton, sortButton]) {
-      expect(button).toHaveClass('h-10', 'w-10', 'p-2');
+    const viewToggle = screen.getByRole('button', { name: 'Grid view' }).closest('[role="group"]');
+    expect(viewToggle).toHaveClass('pf-toolbar__group--segmented');
+    expect(viewToggle).not.toHaveClass('p-1');
+    for (const button of [foldersButton]) {
+      expect(button).toHaveClass('pf-control');
+      expect(button).toHaveAttribute('data-size', 'md');
     }
+    if (mode === 'explorer') {
+      expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Sort direction: descending' })).not.toBeInTheDocument();
+      const header = screen.getByRole('columnheader', { name: 'Uploaded' });
+      expect(header).toHaveAttribute('aria-sort', 'descending');
+      const sortButton = within(header).getByRole('button', { name: 'Uploaded' });
+      fireEvent.click(sortButton);
+      expect(header).toHaveAttribute('aria-sort', 'none');
+      fireEvent.click(sortButton);
+      await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sortOrder: 'asc' }), expect.any(AbortSignal),
+      ));
+      expect(header).toHaveAttribute('aria-sort', 'ascending');
+      fireEvent.click(sortButton);
+      await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sortOrder: 'desc' }), expect.any(AbortSignal),
+      ));
+      expect(header).toHaveAttribute('aria-sort', 'descending');
+      return;
+    }
+    const sortButton = screen.getByRole('button', { name: 'Sort direction: descending' });
+    expect(sortButton.closest('[data-tour="gcode-toolbar"]')).toHaveClass('pf-toolbar');
+    expect(sortButton).toHaveClass('pf-control');
+    expect(sortButton).toHaveAttribute('data-size', 'md');
     fireEvent.click(sortButton);
     await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
       expect.objectContaining({ sortOrder: 'asc' }), expect.any(AbortSignal),
     ));
-    expect(screen.getByRole('button', { name: 'Sort descending' })).toBe(sortButton);
-    expect(sortButton).toHaveClass('h-10', 'w-10', 'p-2');
+    expect(screen.getByRole('button', { name: 'Sort direction: ascending' })).toBe(sortButton);
+    expect(sortButton).toHaveClass('pf-control');
+    expect(sortButton).toHaveAttribute('data-size', 'md');
     fireEvent.click(sortButton);
     await waitFor(() => expect(apiClient.getUnifiedFiles).toHaveBeenLastCalledWith(
       expect.objectContaining({ sortOrder: 'desc' }), expect.any(AbortSignal),
@@ -98,17 +123,28 @@ describe('FilesPage folder navigation with the real file browser', () => {
     const foldersButton = screen.getByRole('button', { name: 'Folders' });
     expect(foldersButton.textContent).toBe('');
     expect(foldersButton.querySelector('svg')).toBeInTheDocument();
+    const filtersButton = screen.getByRole('button', { name: 'Filters' });
+    expect(filtersButton).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('combobox', { name: 'Type' })).not.toBeInTheDocument();
+    fireEvent.click(filtersButton);
+    expect(filtersButton).toHaveAttribute('aria-expanded', 'true');
     for (const [label, control] of [
       ['Search', screen.getByRole('searchbox', { name: 'Search' })],
       ['Type', screen.getByRole('combobox', { name: 'Type' })],
-      ['Sort', screen.getByRole('combobox', { name: 'Sort files' })],
       ['Folders', foldersButton],
     ] as const) {
       const fieldLabel = screen.getByText(label, { selector: 'label' });
       expect(fieldLabel).toBeVisible();
       expect(fieldLabel).toHaveAttribute('for', control.id);
-      expect(fieldLabel.parentElement).toHaveClass('flex-col');
+      expect(fieldLabel.parentElement).toHaveClass('pf-toolbar-field');
       expect(fieldLabel.parentElement?.firstElementChild).toBe(fieldLabel);
+    }
+    if (mode === 'grid') {
+      const sortControl = screen.getByRole('combobox', { name: 'Sort by' });
+      expect(screen.getByText('Sort', { selector: 'label' })).toHaveAttribute('for', sortControl.id);
+    } else {
+      expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Sort', { selector: 'label' })).not.toBeInTheDocument();
     }
     expect(foldersButton).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('combobox', { name: 'Folder' })).not.toBeInTheDocument();
@@ -117,7 +153,7 @@ describe('FilesPage folder navigation with the real file browser', () => {
     fireEvent.click(foldersButton);
     expect(foldersButton).toHaveAttribute('aria-expanded', 'true');
     expect(panel).toBeVisible();
-    expect(panel?.firstElementChild).toHaveClass(FILE_TOOLBAR_CONTROL_CLASS);
+    expect(within(panel!).getByRole('group', { name: 'Folder controls' })).toHaveClass('pf-toolbar');
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select part-2.stl' }));
     expect(screen.getByRole('checkbox', { name: 'Select part-2.stl' })).toBeChecked();
@@ -163,6 +199,7 @@ describe('FilesPage folder navigation with the real file browser', () => {
   it.each(['grid', 'explorer'] as const)('uses one URL-driven type dropdown and preserves folder scope in %s mode', async mode => {
     renderPage(mode, '/files?type=models&remoteSearch=usb');
     await screen.findByRole('checkbox', { name: 'Select part-1.stl' });
+    fireEvent.click(screen.getByRole('button', { name: 'Filters (1)' }));
     const type = screen.getByRole('combobox', { name: 'Type' });
     expect(type).toHaveValue('models');
     expect(within(type).getAllByRole('option').map(option => option.textContent))

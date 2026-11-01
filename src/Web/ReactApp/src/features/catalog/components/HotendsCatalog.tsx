@@ -8,9 +8,9 @@ import {
   Badge,
   DataTable,
   type DataTableColumn,
-  ViewToggle,
-  gridTableOptions,
 } from '@/common/components/ui';
+import { CatalogHeader, CatalogModelToolbar, CatalogResultsSummary } from './CatalogModelToolbar';
+import { filterCatalogModels } from './catalogModelFilters';
 import { Modal } from '@/common/components/modals/Modal';
 import { ManufacturerSelector } from '@/common/components/ManufacturerSelector';
 import { ComponentModelCard, type HotendModelCardData } from '@/common/components/ComponentModelCard';
@@ -85,6 +85,8 @@ export function HotendsCatalog() {
 
   // View toggle state (grid vs table) - persisted per tab
   const [view, setView] = useCatalogViewMode('hotends');
+  const [searchValue, setSearchValue] = useState('');
+  const [selectedManufacturerId, setSelectedManufacturerId] = useState<string | undefined>();
 
   // Define columns for DataTable with built-in sorting
   const columns = useMemo<DataTableColumn<HotendModelCardData>[]>(() => [
@@ -297,33 +299,43 @@ export function HotendsCatalog() {
     );
   }
 
-  const cards = (hotendModels ?? []).map(toCardData);
+  const allCards = (hotendModels ?? []).map(toCardData);
+  const cards = filterCatalogModels(allCards, searchValue, selectedManufacturerId);
 
   return (
     <div className="space-y-4">
       {/* Header with Add button */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-pf-text-primary">
-          Hotend Models ({cards.length})
-        </h2>
-        <div className="flex items-center gap-2">
+      <CatalogHeader title="Hotend Models">
           <Button 
+            control
             onClick={handleAddClick}
             title="Add new hotend model"
-            size="sm"
             iconLeft={<PlusIcon className="w-4 h-4 mr-1" />}
           >
             Add
           </Button>
-          <ViewToggle value={view} onChange={setView} options={gridTableOptions} />
-        </div>
-      </div>
+      </CatalogHeader>
+      <CatalogModelToolbar
+        modelLabel="hotend models"
+        context={CatalogContext.Hotends}
+        searchValue={searchValue}
+        onSearchChange={setSearchValue}
+        manufacturerId={selectedManufacturerId}
+        onManufacturerChange={setSelectedManufacturerId}
+        view={view}
+        onViewChange={setView}
+      />
+      <CatalogResultsSummary shownCount={cards.length} totalCount={allCards.length} itemLabel="hotend models" />
 
       {/* Grid or Table view of hotend cards */}
-      {cards.length === 0 ? (
+      {allCards.length === 0 ? (
         <div className="text-center py-12 text-pf-text-secondary">
           <p>No hotend models defined yet.</p>
           <p className="mt-2">Click "Add Hotend" to create your first one.</p>
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="text-center py-12 text-pf-text-secondary">
+          <p>No hotend models match the current filters.</p>
         </div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
