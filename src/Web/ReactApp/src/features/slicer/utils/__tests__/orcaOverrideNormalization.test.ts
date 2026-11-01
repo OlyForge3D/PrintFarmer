@@ -99,6 +99,38 @@ describe('buildProcessOverrides (Simple mode)', () => {
   });
 });
 
+describe('buildProcessOverrides (Simple mode, compound skirt + brim profile)', () => {
+  const compound = { ...baseline, skirt_loops: 2, brim_type: 'outer_only' } as OrcaProcessSettings;
+  const buildFrom = (current: OrcaProcessSettings) =>
+    buildProcessOverrides({
+      slicerSettings: current,
+      originalProcessSettings: compound as unknown as Record<string, unknown>,
+      advancedProcessSettings: {},
+      simpleMode: true,
+      engineVersion: undefined,
+    });
+  const edit = (patch: Partial<SlicerSettings>) =>
+    simpleToOrcaSettings({ ...orcaToSimpleSettings(compound), ...patch }, compound);
+
+  it('sends no adhesion overrides when untouched, so the profile keeps skirt and brim', () => {
+    expect(buildFrom(compound)).toEqual({});
+  });
+
+  it('preserves skirt + brim across unrelated Simple edits', () => {
+    const current = edit({ wallLoops: 3, infillPercent: 30 });
+    expect(current).toMatchObject({ skirt_loops: 2, brim_type: 'outer_only', raft_layers: 0 });
+    expect(buildFrom(current)).toEqual({ wall_loops: '3', sparse_infill_density: '30%' });
+  });
+
+  it.each([
+    ['none', { brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' }],
+    ['brim', { brim_type: 'outer_only', skirt_loops: '0', raft_layers: '0' }],
+    ['raft', { brim_type: 'no_brim', skirt_loops: '0', raft_layers: '3' }],
+  ] as const)('an explicit change to %s overrides the compound profile', (bedAdhesionType, expected) => {
+    expect(buildFrom(edit({ bedAdhesionType }))).toMatchObject(expected);
+  });
+});
+
 describe('buildProcessOverrides (Advanced mode)', () => {
   it('sends only real edits and does not force adhesion keys', () => {
     expect(build(baseline, { simpleMode: false })).toEqual({});

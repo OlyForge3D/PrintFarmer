@@ -57,6 +57,17 @@ export function simpleToOrcaSettings(
   settings: SlicerSettings,
   prev: OrcaProcessSettings
 ): OrcaProcessSettings {
+  // A compound profile (e.g. skirt + brim) collapses to one Simple choice; keep
+  // its adhesion keys intact until the user explicitly picks a different one.
+  const preserveAdhesion =
+    hasCompoundAdhesion(prev) && settings.bedAdhesionType === orcaToSimpleSettings(prev).bedAdhesionType;
+  const adhesion = preserveAdhesion
+    ? { brim_type: prev.brim_type, skirt_loops: prev.skirt_loops, raft_layers: prev.raft_layers }
+    : {
+        brim_type: settings.bedAdhesionType === 'brim' ? 'outer_only' : 'no_brim',
+        skirt_loops: settings.bedAdhesionType === 'skirt' ? 1 : 0,
+        raft_layers: settings.bedAdhesionType === 'raft' ? 3 : 0,
+      };
   return {
     ...prev,
     sparse_infill_density: settings.infillPercent,
@@ -66,10 +77,22 @@ export function simpleToOrcaSettings(
     wall_loops: settings.wallLoops,
     enable_support: settings.supportEnabled,
     support_type: settings.supportEnabled ? settings.supportType : prev.support_type,
-    brim_type: settings.bedAdhesionType === 'brim' ? 'outer_only' : 'no_brim',
-    skirt_loops: settings.bedAdhesionType === 'skirt' ? 1 : 0,
-    raft_layers: settings.bedAdhesionType === 'raft' ? 3 : 0,
+    ...adhesion,
   };
+}
+
+/**
+ * True when more than one adhesion feature (raft, skirt, brim) is active. The
+ * Simple panel can only display one of them, so such profiles must not be
+ * rewritten to the single displayed choice unless the user changes adhesion.
+ */
+export function hasCompoundAdhesion(orca: OrcaProcessSettings): boolean {
+  const active = [
+    typeof orca.raft_layers === 'number' && orca.raft_layers > 0,
+    typeof orca.skirt_loops === 'number' && orca.skirt_loops > 0,
+    typeof orca.brim_type === 'string' && orca.brim_type !== 'no_brim',
+  ].filter(Boolean).length;
+  return active > 1;
 }
 
 /**
@@ -81,10 +104,15 @@ export function simpleToOrcaSettings(
  * unset, so omitting it from the overrides lets OrcaSlicer fall back to its
  * own default (`auto_brim`) and print a brim the user never saw. Always sending
  * all three keys removes that mismatch.
+ *
+ * Compound profiles (e.g. skirt + brim) return no forced keys: the profile's
+ * own combination is sliced unless the user explicitly changed adhesion, in
+ * which case `simpleToOrcaSettings` has already collapsed it to one choice.
  */
 export function resolveAdhesionOverrides(
   settings: OrcaProcessSettings,
-): Pick<OrcaProcessSettings, 'brim_type' | 'skirt_loops' | 'raft_layers'> {
+): Partial<Pick<OrcaProcessSettings, 'brim_type' | 'skirt_loops' | 'raft_layers'>> {
+  if (hasCompoundAdhesion(settings)) return {};
   const displayed = orcaToSimpleSettings(settings).bedAdhesionType;
   switch (displayed) {
     case 'brim':
