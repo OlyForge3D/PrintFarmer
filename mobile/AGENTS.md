@@ -16,10 +16,14 @@ Use the shared resolver, not a name-only destination. The approved default is
 **iOS 26.5 (23F77)** under **Xcode 26.6 build 17F113**; runtime preferences
 cannot approve another build. Install that runtime in Xcode Settings >
 Components and create a matching available simulator in Window > Devices and
-Simulators. The shared resolver rejects other Xcode versions and builds. Xcode
-26.6 build 17F113, `xcrun`, and
-Python 3 are required. `GITHUB_ENV` is optional; `--udid` emits only the local
-destination on stdout and diagnostics on stderr.
+Simulators. The default resolver mode rejects other Xcode versions and builds. Xcode
+26.6 build 17F113 is unsupported on macOS 27 or later; use macOS 26.2-26.x
+for pinned test evidence. The resolver checks this before simulator discovery.
+For explicitly local exploration on macOS 27, see the separate
+[Xcode 27.2 workflow](README.md#local-exploration-on-macos-27); it cannot
+replace CI, release, or snapshot-acceptance evidence. `xcrun` and Python 3 are
+required. `GITHUB_ENV` is optional; `--udid` emits only the local destination
+on stdout and diagnostics on stderr.
 
 From the repository root, run the focused snapshot class with retained evidence:
 
@@ -31,11 +35,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/snapshots.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \

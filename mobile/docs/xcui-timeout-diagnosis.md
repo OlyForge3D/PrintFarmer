@@ -197,7 +197,10 @@ round upward to a whole minute. A polling deadline cannot interrupt an in-flight
 remote accessibility operation; XCTest's watchdog is the separate backstop.
 Destination discovery timeouts and Actions step ceilings serve different purposes.
 
-From `mobile/`, use an explicit stable simulator UDID:
+From `mobile/`, use an explicit stable simulator UDID approved through the
+shared resolver. Invoking `run-tests.py` directly does not run the resolver or
+check host compatibility. The [local-only Xcode 27.2 workflow](../README.md#local-exploration-on-macos-27)
+is exploratory and does not qualify as pinned evidence:
 
 ```bash
 set -o pipefail
