@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useId, useMemo } from 'react';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from './Table';
-import type { SortDirection } from '../../hooks/useTableSort';
+import { compareTableValues, nextTableSort, useTableSort, type SortDirection, type TableSortValue } from '../../hooks/useTableSort';
 
 const INTERACTIVE_ROW_CHILD_SELECTOR = [
   'a',
@@ -72,8 +72,10 @@ export interface DataTableColumn<T> {
   header: React.ReactNode;
   /** Whether this column is sortable */
   sortable?: boolean;
-  /** Sort comparator function (required if sortable) */
+  /** Sort comparator function (provide this or sortValue for local sorting) */
   sort?: (a: T, b: T) => number;
+  /** Raw display value; missing/non-finite values remain last in either direction. */
+  sortValue?: (item: T) => TableSortValue;
   /** Render function for cell content */
   render: (item: T) => React.ReactNode;
   /** Optional className for the header cell */
@@ -85,7 +87,7 @@ export interface DataTableColumn<T> {
 /**
  * Props for DataTable component
  */
-export interface DataTableProps<T> {
+interface DataTableBaseProps<T> {
   /** Array of data items to display */
   data: T[];
   /** Column definitions */
@@ -115,6 +117,16 @@ export interface DataTableProps<T> {
   /** Accessible name for the table or keyboard-navigable grid */
   ariaLabel?: string;
 }
+
+export type DataTableProps<T> = DataTableBaseProps<T> & (
+  | { sortColumn?: never; sortDirection?: never; onSortChange?: never }
+  | {
+    /** Controlled sorting leaves the supplied data order unchanged (including server pages). */
+    sortColumn: string | null;
+    sortDirection: SortDirection;
+    onSortChange: (column: string | null, direction: SortDirection) => void;
+  }
+);
 
 /**
  * DataTable - A higher-level table component with built-in sorting and keyboard navigation
@@ -155,6 +167,9 @@ export function DataTable<T>({
   keyboardNavigation,
   defaultSortColumn,
   defaultSortDirection = 'asc',
+  sortColumn: controlledSortColumn,
+  sortDirection: controlledSortDirection,
+  onSortChange,
   onRowSelect,
   onRowFocus,
   renderActions,
@@ -169,36 +184,20 @@ export function DataTable<T>({
   const [activeRowKey, setActiveRowKey] = useState<string | number | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
 
-  // Internal sort state
-  const [sortColumn, setSortColumn] = useState<string | null>(defaultSortColumn ?? null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(
-    defaultSortColumn ? defaultSortDirection : null
-  );
+  const { sortState, handleSort: handleInternalSort } = useTableSort(defaultSortColumn, defaultSortDirection);
+  const controlled = controlledSortColumn !== undefined;
+  const sortColumn = controlled ? controlledSortColumn : sortState.column;
+  const sortDirection = controlled ? controlledSortDirection : sortState.direction;
 
   // Handle sort column click
   const handleSort = useCallback((columnKey: string) => {
-    setSortColumn(prev => {
-      if (prev === columnKey) {
-        // Cycle direction: asc -> desc -> null
-        setSortDirection(dir => {
-          if (dir === 'asc') return 'desc';
-          if (dir === 'desc') {
-            // Reset to no sorting
-            return null;
-          }
-          return 'asc';
-        });
-        // If we're going to null direction, also clear column
-        if (sortDirection === 'desc') {
-          return null;
-        }
-        return columnKey;
-      }
-      // New column
-      setSortDirection('asc');
-      return columnKey;
-    });
-  }, [sortDirection]);
+    if (controlled) {
+      const next = nextTableSort({ column: sortColumn, direction: sortDirection ?? null }, columnKey);
+      onSortChange?.(next.column, next.direction);
+    } else {
+      handleInternalSort(columnKey);
+    }
+  }, [controlled, sortColumn, sortDirection, onSortChange, handleInternalSort]);
 
   // Get column by key
   const getColumn = useCallback((key: string) => {
@@ -207,18 +206,23 @@ export function DataTable<T>({
 
   // Sort data
   const sortedData = useMemo(() => {
-    if (!sortColumn || !sortDirection) {
+    if (controlled || !sortColumn || !sortDirection) {
       return data;
     }
 
     const column = getColumn(sortColumn);
+    const sortValue = column?.sortValue;
+    if (sortValue) {
+      return [...data].sort((a, b) => compareTableValues(sortValue(a), sortValue(b), sortDirection));
+    }
     if (!column?.sort) {
       return data;
     }
 
-    const sorted = [...data].sort(column.sort);
-    return sortDirection === 'desc' ? sorted.reverse() : sorted;
-  }, [data, sortColumn, sortDirection, getColumn]);
+    const comparator = column.sort;
+    const direction = sortDirection === 'desc' ? -1 : 1;
+    return [...data].sort((a, b) => direction * comparator(a, b));
+  }, [controlled, data, sortColumn, sortDirection, getColumn]);
 
   // Handle row selection
   const handleRowSelect = useCallback((index: number) => {

@@ -42,6 +42,22 @@ describe('PrinterTableView - maintenance button', () => {
 
   useAllAutoDispatchStatusesMock.mockReturnValue({ data: [] as AutoDispatchStatus[] });
 
+  it('exposes shared full-cell sort buttons for the displayed name, state and backend only', () => {
+    const onSort = vi.fn();
+    render(<PrinterTableView printers={[basePrinter]} onEdit={vi.fn()} onDelete={vi.fn()}
+      onBulkSetMaintenance={vi.fn()} onOpenMaintenance={vi.fn()} sortMode="backend" sortDirection="desc" onSort={onSort} />);
+    for (const [label, column] of [['Printer', 'name'], ['Status', 'state'], ['Backend', 'backend']] as const) {
+      const header = screen.getByRole('columnheader', { name: label });
+      expect(header).toHaveAttribute('aria-sort', column === 'backend' ? 'descending' : 'none');
+      const button = within(header).getByRole('button', { name: label });
+      expect(button.querySelectorAll('svg')).toHaveLength(2);
+      fireEvent.click(button);
+      expect(onSort).toHaveBeenLastCalledWith(column);
+    }
+    expect(screen.getByRole('cell', { name: 'Moonraker' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Progress' })).not.toHaveAttribute('aria-sort');
+  });
+
   it.each([0, 42.6, 100])('renders numeric progress %s with its percentage and accessible value', (progress) => {
     render(
       <PrinterTableView

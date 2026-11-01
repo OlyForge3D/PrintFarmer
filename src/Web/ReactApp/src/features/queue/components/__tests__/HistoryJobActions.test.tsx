@@ -48,7 +48,7 @@ describe('history rerun actions', () => {
       />,
     );
 
-    expect(screen.getByText('↻ Rerun')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rerun' })).toBeInTheDocument();
   });
 
   it('does not show the rerun action for failed jobs in the card view', () => {
@@ -59,6 +59,6 @@ describe('history rerun actions', () => {
       />,
     );
 
-    expect(screen.queryByText('↻ Rerun')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rerun' })).not.toBeInTheDocument();
   });
 });

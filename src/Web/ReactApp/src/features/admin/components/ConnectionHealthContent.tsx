@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTableSort } from '@/common/hooks/useTableSort';
+import { TableHeaderCell } from '@/common/components/ui/Table';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, Card, Spinner } from '@/common/components/ui';
 import { WiFiIcon, NetworkIcon } from '@/common/components/icons/MdiIcons';
@@ -116,6 +118,7 @@ function PrinterRow({ printer }: { printer: PrinterConnectionHealthDto }) {
 }
 
 export function ConnectionHealthContent() {
+  const { headerProps, sortDataByValues } = useTableSort<'printer' | 'backend' | 'state' | 'uptime' | 'reconnects' | 'lastConnected' | 'lastDisconnected' | 'mode'>();
   const { data, isLoading, error } = useQuery({
     queryKey: ['diagnostics', 'connections'],
     queryFn: () => apiClient.getConnectionDiagnostics(),
@@ -165,18 +168,27 @@ export function ConnectionHealthContent() {
             <table className="w-full text-left" role="grid" aria-label="Printer connection health">
               <thead>
                 <tr className="border-b border-pf-border">
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Printer</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Backend</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">State</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Uptime (1h)</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Reconnects</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Last Connected</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Last Disconnected</th>
-                  <th className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Mode</th>
+                  <TableHeaderCell {...headerProps('printer')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Printer</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('backend')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Backend</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('state')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">State</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('uptime')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Uptime (1h)</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('reconnects')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Reconnects</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('lastConnected')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Last Connected</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('lastDisconnected')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Last Disconnected</TableHeaderCell>
+                  <TableHeaderCell {...headerProps('mode')} className="px-3 py-2 text-xs font-medium text-pf-text-secondary">Mode</TableHeaderCell>
                 </tr>
               </thead>
               <tbody className="divide-y divide-pf-border">
-                {data.printers.map((printer) => (
+                {sortDataByValues(data.printers, {
+                  printer: printer => printer.printerName,
+                  backend: printer => printer.backend,
+                  state: printer => printer.connectionState,
+                  uptime: printer => printer.uptimePercent,
+                  reconnects: printer => printer.totalReconnects,
+                  lastConnected: printer => printer.lastConnectedUtc ? Date.parse(printer.lastConnectedUtc) : null,
+                  lastDisconnected: printer => printer.lastDisconnectedUtc ? Date.parse(printer.lastDisconnectedUtc) : null,
+                  mode: printer => printer.connectionMode,
+                }).map((printer) => (
                   <PrinterRow key={printer.printerId} printer={printer} />
                 ))}
               </tbody>

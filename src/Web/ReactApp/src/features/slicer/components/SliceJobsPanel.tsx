@@ -278,6 +278,8 @@ export function SliceJobsPanel() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
           containerClassName="w-44"
+          className="pf-control py-0 !rounded-[4px]"
+          data-role="field"
           aria-label="Filter by status"
         >
           {STATUS_FILTERS.map(f => (

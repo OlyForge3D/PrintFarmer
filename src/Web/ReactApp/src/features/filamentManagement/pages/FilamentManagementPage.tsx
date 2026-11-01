@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon, BarcodeScanIcon } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, Tabs } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { LazyContentBoundary } from '@/common/components/LazyContentBoundary';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
@@ -122,54 +122,39 @@ export function FilamentManagementPage() {
         </Button>
       }
     >
-      {/* Tab bar */}
-      <div className="flex gap-0 border-b border-pf-border mb-4" role="tablist" aria-label="Filament inventory tabs">
-        {TABS.map(tab => {
-          const isActive = activeTab === tab.id;
-          return (
-            <Button
+      <Tabs activeTab={activeTab} onTabChange={tab => {
+        if (tab === 'filaments' || tab === 'spools' || tab === 'clusters') handleTabChange(tab);
+      }}>
+        <Tabs.List aria-label="Filament inventory tabs" className="overflow-x-auto">
+          {TABS.map(tab => (
+            <Tabs.Tab
               key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
+              id={tab.id}
               onFocus={() => void TAB_COMPONENTS[tab.id].preload()}
               onPointerEnter={() => void TAB_COMPONENTS[tab.id].preload()}
-              variant="tab"
-              className={`transition-all duration-200 motion-reduce:transition-none
-                ${isActive
-                  ? 'border-b-2 border-b-pf-accent text-pf-accent enabled:hover:bg-pf-bg-1'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary'
-                }
-              `}
-              aria-selected={isActive}
-              role="tab"
-              aria-controls={`tabpanel-${tab.id}`}
-              id={`tab-${tab.id}`}
             >
               {tab.label}
-            </Button>
-          );
-        })}
-      </div>
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
 
-      {/* Tab content */}
-      <div
-        role="tabpanel"
-        id={`tabpanel-${activeTab}`}
-        aria-labelledby={`tab-${activeTab}`}
-        className="transition-opacity duration-200 motion-reduce:transition-none"
-      >
-        <LazyContentBoundary
-          key={activeTab}
-          label={currentTab.label.toLowerCase()}
-          onRetry={ActiveTab.retry}
-          fallback={(
-            <div className="flex min-h-48 items-center justify-center" role="status" aria-label={`Loading ${currentTab.label}`}>
-              <div className="pf-animate-spin h-8 w-8 rounded-full border-b-2 border-pf-accent" />
-            </div>
-          )}
-        >
-          <ActiveTab />
-        </LazyContentBoundary>
-      </div>
+        <Tabs.Panels>
+          <Tabs.Panel id={activeTab} className="transition-opacity duration-200 motion-reduce:transition-none">
+            <LazyContentBoundary
+              key={activeTab}
+              label={currentTab.label.toLowerCase()}
+              onRetry={ActiveTab.retry}
+              fallback={(
+                <div className="flex min-h-48 items-center justify-center" role="status" aria-label={`Loading ${currentTab.label}`}>
+                  <div className="pf-animate-spin h-8 w-8 rounded-full border-b-2 border-pf-accent" />
+                </div>
+              )}
+            >
+              <ActiveTab />
+            </LazyContentBoundary>
+          </Tabs.Panel>
+        </Tabs.Panels>
+      </Tabs>
 
       {scanModalOpen && (
         <LazyModalBoundary

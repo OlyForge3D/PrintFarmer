@@ -1,4 +1,6 @@
 import { useState, useEffect, useEffectEvent, useContext } from 'react';
+import { useTableSort } from '@/common/hooks/useTableSort';
+import { TableHeaderCell } from '@/common/components/ui/Table';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -19,8 +21,9 @@ import {
   UserX,
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
-import { DeleteIcon, SearchIcon, EditIcon, LockIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Input, FormField, Alert, Checkbox } from '@/common/components/ui';
+import { mdiArrowRight } from '@mdi/js';
+import { DeleteIcon, EditIcon, LockIcon } from '@/common/components/icons/MdiIcons';
+import { Button, ControlIcon, SearchField, FormField, Alert, Checkbox, HeaderActions, Input, Toolbar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -415,6 +418,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     (user.firstName && user.firstName.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (user.lastName && user.lastName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  const { headerProps, sortDataByValues } = useTableSort<'user' | 'roles' | 'status' | 'lastLogin' | 'created'>();
+  const sortedUsers = sortDataByValues(filteredUsers, {
+    user: user => user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username,
+    roles: user => user.roles.map(name => roles.find(role => role.name === name)?.displayName || name).join(', '),
+    status: user => user.isActive ? 'Active' : 'Inactive',
+    lastLogin: user => user.lastLogin ? Date.parse(user.lastLogin) : null,
+    created: user => Date.parse(user.createdAt),
+  });
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -492,46 +503,45 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
       icon={Users}
       actions={
-        <Button
-          variant="primary"
-          onClick={openCreateUser}
-          className="flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add User</span>
-        </Button>
+        <HeaderActions className="justify-end mb-0">
+          <Button
+            variant="primary"
+            onClick={openCreateUser}
+            iconLeft={<Plus className="h-4 w-4" />}
+          >
+            Add User
+          </Button>
+        </HeaderActions>
       }
       embedded={embedded}
     >
       {/* Controls */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
-        <div className="relative flex-1 max-w-xs">
-          <Input
-            type="text"
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-          <SearchIcon className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-pf-text-tertiary" />
-        </div>
-      </div>
+      <Toolbar aria-label="User filters">
+        <SearchField
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          onClear={() => setSearchTerm('')}
+          placeholder="Search users..."
+          label="Search users"
+          containerClassName="max-w-xs"
+        />
+      </Toolbar>
       {/* Users Table */}
       <div className="card">
         <div className="overflow-x-auto">
           <table>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Roles</th>
-                <th>Status</th>
-                <th>Last Login</th>
-                <th>Created</th>
+                <TableHeaderCell {...headerProps('user')}>User</TableHeaderCell>
+                <TableHeaderCell {...headerProps('roles')}>Roles</TableHeaderCell>
+                <TableHeaderCell {...headerProps('status')}>Status</TableHeaderCell>
+                <TableHeaderCell {...headerProps('lastLogin')}>Last Login</TableHeaderCell>
+                <TableHeaderCell {...headerProps('created')}>Created</TableHeaderCell>
                 <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((user) => (
+              {sortedUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-pf-bg-2">
                   <td className="px-6 py-4">
                     <div>
@@ -1018,8 +1028,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                       permissionForm.markPristine({ permissions: selectedUser.permissions ?? [] });
                       setShowPermissionsModal(true);
                     }}
+                    iconRight={<ControlIcon path={mdiArrowRight} />}
                   >
-                    Edit Permissions →
+                    Edit Permissions
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2 p-3 bg-pf-bg-0 rounded-sm border border-pf-border">

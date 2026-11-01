@@ -26,6 +26,20 @@ describe('Button radius contract', () => {
     ]);
   });
 
+  it('uses the fixed control radius by default and preserves explicit control overrides', () => {
+    const { rerender } = render(<Button control>Control</Button>);
+    expect(radiusClasses(screen.getByRole('button', { name: 'Control' }))).toEqual([]);
+
+    rerender(
+      <Button control className="rounded-lg">
+        Control
+      </Button>
+    );
+    expect(radiusClasses(screen.getByRole('button', { name: 'Control' }))).toEqual([
+      'rounded-lg',
+    ]);
+  });
+
   it('keeps the tab variant square unless the caller overrides it', () => {
     const { rerender } = render(<Button variant="tab">Tab</Button>);
     expect(radiusClasses(screen.getByRole('button', { name: 'Tab' }))).toEqual([

@@ -13,7 +13,8 @@ describe('ColorFamilySelect', () => {
 
   it('renders placeholder when no value selected', () => {
     render(<ColorFamilySelect value="" onChange={() => {}} options={options} placeholder="All Colors" />);
-    expect(screen.getByRole('button', { name: /All Colors/i })).toBeTruthy();
+    const select = screen.getByRole('button', { name: /filter by color family/i });
+    expect(select).toHaveTextContent('All Colors');
   });
 
   it('opens list and selects a value', () => {

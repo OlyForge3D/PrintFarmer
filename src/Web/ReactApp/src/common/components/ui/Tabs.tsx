@@ -80,6 +80,8 @@ export interface TabProps {
   disabled?: boolean;
   icon?: React.ReactNode;
   className?: string;
+  onFocus?: React.FocusEventHandler<HTMLButtonElement>;
+  onPointerEnter?: React.PointerEventHandler<HTMLButtonElement>;
 }
 
 const Tab: React.FC<TabProps> = ({
@@ -88,6 +90,8 @@ const Tab: React.FC<TabProps> = ({
   disabled = false,
   icon,
   className,
+  onFocus,
+  onPointerEnter,
 }) => {
   const { activeTab, setActiveTab } = useTabsContext();
   const isActive = activeTab === id;
@@ -143,6 +147,8 @@ const Tab: React.FC<TabProps> = ({
       disabled={disabled}
       onClick={() => !disabled && setActiveTab(id)}
       onKeyDown={handleKeyDown}
+      onFocus={onFocus}
+      onPointerEnter={onPointerEnter}
       onMouseUp={() => {
         if (btnRef.current && document.activeElement === btnRef.current) {
           btnRef.current.blur();

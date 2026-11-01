@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import './styles/theme.css' layer(base);
 @import './styles/controls.css';
+@import './styles/toolbar.css';
 /* Design System v2 — new theme tokens (no layer so they win the cascade) */
 @import './design-system/themes/base.css';
 @import './design-system/themes/dark.css';

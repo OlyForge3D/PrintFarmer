@@ -89,6 +89,27 @@ describe('UserManagementPage shared admin patterns', () => {
     vi.mocked(apiClient.getRoles).mockResolvedValue([farmUserRole]);
   });
 
+  it('sorts displayed names rather than usernames and restores incoming order', async () => {
+    vi.mocked(apiClient.getUsers).mockResolvedValue([
+      { ...testUser, id: 'user-z', username: 'alpha', firstName: 'Zoe', lastName: 'Operator' },
+      { ...testUser, id: 'user-a', username: 'zulu', firstName: 'Ada', lastName: 'Operator' },
+    ]);
+    const user = userEvent.setup();
+    render(<UserManagementPage />);
+    await screen.findByText('Zoe Operator');
+    const rows = () => screen.getAllByRole('row').slice(1);
+    const button = screen.getByRole('button', { name: 'User' });
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    expect(rows()[0]).toHaveTextContent('Ada Operator');
+    await user.click(button);
+    expect(rows()[0]).toHaveTextContent('Zoe Operator');
+    await user.click(button);
+    expect(button.closest('th')).toHaveAttribute('aria-sort', 'none');
+    expect(rows()[0]).toHaveTextContent('Zoe Operator');
+    expect(apiClient.getUsers).toHaveBeenCalledTimes(1);
+  });
+
   it('denies access and shows AdminError when the user lacks users:admin', () => {
     hasUsersAdmin = false;
     render(<UserManagementPage />);
