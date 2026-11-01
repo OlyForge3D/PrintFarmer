@@ -6,6 +6,8 @@
  */
 import type { OrcaProcessSettings } from '@/features/slicer/components/settings/slicerSettingsTypes';
 import type { SlicerSettings } from '@/features/slicer/components/job/SlicerSettingsPanel';
+import type { OrcaProcessProfile } from '@/services/slicerProfilesService';
+import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
 
 /**
  * Derives the Simple-mode UI settings from a raw OrcaProcessSettings object.
@@ -68,4 +70,33 @@ export function simpleToOrcaSettings(
     skirt_loops: settings.bedAdhesionType === 'skirt' ? 1 : 0,
     raft_layers: settings.bedAdhesionType === 'raft' ? 3 : 0,
   };
+}
+
+/**
+ * Helper function to convert OrcaProcessProfile to OrcaProcessSettings
+ * Maps profile data to settings structure, using defaults for missing values
+ */
+export function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): OrcaProcessSettings {
+  if (!profile) return {} as OrcaProcessSettings;
+
+  // Parse settings from profile if available
+  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
+
+  // Merge the four promoted fields and the raw profile JSON, then resolve a
+  // COMPLETE baseline: every metadata-known key gets a value (the profile's
+  // when present, otherwise its metadata default), coerced to the editor's
+  // native type. This ensures every editable field has an original value so
+  // the reset/modified affordance works for all settings, not just the ~50 a
+  // profile declares explicitly. Raw settings win over the promoted fields:
+  // those are server-derived summaries (with fallbacks) of the same keys, and
+  // the raw values are what an untouched submission sends to the slicer.
+  const merged: Record<string, unknown> = {
+    ...(profile.layerHeight !== undefined ? { layer_height: profile.layerHeight } : {}),
+    ...(profile.infillPercentage !== undefined ? { sparse_infill_density: profile.infillPercentage } : {}),
+    ...(profile.printSpeed !== undefined ? { outer_wall_speed: profile.printSpeed } : {}),
+    ...(profile.supports !== undefined ? { enable_support: profile.supports } : {}),
+    ...profileSettings,
+  };
+
+  return resolveProcessSettingsBaseline(merged) as unknown as OrcaProcessSettings;
 }

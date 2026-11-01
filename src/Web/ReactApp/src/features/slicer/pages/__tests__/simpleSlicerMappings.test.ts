@@ -3,7 +3,12 @@
  * Covers bed-adhesion fan-out, support_type preservation, and default fallbacks.
  */
 import { describe, it, expect } from 'vitest';
-import { orcaToSimpleSettings, simpleToOrcaSettings } from '../simpleSlicerMappings';
+import {
+  convertOrcaProcessProfileToSettings,
+  orcaToSimpleSettings,
+  simpleToOrcaSettings,
+} from '../simpleSlicerMappings';
+import type { OrcaProcessProfile } from '@/services/slicerProfilesService';
 import type { OrcaProcessSettings } from '@/features/slicer/components/settings/slicerSettingsTypes';
 
 const EMPTY_ORCA: OrcaProcessSettings = {} as OrcaProcessSettings;
@@ -207,5 +212,25 @@ describe('round-trip: orcaToSimpleSettings → simpleToOrcaSettings', () => {
     expect(back.brim_type).toBe('no_brim');
     expect(back.skirt_loops).toBe(0);
     expect(back.raft_layers).toBe(0);
+  });
+});
+
+describe('convertOrcaProcessProfileToSettings', () => {
+  const profile = (overrides: Partial<OrcaProcessProfile>): OrcaProcessProfile =>
+    ({ name: 'Draft', layerHeight: 0.2, infillPercentage: 20, printSpeed: 60, supports: false, ...overrides }) as OrcaProcessProfile;
+
+  it('shows the raw profile infill ("15%"), not the server-derived fallback, so Simple mode matches what is sliced', () => {
+    const settings = convertOrcaProcessProfileToSettings(
+      profile({ infillPercentage: 20, settings: { sparse_infill_density: '15%' } }),
+    );
+
+    expect(settings.sparse_infill_density).toBe(15);
+    expect(orcaToSimpleSettings(settings).infillPercent).toBe(15);
+  });
+
+  it('falls back to the promoted infillPercentage when the raw settings omit the key', () => {
+    const settings = convertOrcaProcessProfileToSettings(profile({ infillPercentage: 25, settings: {} }));
+
+    expect(settings.sparse_infill_density).toBe(25);
   });
 });

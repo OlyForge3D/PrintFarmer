@@ -117,6 +117,32 @@ public sealed class OrcaRawValueParserTests
         _ = result.Should().Be(260);
     }
 
+    [Theory]
+    [InlineData("\"15%\"", 15)]
+    [InlineData("[\"15%\"]", 15)]
+    [InlineData("\"15\"", 15)]
+    [InlineData("15", 15)]
+    [InlineData("\" 12.5% \"", 13)]
+    public void ParseOptionalPercentInt_AcceptsOrcaPercentForms(string json, int expected)
+    {
+        JsonElement root = Parse($$"""{"value": {{json}}}""");
+
+        int? result = OrcaRawValueParser.ParseOptionalPercentInt(root, "value");
+
+        _ = result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("""{"other": "15%"}""")]
+    [InlineData("""{"value": "abc%"}""")]
+    [InlineData("""{"value": []}""")]
+    public void ParseOptionalPercentInt_WithMissingOrUnparsable_ReturnsNull(string json)
+    {
+        int? result = OrcaRawValueParser.ParseOptionalPercentInt(Parse(json), "value");
+
+        _ = result.Should().BeNull();
+    }
+
     [Fact]
     public void ParseOptionalDouble_WithPresentKey_ParsesValue()
     {

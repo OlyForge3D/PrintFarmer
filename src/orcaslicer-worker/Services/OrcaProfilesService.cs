@@ -1724,9 +1724,10 @@ public class OrcaProfilesService : ISlicerProfilesService
             profile.LayerHeight = ParseDoubleValue(layerElem) ?? 0.2;
         }
 
-        // Try sparse_infill_density first (primary key), fallback to fill_density
-        profile.InfillPercentage = ParseOptionalInt(root, "sparse_infill_density")
-            ?? ParseOptionalInt(root, "fill_density")
+        // Try sparse_infill_density first (primary key), fallback to fill_density.
+        // Orca stores these as percent strings ("15%"), which an int parse rejects.
+        profile.InfillPercentage = ParseOptionalPercentInt(root, "sparse_infill_density")
+            ?? ParseOptionalPercentInt(root, "fill_density")
             ?? 20;
 
         profile.PrintSpeed = ParseProcessPrintSpeed(root, 50);
