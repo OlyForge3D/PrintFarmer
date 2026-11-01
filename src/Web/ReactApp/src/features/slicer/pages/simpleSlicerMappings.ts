@@ -9,23 +9,59 @@ import type { SlicerSettings } from '@/features/slicer/components/job/SlicerSett
 import type { OrcaProcessProfile } from '@/services/slicerProfilesService';
 import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
 
+type AdhesionFeature = 'raft' | 'skirt' | 'brim';
+
+/** The effective bed adhesion of a process profile, as far as it can be known. */
+export type ProfileAdhesion =
+  | { kind: 'single'; type: 'none' | AdhesionFeature }
+  | { kind: 'compound'; features: AdhesionFeature[] }
+  | { kind: 'unknown' };
+
+/**
+ * Classifies a profile's bed adhesion from its effective `raft_layers`,
+ * `skirt_loops` and `brim_type`.
+ *
+ * Worker library profiles arrive with their `inherits:` chain already merged,
+ * so a key that is still missing was not declared anywhere we could resolve
+ * (OrcaSlicer then applies its built-in default, or the parent was never
+ * found). Such a key is unknown: it is NOT read as "off" and not guessed from
+ * metadata defaults, so the profile is reported as `unknown` rather than
+ * inventing a None or a combination.
+ */
+export function describeProfileAdhesion(orca: OrcaProcessSettings): ProfileAdhesion {
+  const { raft_layers: raft, skirt_loops: skirt, brim_type: brim } = orca;
+  if (typeof raft !== 'number' || typeof skirt !== 'number' || typeof brim !== 'string' || brim === '') {
+    return { kind: 'unknown' };
+  }
+  const features: AdhesionFeature[] = [];
+  if (raft > 0) features.push('raft');
+  if (skirt > 0) features.push('skirt');
+  if (brim !== 'no_brim') features.push('brim');
+  if (features.length > 1) return { kind: 'compound', features };
+  return { kind: 'single', type: features[0] ?? 'none' };
+}
+
+function profileAdhesionLabel(adhesion: ProfileAdhesion): string {
+  return adhesion.kind === 'compound'
+    ? `Profile: ${adhesion.features.join(' + ')}`
+    : 'Profile-controlled (inherited value unknown)';
+}
+
 /**
  * Derives the Simple-mode UI settings from a raw OrcaProcessSettings object.
  *
- * Bed adhesion priority: raft_layers > 0 → raft, skirt_loops > 0 → skirt,
- * any brim_type other than 'no_brim' → brim, otherwise none.
+ * Bed adhesion: a profile with exactly one adhesion feature (or explicitly
+ * none) maps to that choice. A combination (e.g. skirt + brim) or an
+ * unresolved inherited value maps to `profile`, labelled with what is known,
+ * so the panel never names a single choice the slicer would not produce.
  */
 export function orcaToSimpleSettings(orca: OrcaProcessSettings): SlicerSettings {
-  let bedAdhesionType: SlicerSettings['bedAdhesionType'] = 'none';
-  if (typeof orca.raft_layers === 'number' && orca.raft_layers > 0) {
-    bedAdhesionType = 'raft';
-  } else if (typeof orca.skirt_loops === 'number' && orca.skirt_loops > 0) {
-    bedAdhesionType = 'skirt';
-  } else if (orca.brim_type && orca.brim_type !== 'no_brim') {
-    bedAdhesionType = 'brim';
-  }
+  const adhesion = describeProfileAdhesion(orca);
+  const bedAdhesionType: SlicerSettings['bedAdhesionType'] =
+    adhesion.kind === 'single' ? adhesion.type : 'profile';
 
   return {
+    ...(bedAdhesionType === 'profile' ? { bedAdhesionProfileLabel: profileAdhesionLabel(adhesion) } : {}),
     layerHeight: typeof orca.layer_height === 'number' ? orca.layer_height : 0.2,
     infillPercent: typeof orca.sparse_infill_density === 'number' ? orca.sparse_infill_density : 15,
     infillPattern: typeof orca.sparse_infill_pattern === 'string' ? orca.sparse_infill_pattern : 'grid',
@@ -50,6 +86,10 @@ export function orcaToSimpleSettings(orca: OrcaProcessSettings): SlicerSettings 
  *   raft  → brim_type: 'no_brim',   skirt_loops: 0, raft_layers: 3
  *   none  → brim_type: 'no_brim',   skirt_loops: 0, raft_layers: 0
  *
+ * Bed adhesion `profile` (a compound or unresolved profile state) keeps the
+ * previous adhesion keys exactly as they were, including absent ones, so the
+ * profile's own semantics are sliced until the user picks an explicit choice.
+ *
  * support_type is preserved from prev when supports are disabled.
  * layer_height is intentionally omitted: governed by the process-profile preset in Simple mode.
  */
@@ -57,17 +97,14 @@ export function simpleToOrcaSettings(
   settings: SlicerSettings,
   prev: OrcaProcessSettings
 ): OrcaProcessSettings {
-  // A compound profile (e.g. skirt + brim) collapses to one Simple choice; keep
-  // its adhesion keys intact until the user explicitly picks a different one.
-  const preserveAdhesion =
-    hasCompoundAdhesion(prev) && settings.bedAdhesionType === orcaToSimpleSettings(prev).bedAdhesionType;
-  const adhesion = preserveAdhesion
-    ? { brim_type: prev.brim_type, skirt_loops: prev.skirt_loops, raft_layers: prev.raft_layers }
-    : {
-        brim_type: settings.bedAdhesionType === 'brim' ? 'outer_only' : 'no_brim',
-        skirt_loops: settings.bedAdhesionType === 'skirt' ? 1 : 0,
-        raft_layers: settings.bedAdhesionType === 'raft' ? 3 : 0,
-      };
+  const adhesion =
+    settings.bedAdhesionType === 'profile'
+      ? { brim_type: prev.brim_type, skirt_loops: prev.skirt_loops, raft_layers: prev.raft_layers }
+      : {
+          brim_type: settings.bedAdhesionType === 'brim' ? 'outer_only' : 'no_brim',
+          skirt_loops: settings.bedAdhesionType === 'skirt' ? 1 : 0,
+          raft_layers: settings.bedAdhesionType === 'raft' ? 3 : 0,
+        };
   return {
     ...prev,
     sparse_infill_density: settings.infillPercent,
@@ -82,39 +119,25 @@ export function simpleToOrcaSettings(
 }
 
 /**
- * True when more than one adhesion feature (raft, skirt, brim) is active. The
- * Simple panel can only display one of them, so such profiles must not be
- * rewritten to the single displayed choice unless the user changes adhesion.
- */
-export function hasCompoundAdhesion(orca: OrcaProcessSettings): boolean {
-  const active = [
-    typeof orca.raft_layers === 'number' && orca.raft_layers > 0,
-    typeof orca.skirt_loops === 'number' && orca.skirt_loops > 0,
-    typeof orca.brim_type === 'string' && orca.brim_type !== 'no_brim',
-  ].filter(Boolean).length;
-  return active > 1;
-}
-
-/**
  * Resolves the explicit bed-adhesion keys to send with a Simple-mode slice job so
  * the slicer produces exactly the adhesion the Simple panel displays.
  *
- * The displayed choice is derived by `orcaToSimpleSettings`, which treats a
- * missing `brim_type` as "none". Profiles that inherit `brim_type` leave it
- * unset, so omitting it from the overrides lets OrcaSlicer fall back to its
- * own default (`auto_brim`) and print a brim the user never saw. Always sending
- * all three keys removes that mismatch.
+ * A single displayed choice (including None) is always sent as all three keys,
+ * so OrcaSlicer cannot fall back to its own default (`auto_brim`) and print a
+ * brim the user never saw.
  *
- * Compound profiles (e.g. skirt + brim) return no forced keys: the profile's
- * own combination is sliced unless the user explicitly changed adhesion, in
- * which case `simpleToOrcaSettings` has already collapsed it to one choice.
+ * A `profile` state (a combination such as skirt + brim, or an inherited value
+ * that could not be resolved) returns no forced keys: the profile's own
+ * adhesion is sliced, which is what the panel says. Once the user picks an
+ * explicit choice, `simpleToOrcaSettings` has written known values, and those
+ * are sent.
  */
 export function resolveAdhesionOverrides(
   settings: OrcaProcessSettings,
 ): Partial<Pick<OrcaProcessSettings, 'brim_type' | 'skirt_loops' | 'raft_layers'>> {
-  if (hasCompoundAdhesion(settings)) return {};
-  const displayed = orcaToSimpleSettings(settings).bedAdhesionType;
-  switch (displayed) {
+  const adhesion = describeProfileAdhesion(settings);
+  if (adhesion.kind !== 'single') return {};
+  switch (adhesion.type) {
     case 'brim':
       return {
         brim_type:
@@ -159,5 +182,13 @@ export function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile 
     ...profileSettings,
   };
 
-  return resolveProcessSettingsBaseline(merged) as unknown as OrcaProcessSettings;
+  const resolved = resolveProcessSettingsBaseline(merged);
+  // A metadata default is not evidence of what the profile slices with, so
+  // adhesion keys the profile never declared stay absent (see describeProfileAdhesion).
+  for (const key of ADHESION_KEYS) {
+    if (!(key in merged)) delete resolved[key];
+  }
+  return resolved as unknown as OrcaProcessSettings;
 }
+
+const ADHESION_KEYS = ['raft_layers', 'skirt_loops', 'brim_type'] as const;

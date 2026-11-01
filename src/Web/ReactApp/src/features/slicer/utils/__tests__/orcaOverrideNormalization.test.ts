@@ -7,8 +7,7 @@ import {
   normalizeOrcaOverrides,
 } from '@/features/slicer/utils/orcaOverrideNormalization';
 
-// A profile that inherits brim_type (the real-world bug): the baseline never
-// carries brim_type, so the Simple panel shows "none" for adhesion.
+// A profile that explicitly declares no adhesion (genuinely None).
 const baseline = {
   layer_height: 0.2,
   sparse_infill_density: 15,
@@ -20,6 +19,7 @@ const baseline = {
   support_type: 'normal(auto)',
   skirt_loops: 0,
   raft_layers: 0,
+  brim_type: 'no_brim',
 } as unknown as OrcaProcessSettings;
 
 function build(
@@ -41,7 +41,7 @@ function editSimple(patch: Partial<SlicerSettings>): OrcaProcessSettings {
 }
 
 describe('buildProcessOverrides (Simple mode)', () => {
-  it('sends explicit no-brim adhesion for an untouched job whose profile inherits brim_type', () => {
+  it('sends explicit no-brim adhesion for an untouched job whose profile declares no adhesion', () => {
     expect(orcaToSimpleSettings(baseline).bedAdhesionType).toBe('none');
     expect(build(baseline)).toEqual({ brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' });
   });
@@ -128,6 +128,33 @@ describe('buildProcessOverrides (Simple mode, compound skirt + brim profile)', (
     ['raft', { brim_type: 'no_brim', skirt_loops: '0', raft_layers: '3' }],
   ] as const)('an explicit change to %s overrides the compound profile', (bedAdhesionType, expected) => {
     expect(buildFrom(edit({ bedAdhesionType }))).toMatchObject(expected);
+  });
+});
+
+describe('buildProcessOverrides (Simple mode, unresolved inherited brim_type)', () => {
+  const inherited = { ...baseline } as Record<string, unknown>;
+  delete inherited.brim_type;
+  const unresolved = inherited as unknown as OrcaProcessSettings;
+  const buildFrom = (current: OrcaProcessSettings) =>
+    buildProcessOverrides({
+      slicerSettings: current,
+      originalProcessSettings: inherited,
+      advancedProcessSettings: {},
+      simpleMode: true,
+      engineVersion: undefined,
+    });
+
+  it('shows profile-controlled and forces no adhesion keys', () => {
+    expect(orcaToSimpleSettings(unresolved).bedAdhesionType).toBe('profile');
+    expect(buildFrom(unresolved)).toEqual({});
+  });
+
+  it('sends all three keys once the user picks an explicit choice', () => {
+    const current = simpleToOrcaSettings(
+      { ...orcaToSimpleSettings(unresolved), bedAdhesionType: 'none' },
+      unresolved,
+    );
+    expect(buildFrom(current)).toEqual({ brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' });
   });
 });
 

@@ -1023,6 +1023,7 @@ describe('NewSliceJobPage', () => {
           printSpeed: 60,
           supports: false,
           compatible_printers: ['Prusa MK4S 0.4 nozzle', 'Prusa MK4S HF0.4 nozzle'],
+          settings: { brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' },
         },
       ] as OrcaProcessProfile[]);
 
@@ -1080,11 +1081,9 @@ describe('NewSliceJobPage', () => {
       };
       expect(profile.machineProfileName).toBe('Prusa MK4S HF0.4 nozzle');
       expect(profile.machineProfileName).not.toBe('Prusa MK4S HF');
-      // Simple mode pins adhesion explicitly so an inherited brim_type can't
-      // silently fall back to OrcaSlicer's auto_brim, in Orca's string form.
-      expect(profile.overrides.brim_type).toEqual(expect.any(String));
-      expect(profile.overrides.skirt_loops).toMatch(/^\d+$/);
-      expect(profile.overrides.raft_layers).toMatch(/^\d+$/);
+      // A profile that declares no adhesion pins it explicitly so OrcaSlicer
+      // can't fall back to auto_brim, in Orca's string form.
+      expect(profile.overrides).toMatchObject({ brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' });
     });
 
     it('keeps the machine profile trigger focusable and explained when a printer has no profiles', async () => {
