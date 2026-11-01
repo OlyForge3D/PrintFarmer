@@ -137,6 +137,47 @@ public class JobDispatchService(
             ct);
     }
 
+    public async Task<QueuedPrintJobDto> DispatchBedClearConfirmedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken ct = default)
+    {
+        if (expectedDispatchStateRowVersion is not { Length: > 0 })
+        {
+            throw new InvalidOperationException(
+                "The reviewed dispatch-state revision is required for bed-clear dispatch.");
+        }
+
+        if (scorer is not IBedClearConfirmedDispatchScorer bedClearScorer)
+        {
+            throw new InvalidOperationException(
+                "Bed-clear confirmed dispatch scoring is unavailable.");
+        }
+
+        DispatchScore printerScore =
+            await bedClearScorer.ScorePrinterForBedClearConfirmedJobAsync(jobId, printerId, ct) ??
+            throw new InvalidOperationException(
+                $"Printer '{printerId}' is not an eligible dispatch candidate.");
+
+        EnsureReviewedPrinterIsEligible(
+            printerScore,
+            filamentOverride?.OverrideApproved == true);
+
+        return await DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            printerScore,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            ct);
+    }
+
     public Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
         Guid jobId,
         Guid printerId,

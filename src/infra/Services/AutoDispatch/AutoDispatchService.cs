@@ -438,7 +438,7 @@ public class AutoDispatchService(
             try
             {
                 QueuedPrintJobDto dispatched =
-                    await jobDispatchService.DispatchReviewedJobAsync(
+                    await jobDispatchService.DispatchBedClearConfirmedJobAsync(
                         reviewedJob.Id,
                         printerId,
                         QueueActorIdentity.AutoDispatch,
@@ -782,7 +782,7 @@ public class AutoDispatchService(
         QueuedPrintJobDto dispatched;
         try
         {
-            dispatched = await jobDispatchService.DispatchReviewedJobAsync(
+            dispatched = await jobDispatchService.DispatchBedClearConfirmedJobAsync(
                 nextJob.Id,
                 printerId,
                 actorSubject,

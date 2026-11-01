@@ -48,3 +48,24 @@ public interface IDispatchScorerWithOrigin : IDispatchScorer
         Guid jobId,
         CancellationToken ct = default);
 }
+
+/// <summary>
+/// Scores the exact printer an operator has just confirmed bed-clear for. This is the only
+/// scoring path that does not treat that printer's own PendingReady state as unavailable;
+/// every other availability (offline, maintenance, disabled) and compatibility gate still
+/// applies. It must never be used for dispatches that lack an explicit bed-clear confirmation.
+/// </summary>
+public interface IBedClearConfirmedDispatchScorer
+{
+    /// <summary>
+    /// Scores <paramref name="printerId"/> for <paramref name="jobId"/> as if the operator's
+    /// bed-clear confirmation had already released the PendingReady gate.
+    /// </summary>
+    /// <returns>
+    /// The score, or <see langword="null"/> when the job or an enabled printer does not exist.
+    /// </returns>
+    Task<DispatchScore?> ScorePrinterForBedClearConfirmedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        CancellationToken ct = default);
+}
