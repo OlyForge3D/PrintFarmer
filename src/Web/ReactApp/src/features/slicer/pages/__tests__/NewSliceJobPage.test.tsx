@@ -1074,9 +1074,17 @@ describe('NewSliceJobPage', () => {
       }, { timeout: 3000 });
 
       const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerProfileJson: string };
-      const profile = JSON.parse(request.slicerProfileJson) as { machineProfileName: string };
+      const profile = JSON.parse(request.slicerProfileJson) as {
+        machineProfileName: string;
+        overrides: Record<string, unknown>;
+      };
       expect(profile.machineProfileName).toBe('Prusa MK4S HF0.4 nozzle');
       expect(profile.machineProfileName).not.toBe('Prusa MK4S HF');
+      // Simple mode pins adhesion explicitly so an inherited brim_type can't
+      // silently fall back to OrcaSlicer's auto_brim, in Orca's string form.
+      expect(profile.overrides.brim_type).toEqual(expect.any(String));
+      expect(profile.overrides.skirt_loops).toMatch(/^\d+$/);
+      expect(profile.overrides.raft_layers).toMatch(/^\d+$/);
     });
 
     it('keeps the machine profile trigger focusable and explained when a printer has no profiles', async () => {

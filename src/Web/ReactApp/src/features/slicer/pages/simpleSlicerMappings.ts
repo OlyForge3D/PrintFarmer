@@ -73,6 +73,39 @@ export function simpleToOrcaSettings(
 }
 
 /**
+ * Resolves the explicit bed-adhesion keys to send with a Simple-mode slice job so
+ * the slicer produces exactly the adhesion the Simple panel displays.
+ *
+ * The displayed choice is derived by `orcaToSimpleSettings`, which treats a
+ * missing `brim_type` as "none". Profiles that inherit `brim_type` leave it
+ * unset, so omitting it from the overrides lets OrcaSlicer fall back to its
+ * own default (`auto_brim`) and print a brim the user never saw. Always sending
+ * all three keys removes that mismatch.
+ */
+export function resolveAdhesionOverrides(
+  settings: OrcaProcessSettings,
+): Pick<OrcaProcessSettings, 'brim_type' | 'skirt_loops' | 'raft_layers'> {
+  const displayed = orcaToSimpleSettings(settings).bedAdhesionType;
+  switch (displayed) {
+    case 'brim':
+      return {
+        brim_type:
+          typeof settings.brim_type === 'string' && settings.brim_type !== 'no_brim'
+            ? settings.brim_type
+            : 'outer_only',
+        skirt_loops: 0,
+        raft_layers: 0,
+      };
+    case 'skirt':
+      return { brim_type: 'no_brim', skirt_loops: settings.skirt_loops, raft_layers: 0 };
+    case 'raft':
+      return { brim_type: 'no_brim', skirt_loops: 0, raft_layers: settings.raft_layers };
+    default:
+      return { brim_type: 'no_brim', skirt_loops: 0, raft_layers: 0 };
+  }
+}
+
+/**
  * Helper function to convert OrcaProcessProfile to OrcaProcessSettings
  * Maps profile data to settings structure, using defaults for missing values
  */

@@ -64,7 +64,8 @@ import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
 import { loadModelResponse, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
 import { validateModelResponse } from '@/features/slicer/utils/validate-model-response';
-import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
+import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson } from '@/features/slicer/utils/slicePayload';
+import { buildProcessOverrides } from '@/features/slicer/utils/orcaOverrideNormalization';
 import { validateOrcaPrintSettings } from '@/features/slicer/utils/slicerSettingsValidation';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
@@ -2077,10 +2078,15 @@ export const NewSliceJobPage: React.FC = () => {
     // the editor — never the full ~300-key metadata baseline. The named process
     // profile (and its `inherits:` chain) is resolved worker-side, so re-sending
     // unmodified defaults would clobber the profile's tuned/inherited values.
-    const modifiedProcessOverrides = diffProcessOverrides(
-      slicerSettings as unknown as Record<string, unknown>,
+    // In Simple mode the adhesion keys are always sent explicitly so the slicer
+    // matches the displayed choice; values are normalised to Orca's string form.
+    const processOverrides = buildProcessOverrides({
+      slicerSettings,
       originalProcessSettings,
-    );
+      advancedProcessSettings,
+      simpleMode: slicerMode !== 'Advanced',
+      engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
+    });
 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
@@ -2103,14 +2109,7 @@ export const NewSliceJobPage: React.FC = () => {
         filamentColours: extruderFilamentColoursPayload,
         filamentColour: singleFilamentColour,
         processPresetId: selectedProcessPresetId,
-        overrides: scrubSettingsForVersion(
-          {
-            ...advancedProcessSettings,
-            ...modifiedProcessOverrides,
-          },
-          'process',
-          selectedEngineVersion ?? latestAvailableForEngine,
-        ),
+        overrides: processOverrides,
       }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
