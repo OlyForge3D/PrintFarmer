@@ -17,19 +17,19 @@ final class PrinterCardMediaModel {
     private(set) var request: PrinterCardRequestID?
     private(set) var image: UIImage?
     private(set) var printTimeLeftSeconds: Double?
-    private var revision = UUID()
+    @ObservationIgnored private var revision = UUID()
 
     func cancel() {
+        // Lazy-row disappearance must not invalidate the layout it is removing.
         revision = UUID()
-        request = nil
-        image = nil
-        printTimeLeftSeconds = nil
     }
 
     func load(request: PrinterCardRequestID, service: (any PrinterServiceProtocol)?) async {
         cancel()
         let revision = self.revision
         self.request = request
+        image = nil
+        printTimeLeftSeconds = nil
         guard let service else { return }
         async let thumbnail: Void = loadThumbnail(request: request, service: service, revision: revision)
         async let status: Void = loadETA(request: request, service: service, revision: revision)

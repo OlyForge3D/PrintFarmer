@@ -1,5 +1,33 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Farm card disappearance invalidation (#3620)
+
+The unsearched control-idle Farm scroll in run `40986691357` aborted app
+PID `35087` after a 21-second main-thread stall. Its crash was attached under
+a later Filament test, but launch/capture times and the app console correlate
+it with the first Farm swipe. The main thread was committing SwiftUI lazy
+subview placements; the earlier retained control crash was placing them.
+
+Controlled local checks on iOS 26.5 (23F77), using **Xcode 27.2 (27B52) for
+exploration only**, reproduced the stall with the original card lifecycle.
+Removing the redundant accessibility representation did not prevent it.
+Disabling media loading, or keeping loading but removing disappearance-time
+media clearing, allowed the same unsearched Prusa MK4 #1 control to reach detail.
+
+`PrinterCardMediaModel.cancel()` now invalidates only its non-observed request
+revision. A disappearing lazy card must not clear the image, request or ETA
+that its layout is still using. A new load clears those rendered values, and
+revision/task-cancellation guards continue to reject late thumbnail and ETA
+responses. The `.task` remains responsible for cancelling its async children.
+Media loading, card appearance, search/return behavior and watchdog enforcement
+are unchanged.
+
+Focused lifecycle tests prove cancellation does not invalidate observed media,
+late responses cannot publish, and a replacement load clears retained media.
+The existing same-card scroll control remains the runtime regression. Xcode
+27.2 results do not certify pinned Xcode 26.6 CI or golden snapshots; the local
+pinned toolchain cannot connect XCTest on macOS 27.2 (see #3627).
+
 ### Filament detail query stall (iPhone shard 3)
 
 Run `39143583699`, job `117727392869`, failed at

@@ -234,7 +234,111 @@ final class PrinterCardSnapshotTests: XCTestCase {
         XCTAssertNil(model.image)
         XCTAssertNil(model.printTimeLeftSeconds)
         model.cancel()
-        XCTAssertNil(model.request)
+        XCTAssertEqual(model.request, new)
+    }
+
+    func testDisappearanceCancellationDoesNotInvalidateRenderedCardMedia() async throws {
+        let service = MockPrinterService()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, _ in data }
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: "/current",
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        let model = PrinterCardMediaModel()
+        await model.load(request: request, service: service)
+        let renderedImage = try XCTUnwrap(model.image)
+        withObservationTracking {
+            _ = model.request
+            _ = model.image
+            _ = model.printTimeLeftSeconds
+        } onChange: {
+            XCTFail("Disappearance cancellation must not invalidate a placed lazy row")
+        }
+
+        model.cancel()
+
+        XCTAssertEqual(model.request, request)
+        XCTAssertTrue(model.image === renderedImage)
+        XCTAssertNil(model.printTimeLeftSeconds)
+    }
+
+    func testDisappearanceCancellationRejectsLateThumbnailAndETA() async throws {
+        let service = MockPrinterService()
+        let thumbnailBarrier = AsyncBarrier()
+        let statusBarrier = AsyncBarrier()
+        defer {
+            thumbnailBarrier.close()
+            statusBarrier.close()
+        }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, _ in
+            await thumbnailBarrier.arriveAndWait()
+            return data
+        }
+        service.statusHandler = { id in
+            await statusBarrier.arriveAndWait()
+            return PrinterStatusDetail(
+                id: id, isOnline: true, state: "printing", progress: 0.5,
+                jobName: "benchy", thumbnailUrl: nil,
+                cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+                x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil,
+                hotendTarget: nil, bedTarget: nil, spoolInfo: nil, mmuStatus: nil,
+                printTimeLeftSeconds: 120
+            )
+        }
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: "/current",
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        let model = PrinterCardMediaModel()
+        let load = Task { await model.load(request: request, service: service) }
+        await thumbnailBarrier.waitUntilArrived()
+        await statusBarrier.waitUntilArrived()
+
+        model.cancel()
+        thumbnailBarrier.release()
+        statusBarrier.release()
+        await load.value
+
+        XCTAssertEqual(model.request, request)
+        XCTAssertNil(model.image)
+        XCTAssertNil(model.printTimeLeftSeconds)
+    }
+
+    func testNewLoadClearsCancelledMediaBeforeReplacementResponse() async throws {
+        let service = MockPrinterService()
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try XCTUnwrap(image.pngData())
+        service.thumbnailHandler = { _, _ in data }
+        let model = PrinterCardMediaModel()
+        let request = PrinterCardRequestID(
+            printerID: TestData.testUUID, path: "/current",
+            jobName: "benchy", state: "printing", isFailureSuspected: false,
+            serviceID: ObjectIdentifier(service)
+        )
+        await model.load(request: request, service: service)
+        XCTAssertNotNil(model.image)
+        model.cancel()
+
+        await model.load(request: request, service: nil)
+
+        XCTAssertEqual(model.request, request)
+        XCTAssertNil(model.image)
+        XCTAssertNil(model.printTimeLeftSeconds)
     }
 
     func testAuthenticatedThumbnailIsDecodedAndDownsampledForCurrentRevision() async throws {
