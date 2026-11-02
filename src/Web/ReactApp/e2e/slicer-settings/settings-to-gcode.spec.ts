@@ -1,12 +1,14 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import metadata from '../../src/features/slicer/generated/orcaSettingsMetadata.json' with { type: 'json' };
 import { provisionAdminAndLogin } from '../fixtures/emulator-setup';
 import {
-  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, inventory, parseConfig,
+  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, heaterTargets, inventory, parseConfig,
   type CoverageRow, type ProfileKind, type SettingDefinition,
 } from './gcode-evidence';
+import { assertSourceIdentity, sourceIdentity, type RunContext } from './run-context';
 
 const version = '2.4.2';
 const apiUrl = 'http://127.0.0.1:15245';
@@ -74,7 +76,7 @@ async function selectFilament(page: Page, name: string): Promise<void> {
   await expect(selector).toBeHidden();
 }
 
-async function editControl(dialog: Locator, setting: SettingDefinition, baseline: string | undefined, kind: ProfileKind): Promise<unknown> {
+async function editControl(dialog: Locator, setting: SettingDefinition, baseline: string | undefined, kind: ProfileKind, baselineGcode: string): Promise<unknown> {
   const tabs = dialog.getByRole('tab');
   const profile = metadata[kind];
   const section = profile.tabs.flatMap(tab => tab.sections).find(section => section.fields.some(field => field.key === setting.key));
@@ -138,6 +140,15 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     await expect(control).toBeChecked({ checked: value });
     return value;
   }
+  if (type === 'color') {
+    const text = control.locator('..').getByPlaceholder('#000000', { exact: true });
+    const sameBaseline = baseline !== undefined && canonical('#123456', setting) === canonicalConfig(baseline, setting);
+    const value = sameBaseline || await text.inputValue() === '#123456' ? '#654321' : '#123456';
+    await text.fill(value);
+    await text.blur();
+    await expect(text).toHaveValue(value);
+    return value;
+  }
   if (await control.getAttribute('role') === 'combobox') {
     const patterns = ['sparse_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
     if (!patterns.includes(setting.key)) throw new Error(`${setting.key}: needs a curated combobox value/label mapping`);
@@ -162,9 +173,13 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     const step = setting.type === 'int' ? 1 : 0.01;
     // Orca caps bridge width at the nozzle diameter even though registry.max
     // also accommodates percent values; this number-only UI emits millimetres.
-    const candidates = setting.key === 'bridge_line_width'
+    let candidates = setting.key === 'bridge_line_width'
       ? [0.35, 0.36]
       : [current + step, current - step, current + 2 * step];
+    if (['nozzle_temperature', 'nozzle_temperature_initial_layer'].includes(setting.key)) {
+      const before = heaterTargets(baselineGcode);
+      candidates = Array.from({ length: 20 }, (_, i) => current + i + 1).filter(value => !before.includes(value));
+    }
     const next = candidates
       .map(value => Number(value.toFixed(5)))
       .find(value => Number.isFinite(value)
@@ -196,10 +211,12 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     sparse_infill_rotate_template: ['0,90', '0,45'],
     compatible_printers_condition: ['nozzle_diameter[0] == 0.4', 'nozzle_diameter[0] > 0'],
     compatible_prints_condition: ['layer_height < 0.3', 'layer_height < 0.4'],
+    small_area_infill_flow_compensation_model: ['0,0;\n0.5,0.6;\n10,1;', '0,0;\n0.5,0.7;\n10,1;'],
   };
   if ((tag === 'textarea' || tag === 'input') && textValues[setting.key]) {
     const [first, second] = textValues[setting.key];
-    const next = await control.inputValue() === first ? second : first;
+    const sameBaseline = baseline !== undefined && canonical(first, setting) === canonicalConfig(baseline, setting);
+    const next = sameBaseline || await control.inputValue() === first ? second : first;
     await control.fill(next);
     await control.blur();
     return next;
@@ -213,7 +230,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   throw new Error(`${setting.key}: ${tag}/${type} requires a curated valid alternative, not arbitrary text`);
 }
 
-async function applySetting(page: Page, row: CoverageRow, baseline: string | undefined, api: APIRequestContext): Promise<unknown> {
+async function applySetting(page: Page, row: CoverageRow, baseline: string | undefined, api: APIRequestContext, baselineGcode: string, phase = 'changed'): Promise<unknown> {
   const process = row.profile === 'process';
   await page.getByRole('button', { name: process ? 'Process profile options menu' : 'Filament profile options menu', exact: true }).click();
   await page.getByRole('button', { name: process ? 'Edit in modal' : 'Edit settings', exact: true }).click();
@@ -225,12 +242,12 @@ async function applySetting(page: Page, row: CoverageRow, baseline: string | und
   const advanced = dialog.getByRole('button', { name: 'Switch to Advanced mode', exact: true });
   if (await advanced.isVisible()) await advanced.click();
   await expect(dialog.getByRole('button', { name: 'Switch to Simple mode', exact: true })).toBeVisible();
-  const requested = await editControl(dialog, definition(row.profile, row.key), baseline, row.profile);
+  const requested = await editControl(dialog, definition(row.profile, row.key), baseline, row.profile, baselineGcode);
   if (process) {
     await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
   } else {
     await dialog.getByRole('button', { name: 'Save as Custom Profile', exact: true }).click();
-    const name = `settings-regression-${row.key}`;
+    const name = `settings-regression-${row.key}-${phase}`;
     await dialog.getByRole('textbox', { name: 'Custom Profile Name' }).fill(name);
     const saved = page.waitForResponse(response => response.url().endsWith('/api/slicer/profiles/upload') && response.request().method() === 'POST');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
@@ -289,8 +306,19 @@ async function slice(page: Page, api: APIRequestContext, root: string, label: st
 test('every registry setting has explicit editor-to-new-G-code evidence', async ({ page, playwright }, testInfo) => {
   const root = process.env.PF_SETTINGS_RUN_ROOT;
   if (!root) throw new Error('Use playwright.slicer-settings.config.ts; shared/external stacks are not permitted');
+  const context: RunContext = JSON.parse(readFileSync(join(root, 'run.json'), 'utf8'));
+  assertSourceIdentity(context.source, sourceIdentity());
+  const isolation: unknown = JSON.parse(readFileSync(join(root, 'isolation.json'), 'utf8'));
+  const enginePath = join(process.env.ORCA_TEST_ROOT!, process.platform === 'win32' ? 'orca-slicer.exe' : 'bin/orca-slicer');
+  const engineSha256 = createHash('sha256').update(readFileSync(enginePath)).digest('hex');
   mkdirSync(root, { recursive: true });
   const rows = inventory();
+  const diagnosticKeys = process.env.PF_SETTINGS_KEYS?.split(',').map(key => key.trim()).filter(Boolean);
+  if ((diagnosticKeys && diagnosticKeys.length === 0)
+    || diagnosticKeys?.some(key => !rows.some(row => `${row.profile}.${row.key}` === key))) {
+    throw new Error('PF_SETTINGS_KEYS contains a key outside the current inventory');
+  }
+  const provenance = { runId: context.runId, source: context.source, engineSha256, isolation, diagnosticKeys };
   const first = ['layer_height', 'initial_layer_print_height', 'wall_loops', 'sparse_infill_density',
     'nozzle_temperature', 'nozzle_temperature_initial_layer'];
   rows.sort((a, b) => {
@@ -319,6 +347,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
   }
   let negativeControl = 'not run';
   let engineVerified = false;
+  let sourceVerified = false;
   let blocker: string | undefined;
   let api: APIRequestContext | undefined;
   try {
@@ -379,38 +408,71 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
     }, token);
     await openJob(page, uploaded.id);
     const baseline = await slice(page, api, root, 'baseline');
+    const baselineGcode = readFileSync(join(root, 'baseline.gcode'), 'utf8');
     engineVerified = true;
 
     for (const row of rows) {
       const setting = definition(row.profile, row.key);
       if (row.status === 'excluded') continue;
+      if (diagnosticKeys && !diagnosticKeys.includes(`${row.profile}.${row.key}`)) {
+        row.reason = 'Not executed: diagnostic PF_SETTINGS_KEYS filter. This row remains unresolved and the suite must fail.';
+        continue;
+      }
+      assertSourceIdentity(context.source, sourceIdentity());
       row.attempted = true;
       row.baseline = baseline.get(row.key);
       try {
+        let effectiveBaseline = baseline;
+        if (!baseline.has(row.key)) {
+          // Nullable/conditional options may be absent until explicitly set.
+          // Establish a real per-key baseline through the same save/select path,
+          // then require a second distinct value and a second fresh artifact.
+          await openJob(page, uploaded.id);
+          const first = await applySetting(page, row, undefined, api, baselineGcode, 'baseline');
+          row.baselineRequested = first;
+          const setupRow: CoverageRow = { ...row, requested: first };
+          const label = `${row.profile}-${row.key}-baseline`;
+          try {
+            effectiveBaseline = await slice(page, api, root, label, setupRow);
+          } finally {
+            row.baselineJobId = setupRow.jobId;
+            if (setupRow.gcodeGenerated) row.baselineArtifact = `${label}.gcode`;
+          }
+          const value = effectiveBaseline.get(row.key);
+          if (value === undefined) {
+            throw new Error(`${row.key}: neither the shared baseline nor an explicitly saved per-key baseline emits this key. Needs an audited engine/feature disposition; NOT verified.`);
+          }
+          expect(canonicalConfig(value, setting), `${row.key}: per-key baseline did not retain its UI value`).toBe(canonical(first, setting));
+          row.baseline = value;
+        }
         await openJob(page, uploaded.id);
-        row.requested = await applySetting(page, row, row.baseline, api);
+        row.requested = await applySetting(page, row, row.baseline, api, baselineGcode);
         const actual = await slice(page, api, root, `${row.profile}-${row.key}`, row);
         row.emitted = actual.get(row.key);
-        if (!baseline.has(row.key)) {
-          throw new Error(`${row.key}: baseline CONFIG_BLOCK does not emit this key; changed job ${actual.has(row.key) ? 'emits it but has no comparable baseline' : 'also does not emit it'}. Needs a specific engine/feature disposition; NOT verified.`);
-        }
-        assertChangedConfig(setting, row.requested, baseline, actual);
+        assertChangedConfig(setting, row.requested, effectiveBaseline, actual);
         row.behaviorVerified = assertCommandEvidence(row.key, row.requested,
-          readFileSync(join(root, `${row.profile}-${row.key}.gcode`), 'utf8'));
+          readFileSync(join(root, `${row.profile}-${row.key}.gcode`), 'utf8'), baselineGcode);
         if (negativeControl === 'not run') {
           const corrupted = new Map(actual);
           corrupted.set(row.key, row.baseline!);
-          expect(() => assertChangedConfig(setting, row.requested, baseline, corrupted)).toThrow();
+          expect(() => assertChangedConfig(setting, row.requested, effectiveBaseline, corrupted)).toThrow();
           negativeControl = `${row.profile}.${row.key}: replacing the newly generated value with baseline was rejected`;
         }
         row.status = 'config-verified';
         row.reason = 'Changed through the editor and Apply/save-select path; new job CONFIG_BLOCK matches distinct request. Configuration retention only, not physical behavior proof.';
+        if (row.key === 'post_process') {
+          // Tagged Orca 2.4.2 OrcaSlicer.cpp comments out CLI execution of
+          // run_post_process_scripts. Retention must not imply host execution.
+          row.reason += ' Orca 2.4.2 CLI disables post-processing execution; behavior is NOT verified.';
+        }
       } catch (error) {
         row.reason = error instanceof Error ? error.message : String(error);
       }
-      writeFileSync(join(root, 'coverage.json'), JSON.stringify({ engine: version, engineVerified, negativeControl, rows }, null, 2));
+      writeFileSync(join(root, 'coverage.json'), JSON.stringify({ ...provenance, engine: version, engineVerified, sourceVerified, negativeControl, rows }, null, 2));
       process.stdout.write(`${row.profile}.${row.key}: ${row.status}${row.status === 'unresolved' ? ` (${row.reason.split('\n')[0]})` : ''}\n`);
     }
+    assertSourceIdentity(context.source, sourceIdentity());
+    sourceVerified = true;
     assertComplete(rows);
     expect(negativeControl, 'At least one live changed value must exercise the negative control').not.toBe('not run');
     for (const key of ['layer_height', 'initial_layer_print_height', 'nozzle_temperature', 'nozzle_temperature_initial_layer']) {
@@ -432,7 +494,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
       unresolved: rows.filter(row => row.status === 'unresolved').length,
     };
     const report = join(root, 'coverage.json');
-    writeFileSync(report, JSON.stringify({ engineRequested: version, engineVerified, summary, negativeControl, blocker, rows }, null, 2));
+    writeFileSync(report, JSON.stringify({ ...provenance, engineRequested: version, engineVerified, sourceVerified, summary, negativeControl, blocker, rows }, null, 2));
     await testInfo.attach('per-setting coverage (incomplete unless unresolved=0)', { path: report, contentType: 'application/json' });
     process.stdout.write(`Settings coverage: ${JSON.stringify(summary)}; report: ${report}\n`);
     await api?.dispose();

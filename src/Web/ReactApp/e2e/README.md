@@ -20,15 +20,11 @@ requested value with the newly generated Orca 2.4.2 `CONFIG_BLOCK`. A saved
 profile alone is not a pass. Unresolved keys fail the suite; explicit exclusions
 remain in the report and are never counted as verified.
 
-Install the normal frontend dependencies and Playwright Chromium, and build the
-API, worker and native emulator from this worktree before running:
+Use .NET SDK 10, the normal frontend dependencies, Playwright Chromium and a
+clean, committed worktree. Run:
 
 ```powershell
-cd <repo-root>\src
-dotnet build .\api\Farm.Web.Api.csproj -c Debug
-dotnet build .\orcaslicer-worker\Farm.OrcaSlicer.Worker.csproj -c Debug
-dotnet build .\moonraker-emulator\Farm.Moonraker.Emulator\Farm.Moonraker.Emulator.csproj -c Debug
-cd .\Web\ReactApp
+cd <repo-root>\src\Web\ReactApp
 $env:ORCA_TEST_ROOT = '<private upstream OrcaSlicer 2.4.2 portable directory>'
 npm run test:e2e -- --config playwright.slicer-settings.config.ts
 ```
@@ -38,7 +34,12 @@ point it at a shared worker's writable profile/cache directory. The dedicated
 config starts its own loopback API (15245), worker (15246), UI (13000), and
 Moonraker emulator (17125), refuses occupied ports, and creates fresh SQLite
 databases, model/artifact storage and profile caches on every invocation.
-The worker also receives private per-user engine configuration/cache paths.
+Before starting any application host, a .NET file-based preflight builds the
+existing API, worker and emulator projects and resolves the API's actual
+configuration ordering and production storage/temp/DataProtection providers.
+Missing or external effective destinations fail before host startup. Every
+host runs with a private working/temp directory; the worker also receives
+private per-user engine configuration/cache paths.
 No Docker or physical printer is needed. Browser print/queue dispatch is
 blocked; generated files are **never** sent to a printer.
 
@@ -53,6 +54,18 @@ G-code header to identify 2.4.2.
 The report distinguishes UI attempts, accepted submissions, and `executed`
 settings with newly generated, downloaded G-code; only matching distinct values
 count as `configVerified`.
+An option absent from the shared baseline gets an explicit UI-saved per-key
+baseline before the second distinct edit. Both artifacts and the baseline job
+ID remain in the report; a key still absent remains unresolved.
+`run.json` and every coverage report identify the full source commit, normalized
+SHA-256 identities of harness/registry inputs, a unique run ID and the engine
+binary hash. Uncommitted inputs, source changes during execution and stale
+worker handoffs fail. `PF_SETTINGS_RUN_ROOT` and `PF_SETTINGS_RUN_ID` are private
+launcher-to-worker handoffs, not user-selectable reuse options.
+For focused diagnosis only, `PF_SETTINGS_KEYS` accepts comma-separated qualified
+keys such as `process.brim_width,filament.nozzle_temperature`. Every unselected
+registry row remains unresolved and the command **fails**; this mode cannot
+produce exhaustive acceptance. Clear that variable for the full run.
 
 Configuration retention is not physical behavior proof. Limited independent
 heater-command and extrusion-plane checks are recorded separately. A negative
@@ -63,7 +76,10 @@ an incomplete run is not exhaustive coverage.
 
 For post-processing, the suite uses only its checked-in proof script: it refuses
 files outside the private run and appends a comment to complete Orca G-code.
-It never invokes a user-configured post-processing program.
+It never invokes a user-configured post-processing program. Orca 2.4.2's CLI
+disables `run_post_process_scripts`; configuration retention is not evidence that
+the program ran. Heater evidence requires a target absent from every baseline
+heater command so an unchanged unrelated phase cannot produce a false pass.
 
 ## Monolith Smoke Journeys (Wire-Contract Corpus)
 
