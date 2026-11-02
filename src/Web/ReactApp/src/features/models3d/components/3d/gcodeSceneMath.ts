@@ -26,7 +26,7 @@ export function gcodeToScene(x: number, y: number, z: number): Vec3 {
 }
 
 /**
- * Bounds of the printed part. Uses extrusion points only, so purge lines are
+ * Bounds of the printed part. Uses extrusion segments only, so purge lines are
  * included but parking/homing travel moves do not drag the camera away from
  * the model. Falls back to every point when a file has no extrusion.
  */
@@ -42,18 +42,35 @@ function accumulateBounds(layers: readonly DetailedLayer[], extrusionOnly: boole
   let maxX = -Infinity;
   let maxY = -Infinity;
   let maxZ = -Infinity;
+  const include = (x: number, y: number, z: number) => {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  };
+  // An extrusion segment runs from the previous point (possibly a travel
+  // endpoint, possibly in the previous layer) to point i, so both ends count.
+  let hasPrev = false;
+  let px = 0;
+  let py = 0;
+  let pz = 0;
   for (const layer of layers) {
     for (let i = 0; i < layer.count; i++) {
-      if (extrusionOnly && layer.type[i] !== 1) continue;
       const x = layer.x[i];
       const y = layer.y[i];
       const z = layer.pz[i];
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-      if (z < minZ) minZ = z;
-      if (z > maxZ) maxZ = z;
+      if (!extrusionOnly) {
+        include(x, y, z);
+      } else if (layer.type[i] === 1) {
+        if (hasPrev) include(px, py, pz);
+        include(x, y, z);
+      }
+      hasPrev = true;
+      px = x;
+      py = y;
+      pz = z;
     }
   }
   if (minX === Infinity) return null;
