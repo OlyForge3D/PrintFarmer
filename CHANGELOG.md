@@ -70,6 +70,9 @@
 
 ### Fixes
 
+- Keep the slicer profile editor's Simple/Advanced toggle stable under React
+  StrictMode while preserving synchronization between mounted editors (#3643).
+
 - Align the Prometheus exporter with the OpenTelemetry 1.18 SDK so `/metrics`
   exports samples instead of returning an empty HTTP 200 response after a
   serializer type-load failure (#3571).
