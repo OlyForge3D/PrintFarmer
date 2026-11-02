@@ -20,6 +20,10 @@ import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Alert } from '@/common/components/ui';
 import { MetadataProfileEditor } from '@/features/slicer/components/settings/MetadataProfileRenderer';
 import {
+  hydrateFilamentProfileSettings,
+  serializeFilamentProfileSettings,
+} from '@/features/slicer/components/filamentProfileEditorAdapter';
+import {
   MACHINE_PROFILE_ADDITIONAL_SECTIONS,
   MACHINE_PROFILE_ADDITIONAL_SETTINGS,
   MACHINE_PROFILE_COMMON_SIMPLE_KEYS,
@@ -54,7 +58,7 @@ function getDefaultProfileName(profileType: ProfileType, originalName: string | 
 }
 
 /**
- * Extract the complete settings bag and hydrate machine values promoted by the DTO.
+ * Extract editor values while retaining native wire settings separately for saving.
  */
 function isMachineProfile(
   profile: OrcaMachineProfile | OrcaFilamentProfile,
@@ -70,7 +74,7 @@ function extractSettings(
   if (profileType === 'machine' && isMachineProfile(profile)) {
     return hydrateMachineProfileSettings(profile);
   }
-  return { ...(profile.settings ?? {}) };
+  return hydrateFilamentProfileSettings(profile.settings ?? {});
 }
 
 function extractRawSettings(
@@ -135,7 +139,7 @@ export function ProfileEditorModal({
     mutationFn: async () => {
       const serializedSettings = profileType === 'machine'
         ? serializeMachineProfileSettings(settings, originalSettings, rawSettings)
-        : settings;
+        : serializeFilamentProfileSettings(settings, originalSettings, rawSettings);
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),
         profileType,

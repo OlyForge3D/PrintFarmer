@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FilamentProfileDropdown } from '../CascadingMenuDropdown';
@@ -16,6 +16,11 @@ function filament(name: string, material: string): OrcaFilamentProfile {
 }
 
 const noopFilter = { hiddenManufacturers: [], hiddenMaterials: [] };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('FilamentProfileDropdown trigger', () => {
   it('shows the filament material type and a full-name tooltip for the selection', () => {
@@ -94,5 +99,63 @@ describe('FilamentProfileDropdown trigger', () => {
     // Nozzle/bed temperatures are NOT shown in the menu rows.
     expect(screen.queryByText(/210°\/60°/)).not.toBeInTheDocument();
     expect(screen.queryByText(/°\//)).not.toBeInTheDocument();
+  });
+
+  it('flips above a low trigger, clamps width, and repositions on resize and scrolling', () => {
+    vi.stubGlobal('innerWidth', 300);
+    vi.stubGlobal('innerHeight', 500);
+    const onSelect = vi.fn();
+    render(
+      <FilamentProfileDropdown
+        profiles={[]}
+        customProfiles={[{ id: 'custom', name: 'Saved filament' }]}
+        selectedProfileName=""
+        onSelect={onSelect}
+        filterConfig={noopFilter}
+        onFilterConfigChange={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole('button');
+    let rect = { top: 460, bottom: 490, left: 250, width: 100 } as DOMRect;
+    vi.spyOn(trigger, 'getBoundingClientRect').mockImplementation(() => rect);
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('dialog', { name: 'Filament selector' });
+    expect(menu).toHaveStyle({ top: 'auto', bottom: '42px', left: '8px', width: '284px', maxHeight: '400px' });
+    vi.stubGlobal('innerWidth', 1000);
+    vi.stubGlobal('innerHeight', 900);
+    fireEvent(window, new Event('resize'));
+    expect(menu).toHaveStyle({ top: '492px', bottom: 'auto', left: '250px', width: '320px', maxHeight: '400px' });
+    rect = { top: 600, bottom: 630, left: 950, width: 100 } as DOMRect;
+    fireEvent(window, new Event('scroll'));
+    expect(menu).toHaveStyle({ top: 'auto', bottom: '302px', left: '672px', maxHeight: '400px' });
+    fireEvent.click(screen.getByRole('button', { name: /Saved filament/ }));
+    expect(onSelect).toHaveBeenCalledWith('Saved filament', 'custom');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('positions a remounted menu when its trigger geometry has not changed', () => {
+    vi.stubGlobal('innerWidth', 1000);
+    vi.stubGlobal('innerHeight', 900);
+    render(
+      <FilamentProfileDropdown
+        profiles={[]}
+        customProfiles={[{ id: 'custom', name: 'Saved filament' }]}
+        selectedProfileName=""
+        onSelect={vi.fn()}
+        filterConfig={noopFilter}
+        onFilterConfigChange={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole('button');
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(
+      { top: 600, bottom: 630, left: 950, width: 100 } as DOMRect,
+    );
+    const position = { top: 'auto', bottom: '302px', left: '672px', width: '320px', maxHeight: '400px' };
+    fireEvent.click(trigger);
+    expect(screen.getByRole('dialog', { name: 'Filament selector' })).toHaveStyle(position);
+    fireEvent.click(screen.getByRole('button', { name: /Saved filament/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('dialog', { name: 'Filament selector' })).toHaveStyle(position);
   });
 });

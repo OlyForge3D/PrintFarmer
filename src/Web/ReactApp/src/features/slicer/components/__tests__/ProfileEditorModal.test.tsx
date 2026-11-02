@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProfileEditorModal } from '@/features/slicer/components/ProfileEditorModal';
 import {
   slicerProfilesService,
+  type OrcaFilamentProfile,
   type OrcaMachineProfile,
 } from '@/services/slicerProfilesService';
 
@@ -15,7 +16,10 @@ vi.mock('@/services/slicerProfilesService', () => ({
   },
 }));
 
-function renderMachineEditor(profile: OrcaMachineProfile) {
+function renderEditor(
+  profileType: 'machine' | 'filament',
+  profile: OrcaMachineProfile | OrcaFilamentProfile,
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -28,12 +32,109 @@ function renderMachineEditor(profile: OrcaMachineProfile) {
       <ProfileEditorModal
         isOpen
         onClose={vi.fn()}
-        profileType="machine"
+        profileType={profileType}
         originalProfile={profile}
       />
     </QueryClientProvider>,
   );
 }
+
+function renderMachineEditor(profile: OrcaMachineProfile) {
+  return renderEditor('machine', profile);
+}
+
+describe('ProfileEditorModal filament profiles', () => {
+  beforeEach(() => {
+    localStorage.setItem('printfarmer-slicer-viewmode', 'advanced');
+    vi.clearAllMocks();
+    vi.mocked(slicerProfilesService.uploadProfile).mockResolvedValue({
+      id: 'custom-filament-id',
+      name: 'Custom filament',
+      profileType: 'filament',
+      isSystem: false,
+      createdAt: '2026-08-31T00:00:00Z',
+      updatedAt: '2026-08-31T00:00:00Z',
+    });
+  });
+
+  function renderFilamentEditor(settings: Record<string, unknown>) {
+    renderEditor('filament', {
+      name: 'Test PLA', material: 'PLA',
+      nozzleTemperature: 200, bedTemperature: 60, printSpeed: 50, settings,
+    });
+  }
+
+  it('hydrates native arrays and uploads edited temperature, boolean, percent and G-code vectors', async () => {
+    const user = userEvent.setup();
+    renderFilamentEditor({
+      nozzle_temperature: ['200', '215'],
+      filament_soluble: ['1', '0'],
+      filament_shrink: ['100%', '99%'],
+      filament_start_gcode: ['M117 X,Y\nG1 X1,Y2', 'M117 E2'],
+      raw_only_setting: { nested: ['keep'] },
+    });
+
+    const soluble = screen.getByRole('checkbox', { name: 'Soluble material' });
+    expect(soluble).toBeChecked();
+    await user.click(soluble);
+    const shrink = screen.getByRole('spinbutton', { name: 'Shrinkage (XY)' });
+    expect(shrink).toHaveValue(100);
+    fireEvent.change(shrink, { target: { value: '98.5' } });
+    const temperature = screen.getByRole('spinbutton', { name: 'First layer / Other layers Other layers' });
+    expect(temperature).toHaveValue(200);
+    fireEvent.change(temperature, { target: { value: '221' } });
+
+    await user.click(screen.getByRole('tab', { name: 'Advanced' }));
+    const startGcode = screen.getByRole('textbox', { name: 'Start G-code' });
+    expect(startGcode).toHaveValue('M117 X,Y\nG1 X1,Y2');
+    fireEvent.change(startGcode, { target: { value: 'M117 NEW,X\nG1 Y2' } });
+    await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    const request = vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0];
+    expect(JSON.parse(request.rawJson)).toEqual({
+      nozzle_temperature: ['221', '215'],
+      filament_soluble: ['0', '0'],
+      filament_shrink: ['98.5%', '99%'],
+      filament_start_gcode: ['M117 NEW,X\nG1 Y2', 'M117 E2'],
+      raw_only_setting: { nested: ['keep'] },
+    });
+  });
+
+  it('keeps coFloats multi-extruder controls and serializes both edited entries', async () => {
+    const user = userEvent.setup();
+    renderFilamentEditor({ filament_flow_ratio: ['0.98', '0.97'] });
+    const first = screen.getByRole('spinbutton', { name: 'Flow ratio Extruder 1' });
+    const second = screen.getByRole('spinbutton', { name: 'Flow ratio Extruder 2' });
+    expect(first).toHaveValue(0.98);
+    expect(second).toHaveValue(0.97);
+    fireEvent.change(second, { target: { value: '0.96' } });
+    await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0].rawJson))
+      .toEqual({ filament_flow_ratio: ['0.98', '0.96'] });
+  });
+
+  it('resets an absent boolean without adding it to an unrelated save', async () => {
+    const user = userEvent.setup();
+    renderFilamentEditor({ nozzle_temperature: ['200', '215'] });
+    await user.click(screen.getByRole('checkbox', { name: 'Soluble material' }));
+    await user.click(screen.getByRole('button', {
+      name: 'Reset Soluble material to original value',
+    }));
+    expect(screen.getByRole('button', { name: 'Save as Custom Profile' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'First layer / Other layers Other layers' }), {
+      target: { value: '221' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0].rawJson))
+      .toEqual({ nozzle_temperature: ['221', '215'] });
+  });
+});
 
 describe('ProfileEditorModal machine profiles', () => {
   beforeEach(() => {

@@ -60,29 +60,45 @@ export function FilamentProfileDropdown({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
+  const [menuPos, setMenuPos] = useState({ top: '0px', bottom: 'auto', left: 0, width: 0, maxHeight: 400 });
 
   const updatePosition = useCallback(() => {
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
+      const margin = 8;
+      const below = Math.max(0, window.innerHeight - rect.bottom - margin - 2);
+      const above = Math.max(0, rect.top - margin - 2);
+      const flip = below < 400 && above > below;
+      const width = Math.min(Math.max(rect.width, 320), Math.max(0, window.innerWidth - margin * 2));
       setMenuPos({
-        top: rect.bottom + 2,
-        left: rect.left,
-        width: Math.max(rect.width, 320),
+        top: flip ? 'auto' : `${Math.max(margin, rect.bottom + 2)}px`,
+        bottom: flip ? `${Math.max(margin, window.innerHeight - rect.top + 2)}px` : 'auto',
+        left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)),
+        width,
+        maxHeight: Math.min(400, flip ? above : below),
       });
     }
   }, []);
 
   useEffect(() => {
-    if (isOpen) updatePosition();
+    if (!isOpen) return;
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
   }, [isOpen, updatePosition]);
 
   useEffect(() => {
     if (!menuRef.current) return;
-    menuRef.current.style.top = `${menuPos.top}px`;
+    menuRef.current.style.top = menuPos.top;
+    menuRef.current.style.bottom = menuPos.bottom;
     menuRef.current.style.left = `${menuPos.left}px`;
     menuRef.current.style.width = `${menuPos.width}px`;
-  }, [menuPos.left, menuPos.top, menuPos.width]);
+    menuRef.current.style.maxHeight = `${menuPos.maxHeight}px`;
+  }, [isOpen, menuPos.bottom, menuPos.left, menuPos.maxHeight, menuPos.top, menuPos.width]);
 
   // Close on click outside
   useEffect(() => {
@@ -254,10 +270,10 @@ export function FilamentProfileDropdown({
           ref={menuRef}
           role="dialog"
           aria-label="Filament selector"
-          className="fixed z-50 rounded-md border border-pf-border shadow-xl overflow-hidden bg-pf-panel max-h-[25rem]"
+          className="fixed z-50 flex flex-col rounded-md border border-pf-border shadow-xl overflow-hidden bg-pf-panel"
         >
           {/* Header: search + filter toggle */}
-          <div className="sticky top-0 bg-pf-panel border-b border-pf-border p-2 flex gap-1.5">
+          <div className="shrink-0 bg-pf-panel border-b border-pf-border p-2 flex gap-1.5">
             <div className="relative flex-1">
               <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -332,7 +348,7 @@ export function FilamentProfileDropdown({
           )}
 
           {/* Scrollable tree content */}
-          <div className="overflow-y-auto max-h-80">
+          <div className="min-h-0 overflow-y-auto max-h-80">
             {/* Custom profiles section */}
             {filteredCustom.length > 0 && (
               <div>
