@@ -41,8 +41,12 @@ Missing or external effective destinations fail before host startup. Every
 host runs with a private working/temp directory; the worker also receives
 private per-user engine configuration/cache paths.
 The private A1 mini machine-profile copy places the wipe tower at (15, 140),
-inside its 180 mm bed, so the smooth-timelapse case can slice. Stock portable
-profiles are unchanged; this fixture setup is not machine-editor coverage.
+inside its 180 mm bed, and supplies a small clumping-detection exclusion area.
+For prime-tower coverage, both per-key jobs enable clumping detection through
+the process editor; without that dependency Orca 2.4.2 disables single-filament
+towers. The report records and verifies that dependency in both artifacts before
+requiring the distinct prime-tower value. Stock portable profiles are unchanged;
+this fixture setup is not machine-editor or physical clumping-detection coverage.
 The build CLI uses the established NuGet package cache only as a **read-only
 local feed**. Restore/extraction, HTTP caches, lock state and CLI metadata have
 explicit private destinations; the subsequent build uses `--no-restore`.

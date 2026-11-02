@@ -32,6 +32,7 @@ if (!existsSync(profiles)) {
   const machine: Record<string, unknown> = JSON.parse(readFileSync(machinePath, 'utf8'));
   machine.wipe_tower_x = ['15'];
   machine.wipe_tower_y = ['140'];
+  machine.wrapping_exclude_area = ['0x0', '5x0', '5x5', '0x5'];
   writeFileSync(machinePath, JSON.stringify(machine, undefined, 2));
 }
 for (const directory of ['gcode', 'models', 'profiles', 'snapshots', 'thumbnails', 'artifacts', 'jobs', 'custom-profiles', 'cache', 'temp', 'data-protection', 'calibration-blobs']) {

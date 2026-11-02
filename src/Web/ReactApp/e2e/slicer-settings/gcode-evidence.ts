@@ -23,6 +23,7 @@ export interface CoverageRow {
   baselineRequested?: unknown;
   baselineJobId?: string;
   baselineArtifact?: string;
+  dependencies?: Record<string, unknown>;
   emitted?: string;
   jobId?: string;
   attempted: boolean;

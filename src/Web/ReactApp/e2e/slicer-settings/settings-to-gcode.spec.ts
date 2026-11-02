@@ -268,6 +268,14 @@ async function applySetting(page: Page, row: CoverageRow, baseline: string | und
   const advanced = dialog.getByRole('button', { name: 'Switch to Advanced mode', exact: true });
   if (await advanced.isVisible()) await advanced.click();
   await expect(dialog.getByRole('button', { name: 'Switch to Simple mode', exact: true })).toBeVisible();
+  if (row.profile === 'process' && row.key === 'enable_prime_tower') {
+    // Orca 2.4.2 disables single-filament towers unless clumping detection
+    // has a machine exclusion area. Exercise that supported editor dependency
+    // in both the per-key baseline and changed job, not a CLI override.
+    const dependency = await editControl(dialog, definition('process', 'enable_wrapping_detection'), '0', 'process', baselineGcode);
+    expect(dependency).toBe(true);
+    row.dependencies = { enable_wrapping_detection: true };
+  }
   const requested = await editControl(dialog, definition(row.profile, row.key), baseline, row.profile, baselineGcode);
   if (process) {
     await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
@@ -314,6 +322,10 @@ async function slice(page: Page, api: APIRequestContext, root: string, label: st
     expect(profile.overrides, `${row.key}: submission lost process overrides`).toHaveProperty(row.key);
     expect(canonical(profile.overrides?.[row.key], definition(row.profile, row.key)), `${row.key}: submission altered the requested value`)
       .toBe(canonical(row.requested, definition(row.profile, row.key)));
+    for (const [key, value] of Object.entries(row.dependencies ?? {})) {
+      expect(canonical(profile.overrides?.[key], definition('process', key)), `${row.key}: submission lost dependency ${key}`)
+        .toBe(canonical(value, definition('process', key)));
+    }
   }
   let status: { status: string; errorDetail?: string } = { status: 'Queued' };
   await expect(async () => {
@@ -330,7 +342,13 @@ async function slice(page: Page, api: APIRequestContext, root: string, label: st
   writeFileSync(join(root, `${label}.gcode`), gcode);
   if (row) row.gcodeGenerated = true;
   expect(gcode, `${label}: config comments alone are not a printable toolpath`).toMatch(/^G[123]\s+.*[XY].*E/m);
-  return parseConfig(gcode, version);
+  const config = parseConfig(gcode, version);
+  for (const [key, value] of Object.entries(row?.dependencies ?? {})) {
+    expect(config.has(key), `${label}: engine omitted dependency ${key}`).toBe(true);
+    expect(canonicalConfig(config.get(key)!, definition('process', key)), `${label}: engine altered dependency ${key}`)
+      .toBe(canonical(value, definition('process', key)));
+  }
+  return config;
 }
 
 test('every registry setting has explicit editor-to-new-G-code evidence', async ({ page, playwright }, testInfo) => {
@@ -453,7 +471,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
       row.baseline = baseline.get(row.key);
       try {
         let effectiveBaseline = baseline;
-        if (!baseline.has(row.key)) {
+        if (!baseline.has(row.key) || row.key === 'enable_prime_tower') {
           // Nullable/conditional options may be absent until explicitly set.
           // Establish a real per-key baseline through the same save/select path,
           // then require a second distinct value and a second fresh artifact.
@@ -490,6 +508,9 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
         }
         row.status = 'config-verified';
         row.reason = 'Changed through the editor and Apply/save-select path; new job CONFIG_BLOCK matches distinct request. Configuration retention only, not physical behavior proof.';
+        if (row.dependencies) {
+          row.reason += ' Same editor-set clumping-detection dependency is verified in both per-key baseline and changed artifact; the private machine fixture supplies its exclusion area.';
+        }
         if (row.key === 'post_process') {
           // Tagged Orca 2.4.2 OrcaSlicer.cpp comments out CLI execution of
           // run_post_process_scripts. Retention must not imply host execution.
