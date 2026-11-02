@@ -70,6 +70,9 @@
 
 ### Fixes
 
+- Preserve saved filament settings in named stock/custom profile selections by
+  unwrapping stock profile settings before creating native job snapshots (#3643).
+
 - Keep the slicer filament picker inside the viewport, flipping above low
   triggers and scrolling profile results so newly saved presets remain selectable.
 

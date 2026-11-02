@@ -1886,31 +1886,29 @@ public partial class SliceJobController(
             return;
         }
 
-        // System/stock profiles imported by SlicersService store RawJson as a serialized CLR DTO
-        // (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — see their "Settings" bag), not
-        // the flat native OrcaSlicer document NativeSlicerProfiles/WriteNativeProfilesAsync writes
-        // verbatim to disk. Only user-authored custom profiles saved through ProfilesService (which
-        // sanitizes RawJson to a flat native document) are safe to snapshot here. Snapshotting a
-        // DTO-shaped document would produce a machine/process/filament.json OrcaSlicer cannot parse,
-        // regressing stock-name submissions that previously worked via the legacy worker-side
-        // resolution. Bail (defer to the legacy path) rather than risk that.
-        if (!IsFlatNativeProfileJson(machine.RawJson) ||
-            !IsFlatNativeProfileJson(process.RawJson) ||
-            !IsFlatNativeProfileJson(filament.RawJson))
+        // Stock profiles carry the native document in a DTO's Settings bag. Unwrap it just
+        // like ID-based submissions so mixed stock/custom selections keep their saved edits.
+        string? machineJson = ExtractFlatNativeProfileJson(machine.RawJson);
+        string? processJson = ExtractFlatNativeProfileJson(process.RawJson);
+        string? filamentJson = ExtractFlatNativeProfileJson(filament.RawJson);
+        if (machineJson is null || processJson is null || filamentJson is null ||
+            !IsFlatNativeProfileJson(machineJson) ||
+            !IsFlatNativeProfileJson(processJson) ||
+            !IsFlatNativeProfileJson(filamentJson))
         {
             _logger.LogInformation(
-                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles are not flat native JSON (likely a system/stock profile stored as a DTO); deferring to the legacy worker-side resolution",
+                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles do not contain flat native JSON; deferring to the legacy worker-side resolution",
                 job.Id);
             return;
         }
 
-        string processJson = ApplyProcessOverrides(process.RawJson, root);
-        string filamentJson = ApplyFilamentColourOverride(filament.RawJson, root);
+        processJson = ApplyProcessOverrides(processJson, root);
+        filamentJson = ApplyFilamentColourOverride(filamentJson, root);
 
-        job.MachineProfileJson = machine.RawJson;
+        job.MachineProfileJson = machineJson;
         job.ProcessProfileJson = processJson;
         job.FilamentProfileJson = filamentJson;
-        job.MachineProfileSha256 = ComputeSha256(machine.RawJson);
+        job.MachineProfileSha256 = ComputeSha256(machineJson);
         job.ProcessProfileSha256 = ComputeSha256(processJson);
         job.FilamentProfileSha256 = ComputeSha256(filamentJson);
         job.SlicerDistribution = machine.SlicerDistribution ?? job.SlicerDistribution;
