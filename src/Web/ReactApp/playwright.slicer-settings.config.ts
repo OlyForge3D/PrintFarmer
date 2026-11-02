@@ -119,8 +119,11 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
     };
     // The existing cache is a read-only hierarchical package feed, never the
     // restore destination. All extraction/HTTP/lock state belongs to this run.
+    const escapeXml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+    const nugetConfig = join(root, 'NuGet.Config');
+    writeFileSync(nugetConfig, `<configuration><packageSources><clear/><add key="readonly-existing-packages" value="${escapeXml(packageCache)}"/><add key="nuget.org" value="https://api.nuget.org/v3/index.json"/></packageSources></configuration>`);
     dependencyLog = execFileSync('dotnet', ['restore', preflight, '--packages', environment.NUGET_PACKAGES,
-      '--source', packageCache, '--source', 'https://api.nuget.org/v3/index.json', '--nologo', '--verbosity', 'quiet'], {
+      '--configfile', nugetConfig, '--nologo', '--verbosity', 'quiet'], {
       cwd: src, env: environment, encoding: 'utf8', timeout: 600_000, maxBuffer: 8 * 1024 * 1024,
     });
     const output = execFileSync('dotnet', ['run', '--file', preflight, '--no-restore', '--no-launch-profile', '--', join(src, 'api')], {
