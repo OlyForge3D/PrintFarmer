@@ -71,6 +71,26 @@ public sealed class GcodeMetadataFilamentParsingTests : IDisposable
     }
 
     [Fact]
+    public async Task LegacyMillimetreOnlyFooter_UsesHistoricalApproximation()
+    {
+        GcodeMetadataSnapshot result = await ExtractAsync("; filament used = 8000mm\n");
+
+        result.FilamentUsageGrams.Should().BeApproximately(8000 * OrcaSlicingPipelineService.LegacyFilamentGramsPerMm, 1e-9);
+        result.FilamentUsageGrams.Should().BeApproximately(20.0, 1e-9);
+    }
+
+    [Theory]
+    [InlineData("; filament used = 8000mm\n; filament used [g] = 12.5\n")]
+    [InlineData("; filament used [g] = 12.5\n; filament used = 8000mm\n")]
+    [InlineData("; filament used = 12.5g\n; filament used = 8000mm\n")]
+    public async Task ExplicitGrams_TakePrecedenceOverLegacyMillimetres(string content)
+    {
+        GcodeMetadataSnapshot result = await ExtractAsync(content);
+
+        result.FilamentUsageGrams.Should().BeApproximately(12.5, 1e-9);
+    }
+
+    [Fact]
     public async Task MillimetreAndVolumeLines_AreNotMisreadAsGrams()
     {
         GcodeMetadataSnapshot result = await ExtractAsync(

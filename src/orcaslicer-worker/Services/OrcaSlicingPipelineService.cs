@@ -2296,6 +2296,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Regex filamentRegex = FilamentUsedRegex();
         double? totalFilamentGrams = null;
         double? perExtruderFilamentGrams = null;
+        double? legacyMmFilamentGrams = null;
         Regex layerRegex = new Regex(@";\s*layer_count\s*=\s*(\d+)", RegexOptions.IgnoreCase);
         Regex layerCommentRegex = new Regex(@";\s*LAYER:(\d+)", RegexOptions.IgnoreCase);
         int maxLayer = 0;
@@ -2340,7 +2341,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 }
 
                 Match fm = filamentRegex.Match(line);
-                if (fm.Success && TryParseFilamentGrams(fm, out double grams))
+                if (fm.Success && TryParseLegacyFilamentMillimetres(fm, out double legacyGrams))
+                {
+                    legacyMmFilamentGrams = legacyGrams;
+                }
+                else if (fm.Success && TryParseFilamentGrams(fm, out double grams))
                 {
                     if (fm.Groups["total"].Success)
                     {
@@ -2366,7 +2371,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             }
         }
 
-        metadata.FilamentUsageGrams = totalFilamentGrams ?? perExtruderFilamentGrams ?? 0;
+        metadata.FilamentUsageGrams = totalFilamentGrams ?? perExtruderFilamentGrams ?? legacyMmFilamentGrams ?? 0;
 
         if (metadata.LayerCount == 0 && maxLayer > 0)
         {
@@ -2412,9 +2417,27 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     // Orca/Prusa footers: "; filament used [g] = 1.50, 2.25" (one value per extruder) and
     // "; total filament used [g] = 3.75". The [mm] and [cm3] lines are deliberately not matched:
     // converting them to grams needs the filament density, which the footer already applied.
-    // The legacy unbracketed form "; filament used = 10.5g" is still accepted.
-    [GeneratedRegex(@"^\s*;\s*(?<total>total\s+)?filament used\s*(?:\[g\]\s*=\s*(?<values>[\d.,\s]+?)\s*g?|=\s*(?<values>[\d.]+)\s*g)\s*$", RegexOptions.IgnoreCase, "en-US")]
+    // The legacy unbracketed forms "; filament used = 10.5g" and "; filament used = 2000mm" are
+    // still accepted; the latter keeps its historical 0.0025 g/mm approximation and only applies
+    // when no gram value is present.
+    [GeneratedRegex(@"^\s*;\s*(?<total>total\s+)?filament used\s*(?:\[g\]\s*=\s*(?<values>[\d.,\s]+?)\s*g?|=\s*(?<values>[\d.]+)\s*g|=\s*(?<mm>[\d.]+)\s*mm)\s*$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex FilamentUsedRegex();
+
+    internal const double LegacyFilamentGramsPerMm = 0.0025;
+
+    private static bool TryParseLegacyFilamentMillimetres(Match match, out double grams)
+    {
+        grams = 0;
+        if (!match.Groups["mm"].Success
+            || !double.TryParse(match.Groups["mm"].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double mm)
+            || mm < 0)
+        {
+            return false;
+        }
+
+        grams = mm * LegacyFilamentGramsPerMm;
+        return true;
+    }
 
     private static bool TryParseFilamentGrams(Match match, out double grams)
     {

@@ -57,12 +57,43 @@ describe('G-code to scene mapping', () => {
 });
 
 describe('computeToolpathBounds', () => {
-  it('uses extrusion points only so travel/park moves do not widen the box', () => {
+  it('uses extrusion segments only so travel/park moves do not widen the box', () => {
     const bounds = computeToolpathBounds([
-      layer([[50, 60, 0.2, 1], [70, 80, 0.2, 1], [0, 250, 0.2, 0]]),
-      layer([[60, 70, 12, 1], [300, 300, 40, 0]]),
+      layer([[50, 60, 0.2, 0], [70, 80, 0.2, 1], [0, 250, 0.2, 0]]),
+      layer([[55, 65, 12, 0], [60, 70, 12, 1], [300, 300, 40, 0]]),
     ]);
     expect(bounds).toEqual({ minX: 50, minY: 60, minZ: Math.fround(0.2), maxX: 70, maxY: 80, maxZ: 12 });
+  });
+
+  it('includes the start of an extrusion segment that follows a travel move, across layers', () => {
+    expect(computeToolpathBounds([layer([[300, 300, 5, 0], [0, 0, 0.2, 0], [100, 0, 0.2, 1]])]))
+      .toEqual({ minX: 0, minY: 0, minZ: Math.fround(0.2), maxX: 100, maxY: 0, maxZ: Math.fround(0.2) });
+    expect(computeToolpathBounds([
+      layer([[10, 10, 0.2, 1], [20, 20, 0.2, 0]]),
+      layer([[120, 40, 0.4, 1]]),
+    ])).toEqual({ minX: 10, minY: 10, minZ: Math.fround(0.2), maxX: 120, maxY: 40, maxZ: Math.fround(0.4) });
+  });
+
+  it('keeps both endpoints of a long first extrusion segment inside the fitted frustum', () => {
+    const layers = [layer([[300, 300, 30, 0], [0, 0, 0.2, 0], [200, 0, 0.2, 1], [200, 5, 0.2, 1]])];
+    const bounds = computeToolpathBounds(layers);
+    expect(bounds).not.toBeNull();
+    const fov = 45;
+    const aspect = 1.5;
+    const fit = computeCameraFit(bounds!, fov, aspect);
+    const camera = new THREE.PerspectiveCamera(fov, aspect, fit.near, fit.far);
+    camera.position.set(...fit.position);
+    camera.lookAt(...fit.target);
+    camera.updateMatrixWorld();
+    camera.updateProjectionMatrix();
+    for (const [x, y, z] of [[0, 0, 0.2], [200, 0, 0.2], [200, 5, 0.2]] as const) {
+      const ndc = toScene(x, y, z).project(camera);
+      expect(Math.abs(ndc.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(ndc.y)).toBeLessThanOrEqual(1);
+    }
+    expect(bounds!.maxX).toBe(200);
+    expect(bounds!.maxY).toBe(5);
+    expect(bounds!.maxZ).toBeCloseTo(0.2, 5);
   });
 
   it('falls back to all points when nothing is extruded, and null when empty', () => {
