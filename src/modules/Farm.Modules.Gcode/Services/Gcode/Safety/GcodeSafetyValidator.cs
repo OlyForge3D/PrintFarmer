@@ -468,6 +468,17 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 
     private static string ReadCommand(string line)
     {
+        if (line.Length > 1 && (line[0] is 'N' or 'n') && char.IsAsciiDigit(line[1]))
+        {
+            int start = 2;
+            while (start < line.Length && char.IsAsciiDigit(line[start]))
+            {
+                start++;
+            }
+
+            line = line[start..].TrimStart();
+        }
+
         int end = line.IndexOfAny([' ', '\t', ';']);
         string token = end < 0 ? line : line[..end];
         return token.ToUpperInvariant();

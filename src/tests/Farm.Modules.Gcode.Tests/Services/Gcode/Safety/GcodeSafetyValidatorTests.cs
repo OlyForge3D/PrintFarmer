@@ -77,6 +77,9 @@ public sealed class GcodeSafetyValidatorTests
     [InlineData("RUN_SHELL_COMMAND CMD=example")]
     [InlineData("  run_shell_command\tCMD=example ; comment")]
     [InlineData("RUN_SHELL_COMMAND; ignored")]
+    [InlineData("N1 RUN_SHELL_COMMAND CMD=example")]
+    [InlineData("N10RUN_SHELL_COMMAND CMD=example")]
+    [InlineData("n10run_shell_command CMD=example")]
     [InlineData("/bin/sh example")]
     [InlineData("cmd.exe example")]
     [InlineData("powershell example")]
@@ -95,6 +98,8 @@ public sealed class GcodeSafetyValidatorTests
 
     [Theory]
     [InlineData("M104 S251", GcodeSafetyProblemCodes.TemperatureAboveLimit)]
+    [InlineData("N1 M104 S251", GcodeSafetyProblemCodes.TemperatureAboveLimit)]
+    [InlineData("N10M104 S251", GcodeSafetyProblemCodes.TemperatureAboveLimit)]
     [InlineData("M109 S251", GcodeSafetyProblemCodes.TemperatureAboveLimit)]
     [InlineData("M140 S101", GcodeSafetyProblemCodes.TemperatureAboveLimit)]
     [InlineData("M190 S101", GcodeSafetyProblemCodes.TemperatureAboveLimit)]

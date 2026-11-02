@@ -36,7 +36,7 @@ distinct rejection code.
 | Printable polygon / exclusions | Absolute-position XY endpoints must lie in the configured printable polygon and outside configured excluded-region polygons. |
 | Z volume | `G0`/`G1` with Z must not exceed the configured Z maximum. |
 | Volumetric flow | Only if filament diameter **and** maximum flow are supplied. Uses positive extrusion, stored feed rate and XY Manhattan distance, with 0.05 mm3/s tolerance. Neither ordinary caller supplies these limits today. |
-| Executable host commands | Exact first command token, case-insensitive: `RUN_SHELL_COMMAND`, `/bin/sh`, `cmd.exe`, `powershell`, `curl`, `wget`, `nc`, `ssh`. Semicolon comments are stripped first. |
+| Executable host commands | Exact first command token after an optional `N` line-number prefix, case-insensitive: `RUN_SHELL_COMMAND`, `/bin/sh`, `cmd.exe`, `powershell`, `curl`, `wget`, `nc`, `ssh`. Semicolon comments are stripped first. |
 | Empty input | An empty program is rejected as `gcode_malformed`. |
 
 Credential words, URLs, absolute paths and host-command words in full-line or
@@ -106,8 +106,9 @@ enforces every check:
 Unknown firmware macros are accepted but not expanded. Their heating, homing,
 shutdown, shell execution and motion cannot be certified from the file. The
 parser recognizes a limited whitespace-delimited command/parameter vocabulary,
-semicolon comments, `G90`/`G91`, `M82`/`M83`, and `G92 E`. It is not a complete
-firmware interpreter: arcs, compact/line-numbered commands, macro effects,
+semicolon comments, optional `N` line-number prefixes, `G90`/`G91`, `M82`/`M83`,
+and `G92 E`. It is not a complete
+firmware interpreter: arcs, compact command/parameter syntax, macro effects,
 work-coordinate transforms, complete path/segment intersections, negative Z,
 and inherited feed-rate ceiling enforcement are not comprehensively checked.
 Relative XY moves are tracked but do not receive the absolute-XY endpoint checks.
