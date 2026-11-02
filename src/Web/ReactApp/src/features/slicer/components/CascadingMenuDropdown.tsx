@@ -98,7 +98,7 @@ export function FilamentProfileDropdown({
     menuRef.current.style.left = `${menuPos.left}px`;
     menuRef.current.style.width = `${menuPos.width}px`;
     menuRef.current.style.maxHeight = `${menuPos.maxHeight}px`;
-  }, [menuPos.bottom, menuPos.left, menuPos.maxHeight, menuPos.top, menuPos.width]);
+  }, [isOpen, menuPos.bottom, menuPos.left, menuPos.maxHeight, menuPos.top, menuPos.width]);
 
   // Close on click outside
   useEffect(() => {

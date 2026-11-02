@@ -132,4 +132,30 @@ describe('FilamentProfileDropdown trigger', () => {
     expect(onSelect).toHaveBeenCalledWith('Saved filament', 'custom');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('positions a remounted menu when its trigger geometry has not changed', () => {
+    vi.stubGlobal('innerWidth', 1000);
+    vi.stubGlobal('innerHeight', 900);
+    render(
+      <FilamentProfileDropdown
+        profiles={[]}
+        customProfiles={[{ id: 'custom', name: 'Saved filament' }]}
+        selectedProfileName=""
+        onSelect={vi.fn()}
+        filterConfig={noopFilter}
+        onFilterConfigChange={vi.fn()}
+      />,
+    );
+    const trigger = screen.getByRole('button');
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(
+      { top: 600, bottom: 630, left: 950, width: 100 } as DOMRect,
+    );
+    const position = { top: 'auto', bottom: '302px', left: '672px', width: '320px', maxHeight: '400px' };
+    fireEvent.click(trigger);
+    expect(screen.getByRole('dialog', { name: 'Filament selector' })).toHaveStyle(position);
+    fireEvent.click(screen.getByRole('button', { name: /Saved filament/ }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('dialog', { name: 'Filament selector' })).toHaveStyle(position);
+  });
 });

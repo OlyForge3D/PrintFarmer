@@ -28,6 +28,11 @@ if (!existsSync(profiles)) {
   for (const entry of ['BBL', 'BBL.json', 'OrcaFilamentLibrary', 'OrcaFilamentLibrary.json']) {
     cpSync(join(orcaRoot, 'resources', 'profiles', entry), join(profiles, entry), { recursive: true });
   }
+  const machinePath = join(profiles, 'BBL', 'machine', 'Bambu Lab A1 mini 0.4 nozzle.json');
+  const machine: Record<string, unknown> = JSON.parse(readFileSync(machinePath, 'utf8'));
+  machine.wipe_tower_x = ['15'];
+  machine.wipe_tower_y = ['140'];
+  writeFileSync(machinePath, JSON.stringify(machine, undefined, 2));
 }
 for (const directory of ['gcode', 'models', 'profiles', 'snapshots', 'thumbnails', 'artifacts', 'jobs', 'custom-profiles', 'cache', 'temp', 'data-protection', 'calibration-blobs']) {
   mkdirSync(join(root, directory), { recursive: true });

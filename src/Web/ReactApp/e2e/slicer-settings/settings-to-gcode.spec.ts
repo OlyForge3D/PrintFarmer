@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import metadata from '../../src/features/slicer/generated/orcaSettingsMetadata.json' with { type: 'json' };
 import { provisionAdminAndLogin } from '../fixtures/emulator-setup';
 import {
-  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, heaterTargets, inventory, parseConfig,
+  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, heaterTargets, inventory, numericMutationStep, parseConfig,
   type CoverageRow, type ProfileKind, type SettingDefinition,
 } from './gcode-evidence';
 import { assertRunSource, type RunContext } from './run-context';
@@ -106,8 +106,10 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   {
     if (setting.tooltip) {
+      const input = dialog.locator('input').and(dialog.getByTitle(setting.tooltip, { exact: true }));
+      if (await input.count() === 1 && await input.isVisible()) control = input;
       const label = dialog.locator('label[for]').and(dialog.getByTitle(setting.tooltip, { exact: true }));
-      if (await label.count() === 1 && await label.isVisible()) {
+      if (!control && await label.count() === 1 && await label.isVisible()) {
         const id = await label.getAttribute('for');
         if (id) control = dialog.locator(`[id=${JSON.stringify(id)}]`);
       }
@@ -134,13 +136,31 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     const candidate = container.getByLabel(setting.label, { exact: true });
     if (await candidate.count() === 1 && await candidate.isVisible()) control = candidate;
   }
+  const treePairs: Record<string, number> = {
+    tree_support_branch_angle: 0, tree_support_branch_angle_organic: 1,
+    tree_support_branch_diameter: 0, tree_support_branch_diameter_organic: 1,
+    tree_support_branch_distance: 0, tree_support_branch_distance_organic: 1,
+  };
+  if (!control && setting.key in treePairs) {
+    expect(section?.name).toBe('Tree supports');
+    const container = dialog.getByRole('heading', { name: 'Tree supports', exact: true }).locator('../..');
+    const pair = container.getByLabel(setting.label, { exact: true });
+    await expect(pair).toHaveCount(2);
+    control = pair.nth(treePairs[setting.key]);
+    await expect(control).toBeVisible();
+  }
   if (!control) throw new Error(`${setting.key}: no unique user-facing control (${setting.label}); needs a curated editor locator`);
   const tag = await control.evaluate(element => element.tagName.toLowerCase());
   const type = await control.getAttribute('type');
   if (type === 'checkbox') {
-    const value = !(await control.isChecked());
+    const checked = await control.isChecked();
+    const value = baseline === undefined ? !checked : canonicalConfig(baseline, setting) === canonical(false, setting);
     // The accessible checkbox is visually replaced by its label's SVG.
     // Space exercises the real keyboard handler without forced DOM clicks.
+    if (checked === value) {
+      await control.press('Space');
+      await expect(control).toBeChecked({ checked: !value });
+    }
     await control.press('Space');
     await expect(control).toBeChecked({ checked: value });
     return value;
@@ -175,7 +195,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   }
   if (type === 'number') {
     const current = Number(await control.inputValue());
-    const step = setting.type === 'int' ? 1 : 0.01;
+    const step = numericMutationStep(current, setting);
     // Orca caps bridge width at the nozzle diameter even though registry.max
     // also accommodates percent values; this number-only UI emits millimetres.
     let candidates = setting.key === 'bridge_line_width'
@@ -217,6 +237,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     compatible_printers_condition: ['nozzle_diameter[0] == 0.4', 'nozzle_diameter[0] > 0'],
     compatible_prints_condition: ['layer_height < 0.3', 'layer_height < 0.4'],
     small_area_infill_flow_compensation_model: ['0,0;0.5,0.6;10,1;', '0,0;0.5,0.7;10,1;'],
+    overhang_fan_threshold: ['25%', '75%'],
   };
   if ((tag === 'textarea' || tag === 'input') && textValues[setting.key]) {
     const [first, second] = textValues[setting.key];

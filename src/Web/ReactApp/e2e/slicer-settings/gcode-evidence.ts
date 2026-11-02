@@ -170,6 +170,12 @@ export function canonicalConfig(value: string, setting: SettingDefinition): stri
   return canonical(value, setting);
 }
 
+export function numericMutationStep(current: number, setting: SettingDefinition): number {
+  if (!Number.isFinite(current)) throw new Error(`${setting.key}: editor value is not finite`);
+  // Orca serializes floats to six significant digits.
+  return setting.type === 'int' ? 1 : Math.max(0.01, 10 ** (Math.floor(Math.log10(Math.abs(current) || 1)) - 5));
+}
+
 export function assertChangedConfig(
   setting: SettingDefinition,
   requested: unknown,
