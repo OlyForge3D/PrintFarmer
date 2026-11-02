@@ -71,7 +71,10 @@
 ### Fixes
 
 - Preserve saved filament settings in named stock/custom profile selections by
-  unwrapping stock profile settings before creating native job snapshots (#3643).
+  unwrapping stock profile settings before creating native job snapshots.
+  Mixed saved/worker-library selections fetch missing stock settings from the
+  selected engine version without importing presets; an unavailable worker
+  returns a retryable 503 instead of queuing an incomplete snapshot (#3643).
 
 - Keep the slicer filament picker inside the viewport, flipping above low
   triggers and scrolling profile results so newly saved presets remain selectable.

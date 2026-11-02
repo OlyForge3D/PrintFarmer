@@ -6,9 +6,13 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Contracts.Libraries;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
@@ -30,7 +34,7 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
     private const string FilamentProfileJson = """{"type":"filament","filament_type":["PLA"]}""";
     private const string CustomFilamentName = "FilAr PLA Bronce";
 
-    private readonly CustomWebApplicationFactory _factory = new();
+    private readonly NamedProfileApplicationFactory _factory = new();
     private HttpClient _client = null!;
 
     public async Task InitializeAsync()
@@ -580,6 +584,145 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
 
     private static string Sha256(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task Submit_MixedWorkerStockAndOwnedProfiles_SnapshotsCompleteSetWithoutImport(
+        bool keepMachine, bool keepProcess, bool keepFilament)
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        if (!keepMachine)
+        {
+            db.MachineProfiles.RemoveRange(await db.MachineProfiles.ToListAsync());
+        }
+        if (!keepProcess)
+        {
+            db.ProcessProfiles.RemoveRange(await db.ProcessProfiles.ToListAsync());
+        }
+        if (!keepFilament)
+        {
+            db.FilamentProfiles.RemoveRange(await db.FilamentProfiles.ToListAsync());
+        }
+        await db.SaveChangesAsync();
+
+        AllProfilesResponseDto library = new()
+        {
+            MachineProfiles = new()
+            {
+                ["Test"] = [new MachineProfileDto { Name = "Test Machine", Settings = NativeSettings(MachineProfileJson) }],
+            },
+            ProcessProfiles = new()
+            {
+                ["Test"] = [new ProcessProfileDto { Name = "Test Process", Settings = NativeSettings(ProcessProfileJson) }],
+            },
+            FilamentProfiles = new()
+            {
+                ["Test"] = [new FilamentProfileDto { Name = CustomFilamentName, Settings = NativeSettings(FilamentProfileJson) }],
+            },
+        };
+        // A same-named worker preset must never displace the caller's saved document.
+        if (keepProcess)
+        {
+            library.ProcessProfiles["Test"][0].Settings["layer_height"] = "0.9";
+        }
+        if (keepFilament)
+        {
+            library.FilamentProfiles["Test"][0].Settings["filament_type"] = new[] { "ABS" };
+        }
+        _factory.Profiles.Setup(service => service.GetWorkerProfilesHierarchyAsync(
+            It.IsAny<HttpClient>(), It.IsAny<CancellationToken>(), "2.4.2")).ReturnsAsync(library);
+
+        using HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerEngineVersion = "2.4.2",
+            SlicerProfileJson = JsonSerializer.Serialize(new
+            {
+                machineProfileName = "Test Machine",
+                processProfileName = "Test Process",
+                filamentProfileName = CustomFilamentName,
+                overrides = new { layer_height = "0.28" },
+                filamentColour = "#123456",
+            }),
+        });
+        submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        SubmitSliceJobResponse submitted = (await submit.Content.ReadFromJsonAsync<SubmitSliceJobResponse>())!;
+        SliceJob job = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == submitted.JobId);
+        using JsonDocument machine = JsonDocument.Parse(job.MachineProfileJson!);
+        using JsonDocument process = JsonDocument.Parse(job.ProcessProfileJson!);
+        using JsonDocument filament = JsonDocument.Parse(job.FilamentProfileJson!);
+        machine.RootElement.GetProperty("printer_model").GetString().Should().Be("Test");
+        process.RootElement.GetProperty("layer_height").GetString().Should().Be("0.28");
+        filament.RootElement.GetProperty("filament_type")[0].GetString().Should().Be("PLA");
+        filament.RootElement.GetProperty("filament_colour")[0].GetString().Should().Be("#123456");
+        job.MachineProfileSha256.Should().Be(Sha256(job.MachineProfileJson!));
+        job.ProcessProfileSha256.Should().Be(Sha256(job.ProcessProfileJson!));
+        job.FilamentProfileSha256.Should().Be(Sha256(job.FilamentProfileJson!));
+        (await db.MachineProfiles.CountAsync()).Should().Be(keepMachine ? 1 : 0);
+        (await db.ProcessProfiles.CountAsync()).Should().Be(keepProcess ? 1 : 0);
+        (await db.FilamentProfiles.CountAsync()).Should().Be(keepFilament ? 1 : 0);
+        _factory.Profiles.Verify(service => service.GetWorkerProfilesHierarchyAsync(
+            It.IsAny<HttpClient>(), It.IsAny<CancellationToken>(), "2.4.2"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Submit_MixedProfilesWorkerUnavailable_Returns503WithoutQueuingJob()
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, CustomFilamentName);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        db.MachineProfiles.RemoveRange(await db.MachineProfiles.ToListAsync());
+        await db.SaveChangesAsync();
+        _factory.Profiles.Setup(service => service.GetWorkerProfilesHierarchyAsync(
+            It.IsAny<HttpClient>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .ThrowsAsync(new HttpRequestException("Worker offline"));
+        using HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = JsonSerializer.Serialize(new
+            {
+                machineProfileName = "Test Machine",
+                processProfileName = "Test Process",
+                filamentProfileName = CustomFilamentName,
+            }),
+        });
+        submit.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await db.SliceJobs.CountAsync()).Should().Be(0);
+    }
+
+    private static Dictionary<string, object> NativeSettings(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, object>>(json)!;
+
+    private sealed class NamedProfileApplicationFactory : CustomWebApplicationFactory
+    {
+        public Mock<IProfilesService> Profiles { get; } = new();
+
+        protected override void ConfigureTestServices(IServiceCollection services)
+        {
+            Mock<ISlicerLibrary> library = new();
+            library.SetupGet(value => value.SlicerName).Returns("OrcaSlicer");
+            library.SetupGet(value => value.SlicerVersion).Returns("2.4.2");
+            Mock<ISlicerRegistry> registry = new();
+            registry.Setup(value => value.GetLibrary("OrcaSlicer", "2.4.2")).Returns(library.Object);
+            services.AddSingleton(registry.Object);
+            Profiles.Setup(service => service.GetWorkerProfilesHierarchyAsync(
+                It.IsAny<HttpClient>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+                .ReturnsAsync(new AllProfilesResponseDto());
+            services.AddSingleton(Profiles.Object);
+        }
+    }
 
     private async Task<WorkerSliceJobResponse> ClaimAsync()
     {
