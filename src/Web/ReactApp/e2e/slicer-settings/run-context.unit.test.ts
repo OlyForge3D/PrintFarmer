@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,8 @@ function fixture() {
   git('config', 'user.email', 'fixture@example.invalid');
   writeFileSync(join(repository, 'harness.ts'), 'export const fixture = true;\n');
   writeFileSync(join(repository, 'editor.tsx'), 'export const editor = true;\n');
+  mkdirSync(join(repository, 'feature'));
+  writeFileSync(join(repository, 'feature', 'editor.tsx'), 'export const nestedEditor = true;\n');
   git('add', '.');
   git('commit', '--quiet', '-m', 'Fixture source');
   return repository;
@@ -78,6 +80,54 @@ describe('owned settings run provenance', () => {
       const stopClean = startSourceGuard(cleanContext, repository);
       stopClean();
       await vi.waitFor(() => expect(() => assertSourceGuard(cleanContext)).toThrow('no longer alive'));
+    } finally {
+      stop?.();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      rmSync(repository, { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores a nested build-output burst but latches restored tracked-directory renames', async () => {
+    const repository = fixture();
+    const parent = mkdtempSync(join(tmpdir(), 'pf-source-build-'));
+    let stop: (() => void) | undefined;
+    try {
+      const identity = sourceIdentity(repository, ['harness.ts']);
+      const context = initializeRun(parent, identity, {});
+      stop = startSourceGuard(context, repository);
+      const output = join(repository, 'feature', 'obj');
+      mkdirSync(output);
+      for (let index = 0; index < 2048; index++) {
+        writeFileSync(join(output, `${index}.tmp`), 'untracked compiler output');
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(() => assertSourceGuard(context)).not.toThrow();
+      renameSync(join(repository, 'feature'), join(repository, 'moved-feature'));
+      renameSync(join(repository, 'moved-feature'), join(repository, 'feature'));
+      expect(sourceIdentity(repository, ['harness.ts'])).toEqual(identity);
+      await vi.waitFor(() => expect(() => assertSourceGuard(context)).toThrow('Tracked source changed'));
+    } finally {
+      stop?.();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      rmSync(repository, { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('latches atomic tracked-file replacement even when committed bytes are restored', async () => {
+    const repository = fixture();
+    const parent = mkdtempSync(join(tmpdir(), 'pf-source-replace-'));
+    let stop: (() => void) | undefined;
+    try {
+      const identity = sourceIdentity(repository, ['harness.ts']);
+      const context = initializeRun(parent, identity, {});
+      stop = startSourceGuard(context, repository);
+      renameSync(join(repository, 'editor.tsx'), join(repository, 'editor.backup'));
+      writeFileSync(join(repository, 'editor.tsx'), 'export const editor = true;\n');
+      rmSync(join(repository, 'editor.backup'));
+      expect(sourceIdentity(repository, ['harness.ts'])).toEqual(identity);
+      await vi.waitFor(() => expect(() => assertSourceGuard(context)).toThrow('Tracked source changed'));
     } finally {
       stop?.();
       await new Promise(resolve => setTimeout(resolve, 100));

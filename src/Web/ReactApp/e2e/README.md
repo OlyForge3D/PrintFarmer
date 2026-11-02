@@ -71,10 +71,13 @@ ID remain in the report; a key still absent remains unresolved.
 SHA-256 identities of harness/registry inputs, a unique run ID and the engine
 binary hash. Uncommitted inputs, source changes during execution and stale
 worker handoffs fail. Every boundary checks the entire tracked worktree, not only
-the selected harness hashes. A separate recursive source monitor starts before
-the blocking build and latches tracked-file changes, including changes restored
-before the next boundary. A missing, failed or terminated monitor invalidates
-the run; untracked build outputs are not source changes.
+the selected harness hashes. A separate source monitor watches tracked parent
+directories before the blocking build and latches tracked-file changes,
+atomic replacements and directory renames, including changes restored before
+the next boundary. Windows uses PowerShell's native `FileSystemWatcher` with
+nonrecursive notifications and a 64 KiB buffer to tolerate nested build-output
+traffic. A missing, failed, overflowing or terminated monitor invalidates the
+run; untracked build outputs are not source changes.
 `PF_SETTINGS_RUN_ROOT` and `PF_SETTINGS_RUN_ID` are private
 launcher-to-worker handoffs, not user-selectable reuse options.
 For focused diagnosis only, `PF_SETTINGS_KEYS` accepts comma-separated qualified

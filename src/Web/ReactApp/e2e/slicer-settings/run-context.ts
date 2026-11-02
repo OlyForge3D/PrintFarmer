@@ -9,6 +9,7 @@ const inputs = [
   'src/Web/ReactApp/e2e/slicer-settings/settings-to-gcode.spec.ts',
   'src/Web/ReactApp/e2e/slicer-settings/gcode-evidence.ts',
   'src/Web/ReactApp/e2e/slicer-settings/run-context.ts',
+  'src/Web/ReactApp/e2e/slicer-settings/source-guard.ps1',
   'src/Web/ReactApp/e2e/slicer-settings/isolation-preflight.cs',
   'src/Web/ReactApp/e2e/slicer-settings/post-process-proof.mjs',
   'src/Web/ReactApp/src/features/slicer/hooks/useSlicerViewMode.ts',
@@ -65,34 +66,55 @@ const path = require('node:path');
 const [repository, root, launcher, runId] = process.argv.slice(1);
 const normalize = name => process.platform === 'win32' ? name.toLowerCase() : name;
 const tracked = new Set();
+const trackedFiles = new Set();
+const directories = new Set(['']);
 for (const file of JSON.parse(fs.readFileSync(path.join(root, 'source-guard-inputs.json'), 'utf8'))) {
   const parts = file.split('/');
-  while (parts.length) { tracked.add(normalize(parts.join('/'))); parts.pop(); }
+  tracked.add(normalize(file));
+  trackedFiles.add(normalize(file));
+  parts.pop();
+  while (parts.length) {
+    const directory = parts.join('/');
+    directories.add(directory);
+    tracked.add(normalize(directory));
+    parts.pop();
+  }
 }
 const failure = path.join(root, 'source-guard-failed.json');
 function fail(reason) {
   if (!fs.existsSync(failure)) fs.writeFileSync(failure, JSON.stringify({ runId, reason }), { flag: 'wx' });
 }
-const watcher = fs.watch(repository, { recursive: true }, (event, name) => {
-  if (!name) return fail('Source watcher returned an event without a path');
-  const relative = normalize(name.replaceAll('\\', '/'));
-  if (tracked.has(relative)) {
-    fail('Tracked source changed during this run: ' + relative);
-  }
+// Windows uses the native monitor below; Node's smaller notification buffer
+// overflows even with nonrecursive watching during ordinary bin/obj traffic.
+const watchers = [...directories].map(directory => {
+  const watcher = fs.watch(path.join(repository, directory), { recursive: false }, (event, name) => {
+    if (!name) return fail('Source watcher returned an event without a path: ' + event + ' in ' + directory);
+    const relative = normalize(path.posix.join(directory, name.replaceAll('\\', '/')));
+    if (trackedFiles.has(relative) || (event === 'rename' && tracked.has(relative))) {
+      fail('Tracked source changed during this run: ' + relative);
+    }
+  });
+  watcher.on('error', error => fail('Source watcher failed: ' + error.message));
+  return watcher;
 });
-watcher.on('error', error => fail('Source watcher failed: ' + error.message));
 process.on('uncaughtException', error => { fail(error.message); process.exit(1); });
 fs.writeFileSync(path.join(root, 'source-guard-ready.json'), JSON.stringify({ runId, pid: process.pid }), { flag: 'wx' });
 setInterval(() => {
-  try { process.kill(Number(launcher), 0); } catch { watcher.close(); process.exit(0); }
+  try { process.kill(Number(launcher), 0); } catch { watchers.forEach(watcher => watcher.close()); process.exit(0); }
 }, 500);
 `;
 
 export function startSourceGuard(context: RunContext, repository = repo): () => void {
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repository, encoding: 'utf8' }).split('\0').filter(Boolean);
   writeFileSync(join(context.root, 'source-guard-inputs.json'), JSON.stringify(tracked), { flag: 'wx' });
-  const child = spawn(process.execPath, ['-e', monitorProgram, repository, context.root, String(process.pid), context.runId], {
+  const windows = process.platform === 'win32';
+  const args = windows
+    ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', join(import.meta.dirname, 'source-guard.ps1'),
+      '-Repository', repository, '-Root', context.root, '-Launcher', String(process.pid), '-RunId', context.runId]
+    : ['-e', monitorProgram, repository, context.root, String(process.pid), context.runId];
+  const child = spawn(windows ? 'powershell.exe' : process.execPath, args, {
     stdio: 'ignore', windowsHide: true,
+    env: { ...process.env, TEMP: context.root, TMP: context.root },
   });
   const stop = () => { child.kill(); };
   process.once('exit', stop);
