@@ -102,6 +102,8 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true',
       DOTNET_NOLOGO: 'true',
       DOTNET_CLI_UI_LANGUAGE: 'en-US',
+      MSBUILDDISABLENODEREUSE: '1',
+      DOTNET_CLI_USE_MSBUILD_SERVER: '0',
     };
     const packageCache = process.env.NUGET_PACKAGES ?? execFileSync('dotnet', ['nuget', 'locals', 'global-packages', '--list'], {
       cwd: src, env: { ...process.env, ...cli }, encoding: 'utf8',

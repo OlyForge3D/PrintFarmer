@@ -52,8 +52,11 @@ blocked; generated files are **never** sent to a printer.
 
 Each run prints its scratch directory and writes `coverage.json`, baseline and
 per-setting G-code plus submitted profile snapshots there. Set
-`PF_SETTINGS_TEST_ROOT` to choose the parent evidence directory; retain evidence
-for diagnosis and remove only that run's directory when finished. Do not set
+`PF_SETTINGS_TEST_ROOT` to choose the parent evidence directory. Keep it short
+on Windows (the default temp directory works): MSBuild reference resolution can
+reject extracted dependency paths over 260 characters even when normal file
+reads support them. Retain evidence for diagnosis and remove only that run's
+directory when finished. Do not set
 the internal `PF_SETTINGS_RUN_ROOT`: Playwright passes it to its own test worker.
 The portable Windows binary rejects `--version`, so the harness disables that
 startup probe only for its private worker and instead requires the actual

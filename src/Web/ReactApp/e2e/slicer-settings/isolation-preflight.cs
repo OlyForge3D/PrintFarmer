@@ -99,7 +99,7 @@ foreach (string name in new[] { "ORCA_PROFILES_PATH", "ORCA_CUSTOM_PROFILES_PATH
 DefaultTempPathProvider apiTemp = new(configuration);
 CheckPath("resolvedApiTemp", apiTemp.GetTempRoot());
 ServiceCollection services = new();
-services.AddSingleton(configuration);
+services.AddSingleton<IConfiguration>(configuration);
 services.AddLogging();
 services.AddPrintFarmerDataProtection(builder.Environment, contentRoot);
 services.AddSlicerApiServices(configuration);
