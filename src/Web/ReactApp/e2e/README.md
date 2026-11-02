@@ -67,10 +67,15 @@ count as `configVerified`.
 An option absent from the shared baseline gets an explicit UI-saved per-key
 baseline before the second distinct edit. Both artifacts and the baseline job
 ID remain in the report; a key still absent remains unresolved.
-`run.json` and every coverage report identify the full source commit, normalized
+`run.json` and every coverage report identify the full source commit and tree, normalized
 SHA-256 identities of harness/registry inputs, a unique run ID and the engine
 binary hash. Uncommitted inputs, source changes during execution and stale
-worker handoffs fail. `PF_SETTINGS_RUN_ROOT` and `PF_SETTINGS_RUN_ID` are private
+worker handoffs fail. Every boundary checks the entire tracked worktree, not only
+the selected harness hashes. A separate recursive source monitor starts before
+the blocking build and latches tracked-file changes, including changes restored
+before the next boundary. A missing, failed or terminated monitor invalidates
+the run; untracked build outputs are not source changes.
+`PF_SETTINGS_RUN_ROOT` and `PF_SETTINGS_RUN_ID` are private
 launcher-to-worker handoffs, not user-selectable reuse options.
 For focused diagnosis only, `PF_SETTINGS_KEYS` accepts comma-separated qualified
 keys such as `process.brim_width,filament.nozzle_temperature`. Every unselected

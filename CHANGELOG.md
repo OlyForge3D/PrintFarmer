@@ -70,6 +70,9 @@
 
 ### Fixes
 
+- Keep the slicer filament picker inside the viewport, flipping above low
+  triggers and scrolling profile results so newly saved presets remain selectable.
+
 - Keep the slicer profile editor's Simple/Advanced toggle stable under React
   StrictMode while preserving synchronization between mounted editors (#3643).
 

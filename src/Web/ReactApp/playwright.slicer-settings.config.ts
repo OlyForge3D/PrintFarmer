@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { initializeRun, sourceIdentity } from './e2e/slicer-settings/run-context';
+import { assertRunSource, initializeRun, sourceIdentity, startSourceGuard } from './e2e/slicer-settings/run-context';
 
 const orcaRoot = process.env.ORCA_TEST_ROOT;
 if (!orcaRoot) throw new Error('ORCA_TEST_ROOT must name an isolated upstream OrcaSlicer 2.4.2 portable directory');
@@ -12,7 +12,9 @@ if (!existsSync(executable) || !existsSync(join(orcaRoot, 'resources', 'profiles
   throw new Error('ORCA_TEST_ROOT must contain the real executable and resources/profiles');
 }
 const parent = process.env.PF_SETTINGS_TEST_ROOT ?? tmpdir();
-const context = initializeRun(parent, sourceIdentity(process.env.TEST_WORKER_INDEX === undefined));
+const context = initializeRun(parent, sourceIdentity());
+if (process.env.TEST_WORKER_INDEX === undefined) startSourceGuard(context);
+assertRunSource(context);
 const { root } = context;
 process.env.API_BASE_URL = 'http://127.0.0.1:15245';
 process.env.BASE_URL = 'http://127.0.0.1:13000';
@@ -143,6 +145,7 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
   }
 }
 const isolation: { runId?: string; hostStarted?: boolean } = JSON.parse(readFileSync(join(root, 'isolation.json'), 'utf8'));
+assertRunSource(context);
 if (isolation.runId !== context.runId || isolation.hostStarted !== false) {
   throw new Error('Missing or mismatched effective-path preflight; refusing host startup');
 }

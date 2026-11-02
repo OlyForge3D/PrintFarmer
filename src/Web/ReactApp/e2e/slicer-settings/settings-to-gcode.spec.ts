@@ -8,7 +8,7 @@ import {
   assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, heaterTargets, inventory, parseConfig,
   type CoverageRow, type ProfileKind, type SettingDefinition,
 } from './gcode-evidence';
-import { assertSourceIdentity, sourceIdentity, type RunContext } from './run-context';
+import { assertRunSource, type RunContext } from './run-context';
 
 const version = '2.4.2';
 const apiUrl = 'http://127.0.0.1:15245';
@@ -316,7 +316,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
   const root = process.env.PF_SETTINGS_RUN_ROOT;
   if (!root) throw new Error('Use playwright.slicer-settings.config.ts; shared/external stacks are not permitted');
   const context: RunContext = JSON.parse(readFileSync(join(root, 'run.json'), 'utf8'));
-  assertSourceIdentity(context.source, sourceIdentity());
+  assertRunSource(context);
   const isolation: unknown = JSON.parse(readFileSync(join(root, 'isolation.json'), 'utf8'));
   const enginePath = join(process.env.ORCA_TEST_ROOT!, process.platform === 'win32' ? 'orca-slicer.exe' : 'bin/orca-slicer');
   const engineSha256 = createHash('sha256').update(readFileSync(enginePath)).digest('hex');
@@ -427,7 +427,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
         row.reason = 'Not executed: diagnostic PF_SETTINGS_KEYS filter. This row remains unresolved and the suite must fail.';
         continue;
       }
-      assertSourceIdentity(context.source, sourceIdentity());
+      assertRunSource(context);
       row.attempted = true;
       row.baseline = baseline.get(row.key);
       try {
@@ -480,7 +480,7 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
       writeFileSync(join(root, 'coverage.json'), JSON.stringify({ ...provenance, engine: version, engineVerified, sourceVerified, negativeControl, rows }, null, 2));
       process.stdout.write(`${row.profile}.${row.key}: ${row.status}${row.status === 'unresolved' ? ` (${row.reason.split('\n')[0]})` : ''}\n`);
     }
-    assertSourceIdentity(context.source, sourceIdentity());
+    assertRunSource(context);
     sourceVerified = true;
     assertComplete(rows);
     expect(negativeControl, 'At least one live changed value must exercise the negative control').not.toBe('not run');

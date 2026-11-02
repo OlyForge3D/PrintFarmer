@@ -113,6 +113,20 @@ describe('settings G-code evidence (not a live slicer test)', () => {
     expect(() => parseConfig(gcode('; layer_height = 0.2') + '; CONFIG_BLOCK_START\n', '2.4.2')).toThrow('exactly one');
   });
 
+  it('audits the flow-compensation editor vector without relaxing other string vectors', () => {
+    const setting = definition('process', 'small_area_infill_flow_compensation_model');
+    const requested = '0,0;0.5,0.6;10,1;';
+    expect(canonical(requested, setting)).toBe(canonical(['0,0', '0.5,0.6', '10,1', ''], setting));
+    const baseline = new Map([[setting.key, '0,0;0.5,0.7;10,1;']]);
+    const actual = new Map([[setting.key, requested]]);
+    expect(() => assertChangedConfig(setting, requested, baseline, actual)).not.toThrow();
+    for (const changed of ['0,0;0.5,0.8;10,1;', '0,0;10,1;', '0,0;0.5,0.6;10,1', `${requested};`]) {
+      expect(() => assertChangedConfig(setting, requested, baseline, new Map([[setting.key, changed]]))).toThrow();
+    }
+    const scripts = definition('filament', 'filament_start_gcode');
+    expect(canonical('; proof; M400', scripts)).toBe(canonical(['; proof; M400'], scripts));
+  });
+
   it('negative controls reject missing, lost, altered and baseline-equal changes', () => {
     const setting = definition('process', 'layer_height');
     const baseline = parseConfig(gcode('; layer_height = 0.2'), '2.4.2');

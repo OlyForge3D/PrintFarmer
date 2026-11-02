@@ -150,7 +150,14 @@ export function canonical(value: unknown, setting: SettingDefinition): string {
     if (!arrayType) throw new Error(`${setting.key}: array supplied for scalar setting`);
     values = value;
   } else if (arrayType) {
-    values = setting.coType === 'coStrings' ? [value] : String(value).split(',');
+    if (setting.coType === 'coStrings') {
+      // This editor supplies Orca's semicolon-delimited point vector as text.
+      // Keep the terminal empty element; it is part of the emitted cardinality.
+      values = setting.key === 'small_area_infill_flow_compensation_model'
+        ? String(value).split(';') : [value];
+    } else {
+      values = String(value).split(',');
+    }
   } else {
     values = [value];
   }
