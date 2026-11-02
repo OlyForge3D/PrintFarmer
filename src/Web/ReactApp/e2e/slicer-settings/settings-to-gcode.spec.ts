@@ -72,7 +72,7 @@ async function selectFilament(page: Page, name: string): Promise<void> {
   await field.locator('button[aria-haspopup="dialog"]').click();
   const selector = page.getByRole('dialog', { name: 'Filament selector', exact: true });
   await selector.getByPlaceholder('Search filaments...').fill(name);
-  await selector.getByRole('button', { name, exact: true }).click();
+  await selector.getByRole('button', { name: name.startsWith('settings-regression-') ? `\u2605 ${name}` : name, exact: true }).click();
   await expect(selector).toBeHidden();
 }
 
@@ -128,6 +128,11 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
         break;
       }
     }
+  }
+  if (!control && section) {
+    const container = dialog.getByRole('heading', { name: section.name, exact: true }).locator('../..');
+    const candidate = container.getByLabel(setting.label, { exact: true });
+    if (await candidate.count() === 1 && await candidate.isVisible()) control = candidate;
   }
   if (!control) throw new Error(`${setting.key}: no unique user-facing control (${setting.label}); needs a curated editor locator`);
   const tag = await control.evaluate(element => element.tagName.toLowerCase());
@@ -211,7 +216,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     sparse_infill_rotate_template: ['0,90', '0,45'],
     compatible_printers_condition: ['nozzle_diameter[0] == 0.4', 'nozzle_diameter[0] > 0'],
     compatible_prints_condition: ['layer_height < 0.3', 'layer_height < 0.4'],
-    small_area_infill_flow_compensation_model: ['0,0; 0.5,0.6; 10,1;', '0,0; 0.5,0.7; 10,1;'],
+    small_area_infill_flow_compensation_model: ['0,0;0.5,0.6;10,1;', '0,0;0.5,0.7;10,1;'],
   };
   if ((tag === 'textarea' || tag === 'input') && textValues[setting.key]) {
     const [first, second] = textValues[setting.key];
@@ -222,7 +227,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     return next;
   }
   if (setting.key === 'post_process') {
-    const command = `"${process.execPath}" "${join(import.meta.dirname, 'post-process-proof.mjs')}"`;
+    const command = join(import.meta.dirname, 'post-process-proof.mjs');
     await control.fill(command);
     await control.blur();
     return command;
