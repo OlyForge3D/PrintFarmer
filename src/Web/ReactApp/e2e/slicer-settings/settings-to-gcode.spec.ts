@@ -79,7 +79,8 @@ async function selectFilament(page: Page, name: string): Promise<void> {
 async function editControl(dialog: Locator, setting: SettingDefinition, baseline: string | undefined, kind: ProfileKind, baselineGcode: string): Promise<unknown> {
   const tabs = dialog.getByRole('tab');
   const profile = metadata[kind];
-  const section = profile.tabs.flatMap(tab => tab.sections).find(section => section.fields.some(field => field.key === setting.key));
+  const ownerTab = profile.tabs.find(tab => tab.sections.some(section => section.fields.some(field => field.key === setting.key)));
+  const section = ownerTab?.sections.find(section => section.fields.some(field => field.key === setting.key));
   const field = section?.fields.find(field => field.key === setting.key);
   const index = section?.fields.findIndex(field => field.key === setting.key) ?? -1;
   let start = index;
@@ -99,33 +100,32 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     titles.push(`${plate} ${setting.key.endsWith('_initial_layer') ? 'first layer' : 'other layers'}`);
   }
   let control: Locator | undefined;
-  for (let i = 0; i < await tabs.count(); i++) {
-    await tabs.nth(i).click();
-    await expect(tabs.nth(i)).toHaveAttribute('aria-selected', 'true');
+  const tab = tabs.filter({ hasText: new RegExp(`^${(ownerTab?.name ?? 'Other Settings').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
+  await expect(tab).toHaveCount(1);
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  {
+    if (setting.tooltip) {
+      const label = dialog.locator('label[for]').and(dialog.getByTitle(setting.tooltip, { exact: true }));
+      if (await label.count() === 1 && await label.isVisible()) {
+        const id = await label.getAttribute('for');
+        if (id) control = dialog.locator(`[id=${JSON.stringify(id)}]`);
+      }
+    }
     for (const name of names) {
+      if (control) break;
       const candidates = dialog.getByLabel(name, { exact: true });
       if (await candidates.count() === 1 && await candidates.isVisible()) {
         control = candidates;
         break;
       }
     }
-    if (control) break;
     for (const title of titles) {
+      if (control) break;
       const titled = dialog.getByTitle(title, { exact: true });
       if (await titled.count() === 1 && await titled.isVisible()) {
         control = titled;
         break;
-      }
-    }
-    if (control) break;
-    if (setting.tooltip) {
-      const label = dialog.locator('label[for]').and(dialog.getByTitle(setting.tooltip, { exact: true }));
-      if (await label.count() === 1 && await label.isVisible()) {
-        const id = await label.getAttribute('for');
-        if (id) {
-          control = dialog.locator(`[id=${JSON.stringify(id)}]`);
-          break;
-        }
       }
     }
   }
@@ -175,7 +175,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     // also accommodates percent values; this number-only UI emits millimetres.
     let candidates = setting.key === 'bridge_line_width'
       ? [0.35, 0.36]
-      : [current + step, current - step, current + 2 * step];
+      : [current + step, current - step, current + 2 * step, setting.min ?? step, (setting.min ?? step) + step];
     if (['nozzle_temperature', 'nozzle_temperature_initial_layer'].includes(setting.key)) {
       const before = heaterTargets(baselineGcode);
       candidates = Array.from({ length: 20 }, (_, i) => current + i + 1).filter(value => !before.includes(value));
@@ -211,7 +211,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
     sparse_infill_rotate_template: ['0,90', '0,45'],
     compatible_printers_condition: ['nozzle_diameter[0] == 0.4', 'nozzle_diameter[0] > 0'],
     compatible_prints_condition: ['layer_height < 0.3', 'layer_height < 0.4'],
-    small_area_infill_flow_compensation_model: ['0,0;\n0.5,0.6;\n10,1;', '0,0;\n0.5,0.7;\n10,1;'],
+    small_area_infill_flow_compensation_model: ['0,0; 0.5,0.6; 10,1;', '0,0; 0.5,0.7; 10,1;'],
   };
   if ((tag === 'textarea' || tag === 'input') && textValues[setting.key]) {
     const [first, second] = textValues[setting.key];
@@ -258,8 +258,12 @@ async function applySetting(page: Page, row: CoverageRow, baseline: string | und
     expect(canonical(raw[row.key], definition(row.profile, row.key)), `${row.key}: editor lost the value before save`)
       .toBe(canonical(requested, definition(row.profile, row.key)));
     const profile = await response.json() as { id: string };
-    const exported = await json<{ rawJson: string }>(await api.get(`/api/slicer/profiles/${profile.id}/export`));
-    const stored: Record<string, unknown> = JSON.parse(exported.rawJson);
+    // The export route is process-only. Read the persisted filament through
+    // the same owner-scoped collection used by custom-profile management.
+    const savedProfiles = await json<{ profiles: Array<{ id: string; rawJson: string }> }>(await api.get('/api/slicer/profiles/custom'));
+    const persisted = savedProfiles.profiles.find(item => item.id === profile.id);
+    expect(persisted, `${row.key}: uploaded filament is missing from owned profiles`).toBeDefined();
+    const stored: Record<string, unknown> = JSON.parse(persisted!.rawJson);
     expect(canonical(stored[row.key], definition(row.profile, row.key)), `${row.key}: saved profile lost the value`)
       .toBe(canonical(requested, definition(row.profile, row.key)));
     // Saving does not select a custom filament; use the actual picker.
