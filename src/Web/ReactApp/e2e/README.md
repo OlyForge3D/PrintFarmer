@@ -40,6 +40,10 @@ configuration ordering and production storage/temp/DataProtection providers.
 Missing or external effective destinations fail before host startup. Every
 host runs with a private working/temp directory; the worker also receives
 private per-user engine configuration/cache paths.
+The build CLI retains the established NuGet package cache (not an application
+profile cache); its run-specific metadata stays private. SDK certificate
+generation, telemetry, global-tool PATH changes and workload advertising
+downloads are explicitly disabled.
 No Docker or physical printer is needed. Browser print/queue dispatch is
 blocked; generated files are **never** sent to a printer.
 

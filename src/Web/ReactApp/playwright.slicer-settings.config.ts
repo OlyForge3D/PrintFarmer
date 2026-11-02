@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { initializeRun, sourceIdentity } from './e2e/slicer-settings/run-context';
 
 const orcaRoot = process.env.ORCA_TEST_ROOT;
@@ -94,9 +94,21 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
   // Resolve real .NET configuration/path providers before any application host
   // can write. This also builds the referenced API/worker from this source tree.
   try {
+    const cli = {
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false',
+      DOTNET_ADD_GLOBAL_TOOLS_TO_PATH: 'false',
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true',
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true',
+      DOTNET_NOLOGO: 'true',
+      DOTNET_CLI_UI_LANGUAGE: 'en-US',
+    };
+    const packageCache = process.env.NUGET_PACKAGES ?? execFileSync('dotnet', ['nuget', 'locals', 'global-packages', '--list'], {
+      cwd: src, env: { ...process.env, ...cli }, encoding: 'utf8',
+    }).trim().replace(/^global-packages:\s*/, '');
+    if (!isAbsolute(packageCache)) throw new Error('Cannot resolve the existing NuGet tool-cache location');
     const output = execFileSync('dotnet', ['run', '--file', join(import.meta.dirname, 'e2e', 'slicer-settings', 'isolation-preflight.cs'), '--', join(src, 'api')], {
-      cwd: root,
-      env: { ...process.env, ...workerEnv, ...apiEnv, DOTNET_CLI_HOME: join(root, 'dotnet-cli') },
+      cwd: src,
+      env: { ...process.env, ...workerEnv, ...apiEnv, ...cli, NUGET_PACKAGES: packageCache, DOTNET_CLI_HOME: join(root, 'dotnet-cli') },
       encoding: 'utf8',
       timeout: 600_000,
       maxBuffer: 8 * 1024 * 1024,
