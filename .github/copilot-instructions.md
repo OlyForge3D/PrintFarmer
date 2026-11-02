@@ -104,8 +104,11 @@ API integration:
 Common commands (start at the repository root). Use Xcode 26.6 build 17F113;
 the shared resolver approves only iOS 26.5 (23F77). Install that runtime in Xcode
 Settings > Components and create an available matching simulator. It fails
-before tests if no approved destination exists. Python 3 is required; no GitHub
-Actions state is needed locally.
+before tests if no approved destination exists. Xcode 26.6 is unsupported on
+macOS 27 or later; use macOS 26.2-26.x for pinned test evidence. Python 3 is
+required; no GitHub Actions state is needed locally. A separate
+[local-only Xcode 27.2 workflow](../mobile/README.md#local-exploration-on-macos-27)
+is exploratory and cannot replace pinned CI, release, or snapshot evidence.
 
 ```bash
 cd mobile
@@ -115,11 +118,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/unit-tests.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests -parallel-testing-enabled NO \

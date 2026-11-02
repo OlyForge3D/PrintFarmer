@@ -584,23 +584,31 @@ def main(argv=None):
     if "Xcode 26.6" not in xcode_version or "17F113" not in xcode_version:
         raise RuntimeError(f"Unexpected Xcode version; see {run_dir / 'xcode.log'}")
 
+    resolver = subprocess.run(
+        [str(REPO / "scripts/ci/resolve-ios-simulator.sh"), "--udid"],
+        cwd=REPO, env=env, capture_output=True, text=True,
+    )
+    if resolver.returncode != 0:
+        (run_dir / "destination.log").write_text(resolver.stderr, encoding="utf-8")
+        raise RuntimeError(
+            f"Simulator resolver failed with exit {resolver.returncode}: {resolver.stderr.strip()}"
+        )
+    resolved_simulator_id = resolver.stdout.strip()
+    if not resolved_simulator_id:
+        (run_dir / "destination.log").write_text(resolver.stderr, encoding="utf-8")
+        raise RuntimeError("Simulator resolver returned no UDID.")
+    (run_dir / "destination.log").write_text(
+        resolver.stderr + f"UDID: {resolved_simulator_id}\n", encoding="utf-8"
+    )
+    print(resolver.stderr, end="", flush=True)
+    print(f"Resolved simulator UDID: {resolved_simulator_id}", flush=True)
+
     for filename, args in (
         ("runtimes.json", ["xcrun", "simctl", "list", "runtimes", "-j"]),
         ("devices.json", ["xcrun", "simctl", "list", "devices", "available", "-j"]),
     ):
         result = subprocess.run(args, cwd=MOBILE, env=env, check=True, capture_output=True)
         (run_dir / filename).write_bytes(result.stdout)
-
-    resolver = subprocess.run(
-        [str(REPO / "scripts/ci/resolve-ios-simulator.sh"), "--udid"],
-        cwd=REPO, env=env, check=True, capture_output=True, text=True,
-    )
-    resolved_simulator_id = resolver.stdout.strip()
-    (run_dir / "destination.log").write_text(
-        resolver.stderr + f"UDID: {resolved_simulator_id}\n", encoding="utf-8"
-    )
-    print(resolver.stderr, end="", flush=True)
-    print(f"Resolved simulator UDID: {resolved_simulator_id}", flush=True)
 
     api_project = SRC / "api"
     api_dll = api_project / "bin/Debug/net10.0/Farm.Web.Api.dll"
