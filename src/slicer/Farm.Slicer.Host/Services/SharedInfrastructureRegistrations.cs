@@ -6,6 +6,7 @@ using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Repositories.Tags;
+using Farm.Infrastructure.Repositories.Tasks;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Catalog;
@@ -17,6 +18,7 @@ using Farm.Infrastructure.Services.Models;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Services.Tasks;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -49,9 +51,18 @@ public static class SharedInfrastructureRegistrations
         AddFileServices(services);
         AddCatalogServices(services);
         AddSettingsAndAliasServices(services);
+        AddUserTaskServices(services);
         AddTokenRevocationServices(services);
 
         return services;
+    }
+
+    private static void AddUserTaskServices(IServiceCollection services)
+    {
+        // Like catalog lookups, profile-import tasks use the shared core database. Do not pull
+        // the main API's notification/SignalR graph into this standalone host.
+        services.AddScoped<IUserTaskRepository, EfUserTaskRepository>();
+        services.AddScoped<IUserTaskService, UserTaskService>();
     }
 
     /// <summary>

@@ -39,10 +39,9 @@ import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
 } from '@/features/slicer/components/settings';
-import { resolveProcessSettingsBaseline } from '@/features/slicer/components/settings/processSettingsBaseline';
 import { scrubSettingsForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import { PrinterSlicerSelector, SlicerSelector, type PrinterForSlicing, SlicerSettingsPanel as SimpleSlicerSettingsPanel, type SlicerSettings } from '../components/job';
-import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
+import { convertOrcaProcessProfileToSettings, orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappings';
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
@@ -65,7 +64,8 @@ import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
 import { loadModelResponse, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
 import { validateModelResponse } from '@/features/slicer/utils/validate-model-response';
-import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
+import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson } from '@/features/slicer/utils/slicePayload';
+import { buildProcessOverrides } from '@/features/slicer/utils/orcaOverrideNormalization';
 import { validateOrcaPrintSettings } from '@/features/slicer/utils/slicerSettingsValidation';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
 import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
@@ -103,32 +103,6 @@ function getMachineProfilesErrorCode(error: MachineProfilesQueryError | null): M
     : undefined;
 }
 
-/**
- * Helper function to convert OrcaProcessProfile to OrcaProcessSettings
- * Maps profile data to settings structure, using defaults for missing values
- */
-function convertOrcaProcessProfileToSettings(profile: OrcaProcessProfile | undefined): OrcaProcessSettings {
-  if (!profile) return {} as OrcaProcessSettings;
-
-  // Parse settings from profile if available
-  const profileSettings = (profile.settings ?? {}) as Record<string, unknown>;
-
-  // Merge the explicit profile values (raw JSON + the four promoted fields) and
-  // resolve a COMPLETE baseline: every metadata-known key gets a value (the
-  // profile's when present, otherwise its metadata default), coerced to the
-  // editor's native type. This ensures every editable field has an original
-  // value so the reset/modified affordance works for all settings, not just the
-  // ~50 a profile declares explicitly.
-  const merged: Record<string, unknown> = {
-    ...profileSettings,
-    ...(profile.layerHeight !== undefined ? { layer_height: profile.layerHeight } : {}),
-    ...(profile.infillPercentage !== undefined ? { sparse_infill_density: profile.infillPercentage } : {}),
-    ...(profile.printSpeed !== undefined ? { outer_wall_speed: profile.printSpeed } : {}),
-    ...(profile.supports !== undefined ? { enable_support: profile.supports } : {}),
-  };
-
-  return resolveProcessSettingsBaseline(merged) as unknown as OrcaProcessSettings;
-}
 
 function formatNozzleDiameter(diameter: number): string {
   return Number(diameter.toFixed(NOZZLE_VALUE_DECIMALS)).toString();
@@ -2104,10 +2078,15 @@ export const NewSliceJobPage: React.FC = () => {
     // the editor — never the full ~300-key metadata baseline. The named process
     // profile (and its `inherits:` chain) is resolved worker-side, so re-sending
     // unmodified defaults would clobber the profile's tuned/inherited values.
-    const modifiedProcessOverrides = diffProcessOverrides(
-      slicerSettings as unknown as Record<string, unknown>,
+    // In Simple mode the adhesion keys are always sent explicitly so the slicer
+    // matches the displayed choice; values are normalised to Orca's string form.
+    const processOverrides = buildProcessOverrides({
+      slicerSettings,
       originalProcessSettings,
-    );
+      advancedProcessSettings,
+      simpleMode: slicerMode !== 'Advanced',
+      engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
+    });
 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
@@ -2130,14 +2109,7 @@ export const NewSliceJobPage: React.FC = () => {
         filamentColours: extruderFilamentColoursPayload,
         filamentColour: singleFilamentColour,
         processPresetId: selectedProcessPresetId,
-        overrides: scrubSettingsForVersion(
-          {
-            ...advancedProcessSettings,
-            ...modifiedProcessOverrides,
-          },
-          'process',
-          selectedEngineVersion ?? latestAvailableForEngine,
-        ),
+        overrides: processOverrides,
       }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
@@ -3572,7 +3544,7 @@ function SliceJobProgressPanel({
             {isCompleted ? '100' : percent}%
           </span>
         </div>
-        {progress.progressMessage && (
+        {progress.progressMessage && !isTerminal && (
           <p className="text-xs text-pf-text-tertiary">{progress.progressMessage}</p>
         )}
       </div>

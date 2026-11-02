@@ -1023,6 +1023,7 @@ describe('NewSliceJobPage', () => {
           printSpeed: 60,
           supports: false,
           compatible_printers: ['Prusa MK4S 0.4 nozzle', 'Prusa MK4S HF0.4 nozzle'],
+          settings: { brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' },
         },
       ] as OrcaProcessProfile[]);
 
@@ -1074,9 +1075,15 @@ describe('NewSliceJobPage', () => {
       }, { timeout: 3000 });
 
       const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)?.[0] as { slicerProfileJson: string };
-      const profile = JSON.parse(request.slicerProfileJson) as { machineProfileName: string };
+      const profile = JSON.parse(request.slicerProfileJson) as {
+        machineProfileName: string;
+        overrides: Record<string, unknown>;
+      };
       expect(profile.machineProfileName).toBe('Prusa MK4S HF0.4 nozzle');
       expect(profile.machineProfileName).not.toBe('Prusa MK4S HF');
+      // A profile that declares no adhesion pins it explicitly so OrcaSlicer
+      // can't fall back to auto_brim, in Orca's string form.
+      expect(profile.overrides).toMatchObject({ brim_type: 'no_brim', skirt_loops: '0', raft_layers: '0' });
     });
 
     it('keeps the machine profile trigger focusable and explained when a printer has no profiles', async () => {
@@ -2667,6 +2674,31 @@ describe('NewSliceJobPage', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+    it('hides the stale in-flight progress message once the job completes', async () => {
+      await submitAndFail();
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Processing',
+          error: null,
+          progressPercent: 85,
+          progressMessage: 'Slicing in progress (85%).',
+        });
+      });
+      expect(screen.getAllByText('Slicing in progress (85%).').length).toBeGreaterThan(0);
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Completed',
+          progressPercent: 100,
+          artifactsRoute: '/api/artifacts/job/job-1',
+        });
+      });
+
+      expect(screen.queryAllByText('Slicing in progress (85%).')).toHaveLength(0);
     });
   });
 

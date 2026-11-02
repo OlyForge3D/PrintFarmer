@@ -37,82 +37,235 @@ export interface DetailedParseBuffers {
   tools: Int32Array;
   pointCount: number;
   layerCount: number;
+  /** Printable bed area declared in the slicer config block, when present. */
+  bed: BedBounds | null;
 }
 
-interface LayerAccumulator {
-  z: number;
-  commandCount: number;
-  lineNumber: number;
+/** Printable bed rectangle in G-code (machine) X/Y millimetres. */
+export interface BedBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+// OrcaSlicer/Bambu Studio write `printable_area`; PrusaSlicer writes `bed_shape`.
+const BED_AREA_KEYS = ['; printable_area =', '; bed_shape ='];
+
+/**
+ * Reads the printable bed rectangle from the slicer's config comments
+ * (e.g. `; printable_area = 0x0,256x0,256x256,0x256`). The config block sits
+ * at the end of the file, so the last occurrence is used.
+ */
+export function parseBedBounds(gcodeText: string): BedBounds | null {
+  for (const key of BED_AREA_KEYS) {
+    const at = gcodeText.lastIndexOf(key);
+    if (at < 0) continue;
+    const lineEnd = gcodeText.indexOf('\n', at);
+    const value = gcodeText.slice(at + key.length, lineEnd < 0 ? undefined : lineEnd);
+    const bounds = parseCornerList(value);
+    if (bounds) return bounds;
+  }
+  return null;
+}
+
+function parseCornerList(value: string): BedBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const corner of value.split(',')) {
+    const [xs, ys] = corner.trim().split('x');
+    const x = Number.parseFloat(xs);
+    const y = Number.parseFloat(ys);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (!(maxX > minX && maxY > minY)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+const LAYER_CHANGE_MARKER = ';LAYER_CHANGE';
+const Z_MARKER = ';Z:';
+
+/** Rounds a Z height to the 0.01 mm grid used for layer identity. */
+function layerKey(z: number): number {
+  return Math.round(z * 100) / 100;
+}
+
+/**
+ * Calls `visit` for every line in `text` without materializing a
+ * `string[]` of all lines (a 45 MB file has ~1.7M lines).
+ */
+function forEachLine(text: string, visit: (line: string) => void): void {
+  let start = 0;
+  const length = text.length;
+  while (start < length) {
+    let end = text.indexOf('\n', start);
+    if (end === -1) end = length;
+    visit(text.slice(start, end));
+    start = end + 1;
+  }
+}
+
+/**
+ * Tracks layer boundaries for a stream of G0/G1 points.
+ *
+ * When the file contains slicer `;LAYER_CHANGE` markers (OrcaSlicer, Prusa,
+ * Bambu), each marker starts a layer and the following `;Z:` comment gives
+ * its height — this is the slicer's own layer count. Without markers, a layer
+ * starts at the first point reached at a new Z, but only once an extrusion
+ * happens at that Z, so Z-hop travel heights never become layers.
+ */
+class LayerTracker {
+  readonly starts: number[] = [];
+  readonly zs: number[] = [];
+  private markerZ: number | null = null;
+  private markerPending = false;
+  private candidateStart = -1;
+  private candidateZ = Number.NaN;
+  private currentZ = Number.NaN;
+
+  constructor(private readonly useMarkers: boolean) {}
+
+  /** Handles a comment line, recording `;LAYER_CHANGE` / `;Z:` markers. */
+  comment(line: string, nextPointIndex: number): void {
+    if (!this.useMarkers) return;
+    if (line.startsWith(LAYER_CHANGE_MARKER)) {
+      this.markerPending = true;
+      this.markerZ = null;
+      this.starts.push(nextPointIndex);
+      this.zs.push(Number.NaN);
+    } else if (this.markerPending && line.startsWith(Z_MARKER)) {
+      const z = parseFloat(line.slice(Z_MARKER.length));
+      if (!Number.isNaN(z)) {
+        this.markerZ = layerKey(z);
+        this.zs[this.zs.length - 1] = this.markerZ;
+      }
+    }
+  }
+
+  point(index: number, z: number, isExtrude: boolean): void {
+    if (this.useMarkers) {
+      if (this.markerPending) {
+        if (this.markerZ === null) this.zs[this.zs.length - 1] = layerKey(z);
+        this.markerPending = false;
+      }
+      return;
+    }
+
+    const key = layerKey(z);
+    if (key !== this.candidateZ) {
+      this.candidateZ = key;
+      this.candidateStart = index;
+    }
+    if (isExtrude && key !== this.currentZ) {
+      this.currentZ = key;
+      this.starts.push(this.candidateStart);
+      this.zs.push(key);
+    }
+  }
+
+  /** Finalizes boundaries: drops empty layers and folds leading points into layer 0. */
+  finish(pointCount: number): { starts: number[]; zs: number[] } {
+    const starts: number[] = [];
+    const zs: number[] = [];
+    for (let i = 0; i < this.starts.length; i++) {
+      const start = this.starts[i];
+      const end = i + 1 < this.starts.length ? this.starts[i + 1] : pointCount;
+      if (end <= start || Number.isNaN(this.zs[i])) continue;
+      starts.push(start);
+      zs.push(this.zs[i]);
+    }
+    if (starts.length > 0) starts[0] = 0;
+    return { starts, zs };
+  }
 }
 
 /** Lightweight layer-index-only parse (used by `parseGCode`). Cheap — not worker-routed. */
 export function parseLayersCore(gcodeText: string): ParsedLayer[] {
-  const lines = gcodeText.split('\n');
-  const layerAccumulators: LayerAccumulator[] = [];
-  let currentZ = -Infinity;
+  const tracker = new LayerTracker(gcodeText.includes(LAYER_CHANGE_MARKER));
+  const pointLines: number[] = [];
+  const pointExtrudes: number[] = [];
+  const state = new MotionState();
+  let lineNumber = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || line.startsWith(';')) continue;
-
-    const isMove = line.startsWith('G0 ') || line.startsWith('G1 ');
-    if (!isMove) continue;
-
-    const zMatch = line.match(/Z([\d.]+)/);
-    if (zMatch) {
-      const z = parseFloat(zMatch[1]);
-      if (z > currentZ) {
-        currentZ = z;
-        layerAccumulators.push({ z, commandCount: 0, lineNumber: i + 1 });
-      }
+  forEachLine(gcodeText, rawLine => {
+    lineNumber++;
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith(';')) {
+      tracker.comment(trimmed, pointLines.length);
+      return;
     }
+    const move = state.apply(trimmed);
+    if (!move) return;
+    tracker.point(pointLines.length, move.z, move.isExtrude);
+    pointLines.push(lineNumber);
+    pointExtrudes.push(move.isExtrude ? 1 : 0);
+  });
 
-    if (layerAccumulators.length > 0 && line.match(/E[\d.]+/)) {
-      layerAccumulators[layerAccumulators.length - 1].commandCount++;
-    }
-  }
+  const { starts, zs } = tracker.finish(pointLines.length);
+  return starts.map((start, idx) => {
+    const end = idx + 1 < starts.length ? starts[idx + 1] : pointLines.length;
+    let commandCount = 0;
+    for (let i = start; i < end; i++) commandCount += pointExtrudes[i];
+    return { index: idx, commandCount, lineNumber: pointLines[start], z: zs[idx] };
+  });
+}
 
-  return layerAccumulators.map((acc, idx) => ({
-    index: idx,
-    commandCount: acc.commandCount,
-    lineNumber: acc.lineNumber,
-    z: acc.z,
-  }));
+interface Move {
+  x: number;
+  y: number;
+  z: number;
+  e: number;
+  f: number;
+  isExtrude: boolean;
 }
 
 /**
- * Full detailed parse producing typed-array buffers grouped by layer
- * (ascending Z), matching the grouping/ordering the previous
- * object-per-point implementation used.
+ * Tracks printer motion state across lines, including absolute (M82) vs
+ * relative (M83) extrusion and `G92 E` resets. OrcaSlicer emits relative E,
+ * so "E increased" is not a valid extrusion test there.
  */
-export function parseDetailedLayersCore(gcodeText: string): DetailedParseBuffers {
-  const lines = gcodeText.split('\n');
+class MotionState {
+  x = 0;
+  y = 0;
+  z = 0;
+  e = 0;
+  f = 0;
+  tool = 0;
+  relativeE = false;
+  readonly tools = new Set<number>();
 
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const zs: number[] = [];
-  const es: number[] = [];
-  const fs: number[] = [];
-  const types: number[] = [];
-  const toolsPerPoint: number[] = [];
-  const layerKeys: number[] = [];
+  /** Applies one comment-stripped line; returns the resulting point for G0/G1 moves. */
+  apply(rawLine: string): Move | null {
+    const semicolon = rawLine.indexOf(';');
+    const line = (semicolon === -1 ? rawLine : rawLine.slice(0, semicolon)).trim();
+    if (!line) return null;
 
-  const toolsFound = new Set<number>();
-  let currentTool = 0;
-  let pos = { x: 0, y: 0, z: 0, e: 0, f: 0 };
-
-  for (const rawLine of lines) {
-    const line = rawLine.split(';')[0].trim();
-    if (!line) continue;
-
-    const toolMatch = line.match(/^T(\d+)/);
-    if (toolMatch) {
-      currentTool = parseInt(toolMatch[1], 10);
-      toolsFound.add(currentTool);
-      continue;
+    const first = line.charCodeAt(0);
+    if (first === 84 /* T */) {
+      const toolMatch = line.match(/^T(\d+)/);
+      if (toolMatch) {
+        this.tool = parseInt(toolMatch[1], 10);
+        this.tools.add(this.tool);
+      }
+      return null;
     }
-
-    if (!line.startsWith('G0') && !line.startsWith('G1')) continue;
+    if (first === 77 /* M */) {
+      if (line.startsWith('M83')) this.relativeE = true;
+      else if (line.startsWith('M82')) this.relativeE = false;
+      return null;
+    }
+    if (line.startsWith('G92')) {
+      const e = line.match(/E([-\d.]+)/)?.[1];
+      if (e !== undefined) this.e = parseFloat(e);
+      return null;
+    }
+    if (!/^G[01](?!\d)/.test(line)) return null;
 
     const x = line.match(/X([-\d.]+)/)?.[1];
     const y = line.match(/Y([-\d.]+)/)?.[1];
@@ -120,89 +273,99 @@ export function parseDetailedLayersCore(gcodeText: string): DetailedParseBuffers
     const e = line.match(/E([-\d.]+)/)?.[1];
     const f = line.match(/F([\d.]+)/)?.[1];
 
-    const newPos = {
-      x: x ? parseFloat(x) : pos.x,
-      y: y ? parseFloat(y) : pos.y,
-      z: z ? parseFloat(z) : pos.z,
-      e: e ? parseFloat(e) : pos.e,
-      f: f ? parseFloat(f) : pos.f,
-    };
-
-    const isExtrude = e !== undefined && parseFloat(e) > pos.e;
-    const layerZ = Math.round(newPos.z * 100) / 100;
-
-    xs.push(newPos.x);
-    ys.push(newPos.y);
-    zs.push(newPos.z);
-    es.push(newPos.e);
-    fs.push(newPos.f);
-    types.push(isExtrude ? 1 : 0);
-    toolsPerPoint.push(currentTool);
-    layerKeys.push(layerZ);
-
-    pos = newPos;
-  }
-
-  if (toolsFound.size === 0) toolsFound.add(0);
-
-  // Group point indices by layer key, preserving encounter order within a
-  // layer (matches the previous Map<z, GCodePoint[]>.push behaviour).
-  const layerIndexMap = new Map<number, number[]>();
-  for (let i = 0; i < layerKeys.length; i++) {
-    const key = layerKeys[i];
-    let indices = layerIndexMap.get(key);
-    if (!indices) {
-      indices = [];
-      layerIndexMap.set(key, indices);
+    let isExtrude = false;
+    if (e !== undefined) {
+      const eValue = parseFloat(e);
+      if (this.relativeE) {
+        isExtrude = eValue > 0;
+        this.e += eValue;
+      } else {
+        isExtrude = eValue > this.e;
+        this.e = eValue;
+      }
     }
-    indices.push(i);
-  }
+    // A pure E move (retract/unretract) has no travel.
+    if (isExtrude && x === undefined && y === undefined) isExtrude = false;
 
-  const sortedKeys = Array.from(layerIndexMap.keys()).sort((a, b) => a - b);
+    if (x !== undefined) this.x = parseFloat(x);
+    if (y !== undefined) this.y = parseFloat(y);
+    if (z !== undefined) this.z = parseFloat(z);
+    if (f !== undefined) this.f = parseFloat(f);
+
+    return { x: this.x, y: this.y, z: this.z, e: this.e, f: this.f, isExtrude };
+  }
+}
+
+class GrowableFloat32 {
+  data = new Float32Array(1 << 16);
+  length = 0;
+  push(value: number): void {
+    if (this.length === this.data.length) {
+      const next = new Float32Array(this.data.length * 2);
+      next.set(this.data);
+      this.data = next;
+    }
+    this.data[this.length++] = value;
+  }
+  toArray(): Float32Array {
+    return this.data.slice(0, this.length);
+  }
+}
+
+/**
+ * Full detailed parse producing typed-array buffers grouped by layer.
+ * Points stay in file order; layer boundaries come from `LayerTracker`.
+ */
+export function parseDetailedLayersCore(gcodeText: string): DetailedParseBuffers {
+  const tracker = new LayerTracker(gcodeText.includes(LAYER_CHANGE_MARKER));
+  const state = new MotionState();
+
+  const xs = new GrowableFloat32();
+  const ys = new GrowableFloat32();
+  const zs = new GrowableFloat32();
+  const es = new GrowableFloat32();
+  const fs = new GrowableFloat32();
+  const types = new GrowableFloat32();
+  const toolsPerPoint = new GrowableFloat32();
+
+  forEachLine(gcodeText, rawLine => {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith(';')) {
+      tracker.comment(trimmed, xs.length);
+      return;
+    }
+    const move = state.apply(trimmed);
+    if (!move) return;
+
+    tracker.point(xs.length, move.z, move.isExtrude);
+    xs.push(move.x);
+    ys.push(move.y);
+    zs.push(move.z);
+    es.push(move.e);
+    fs.push(move.f);
+    types.push(move.isExtrude ? 1 : 0);
+    toolsPerPoint.push(state.tool);
+  });
+
+  if (state.tools.size === 0) state.tools.add(0);
+
   const pointCount = xs.length;
-
-  const outX = new Float32Array(pointCount);
-  const outY = new Float32Array(pointCount);
-  const outZ = new Float32Array(pointCount);
-  const outE = new Float32Array(pointCount);
-  const outF = new Float32Array(pointCount);
-  const outType = new Uint8Array(pointCount);
-  const outTool = new Int32Array(pointCount);
-  const layerStart = new Int32Array(sortedKeys.length);
-  const layerZArr = new Float32Array(sortedKeys.length);
-
-  let cursor = 0;
-  for (let li = 0; li < sortedKeys.length; li++) {
-    const key = sortedKeys[li];
-    layerStart[li] = cursor;
-    layerZArr[li] = key;
-
-    const indices = layerIndexMap.get(key)!;
-    for (const idx of indices) {
-      outX[cursor] = xs[idx];
-      outY[cursor] = ys[idx];
-      outZ[cursor] = zs[idx];
-      outE[cursor] = es[idx];
-      outF[cursor] = fs[idx];
-      outType[cursor] = types[idx];
-      outTool[cursor] = toolsPerPoint[idx];
-      cursor++;
-    }
-  }
+  const { starts, zs: layerZs } = tracker.finish(pointCount);
 
   return {
-    x: outX,
-    y: outY,
-    z: outZ,
-    e: outE,
-    feedRate: outF,
-    tool: outTool,
-    type: outType,
-    layerStart,
-    layerZ: layerZArr,
-    tools: Int32Array.from(Array.from(toolsFound).sort((a, b) => a - b)),
+    x: xs.toArray(),
+    y: ys.toArray(),
+    z: zs.toArray(),
+    e: es.toArray(),
+    feedRate: fs.toArray(),
+    tool: Int32Array.from(toolsPerPoint.data.subarray(0, pointCount)),
+    type: Uint8Array.from(types.data.subarray(0, pointCount)),
+    layerStart: Int32Array.from(starts),
+    layerZ: Float32Array.from(layerZs),
+    tools: Int32Array.from(Array.from(state.tools).sort((a, b) => a - b)),
     pointCount,
-    layerCount: sortedKeys.length,
+    layerCount: starts.length,
+    bed: parseBedBounds(gcodeText),
   };
 }
 

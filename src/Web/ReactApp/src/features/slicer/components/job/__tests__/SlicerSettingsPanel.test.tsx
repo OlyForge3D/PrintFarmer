@@ -271,6 +271,30 @@ describe('SlicerSettingsPanel — bed adhesion', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'none' } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'none' }));
   });
+
+  it('shows a profile-controlled adhesion as a disabled, selected option with its label', () => {
+    renderPanel({ bedAdhesionType: 'profile', bedAdhesionProfileLabel: 'Profile: skirt + brim' });
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(select.value).toBe('profile');
+    const option = within(select).getByRole('option', { name: 'Profile: skirt + brim' }) as HTMLOptionElement;
+    expect(option).toBeDisabled();
+    expect(option.selected).toBe(true);
+    expect(screen.getByText(/Sliced with the profile's own adhesion settings/)).toBeInTheDocument();
+  });
+
+  it('lets the user replace profile-controlled adhesion with an explicit choice', () => {
+    const { onChange } = renderPanel({ bedAdhesionType: 'profile' });
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(within(select).getByRole('option', { name: 'Profile-controlled' })).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'brim' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'brim' }));
+  });
+
+  it('does not offer the profile option for an explicit choice', () => {
+    renderPanel({ bedAdhesionType: 'brim' });
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).not.toContain('profile');
+  });
 });
 
 describe('SlicerSettingsPanel — simpleMode hides layer height', () => {

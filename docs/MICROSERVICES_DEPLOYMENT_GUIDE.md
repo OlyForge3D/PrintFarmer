@@ -273,6 +273,58 @@ slicer-host's artifact directory into the API is not a supported workaround:
 it creates shared-volume coupling and bypasses the authenticated,
 operation-bound transfer contract.
 
+### Artifact storage startup and worker upload limits
+
+The slicer-host image starts a narrowly scoped root entrypoint before executing
+the application as `appuser` with `gosu`. This repairs existing root-owned data
+bind mounts as well as fresh deployments: only the configured artifact tree is
+created/reowned, not the entire `/data` mount, database, model library or host
+volume directory. File contents and ordinary permission modes are preserved. The runtime
+account's actual UID/GID is used, rather than assuming the base image uses 1001.
+Artifact ancestors, including `/data`, must be root-owned and not writable by
+group/others, so an unprivileged process cannot redirect the privileged traversal.
+The image supplies that safe parent for new volumes; the entrypoint does not
+reown an existing mount parent. Invalid paths, symlinks and failed permission repairs stop startup instead of
+falling back to world-writable access. This requires a writable mounted artifact
+tree; a read-only mount, unsafe parent or root-squashed filesystem needs operator
+provisioning. Filesystem ownership changes can clear special set-ID bits.
+The entrypoint verifies write/traverse access as `appuser` before launching
+the application; insufficient existing modes fail without a chmod fallback.
+Different-device nested mounts are rejected before ownership changes, including
+their mount roots. Same-device bind mounts still require operator care.
+Generated Compose maps `SLICER_ARTIFACT_STORAGE_ROOT_PATH` (default
+`/data/artifacts`) to `ArtifactStorage__RootPath`. Regenerate Compose to use that
+substitution for a custom child path. Changing the root does not migrate existing
+artifacts; retain the existing root during a permissions repair.
+
+Rebuild and recreate `slicer-host` after updating the checkout; a branch checkout
+alone does not replace a locally tagged image. Keep the existing persistent
+mounts and secrets. Do not use deployment tear-down or remove volumes to repair
+permissions. Reverting the image does not revert artifact ownership, so record
+the old runtime identity before deployment and consider it during rollback.
+
+Worker `POST /api/slice/{id}/artifacts` requests use
+`ArtifactStorage:MaxFileSizeBytes` for the multipart file ceiling, plus 1 MiB of
+bounded request overhead. The default is 100 MiB; supported configured file
+ceilings are 1 through 500,000,000 bytes. Invalid configuration fails validation
+at startup. This replaces Kestrel's unrelated 30,000,000-byte default only for
+this action; other routes retain their existing limits. The shipped nginx
+500 MiB ceiling already accommodates this policy. Lower external proxy limits
+must be adjusted separately by the operator.
+
+Multipart files remain disk-buffered above the existing memory threshold;
+chunked requests are still bounded. Oversized declared-length requests return
+413; form/stream limits can produce 400 during model binding. Worker credentials,
+engine compatibility, active claim/lease fencing, declared byte count and
+SHA-256 validation are unchanged. Ensure temporary buffering and artifact
+storage have capacity for concurrent uploads; this is not a disk quota.
+
+The standalone profile-import scanner uses the existing shared core database
+with `IUserTaskRepository` and `IUserTaskService`, just like its catalog queries.
+It does not import the main API's notification/SignalR dependency graph. Profile
+tasks persist for normal API reads; immediate main-API task broadcasts are not
+emitted by the standalone host.
+
 ### Delivery scope
 
 The split-host contract is delivered with the explicit-action workflow:

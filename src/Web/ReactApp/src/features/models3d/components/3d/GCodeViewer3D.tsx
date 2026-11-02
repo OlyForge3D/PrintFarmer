@@ -1,15 +1,17 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Line, OrbitControls, Grid } from '@react-three/drei';
-import * as THREE from 'three';
+import { OrbitControls } from '@react-three/drei';
 import { Button, Checkbox, Select } from '@/common/components/ui';
 import { GearIcon, SkipForwardIcon, PlayIcon, PauseIcon } from '@/common/components/icons/MdiIcons';
 import {
   createGcodePreviewService,
   type IGcodePreviewService,
   type DetailedParsedGCode,
-  type DetailedLayer,
 } from '@/features/slicer/services';
+import { buildGcodeLineBuffers } from './gcodeLineBuffers';
+import { GcodeLineSegments } from './GcodeLineSegments';
+import { GcodeBed, GcodeCameraFit } from './GcodeSceneHelpers';
+import { GCODE_TO_SCENE_ROTATION, computeToolpathBounds, resolveBedBounds } from './gcodeSceneMath';
 
 interface ColorMode {
   id: number;
@@ -19,141 +21,6 @@ interface ColorMode {
 interface RenderQuality {
   value: number;
   label: string;
-}
-
-function GCodePath({ layer, visible, colorMode, minFeedColor, maxFeedColor }: {
-  layer: DetailedLayer;
-  visible: boolean;
-  colorMode: number;
-  minFeedColor: string;
-  maxFeedColor: string;
-}) {
-  // Reads `layer`'s typed-array views directly (see #1788): no per-point
-  // `GCodePoint` object is materialized here, only the `THREE.Vector3`
-  // instances Line actually needs for the segments being rendered.
-  const { extrudeSegments, moveSegments } = useMemo(() => {
-    const extrudeSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
-    const moveSegments: Array<{ points: THREE.Vector3[]; color: THREE.Color }> = [];
-
-    let currentSegment: THREE.Vector3[] = [];
-    let currentFeedSum = 0;
-    let lastType = -1; // -1 = none yet, 0 = move, 1 = extrude
-
-    const flush = () => {
-      if (currentSegment.length === 0) return;
-      const isExtrude = lastType === 1;
-      const avgFeed = currentFeedSum / currentSegment.length;
-      const color = getSegmentColor(isExtrude, avgFeed, colorMode, minFeedColor, maxFeedColor);
-
-      if (isExtrude) {
-        extrudeSegments.push({ points: currentSegment, color });
-      } else {
-        moveSegments.push({ points: currentSegment, color });
-      }
-
-      currentSegment = [];
-      currentFeedSum = 0;
-    };
-
-    for (let i = 0; i < layer.count; i++) {
-      const type = layer.type[i];
-      if (type !== lastType && lastType !== -1) {
-        flush();
-      }
-      lastType = type;
-      currentSegment.push(new THREE.Vector3(layer.x[i], layer.y[i], layer.pz[i]));
-      currentFeedSum += layer.feedRate[i] || 0;
-    }
-    flush();
-
-    return { extrudeSegments, moveSegments };
-  }, [layer, colorMode, minFeedColor, maxFeedColor]);
-
-  if (!visible) return null;
-
-  return (
-    <>
-      {extrudeSegments.map((segment, idx) => (
-        segment.points.length > 1 && (
-          <Line
-            key={`extrude-${idx}`}
-            points={segment.points}
-            color={segment.color}
-            lineWidth={2}
-          />
-        )
-      ))}
-
-      {moveSegments.map((segment, idx) => (
-        segment.points.length > 1 && (
-          <Line
-            key={`move-${idx}`}
-            points={segment.points}
-            color={new THREE.Color('#666666')}
-            lineWidth={0.5}
-            dashed={true}
-            dashSize={0.5}
-            gapSize={0.5}
-          />
-        )
-      ))}
-    </>
-  );
-}
-
-function getSegmentColor(isExtrude: boolean, avgFeed: number, colorMode: number, minFeedColor: string, maxFeedColor: string): THREE.Color {
-  const color = new THREE.Color();
-
-  if (colorMode === 0) {
-    return color.setHSL(Math.random(), 0.8, 0.6);
-  } else if (colorMode === 1) {
-    const minFeed = 20;
-    const maxFeed = 150;
-    const normalized = Math.max(0, Math.min(1, (avgFeed - minFeed) / (maxFeed - minFeed)));
-
-    const min = new THREE.Color(minFeedColor);
-    const max = new THREE.Color(maxFeedColor);
-
-    return color.lerpColors(min, max, normalized);
-  } else if (colorMode === 2) {
-    return color.set(isExtrude ? '#FF6B35' : '#666666');
-  }
-
-  return color;
-}
-
-/**
- * Builds a tool-filtered `DetailedLayer` by copying only the enabled points
- * into new typed arrays. Only called when the filter actually excludes at
- * least one tool — the common "all tools enabled" case skips this entirely
- * and reuses the original zero-copy layer views (see `filteredLayers` below).
- */
-function filterLayerByTools(layer: DetailedLayer, enabledTools: Set<number>): DetailedLayer {
-  const indices: number[] = [];
-  for (let i = 0; i < layer.count; i++) {
-    if (enabledTools.has(layer.tool[i])) indices.push(i);
-  }
-
-  const count = indices.length;
-  const x = new Float32Array(count);
-  const y = new Float32Array(count);
-  const pz = new Float32Array(count);
-  const e = new Float32Array(count);
-  const feedRate = new Float32Array(count);
-  const type = new Uint8Array(count);
-  const tool = new Int32Array(count);
-
-  indices.forEach((srcIndex, i) => {
-    x[i] = layer.x[srcIndex];
-    y[i] = layer.y[srcIndex];
-    pz[i] = layer.pz[srcIndex];
-    e[i] = layer.e[srcIndex];
-    feedRate[i] = layer.feedRate[srcIndex];
-    type[i] = layer.type[srcIndex];
-    tool[i] = layer.tool[srcIndex];
-  });
-
-  return { ...layer, count, x, y, pz, e, feedRate, type, tool };
 }
 
 export interface GCodeViewerProps {
@@ -258,14 +125,28 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
     return () => clearInterval(interval);
   }, [playAnimation, parseResult]);
 
-  // Filter layers by enabled tools. The common case (no tool disabled) skips
-  // filtering entirely and reuses the original zero-copy typed-array layer
-  // views; only a genuine subset triggers filterLayerByTools' typed-array copy.
-  const filteredLayers = useMemo(() => {
-    if (!parseResult) return [];
-    if (enabledTools.size >= parseResult.tools.length) return parseResult.layers;
-    return parseResult.layers.map(layer => filterLayerByTools(layer, enabledTools));
-  }, [parseResult, enabledTools]);
+  // All visible geometry lives in two merged vertex streams (extrusion and
+  // travel), so object/draw-call counts stay constant regardless of file size.
+  // The layer slider only changes each stream's draw range.
+  const toolpathBounds = useMemo(
+    () => (parseResult ? computeToolpathBounds(parseResult.layers) : null),
+    [parseResult],
+  );
+  const bed = useMemo(
+    () => resolveBedBounds(parseResult?.bed, toolpathBounds),
+    [parseResult, toolpathBounds],
+  );
+
+  const lineBuffers = useMemo(() => {
+    if (!parseResult) return null;
+    const allToolsEnabled = enabledTools.size >= parseResult.tools.length;
+    return buildGcodeLineBuffers(parseResult.layers, {
+      colorMode,
+      minFeedColor,
+      maxFeedColor,
+      enabledTools: allToolsEnabled ? undefined : enabledTools,
+    });
+  }, [parseResult, enabledTools, colorMode, minFeedColor, maxFeedColor]);
 
   const printStats = useMemo(() => {
     if (!parseResult || parseResult.layerCount === 0) return null;
@@ -561,27 +442,33 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
       {/* 3D Viewer */}
       <div className={`${className} border border-pf-border rounded-lg overflow-hidden`}>
         <Canvas
-          camera={{ position: [100, 100, 100], fov: 45 }}
+          camera={{ position: [100, 100, 100], fov: 45, far: 5000 }}
           style={{ background: backgroundColor }}
         >
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
           <pointLight position={[-10, -10, -10]} intensity={0.5} />
 
-          {showGrid && <Grid args={[200, 200]} cellColor={gridColor} sectionColor={gridColor} />}
+          {/* G-code is Z-up; this group maps machine coordinates onto the Y-up scene. */}
+          <group rotation={GCODE_TO_SCENE_ROTATION}>
+            <GcodeBed bed={bed} showGrid={showGrid} gridColor={gridColor} />
+            {lineBuffers && (
+              <GcodeLineSegments
+                stream={lineBuffers.extrude}
+                drawCount={lineBuffers.extrude.layerEnds[currentLayer] ?? 0}
+              />
+            )}
+            {lineBuffers && showMoves && (
+              <GcodeLineSegments
+                stream={lineBuffers.travel}
+                drawCount={lineBuffers.travel.layerEnds[currentLayer] ?? 0}
+                opacity={0.35}
+              />
+            )}
+          </group>
 
-          {filteredLayers.slice(0, currentLayer + 1).map((layer, index) => (
-            <GCodePath
-              key={index}
-              layer={layer}
-              visible={true}
-              colorMode={colorMode}
-              minFeedColor={minFeedColor}
-              maxFeedColor={maxFeedColor}
-            />
-          ))}
-
-          <OrbitControls />
+          <GcodeCameraFit bounds={toolpathBounds} />
+          <OrbitControls makeDefault />
         </Canvas>
       </div>
     </div>
