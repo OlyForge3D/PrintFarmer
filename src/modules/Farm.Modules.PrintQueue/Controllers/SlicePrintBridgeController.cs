@@ -188,8 +188,8 @@ public class SlicePrintBridgeController(
         string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes).TrimStart('\uFEFF');
 
         // 7. Run the general g-code safety pass before this program is ever streamed to a
-        // physical printer. This is not calibration-scoped: any command is allowed
-        // (AllowedCommands: null), and the machine envelope is sourced from the printer/
+        // physical printer. This checks recognized commands, not expanded firmware macros.
+        // The machine envelope is sourced from the printer/
         // toolhead domain fields, never from Printer.Calibration* columns.
         GcodeSafetyLimits safetyLimits;
         try

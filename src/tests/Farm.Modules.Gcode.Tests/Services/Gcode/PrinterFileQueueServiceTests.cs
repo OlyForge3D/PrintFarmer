@@ -118,7 +118,7 @@ public sealed class PrinterFileQueueServiceTests
     [Theory]
     [InlineData("G28\nG1 X999 Y1\nM104 S0\nM140 S0\nM84\n", "gcode_motion_outside_build_volume")]
     [InlineData("G28\nRUN_SHELL_COMMAND CMD=bad\nM104 S0\nM140 S0\nM84\n", "gcode_contains_host_command")]
-    [InlineData("G28\nG1 X1 Y1\n", "gcode_missing_final_reset")]
+    [InlineData("PRINT_START\nG1 Z201\nPRINT_END", "gcode_motion_outside_build_volume")]
     public async Task Queue_RejectsUnsafeProgramAgainstActualDestinationAsync(string content, string reason)
     {
         await using Fixture test = await Fixture.CreateAsync(content);
@@ -130,6 +130,22 @@ public sealed class PrinterFileQueueServiceTests
         Assert.Empty(await test.Db.PrintJobs.ToListAsync());
         Assert.Empty(await test.Db.PrinterFileOperationJobs.ToListAsync());
         Assert.True(File.Exists(test.Path));
+    }
+
+    [Fact]
+    public async Task Queue_OrdinaryMacroProgram_AdmitsWithoutCalibrationSequenceAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync(
+            "; OrcaSlicer https://example.invalid C:\\profiles\\printer.json api_key\n" +
+            "PRINT_START\nG90\nM83\nG1 X10 Y10 Z0.2 E1 F1500 ; RUN_SHELL_COMMAND metadata\nPRINT_END");
+        var service = test.CreateService();
+        await service.ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
+
+        PrinterFileCopyOperation? result = await service.AdmitAsync(test.Actor, test.OperationId, default);
+
+        Assert.Equal(PrinterFileOperationState.Queued, result!.State);
+        Assert.Single(await test.Db.PrintJobs.ToListAsync());
+        Assert.Equal(test.Bytes, await File.ReadAllBytesAsync(test.Path));
     }
 
     [Fact]

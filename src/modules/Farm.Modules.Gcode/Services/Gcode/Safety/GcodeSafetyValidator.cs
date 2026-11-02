@@ -7,59 +7,29 @@ namespace Farm.Modules.Gcode.Services.Gcode.Safety;
 
 /// <summary>Default <see cref="IGcodeSafetyValidator"/>.</summary>
 /// <remarks>
-/// This is the general, calibration-independent g-code safety interpreter extracted from the
-/// calibration-only validator originally added by PR #947. It performs no provenance/manifest/digest
-/// matching — only physical safety checks against an authoritative <see cref="GcodeSafetyLimits"/>
-/// envelope, plus redaction and structural scanning that is harmless to run against any g-code.
+/// Checks recognized commands in ordinary slicer output against configured
+/// <see cref="GcodeSafetyLimits"/> and rejects recognized executable host commands.
+/// Firmware macros are not expanded; acceptance is not a certification of their behavior.
 /// </remarks>
 public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 {
-    /// <summary>Absolute pressure advance ceiling accepted in any validated program.</summary>
-    public const decimal AbsolutePressureAdvanceCeiling = 2.0m;
-
-    /// <summary>Absolute retraction ceiling, in millimetres, accepted in any validated program.</summary>
-    public const decimal AbsoluteRetractionCeiling = 10.0m;
-
     /// <summary>Volumetric flow tolerance, in mm³/s, applied before a move is rejected.</summary>
     public const decimal VolumetricFlowTolerance = 0.05m;
 
     /// <summary>Coordinate tolerance, in millimetres, applied before a move is rejected.</summary>
     public const decimal CoordinateTolerance = 0.01m;
 
-    /// <summary>The forbidden firmware tuning tower macro.</summary>
-    public const string TuningTower = "TUNING_TOWER";
-
-    /// <summary>Marks a safe transition between calibration segments.</summary>
-    private const string SegmentTransitionMarker = ";PF_SEG_TRANSITION";
-
-    /// <summary>Marks the start of a calibration segment.</summary>
-    private const string SegmentBeginMarker = ";PF_SEG_BEGIN";
-
-    /// <summary>Marks the end of a calibration segment.</summary>
-    private const string SegmentEndMarker = ";PF_SEG_END";
-
-    private static readonly string[] HostCommandMarkers =
-    [
+    private static readonly HashSet<string> HostCommands = new(StringComparer.OrdinalIgnoreCase)
+    {
         "RUN_SHELL_COMMAND",
         "/bin/sh",
         "cmd.exe",
-        "powershell ",
-        "curl ",
-        "wget ",
-        "nc ",
-        "ssh ",
-    ];
-
-    private static readonly string[] CredentialMarkers =
-    [
-        "api_key",
-        "apikey",
-        "password",
-        "authorization:",
-        "bearer ",
-        "client_secret",
-        "x-worker-key",
-    ];
+        "powershell",
+        "curl",
+        "wget",
+        "nc",
+        "ssh",
+    };
 
     /// <inheritdoc/>
     public GcodeSafetyResult<GcodeSafetyReport> Validate(GcodeSafetyRequest request)
@@ -75,7 +45,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 
         List<GcodeSafetyProblem> problems = [];
         InterpreterState state = Interpret(request, problems);
-        ValidateEnvelope(state, problems);
 
         if (problems.Count > 0)
         {
@@ -102,37 +71,21 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         foreach (string rawLine in request.Gcode.Split('\n'))
         {
             lineNumber++;
-            string line = rawLine.Trim();
+            int commentStart = rawLine.IndexOf(';');
+            string line = (commentStart < 0 ? rawLine : rawLine[..commentStart]).Trim();
             if (line.Length == 0)
             {
                 continue;
             }
 
-            ScanRedaction(line, lineNumber, problems);
-            if (line[0] == ';')
-            {
-                TrackMarker(state, line, lineNumber, problems);
-                continue;
-            }
-
             string command = ReadCommand(line);
-            if (line.Contains(TuningTower, StringComparison.OrdinalIgnoreCase))
+            if (HostCommands.Contains(command))
             {
                 Add(
                     problems,
-                    GcodeSafetyProblemCodes.TuningTowerForbidden,
+                    GcodeSafetyProblemCodes.ContainsHostCommand,
                     Field(lineNumber),
-                    "G-code must never drive a firmware tuning tower.");
-                continue;
-            }
-
-            if (request.AllowedCommands is not null && !request.AllowedCommands.Contains(command))
-            {
-                Add(
-                    problems,
-                    GcodeSafetyProblemCodes.CommandNotAllowlisted,
-                    Field(lineNumber),
-                    "G-code contains a command outside the trusted allowlist.");
+                    "G-code contains an executable shell, host or network command.");
                 continue;
             }
 
@@ -153,8 +106,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         switch (command)
         {
             case "G28":
-                state.Homed = true;
-                state.MotorsOff = false;
                 state.X = 0m;
                 state.Y = 0m;
                 state.Z = 0m;
@@ -196,26 +147,8 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             case "SET_VELOCITY_LIMIT":
                 ApplyVelocityLimit(state, line, lineNumber, problems);
                 break;
-            case "SET_PRESSURE_ADVANCE":
-                ApplyPressureAdvance(state, line, lineNumber, problems);
-                break;
-            case "TURN_OFF_HEATERS":
-                state.NozzleReset = true;
-                state.BedReset = true;
-                state.NozzleTemperature = 0;
-                state.BedTemperature = 0;
-                state.ChamberTemperature = 0;
-                break;
-            case "M18":
-            case "M84":
-                state.MotorsOff = true;
-                break;
-            case "M17":
-                state.MotorsOff = false;
-                break;
             case "G0":
             case "G1":
-                state.MotorsOff = false;
                 ApplyMove(state, line, lineNumber, problems);
                 break;
             default:
@@ -234,8 +167,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             return;
         }
 
-        state.NozzleTemperature = value;
-        state.NozzleReset = value == 0;
         if (state.Limits.Toolhead.NozzleMaxTemperatureCelsius is null &&
             state.Limits.Toolhead.HotendMaxTemperatureCelsius is null)
         {
@@ -266,8 +197,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             return;
         }
 
-        state.BedTemperature = value;
-        state.BedReset = value == 0;
         if (state.Limits.Machine.MaxBedTemperatureCelsius is not { } ceiling)
         {
             return;
@@ -294,7 +223,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             return;
         }
 
-        state.ChamberTemperature = value;
         if (value != 0 && (state.Limits.Machine.HasHeatedChamber != true ||
             value > (state.Limits.Machine.MaxChamberTemperatureCelsius ?? 0)))
         {
@@ -358,31 +286,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
                 GcodeSafetyProblemCodes.AccelerationAboveLimit,
                 Field(lineNumber),
                 "A commanded acceleration limit exceeds the authoritative ceiling.");
-        }
-    }
-
-    private static void ApplyPressureAdvance(
-        InterpreterState state,
-        string line,
-        int lineNumber,
-        List<GcodeSafetyProblem> problems)
-    {
-        if (!TryReadNamedParameter(line, "ADVANCE=", out decimal value))
-        {
-            return;
-        }
-
-        state.PressureAdvance = value;
-        decimal ceiling = Math.Min(
-            AbsolutePressureAdvanceCeiling,
-            state.Limits.Toolhead.IsDirectDrive == true ? 0.5m : 2.0m);
-        if (value < 0m || value > ceiling)
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.PressureAdvanceOutOfRange,
-                Field(lineNumber),
-                "A commanded pressure advance value is outside the safe range.");
         }
     }
 
@@ -460,44 +363,8 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
             state.FeedRate = feedRate;
         }
 
-        if (extrusion < 0m)
-        {
-            decimal retraction = -extrusion;
-            state.TransitionRetracted = true;
-            decimal ceiling = Math.Min(
-                AbsoluteRetractionCeiling,
-                state.Limits.Toolhead.IsDirectDrive == true ? 3.0m : 10.0m);
-            if (retraction > ceiling)
-            {
-                Add(
-                    problems,
-                    GcodeSafetyProblemCodes.RetractionAboveLimit,
-                    Field(lineNumber),
-                    "A commanded retraction exceeds the safe range.");
-            }
-        }
-
         if (extrusion > 0m)
         {
-            state.HasExtruded = true;
-            if (!state.Homed)
-            {
-                Add(
-                    problems,
-                    GcodeSafetyProblemCodes.UnsafeInitialization,
-                    Field(lineNumber),
-                    "G-code extrudes before the printer is homed.");
-            }
-
-            if (state.NozzleTemperature <= 0m)
-            {
-                Add(
-                    problems,
-                    GcodeSafetyProblemCodes.UnsafeInitialization,
-                    Field(lineNumber),
-                    "G-code extrudes before a nozzle temperature is commanded.");
-            }
-
             ValidateVolumetricFlow(state, previousX, previousY, extrusion, lineNumber, problems);
         }
 
@@ -599,138 +466,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         }
     }
 
-    private static void TrackMarker(
-        InterpreterState state,
-        string line,
-        int lineNumber,
-        List<GcodeSafetyProblem> problems)
-    {
-        if (line.StartsWith(SegmentTransitionMarker, StringComparison.Ordinal))
-        {
-            state.SawTransition = true;
-            state.TransitionRetracted = false;
-            return;
-        }
-
-        if (line.StartsWith(SegmentBeginMarker, StringComparison.Ordinal))
-        {
-            state.SegmentDepth++;
-            if (state.SegmentsSeen > 0 && (!state.SawTransition || !state.TransitionRetracted))
-            {
-                Add(
-                    problems,
-                    GcodeSafetyProblemCodes.UnsafeSegmentTransition,
-                    Field(lineNumber),
-                    "A segment starts without a retracting safe transition.");
-            }
-
-            state.SegmentsSeen++;
-            state.SawTransition = false;
-            return;
-        }
-
-        if (line.StartsWith(SegmentEndMarker, StringComparison.Ordinal))
-        {
-            state.SegmentDepth--;
-        }
-    }
-
-    private static void ValidateEnvelope(InterpreterState state, List<GcodeSafetyProblem> problems)
-    {
-        if (!state.Homed)
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.UnsafeInitialization,
-                "gcode.initialization",
-                "G-code never homes the printer.");
-        }
-
-        if (!state.HeatersOff || !state.MotorsOff)
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.MissingFinalReset,
-                "gcode.finalization",
-                "G-code does not end with a safe heater and motor reset.");
-        }
-
-        if (state.SegmentDepth != 0)
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.UnsafeSegmentTransition,
-                "gcode.segments",
-                "G-code contains an unbalanced segment marker.");
-        }
-    }
-
-    private static void ScanRedaction(
-        string line,
-        int lineNumber,
-        List<GcodeSafetyProblem> problems)
-    {
-        if (HostCommandMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.ContainsHostCommand,
-                Field(lineNumber),
-                "G-code contains a shell, host or network command.");
-            return;
-        }
-
-        if (CredentialMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.ContainsCredential,
-                Field(lineNumber),
-                "G-code contains a credential-bearing token.");
-            return;
-        }
-
-        if (line.Contains("://", StringComparison.Ordinal))
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.ContainsPrivateUrl,
-                Field(lineNumber),
-                "G-code contains a URL.");
-            return;
-        }
-
-        if (ContainsAbsolutePath(line))
-        {
-            Add(
-                problems,
-                GcodeSafetyProblemCodes.ContainsFilesystemPath,
-                Field(lineNumber),
-                "G-code contains an absolute filesystem path.");
-        }
-    }
-
-    private static bool ContainsAbsolutePath(string line)
-    {
-        foreach (string token in line.Split(
-            [' ', '\t', '=', '"', '\''],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            string candidate = token.TrimStart(';');
-            if (candidate.StartsWith(@"\\", StringComparison.Ordinal) ||
-                (candidate.Length >= 3 &&
-                    char.IsAsciiLetter(candidate[0]) &&
-                    candidate[1] == ':' &&
-                    (candidate[2] == '\\' || candidate[2] == '/')) ||
-                (candidate.Length > 1 && candidate[0] == '/' && char.IsAsciiLetter(candidate[1])))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static string ReadCommand(string line)
     {
         int end = line.IndexOfAny([' ', '\t', ';']);
@@ -819,26 +554,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
 
         public bool AbsoluteExtrusion { get; set; } = true;
 
-        public bool Homed { get; set; }
-
-        public bool NozzleReset { get; set; }
-
-        public bool BedReset { get; set; }
-
-        public decimal ChamberTemperature { get; set; }
-
-        public bool HeatersOff => NozzleReset && BedReset && ChamberTemperature == 0;
-
-        public bool MotorsOff { get; set; }
-
-        public bool HasExtruded { get; set; }
-
-        public bool SawTransition { get; set; }
-
-        public bool TransitionRetracted { get; set; }
-
-        public int SegmentsSeen { get; set; }
-
         public decimal X { get; set; }
 
         public decimal Y { get; set; }
@@ -848,14 +563,6 @@ public sealed class GcodeSafetyValidator : IGcodeSafetyValidator
         public decimal E { get; set; }
 
         public decimal FeedRate { get; set; }
-
-        public decimal NozzleTemperature { get; set; }
-
-        public decimal BedTemperature { get; set; }
-
-        public decimal PressureAdvance { get; set; }
-
-        public int SegmentDepth { get; set; }
 
         public int CommandCount { get; set; }
     }

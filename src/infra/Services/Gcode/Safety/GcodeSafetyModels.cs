@@ -112,8 +112,8 @@ public sealed record GcodeSafetyLimits(
     /// <summary>
     /// Limits with every ceiling unset. Every temperature/speed/acceleration/flow check is skipped
     /// when its ceiling is unset, so this is only appropriate when the caller cannot determine the
-    /// authoritative machine envelope and has decided the redaction/structural checks alone are
-    /// still worth running.
+    /// configured machine envelope and has decided the recognized host-command check alone is
+    /// still worth running. Chamber commands also require a configured heated chamber and ceiling.
     /// </summary>
     public static GcodeSafetyLimits Empty { get; } = new(
         GcodeSafetyToolheadLimits.Empty,
@@ -203,26 +203,10 @@ public static class GcodeSafetyResult
 }
 
 /// <summary>
-/// The stable, machine-readable problem codes shared with the calibration-scoped adapter, so that
-/// existing consumers observe unchanged codes after the extraction.
+/// The stable, machine-readable rejection codes for recognized ordinary-file checks.
 /// </summary>
 public static class GcodeSafetyProblemCodes
 {
-    /// <summary>A command outside the request's optional allowlist was encountered.</summary>
-    public const string CommandNotAllowlisted = "gcode_command_not_allowlisted";
-
-    /// <summary>A firmware tuning tower command was encountered.</summary>
-    public const string TuningTowerForbidden = "gcode_tuning_tower_forbidden";
-
-    /// <summary>A credential-bearing token was encountered.</summary>
-    public const string ContainsCredential = "gcode_contains_credential";
-
-    /// <summary>A URL was encountered.</summary>
-    public const string ContainsPrivateUrl = "gcode_contains_private_url";
-
-    /// <summary>An absolute filesystem path was encountered.</summary>
-    public const string ContainsFilesystemPath = "gcode_contains_filesystem_path";
-
     /// <summary>A shell, host or network command was encountered.</summary>
     public const string ContainsHostCommand = "gcode_contains_host_command";
 
@@ -247,21 +231,6 @@ public static class GcodeSafetyProblemCodes
     /// <summary>A commanded move exceeds the authoritative volumetric flow ceiling.</summary>
     public const string VolumetricFlowAboveLimit = "gcode_volumetric_flow_above_limit";
 
-    /// <summary>A commanded retraction exceeds the safe range.</summary>
-    public const string RetractionAboveLimit = "gcode_retraction_above_limit";
-
-    /// <summary>A commanded pressure advance value is outside the safe range.</summary>
-    public const string PressureAdvanceOutOfRange = "gcode_pressure_advance_out_of_range";
-
-    /// <summary>The program is unsafe at initialization (extrudes before homed/heated).</summary>
-    public const string UnsafeInitialization = "gcode_unsafe_initialization";
-
-    /// <summary>A segment transition marker was found unsafe.</summary>
-    public const string UnsafeSegmentTransition = "gcode_unsafe_segment_transition";
-
-    /// <summary>The program does not end with a safe heater and motor reset.</summary>
-    public const string MissingFinalReset = "gcode_missing_final_reset";
-
     /// <summary>The supplied g-code is empty or otherwise malformed.</summary>
     public const string Malformed = "gcode_malformed";
 }
@@ -270,28 +239,25 @@ public static class GcodeSafetyProblemCodes
 /// <param name="Limits">The authoritative safety envelope for the target machine.</param>
 /// <param name="Gcode">The g-code program text to validate.</param>
 /// <param name="Checkpoint">The lifecycle point being validated.</param>
-/// <param name="AllowedCommands">
-/// An optional command allowlist. When <see langword="null"/>, any command is accepted (the normal
-/// case for real slicer-produced g-code, whose vocabulary is far wider than any narrow generator
-/// allowlist). Calibration call sites pass their trusted generator allowlist here.
-/// </param>
 public sealed record GcodeSafetyRequest(
     GcodeSafetyLimits Limits,
     string Gcode,
-    GcodeSafetyCheckpoint Checkpoint,
-    IReadOnlyCollection<string>? AllowedCommands = null);
+    GcodeSafetyCheckpoint Checkpoint);
 
 /// <summary>
-/// General, calibration-independent reject-only static validation of g-code, extracted from the
-/// calibration-only validator introduced by PR #947. Safe and intended to run at every slice-job
-/// and send-to-printer lifecycle point where g-code content is not yet trusted.
+/// Reject-only static validation of recognized commands in ordinary slicer-produced g-code.
 /// </summary>
 /// <remarks>
-/// The validator never rewrites, repairs or normalizes g-code. It parses the program statefully and
-/// either returns a clean report or the ordered reasons the program must be rejected. Provenance and
-/// digest matching against calibration manifests, specifications, and plans is intentionally out of
-/// scope here — that was calibration-generator-specific and lived in the calibration generation saga
-/// removed by #1979.
+/// The validator never rewrites or repairs g-code. It checks configured motion/thermal/geometry
+/// limits and recognized executable host commands, ignoring semicolon comments. It does not expand
+/// firmware macros or require literal homing, heating or shutdown sequences, calibration markers,
+/// a command allowlist, or hardcoded pressure-advance/retraction limits. Acceptance is not a safety
+/// certification: unknown commands and firmware behavior cannot be inferred from this file.
+/// Current callers validate slice send-to-printer (upload-only and start) and printer-file queue
+/// admission. Slice add-to-queue and dispatch do not invoke this pass. Limits come from persisted
+/// Printer/Toolhead records, not live firmware; unset numeric ceilings skip their checks except
+/// chamber heating requires an explicitly supported chamber and ceiling. Ordinary callers provide
+/// no filament/flow limits. Malformed configured geometry fails closed in PrinterGcodeSafetyLimits.
 /// </remarks>
 public interface IGcodeSafetyValidator
 {
