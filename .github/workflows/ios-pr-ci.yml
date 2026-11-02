@@ -319,81 +319,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - key: iphone-1
-            family: iPhone
-            shard: 1
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/OperatorShellUITests
-          - key: iphone-2
-            family: iPhone
-            shard: 2
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ScanStationUITests
-              -only-testing:PrintFarmerUITests/HarvestUITests
-          - key: iphone-3
-            family: iPhone
-            shard: 3
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
-              -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
-              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
-              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
-              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
-          - key: iphone-4
-            family: iPhone
-            shard: 4
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
-          - key: ipad-1
-            family: iPad
-            shard: 1
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/LoginFlowUITests
-              -only-testing:PrintFarmerUITests/OperatorShellUITests
+          # #3622 diagnostic branch only: restore the full matrix before merging.
           - key: ipad-2
             family: iPad
             shard: 2
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/ScanStationUITests
-              -only-testing:PrintFarmerUITests/HarvestUITests
-          - key: ipad-3
-            family: iPad
-            shard: 3
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
-              -only-testing:PrintFarmerUITests/PrinterListUITests
-              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
-              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
-              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
-              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
-          - key: ipad-4
-            family: iPad
-            shard: 4
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-            selectors: >-
-              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
-              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
-              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
-              -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests/testCompletedJobExposesHarvestAction
     defaults:
       run:
         working-directory: mobile
@@ -533,7 +466,8 @@ jobs:
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
-          python3 scripts/run-tests.py --retry-failed-tests -- test-without-building \
+          # #3622 diagnostic: retain the first attempt without an automatic retry.
+          python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -549,12 +483,21 @@ jobs:
             -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
             2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log"
 
+      - name: Collect history menu delivery diagnostics
+        if: ${{ always() && matrix.key == 'ipad-2' && env.SIMULATOR_UDID != '' }}
+        run: |
+          xcrun simctl spawn "$SIMULATOR_UDID" log show \
+            --style compact --last 30m \
+            --predicate 'subsystem == "com.printfarmer.ios" AND category == "HistoryMenuDiagnostic"' \
+            > "build-${{ matrix.key }}/HistoryMenuDiagnostic.log"
+
       - name: Upload XCUI shard results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: ios-xcui-${{ matrix.key }}
           path: |
+            mobile/build-${{ matrix.key }}/HistoryMenuDiagnostic.log
             mobile/build-${{ matrix.key }}/Login.xcresult
             mobile/build-${{ matrix.key }}/Login.log
             mobile/build-${{ matrix.key }}/Login.events.jsonl

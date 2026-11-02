@@ -1,5 +1,29 @@
 ## XCUI timeout diagnosis (#2573)
 
+### Job History menu delivery diagnostic (#3622)
+
+The diagnostic draft enables `--uitesting-history-menu-diagnostics` only for
+`HarvestUITests/testCompletedJobExposesHarvestAction`. In DEBUG UI-test mode,
+a window-level observer records touches inside the ellipsis label without
+recognizing gestures, preventing other recognizers, delaying delivery, or
+cancelling touches. `HistoryMenuDiagnostic.log` retains installation and touch
+events with app uptime. A menu-content lifecycle log is supplemental only:
+SwiftUI may construct menu content independently of visible presentation.
+The helper retains tap-start/return timestamps, the unchanged five-second
+menu-item wait result, and the post-wait accessibility hierarchy in an XCTest
+attachment.
+
+A matching touch proves delivery to the app window at the label, not that
+SwiftUI accepted the gesture or presented a menu. The menu item's presence in
+XCUI remains the presentation check. No touch event is inconclusive unless
+the observer was installed and the retained log covers the tap interval.
+Do not interpret a successful diagnostic attempt as resolution of the original
+intermittent failure.
+
+This branch temporarily selects only iPad shard 2's affected test and disables
+the runner's automatic failed-test retry. It is **not mergeable**: restore the
+normal matrix and retry policy before preparing any product-fix PR.
+
 ### Farm card disappearance invalidation (#3620)
 
 The unsearched control-idle Farm scroll in run `40986691357` aborted app

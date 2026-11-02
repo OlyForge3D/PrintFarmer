@@ -13,6 +13,11 @@ import XCTest
 final class HarvestUITests: QueueUITestBase {
     override var waitsForNavigationReadiness: Bool { true }
 
+    override var additionalLaunchArguments: [String] {
+        name.contains("testCompletedJobExposesHarvestAction")
+            ? ["--uitesting-history-menu-diagnostics"] : []
+    }
+
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
     private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"
     private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"

@@ -346,10 +346,22 @@ struct JobListView: View {
                     Label("Job history", systemImage: "clock.arrow.circlepath")
                 }
                 .accessibilityIdentifier("jobList.history.select")
+                .onAppear {
+                    #if DEBUG
+                    HistoryMenuTouchProbe.record("menu content appeared")
+                    #endif
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
+                    .background {
+                        #if DEBUG
+                        if HistoryMenuTouchProbe.isEnabled {
+                            HistoryMenuTouchProbe()
+                        }
+                        #endif
+                    }
             }
             .accessibilityLabel("Job history")
             .accessibilityHint("Opens completed and cancelled jobs, including harvest actions.")
@@ -947,6 +959,89 @@ struct JobListView: View {
     }
 
 }
+
+#if DEBUG
+/// Observes delivery without recognizing a gesture or changing Menu's handlers.
+private struct HistoryMenuTouchProbe: UIViewRepresentable {
+    static var isEnabled: Bool {
+        UITestBootstrap.isEnabled
+            && ProcessInfo.processInfo.arguments.contains("--uitesting-history-menu-diagnostics")
+    }
+
+    static func record(_ event: String) {
+        guard isEnabled else { return }
+        Logger(subsystem: "com.printfarmer.ios", category: "HistoryMenuDiagnostic")
+            .notice("uptime=\(ProcessInfo.processInfo.systemUptime) \(event, privacy: .public)")
+    }
+
+    func makeUIView(context: Context) -> ProbeView { ProbeView() }
+    func updateUIView(_ uiView: ProbeView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: ProbeView, coordinator: ()) {
+        uiView.observer.view?.removeGestureRecognizer(uiView.observer)
+    }
+
+    final class ProbeView: UIView {
+        let observer = TouchObserver()
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            observer.view?.removeGestureRecognizer(observer)
+            observer.probe = self
+            if let window {
+                window.addGestureRecognizer(observer)
+                HistoryMenuTouchProbe.record("touch observer installed")
+            }
+        }
+    }
+
+    final class TouchObserver: UIGestureRecognizer {
+        weak var probe: UIView?
+        private var observedTouch = false
+
+        init() {
+            super.init(target: nil, action: nil)
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false
+            delaysTouchesEnded = false
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let probe,
+                  let touch = touches.first(where: { probe.bounds.contains($0.location(in: probe)) }) else {
+                state = .failed
+                return
+            }
+            observedTouch = true
+            let location = touch.location(in: view)
+            let hitView = touch.view.map { String(describing: type(of: $0)) } ?? "nil"
+            HistoryMenuTouchProbe.record(
+                "touch began timestamp=\(touch.timestamp) point=\(location) hitView=\(hitView)"
+            )
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            if observedTouch { HistoryMenuTouchProbe.record("touch ended") }
+            state = .failed
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            if observedTouch { HistoryMenuTouchProbe.record("touch cancelled") }
+            state = .failed
+        }
+
+        override func reset() {
+            super.reset()
+            observedTouch = false
+        }
+    }
+}
+#endif
 
 struct AuthenticatedJobThumbnail: View {
     private static let maxImageBytes = 10 * 1024 * 1024

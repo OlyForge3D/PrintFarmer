@@ -35,10 +35,27 @@ class QueueUITestBase: PrintFarmerUITestCase {
             line: line
         )
         XCTAssertTrue(historyButton.isHittable, "Job History menu must be reachable", file: file, line: line)
+        let diagnostic = app.launchArguments.contains("--uitesting-history-menu-diagnostics")
+        let tapStarted = ProcessInfo.processInfo.systemUptime
         historyButton.tap()
+        let tapReturned = ProcessInfo.processInfo.systemUptime
 
         let selectHistory = app.buttons["jobList.history.select"]
-        XCTAssertTrue(selectHistory.waitForExistence(timeout: 5), file: file, line: line)
+        let menuOpened = selectHistory.waitForExistence(timeout: 5)
+        if diagnostic {
+            let waitReturned = ProcessInfo.processInfo.systemUptime
+            let attachment = XCTAttachment(string: """
+                tapStarted=\(tapStarted)
+                tapReturned=\(tapReturned)
+                waitReturned=\(waitReturned)
+                menuOpened=\(menuOpened)
+                \(app.debugDescription)
+                """)
+            attachment.name = "History menu single-tap diagnostic"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertTrue(menuOpened, file: file, line: line)
         selectHistory.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["jobList.history"]
