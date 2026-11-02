@@ -1,144 +1,124 @@
-# Calibration Divergences From OrcaSlicer
+## Ordinary slicer G-code checks and historical calibration policy
 
-> **Purpose**: Distinguish PFD's *intentional* design decisions from *regressions* or *silent
-> drift* when calibration output is compared against OrcaSlicer-derived references (see the
-> golden/parity fixture work in #1929, part of #1926).
+The deterministic calibration generator and its adapter were removed in #1979.
+This document previously described that removed pipeline as if it still ran.
+`GcodeSafetyValidator` now checks ordinary slicer output; it is not a controlled
+calibration-program verifier.
 
-PFD's calibration generation pipeline (`src/api/Services/Calibration/Generation/`) reuses
-OrcaSlicer's native profile format and slicing engine, but it is not a byte-for-byte
-reimplementation of OrcaSlicer's calibration wizard. A handful of behaviors are deliberately
-different, almost always because PFD runs calibration **unattended against real, remote
-hardware**, whereas OrcaSlicer's calibration wizard runs interactively on a desktop where a
-human reviews the G-code (or the print) before it reaches a printer.
+### Removed historical assumptions
 
-If a future golden/parity test (#1929) reports a mismatch against an OrcaSlicer-generated
-reference, check this list first. A match to an entry below means the divergence is expected;
-add a code comment linking back to this document if the test needs to special-case it. If the
-mismatch isn't listed here, treat it as a genuine bug or drift, not an intentional divergence.
+Ordinary files need not contain literal `G28`, heating before extrusion,
+`TURN_OFF_HEATERS`, `M84`/`M18`, or balanced `PF_SEG_*` markers. Firmware macros such
+as `PRINT_START`/`PRINT_END` may own those operations. The old command allowlist,
+`TUNING_TOWER` prohibition, pressure-advance ceilings (2.0 / 0.5 direct drive),
+and retraction ceilings (10 / 3 mm direct drive) no longer apply. None was a
+configured ordinary-file limit.
 
-## 1. Safety ceilings reject values OrcaSlicer would slice unmodified
+The former vendor-profile hook neutralization and calibration flow-rate clamping
+also belonged to removed calibration compilers, not the current ordinary-file
+validator. They must not be presented as current protections.
 
-**Method(s)**: all — enforced pipeline-wide as a final, reject-only checkpoint.
+### Retained static checks
 
-**What differs**: `GcodeSafetyValidator` statically interprets every emitted
-calibration program and rejects it outright if any commanded nozzle/bed/chamber temperature,
-acceleration, feed rate, retraction distance, pressure advance value, or volumetric flow rate
-exceeds an authoritative ceiling (drawn from the printer's own profile limits, plus a small set
-of absolute, hardcoded ceilings — see below). OrcaSlicer's calibration wizard has no equivalent
-static pass: it will happily slice and hand over a tuning-tower program that commands values
-outside a printer's configured limits, trusting the firmware or the operator to catch it.
+All checks below run in
+[`GcodeSafetyValidator`](../src/modules/Farm.Modules.Gcode/Services/Gcode/Safety/GcodeSafetyValidator.cs).
+It rejects rather than rewrites the file and reports a code and first line per
+distinct rejection code.
 
-**Why**: PFD calibration jobs are queued and executed without a human present to watch the
-first layer or abort a runaway heat/speed command. The validator exists specifically to fail
-closed before a job reaches a worker, rather than relying on firmware limits (which may not be
-configured, or may be wrong) or an operator (who isn't there). This is documented as a design
-invariant in the validator's own remarks: *"The validator never rewrites, repairs or normalizes
-G-code... it either returns a clean report or the ordered reasons the program must not be
-completed, promoted, queued or started."*
+| Check | Recognized input and application |
+| --- | --- |
+| Nozzle temperature | `M104`/`M109 S`: nozzle maximum, falling back to hotend maximum when nozzle maximum is unset. |
+| Bed temperature | `M140`/`M190 S`: configured bed maximum. |
+| Chamber temperature | `M141`/`M191 S`: nonzero values require `HasHeatedChamber == true` and a configured maximum, then must not exceed it. Zero is accepted. |
+| Acceleration | `M204 S` and `SET_VELOCITY_LIMIT ACCEL=` against configured maximum acceleration. |
+| Speed | `SET_VELOCITY_LIMIT VELOCITY=` against travel maximum; explicit `G0`/`G1 F` (mm/min divided by 60) against print maximum for positive extrusion, travel maximum otherwise. |
+| XY volume | Absolute-position `G0`/`G1` XY endpoints against origin plus size, when both X and Y sizes exist; 0.01 mm tolerance. |
+| Printable polygon / exclusions | Absolute-position XY endpoints must lie in the configured printable polygon and outside configured excluded-region polygons. |
+| Z volume | `G0`/`G1` with Z must not exceed the configured Z maximum. |
+| Volumetric flow | Only if filament diameter **and** maximum flow are supplied. Uses positive extrusion, stored feed rate and XY Manhattan distance, with 0.05 mm3/s tolerance. Neither ordinary caller supplies these limits today. |
+| Executable host commands | Exact first command token after an optional `N` line-number prefix, case-insensitive: `RUN_SHELL_COMMAND`, `/bin/sh`, `cmd.exe`, `powershell`, `curl`, `wget`, `nc`, `ssh`. Semicolon comments are stripped first. |
+| Empty input | An empty program is rejected as `gcode_malformed`. |
 
-**Where in code**:
+Credential words, URLs, absolute paths and host-command words in full-line or
+trailing semicolon comments are not executable instructions and are not scanned.
+The host check does not reject a display message or a macro argument merely
+because it contains one of those strings. This is a narrow recognized-command
+check, **not** a credential scrubber or general shell-language analyzer.
 
-- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` (general, calibration-independent
-  checks) —
-  `ApplyNozzleTemperature`, `ApplyBedTemperature`, `ApplyChamberTemperature`,
-  `ApplyAcceleration`, `ApplyVelocityLimit`, `ApplyMove` (feed rate, retraction, volumetric flow),
-  `ApplyPressureAdvance`.
-- Tested by `src/tests/Farm.Web.Api.Tests/Services/Gcode/Safety/GcodeSafetyValidatorTests.cs`
-  and `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`.
-- A related but separate mechanism proactively *clamps* (rather than rejects) the printed feed
-  rate to the volumetric-flow ceiling during specification compilation, specifically so a wide
-  nozzle's calibration program is resolved safely instead of being rejected later by the
-  validator above — see `CalibrationSpecificationCompiler.cs` (search for the `Clamp the printed
-  feed rate` comment).
+### Where checks run and where they do not
 
-## 2. Direct-drive extruders get stricter pressure-advance and retraction ceilings
+| Path | Current static-validator coverage |
+| --- | --- |
+| Slice send-to-printer | [`SlicePrintBridgeController.SendToPrinterAsync`](../src/modules/Farm.Modules.PrintQueue/Controllers/SlicePrintBridgeController.cs) validates before **both upload-only and immediate start**. Failure returns HTTP 400 without uploading. The uploaded bytes are the same bytes read for validation. |
+| Printer-file/catalog queue admission | [`PrinterFileQueueService.AdmitAsync`](../src/modules/Farm.Modules.Gcode/Services/Gcode/PrinterFileQueueService.cs) validates verified local content against the actual destination before creating a job; a rejection blocks the operation with its problem code. |
+| Slice add-to-queue | `SlicePrintBridgeController.AddToQueueAsync` promotes the artifact and calls `IJobQueueService.AddJobToQueueAsync`; it does **not** invoke this validator. |
+| Queue dispatch/start | Does **not** invoke this validator. Other dispatch checks below are not equivalent to inspecting the G-code commands. |
 
-**Method(s)**: `PressureAdvanceTower`, `PressureAdvanceLine`, `PressureAdvancePattern`,
-`Retraction`.
+Checkpoint enum names are report metadata, not proof that every named lifecycle
+point is wired. In particular there is no universal artifact-completion, promotion
+or dispatch static-validation gate.
 
-**What differs**: The safety validator's pressure-advance ceiling is `min(2.0,
-0.5 if direct-drive else 2.0)`, and its retraction ceiling is `min(10.0mm,
-3.0mm if direct-drive else 10.0mm)`. OrcaSlicer's own calibration test generators apply no
-extruder-topology-aware ceiling at all — a user can dial in any pressure advance or retraction
-distance the test wants to sweep, regardless of whether the toolhead is direct-drive or Bowden.
+Both covered callers use
+[`PrinterGcodeSafetyLimits.Build`](../src/infra/Services/Gcode/Safety/PrinterGcodeSafetyLimits.cs).
+Limits come from persisted PrintFarmer `Printer` and primary (or first available)
+`Toolhead` records, including the hotend-model fallback. They are **not fetched
+live from firmware**. Unset nozzle/bed/speed/acceleration/volume/flow ceilings skip
+their checks; unset XY origins default to zero. Chamber heating is the exception
+described above. Keep the records accurate; a missing limit is not an implicit
+firmware-derived ceiling.
 
-**Why**: Pressure-advance and retraction values that are safe on a long Bowden path can strip a
-direct-drive extruder's gear or slam it against its stop on a short, stiff drive path. Because
-PFD calibration is unattended, the printer's own hardware topology (`IsDirectDrive`) is used to
-pick a tighter, hardware-appropriate absolute ceiling rather than trusting the sweep range the
-calibration method itself would otherwise request.
+Configured malformed polygons, null/missing points, fewer than three vertices,
+and nonfinite/unrepresentable coordinates fail closed in the shared builder.
+The bridge returns HTTP 400; printer-file admission blocks with
+`destination_safety_geometry_invalid`. Empty/unconfigured geometry is not the
+same as malformed configured geometry.
 
-**Where in code**:
+### Other gates are separate
 
-- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` —
-  `ApplyPressureAdvance` (pressure-advance ceiling), `ApplyMove` (retraction ceiling), and the
-  `AbsolutePressureAdvanceCeiling` / `AbsoluteRetractionCeiling` constants.
-- Tested by `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`
-  in the calibration test suite.
+These are verified call paths, not a claim that every possible start route
+enforces every check:
 
-## 3. Custom G-code hooks and post-processing scripts are neutralized in vendor profiles
+- The slice bridge checks permissions/resource scope, job ownership and completed
+  status, destination existence, durable artifact promotion and file availability
+  before upload. Its immediate-start helper acquires the shared dispatch claim;
+  upload-only does not start a print.
+- Printer-file admission rechecks actor access, confirmation binding, local file
+  digest/size, destination enabled/compatibility, and a destination revision fence
+  before committing the pinned job. See `PrinterFileQueueService` above.
+- [`AutoDispatchService`](../src/infra/Services/AutoDispatch/AutoDispatchService.cs)
+  returns pre-cleared auto-start to PendingReady when filament evidence is not
+  Compatible. Its ordinary ready-gate preflight requires an explicit override
+  for Incompatible **or Unknown** evidence, binding that override to the exact
+  job, printer and evidence versions. This is ready/start behavior, not proof
+  that insufficient estimated quantity blocks ordinary queue admission.
+- [`FilamentPreflightEvaluator`](../src/infra/Services/AutoDispatch/FilamentPreflightEvaluator.cs)
+  returns Unknown for missing spool/service/material/estimate/remaining-weight
+  evidence, and Incompatible for material mismatch or estimated shortage.
+  [`DispatchClaimService`](../src/infra/Services/Queue/Dispatch/DispatchClaimService.cs)
+  rechecks and fingerprints supplied reviewed filament evidence at claim time.
+- Printer-file compatibility scoring explicitly disables `gramsAware` in
+  [`DispatchScorer.PrinterFiles`](../src/infra/Services/Queue/Dispatch/DispatchScorer.PrinterFiles.cs).
+  Quantity scoring is not an unconditional admission veto. This change does not
+  modify queue, filament, authorization or claim policy.
 
-**Method(s)**: all — applied whenever a machine/process/filament profile is compiled into a
-calibration plan.
+### Static-analysis limits and risk
 
-**What differs**: Official OrcaSlicer vendor profiles routinely populate custom G-code hook
-keys (any native key ending in `_gcode`, e.g. `before_layer_gcode`, `machine_start_gcode`) and
-`post_process` / `printer_notes`. OrcaSlicer trusts these keys and will execute or emit them
-verbatim when slicing normally. PFD's calibration plan compiler neutralizes every such key
-before a worker ever sees the effective profile: the immutable baseline document keeps its
-original bytes and digest for provenance, but the document sent downstream carries none of
-their values.
+Unknown firmware macros are accepted but not expanded. Their heating, homing,
+shutdown, shell execution and motion cannot be certified from the file. The
+parser recognizes a limited whitespace-delimited command/parameter vocabulary,
+semicolon comments, optional `N` line-number prefixes, `G90`/`G91`, `M82`/`M83`,
+and `G92 E`. It is not a complete
+firmware interpreter: arcs, compact command/parameter syntax, macro effects,
+work-coordinate transforms, complete path/segment intersections, negative Z,
+and inherited feed-rate ceiling enforcement are not comprehensively checked.
+Relative XY moves are tracked but do not receive the absolute-XY endpoint checks.
+Do not treat acceptance, a SHA-256 report, or a successful upload as proof that
+printing is safe.
 
-**Why**: These keys are command-bearing by construction (arbitrary G-code, or scripts invoked
-by the desktop OrcaSlicer app). A calibration job compiled from a third-party or user-imported
-vendor profile must not be able to smuggle arbitrary commands into an automated, unattended
-print pipeline. The rule is stated by key *shape* (suffix), not by an enumerated list, so a
-future upstream hook this build has never heard of is neutralized on sight rather than
-surviving as an unrecognized field.
-
-**Where in code**:
-
-- `src/api/Services/Calibration/Generation/OrcaCalibrationPlanCompiler.cs` —
-  `OrcaProfileCommandKeys` (the forbidden-key rule) and `OrcaEffectiveProfileFactory` (where
-  neutralization is applied).
-
-## 4. Calibration G-code is restricted to a trusted command allowlist and forbids `TUNING_TOWER`
-
-**Method(s)**: all Klipper-targeted calibration methods.
-
-**What differs**: Klipper's own tuning workflow — and the macros OrcaSlicer's community guides
-often point users at — frequently drives a live-adjusted parameter with the `TUNING_TOWER`
-macro (e.g. sweeping pressure advance mid-print via `SET_PRESSURE_ADVANCE`). PFD's generator
-never emits `TUNING_TOWER`, and the safety validator explicitly rejects it if found (along with
-any other command outside a fixed, trusted allowlist — see `gcode_command_not_allowlisted` and
-`gcode_tuning_tower_forbidden`).
-
-**Why**: `TUNING_TOWER` and free-form macro commands are open-ended by design — that is the
-point of the macro in an interactive workflow. PFD instead generates discrete, pre-computed test
-points up front so the resulting program is deterministic and reproducible for golden/parity
-comparison, and so the safety validator can reason about a small, closed command allowlist
-instead of an open-ended macro surface. This also closes an injection vector: an unallowlisted
-command (`RUN_SHELL_COMMAND`, `SAVE_CONFIG`, host-command markers such as `curl`/`ssh`, etc.) is
-rejected outright rather than executed against real hardware.
-
-**Where in code**:
-
-- `src/api/Services/Gcode/Safety/GcodeSafetyValidator.cs` — the general command allowlist
-  check and `TUNING_TOWER` rejection in the G-code interpretation loop. The allowlist itself
-  is optional and calibration-specific: `CalibrationGcodeProgramValidator` is the only caller
-  that passes one (`KlipperCalibrationCommands.Allowlist`); the send-to-printer path leaves it
-  unset so ordinary slicer g-code is not constrained to a calibration vocabulary.
-- Tested by `src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeProgramValidatorTests.cs`
-  (`Validate_WithInjectedTuningTower_RejectsExplicitly`,
-  `Validate_WithNonAllowlistedCommand_Rejects`) and
-  `src/tests/Farm.Web.Api.Tests/Services/Gcode/Safety/GcodeSafetyValidatorTests.cs`
-  (`Validate_WithAllowlistAndDisallowedCommand_Rejects`,
-  `Validate_WithNoAllowlist_AcceptsArbitrarySlicerCommands`).
-
-## Adding a new entry
-
-When you discover or introduce another deliberate PFD/OrcaSlicer divergence in the calibration
-pipeline, add a numbered entry above with the same four fields: **Method(s)**, **What
-differs**, **Why**, and **Where in code**. Keep entries in the order they were added rather than
-renumbering existing ones, so code comments and PR discussions that cite an entry number stay
-valid.
+The change is reversible policy removal, not a firmware safety replacement.
+A retained-envelope regression or an executable recognized host command passing
+would falsify the intended contract; tests cover both rejection and acceptance.
+If assumptions are wrong, operators and nearby people can face equipment,
+thermal or motion hazards, potentially irreversible hardware damage. Keep
+firmware limits, trusted macros and operator procedures in place; static checks
+cannot substitute for them, especially on the documented uncovered queue paths.

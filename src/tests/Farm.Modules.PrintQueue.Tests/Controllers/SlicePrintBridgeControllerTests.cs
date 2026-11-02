@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Gcode.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode.Safety;
 using Farm.Modules.PrintQueue.Controllers;
 using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Modules.PrintQueue.Controllers.Responses;
@@ -508,9 +509,11 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     // G-code safety gate: previously skipped, now invoked before send-to-printer
     // =========================================================================
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_SafetyValidatorRejects_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_SafetyValidatorRejects_Returns400AndDoesNotUpload(bool startPrint)
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -528,7 +531,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
                 "M104.S",
                 "Commanded nozzle temperature exceeds the configured ceiling."));
 
-        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint };
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
@@ -599,7 +602,6 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Checkpoint.Should().Be(GcodeSafetyCheckpoint.BeforeSendToPrinter);
-        capturedRequest.AllowedCommands.Should().BeNull();
         capturedRequest.Limits.Machine.MaxBedTemperatureCelsius.Should().Be(120);
         capturedRequest.Limits.Machine.MaxAcceleration.Should().Be(5000);
 
@@ -608,6 +610,55 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         capturedRequest.Limits.Toolhead.NozzleMaxTemperatureCelsius.Should().Be(280);
         capturedRequest.Limits.Toolhead.HotendMaxTemperatureCelsius.Should().Be(300);
         capturedRequest.Limits.Toolhead.IsDirectDrive.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_RealValidatorChecksOrdinaryMacroFile_BeforeEitherBackendPath(
+        bool startPrint, bool unsafeCommand)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = CreateTempGcodeFile("model.gcode");
+        string program = "; OrcaSlicer api_key https://example.invalid C:\\profiles\\printer.json\n" +
+            "PRINT_START\nG90\nM83\nG1 X10 Y10 E1 F1500 ; RUN_SHELL_COMMAND metadata\n" +
+            (unsafeCommand ? "RUN_SHELL_COMMAND CMD=example\n" : string.Empty) + "PRINT_END";
+        await File.WriteAllTextAsync(filePath, program);
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupPrinterExists(printerId);
+        SetupArtifactPath(gcode, filePath);
+        _safetyValidatorMock.Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
+            .Returns((GcodeSafetyRequest request) => new GcodeSafetyValidator().Validate(request));
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _printersMock.Setup(p => p.UploadAndStartPrintAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<IProgress<UploadAndPrintStage>?>(),
+            It.IsAny<CancellationToken>())).ReturnsAsync(UploadAndPrintResult.Ok());
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint },
+            CancellationToken.None);
+
+        if (unsafeCommand)
+        {
+            result.Should().BeOfType<BadRequestObjectResult>();
+        }
+        else
+        {
+            result.Should().BeOfType<OkObjectResult>();
+        }
+
+        _printersMock.Verify(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            !unsafeCommand && !startPrint ? Times.Once() : Times.Never());
+        _printersMock.Verify(p => p.UploadAndStartPrintAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<IProgress<UploadAndPrintStage>?>(), It.IsAny<CancellationToken>()),
+            !unsafeCommand && startPrint ? Times.Once() : Times.Never());
     }
 
     [Fact]
