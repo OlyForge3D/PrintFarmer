@@ -93,6 +93,7 @@ const workerEnv = {
 if (process.env.TEST_WORKER_INDEX === undefined) {
   // Resolve real .NET configuration/path providers before any application host
   // can write. This also builds the referenced API/worker from this source tree.
+  let dependencyLog = '';
   try {
     const cli = {
       DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false',
@@ -106,17 +107,33 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
       cwd: src, env: { ...process.env, ...cli }, encoding: 'utf8',
     }).trim().replace(/^global-packages:\s*/, '');
     if (!isAbsolute(packageCache)) throw new Error('Cannot resolve the existing NuGet tool-cache location');
-    const output = execFileSync('dotnet', ['run', '--file', join(import.meta.dirname, 'e2e', 'slicer-settings', 'isolation-preflight.cs'), '--', join(src, 'api')], {
+    const preflight = join(import.meta.dirname, 'e2e', 'slicer-settings', 'isolation-preflight.cs');
+    const environment = {
+      ...process.env, ...workerEnv, ...apiEnv, ...cli,
+      NUGET_PACKAGES: join(root, 'nuget-packages'),
+      NUGET_HTTP_CACHE_PATH: join(root, 'nuget-http-cache'),
+      NUGET_SCRATCH: join(root, 'nuget-scratch'),
+      NUGET_PLUGINS_CACHE_PATH: join(root, 'nuget-plugins'),
+      PF_SETTINGS_READONLY_NUGET_FEED: packageCache,
+      DOTNET_CLI_HOME: join(root, 'dotnet-cli'),
+    };
+    // The existing cache is a read-only hierarchical package feed, never the
+    // restore destination. All extraction/HTTP/lock state belongs to this run.
+    dependencyLog = execFileSync('dotnet', ['restore', preflight, '--packages', environment.NUGET_PACKAGES,
+      '--source', packageCache, '--source', 'https://api.nuget.org/v3/index.json', '--nologo', '--verbosity', 'quiet'], {
+      cwd: src, env: environment, encoding: 'utf8', timeout: 600_000, maxBuffer: 8 * 1024 * 1024,
+    });
+    const output = execFileSync('dotnet', ['run', '--file', preflight, '--no-restore', '--no-launch-profile', '--', join(src, 'api')], {
       cwd: src,
-      env: { ...process.env, ...workerEnv, ...apiEnv, ...cli, NUGET_PACKAGES: packageCache, DOTNET_CLI_HOME: join(root, 'dotnet-cli') },
+      env: environment,
       encoding: 'utf8',
       timeout: 600_000,
       maxBuffer: 8 * 1024 * 1024,
     });
-    writeFileSync(join(root, 'preflight.log'), output);
+    writeFileSync(join(root, 'preflight.log'), `${dependencyLog}\n${output}`);
   } catch (error) {
     const failure = error as Error & { stdout?: string; stderr?: string };
-    writeFileSync(join(root, 'preflight.log'), `${failure.stdout ?? ''}\n${failure.stderr ?? ''}\n${failure.message}`);
+    writeFileSync(join(root, 'preflight.log'), `${dependencyLog}\n${failure.stdout ?? ''}\n${failure.stderr ?? ''}\n${failure.message}`);
     throw new Error(`Private configuration preflight failed before host startup; inspect ${join(root, 'preflight.log')}`, { cause: error });
   }
 }

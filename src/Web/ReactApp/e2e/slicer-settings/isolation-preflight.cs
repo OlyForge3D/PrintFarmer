@@ -64,6 +64,10 @@ CheckPath("appData", Environment.GetEnvironmentVariable("APPDATA"));
 CheckPath("localAppData", Environment.GetEnvironmentVariable("LOCALAPPDATA"));
 CheckPath("xdgConfig", Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
 CheckPath("xdgCache", Environment.GetEnvironmentVariable("XDG_CACHE_HOME"));
+CheckPath("nugetPackages", Environment.GetEnvironmentVariable("NUGET_PACKAGES"));
+CheckPath("nugetHttpCache", Environment.GetEnvironmentVariable("NUGET_HTTP_CACHE_PATH"));
+CheckPath("nugetScratch", Environment.GetEnvironmentVariable("NUGET_SCRATCH"));
+CheckPath("nugetPlugins", Environment.GetEnvironmentVariable("NUGET_PLUGINS_CACHE_PATH"));
 
 if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("Default"))
     || string.IsNullOrWhiteSpace(configuration.GetConnectionString("SlicerDatabase")))
@@ -116,6 +120,8 @@ using (Utf8JsonWriter writer = new(outputStream, new JsonWriterOptions { Indente
     writer.WriteString("runId", runId);
     writer.WriteString("root", root);
     writer.WriteBoolean("hostStarted", false);
+    writer.WriteString("dependencyCacheMode", "private-restore; existing cache used as a read-only local feed");
+    writer.WriteString("readOnlyDependencyFeed", Environment.GetEnvironmentVariable("PF_SETTINGS_READONLY_NUGET_FEED"));
     writer.WriteStartObject("paths");
     foreach ((string name, string path) in paths)
     {

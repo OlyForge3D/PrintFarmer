@@ -40,8 +40,11 @@ configuration ordering and production storage/temp/DataProtection providers.
 Missing or external effective destinations fail before host startup. Every
 host runs with a private working/temp directory; the worker also receives
 private per-user engine configuration/cache paths.
-The build CLI retains the established NuGet package cache (not an application
-profile cache); its run-specific metadata stays private. SDK certificate
+The build CLI uses the established NuGet package cache only as a **read-only
+local feed**. Restore/extraction, HTTP caches, lock state and CLI metadata have
+explicit private destinations; the subsequent build uses `--no-restore`.
+Missing packages may be downloaded from NuGet.org into that private cache;
+there is no fallback to restoring into a shared destination. SDK certificate
 generation, telemetry, global-tool PATH changes and workload advertising
 downloads are explicitly disabled.
 No Docker or physical printer is needed. Browser print/queue dispatch is
