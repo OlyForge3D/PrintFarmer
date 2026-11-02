@@ -63,6 +63,33 @@ OBICO_ML_SCAN_INTERVAL=30          # seconds
 
 ## API Usage
 
+### PrintFarmer system health
+
+PrintFarmer's `/health` includes an `obico` check. When failure detection is
+disabled it reports Healthy without contacting Obico, and the Admin Control
+Center hides its tile. When enabled it actively probes the global fallback
+endpoint and all enabled pooled servers, even on an idle farm. Disabled or
+missing server assignments fall back to the global URL, matching monitoring.
+
+The check shares the administrative server connectivity probe: guarded,
+address-pinned `GET /p/` with the existing legacy `POST /p/` compatibility
+fallback. Identical endpoint/credential combinations are probed once; different
+credentials at the same endpoint remain separate so a broken route cannot be
+masked by a working one. All targets reachable means Healthy; partial or total
+outage, or no usable targets, means Degraded. Degraded remains HTTP 200 on
+`/health`; `/healthz` remains independent liveness.
+
+Probes run at most four at a time within a six-second batch budget. Concurrent
+health requests share the same batch, and completed results are cached for
+45 seconds, including failures. Caller cancellation does not cancel that batch.
+Endpoint/credential changes may take one cache interval to appear; disabling
+takes effect on the next health request. Anonymous health output exposes only
+generic descriptions, the enabled flag and target/reachable counts, never
+endpoint URLs, server names, credentials or upstream errors.
+
+Healthy means backend reachability, **not** ML accuracy, usable camera snapshots,
+or proof that every printer's monitoring loop is protecting an active print.
+
 ### Health Check
 ```bash
 GET http://obico-ml-api:3333/hc/
