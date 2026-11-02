@@ -354,7 +354,7 @@ public class SystemInfoService(
         services.AddRange(backgroundServices.Select(status => new SystemServiceInfoDto
         {
             Name = status.DisplayName,
-            Version = "Unknown",
+            Version = status.ApplicationVersion ?? "Unknown",
             Health = MapServiceHealth(status),
         }));
 

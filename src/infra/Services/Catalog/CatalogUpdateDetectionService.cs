@@ -44,7 +44,8 @@ public class CatalogUpdateDetectionService(
             "Scans printers for available catalog model template updates and notifies users",
             "Catalog",
             "pf-icon-refresh",
-            settings.IntervalSeconds);
+            settings.IntervalSeconds,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         if (!settings.Enabled)

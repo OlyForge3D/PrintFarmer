@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace Farm.Infrastructure.Services.Background;
 
@@ -7,6 +8,8 @@ namespace Farm.Infrastructure.Services.Background;
 /// </summary>
 public record BackgroundServiceStatus
 {
+    internal string? ApplicationVersion { get; init; }
+
     /// <summary>
     /// Unique identifier for the service (e.g., "PrintStatsSyncService")
     /// </summary>
@@ -111,8 +114,11 @@ public class BackgroundServiceState
 
     public int? IntervalSeconds { get; set; }
 
+    internal string? ApplicationVersion { get; init; }
+
     public BackgroundServiceStatus ToStatus() => new()
     {
+        ApplicationVersion = ApplicationVersion,
         ServiceId = ServiceId,
         DisplayName = DisplayName,
         Description = Description,
@@ -139,7 +145,7 @@ public interface IBackgroundServiceMonitor
     /// <summary>
     /// Register a background service with the monitor
     /// </summary>
-    void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null);
+    void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null, Type? implementationType = null);
 
     /// <summary>
     /// Report that a service has started running
@@ -187,10 +193,11 @@ public class BackgroundServiceMonitor : IBackgroundServiceMonitor, IHostedServic
 {
     private readonly ConcurrentDictionary<string, BackgroundServiceState> _services = new();
 
-    public void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null)
+    public void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null, Type? implementationType = null)
     {
         _services.TryAdd(serviceId, new BackgroundServiceState
         {
+            ApplicationVersion = GetApplicationVersion(implementationType),
             ServiceId = serviceId,
             DisplayName = displayName,
             Description = description,
@@ -198,6 +205,29 @@ public class BackgroundServiceMonitor : IBackgroundServiceMonitor, IHostedServic
             Icon = icon,
             IntervalSeconds = intervalSeconds
         });
+    }
+
+    private static string? GetApplicationVersion(Type? implementationType)
+    {
+        if (implementationType is null)
+        {
+            return null;
+        }
+
+        Assembly assembly = implementationType.Assembly;
+        string? informationalVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            return informationalVersion.Split('+', 2)[0];
+        }
+
+        Version? assemblyVersion = assembly.GetName().Version;
+        return assemblyVersion is null
+            ? null
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(assemblyVersion.Build, 0)}";
     }
 
     public void ReportStarted(string serviceId)
