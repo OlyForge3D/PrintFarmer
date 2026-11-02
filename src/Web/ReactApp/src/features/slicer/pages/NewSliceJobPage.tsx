@@ -753,6 +753,33 @@ export const NewSliceJobPage: React.FC = () => {
   // Post-submission progress tracking
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
+  // Completed-results overlay dismissal is keyed to the job it was dismissed
+  // for, so a new slice or Retry (new job ID) always shows its overlay again.
+  // Dismissal only hides the overlay — it never resets job/model/settings state.
+  const [dismissedResultsJobId, setDismissedResultsJobId] = useState<string | null>(null);
+  const [resultsReopened, setResultsReopened] = useState(false);
+  const showResultsButtonRef = useRef<HTMLButtonElement>(null);
+  const isSliceResultsDismissed = submittedJobId != null
+    && dismissedResultsJobId === submittedJobId
+    && jobProgress.status === 'Completed';
+
+  useEffect(() => {
+    if (isSliceResultsDismissed) {
+      showResultsButtonRef.current?.focus();
+    }
+  }, [isSliceResultsDismissed]);
+
+  const handleDismissSliceResults = useCallback(() => {
+    if (submittedJobId) {
+      setResultsReopened(false);
+      setDismissedResultsJobId(submittedJobId);
+    }
+  }, [submittedJobId]);
+
+  const handleShowSliceResults = useCallback(() => {
+    setResultsReopened(true);
+    setDismissedResultsJobId(null);
+  }, []);
 
   // Issue #2374: Retry on a failed/cancelled slice must resubmit the SAME
   // plate models that were originally sliced, not whatever `bedModels`
@@ -1810,6 +1837,7 @@ export const NewSliceJobPage: React.FC = () => {
         `Job queued (id ${res.jobId.substring(0, 8)})${formatQueuePositionSuffix(res.queuePosition)}`,
       );
       setError(null);
+      setResultsReopened(false);
       setSubmittedJobId(res.jobId);
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
@@ -2206,6 +2234,18 @@ export const NewSliceJobPage: React.FC = () => {
       retryInFlightRef.current = false;
     }
   }, [submitMutation.isPending, submitSliceJob]);
+
+  // New Job is the intentional reset; Hide results (overlay dismissal) is not.
+  const handleNewJob = useCallback(() => {
+    setSubmittedJobId(null);
+    setDismissedResultsJobId(null);
+    setResultsReopened(false);
+    setSliceSnapshot(null);
+    setMessage(null);
+    setModelFileUrl('');
+    setModelFileName('');
+    setBedModels([]);
+  }, []);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -3344,14 +3384,8 @@ export const NewSliceJobPage: React.FC = () => {
             <SliceJobProgressPanel
               jobId={submittedJobId}
               progress={jobProgress}
-              onNewJob={() => {
-                setSubmittedJobId(null);
-                setSliceSnapshot(null);
-                setMessage(null);
-                setModelFileUrl('');
-                setModelFileName('');
-                setBedModels([]);
-              }}
+              onNewJob={handleNewJob}
+              onShowResults={isSliceResultsDismissed ? handleShowSliceResults : undefined}
               onRetry={handleRetryFailedSlice}
               retryDisabled={submitMutation.isPending}
             />
@@ -3368,6 +3402,25 @@ export const NewSliceJobPage: React.FC = () => {
              `overflow-hidden` form and off-screen (issue #1868). */}
         <div data-testid="slicer-workspace-panel" className="min-w-0 flex-1 flex flex-col min-h-0">
           <div className="relative bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
+            {isSliceResultsDismissed && (
+              <div
+                data-testid="slice-results-hidden-bar"
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-pf-border bg-pf-bg-1 px-3 py-1.5 text-xs text-pf-text-secondary shrink-0"
+              >
+                <span>Slice complete — results hidden.</span>
+                <Button
+                  ref={showResultsButtonRef}
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  control
+                  iconLeft={<LayersIcon className="w-4 h-4" />}
+                  onClick={handleShowSliceResults}
+                >
+                  Show slice results
+                </Button>
+              </div>
+            )}
             {selectedPrinterId ? (
               <SlicerWorkspaceBoundary
                 bedConfig={workspaceBedConfig}
@@ -3384,7 +3437,7 @@ export const NewSliceJobPage: React.FC = () => {
                 onModelsReplace={handleWorkspaceModelsReplace}
                 onDeleteModels={handleWorkspaceDeleteModels}
                 simpleMode={slicerMode !== 'Advanced'}
-                className="h-full"
+                className="h-full min-h-0"
               />
             ) : (
               <div className="h-full w-full flex items-center justify-center text-pf-text-muted bg-pf-bg-0">
@@ -3395,7 +3448,7 @@ export const NewSliceJobPage: React.FC = () => {
             )}
 
             {/* Slicing progress overlay — covers 3D workspace */}
-            {submittedJobId && (
+            {submittedJobId && !isSliceResultsDismissed && (
               <SliceProgressOverlay
                 jobId={submittedJobId}
                 progress={jobProgress}
@@ -3405,14 +3458,9 @@ export const NewSliceJobPage: React.FC = () => {
                 requiredPrinterModel={effectiveRequiredPrinterModel}
                 requiredMaterialType={effectiveRequiredMaterialType}
                 requiredNozzleDiameter={effectiveRequiredNozzleDiameter}
-                onNewJob={() => {
-                  setSubmittedJobId(null);
-                  setSliceSnapshot(null);
-                  setMessage(null);
-                  setModelFileUrl('');
-                  setModelFileName('');
-                  setBedModels([]);
-                }}
+                onNewJob={handleNewJob}
+                onDismiss={handleDismissSliceResults}
+                focusDismissOnMount={resultsReopened}
                 onRetry={handleRetryFailedSlice}
                 retryDisabled={submitMutation.isPending}
               />
@@ -3484,12 +3532,15 @@ function SliceJobProgressPanel({
   jobId,
   progress,
   onNewJob,
+  onShowResults,
   onRetry,
   retryDisabled,
 }: {
   jobId: string;
   progress: ReturnType<typeof useSliceJobProgress>;
   onNewJob: () => void;
+  /** Present when the completed-results overlay was hidden; reopens it. */
+  onShowResults?: () => void;
   onRetry: () => void;
   /** True while a Retry-triggered resubmission is in flight (issue #2374). */
   retryDisabled?: boolean;
@@ -3564,9 +3615,14 @@ function SliceJobProgressPanel({
 
       {/* Completion actions */}
       {isCompleted && (
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {onShowResults && (
+            <Button variant="primary" size="sm" onClick={onShowResults}>
+              Show results
+            </Button>
+          )}
           {progress.artifactsRoute && (
-            <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+            <Button variant={onShowResults ? 'secondary' : 'primary'} size="sm" onClick={() => setPreviewOpen(true)}>
               Preview
             </Button>
           )}
