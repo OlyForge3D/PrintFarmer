@@ -20,9 +20,16 @@ the observer was installed and the retained log covers the tap interval.
 Do not interpret a successful diagnostic attempt as resolution of the original
 intermittent failure.
 
-This branch temporarily selects only iPad shard 2's affected test and disables
-the runner's automatic failed-test retry. It is **not mergeable**: restore the
-normal matrix and retry policy before preparing any product-fix PR.
+The eight-entry production matrix and default retry/artifact contracts remain
+intact. This draft temporarily sets `HISTORY_MENU_DIAGNOSTIC=1` on the XCUI job:
+only iPad shard 2 performs toolchain/simulator work, its invocation
+selects the affected test without automatic retry, and the other seven entries
+exit without invoking XCTest. Unit/build prerequisites are unchanged. The
+unchanged 37-test runner suite exercises default behavior; the separate
+`test_history_menu_diagnostic.py` replays the actual workflow command for every
+matrix entry, proving only the authorized selector runs and even a known test
+failure cannot retry. It is **not mergeable**: remove the diagnostic mode and
+instrumentation before preparing any product-fix PR.
 
 ### Farm card disappearance invalidation (#3620)
 

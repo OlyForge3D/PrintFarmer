@@ -310,6 +310,9 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 120
     needs: [select, test]
+    env:
+      # Diagnostic draft only. Remove before any merge.
+      HISTORY_MENU_DIAGNOSTIC: '1'
     # Avoid allocating eight macOS runners until unit coverage passes; retain
     # the selector's fail-safe behavior by skipping only explicit false.
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
@@ -319,14 +322,81 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # #3622 diagnostic branch only: restore the full matrix before merging.
+          - key: iphone-1
+            family: iPhone
+            shard: 1
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
+          - key: iphone-2
+            family: iPhone
+            shard: 2
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: iphone-3
+            family: iPhone
+            shard: 3
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: iphone-4
+            family: iPhone
+            shard: 4
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
+          - key: ipad-1
+            family: iPad
+            shard: 1
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
           - key: ipad-2
             family: iPad
             shard: 2
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/HarvestUITests/testCompletedJobExposesHarvestAction
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: ipad-3
+            family: iPad
+            shard: 3
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FarmScrollControlUITests/testUnsearchedFarmScrollReachesIdlePrinter
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFarmTitleSharesQueueAndFilamentLeadingInset
+              -only-testing:PrintFarmerUITests/RootTitleAlignmentLargeTypeUITests/testFilamentFilterChipsScrollOnOneLineAtLargeType
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: ipad-4
+            family: iPad
+            shard: 4
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/PrinterDetailHeaderUITests
+              -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:
         working-directory: mobile
@@ -335,6 +405,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Select Xcode 26.6
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         run: |
           XCODE_PATH="/Applications/Xcode_26.6.app"
           if [ ! -d "$XCODE_PATH" ]; then
@@ -354,10 +425,11 @@ jobs:
           printf '%s\n' "$XCODE_VERSION"
 
       - name: Test simulator resolver
-        if: matrix.key == 'iphone-1'
+        if: matrix.key == 'iphone-1' && env.HISTORY_MENU_DIAGNOSTIC != '1'
         run: ../scripts/ci/test-resolve-ios-simulator.sh
 
       - name: Resolve package dependencies
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         run: |
           xcodebuild -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -365,6 +437,7 @@ jobs:
             -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages"
 
       - name: Install approved iOS 26.5 simulator runtime
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         timeout-minutes: 30
         env:
           IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
@@ -408,6 +481,7 @@ jobs:
           fi
 
       - name: Resolve ${{ matrix.family }} simulator destination
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         env:
           IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
           IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
@@ -415,9 +489,11 @@ jobs:
         run: ../scripts/ci/resolve-ios-simulator.sh
 
       - name: Boot ${{ matrix.family }} simulator
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
 
       - name: Build XCUI shard for testing
+        if: env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2'
         timeout-minutes: 20
         run: |
           xcodebuild \
@@ -435,7 +511,7 @@ jobs:
 
       - name: Run login XCUI
         id: login-xcui
-        if: matrix.shard == 1
+        if: matrix.shard == 1 && env.HISTORY_MENU_DIAGNOSTIC != '1'
         timeout-minutes: 25
         run: |
           set -o pipefail
@@ -462,12 +538,20 @@ jobs:
           SELECTORS: ${{ matrix.selectors }}
         run: |
           set -o pipefail
+          if [[ "${HISTORY_MENU_DIAGNOSTIC:-0}" == "1" && "${{ matrix.key }}" != "ipad-2" ]]; then
+            echo "Diagnostic draft: no XCUI invocation authorized for ${{ matrix.key }}."
+            exit 0
+          fi
           read -r -a selectors <<< "$SELECTORS"
           if [[ "${{ matrix.shard }}" == "1" ]]; then
             selectors=("${selectors[@]:1}")
           fi
-          # #3622 diagnostic: retain the first attempt without an automatic retry.
-          python3 scripts/run-tests.py -- test-without-building \
+          retry_options=(--retry-failed-tests)
+          if [[ "${HISTORY_MENU_DIAGNOSTIC:-0}" == "1" ]]; then
+            selectors=(-only-testing:PrintFarmerUITests/HarvestUITests/testCompletedJobExposesHarvestAction)
+            retry_options=()
+          fi
+          python3 scripts/run-tests.py "${retry_options[@]}" -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -492,7 +576,7 @@ jobs:
             > "build-${{ matrix.key }}/HistoryMenuDiagnostic.log"
 
       - name: Upload XCUI shard results
-        if: always()
+        if: always() && (env.HISTORY_MENU_DIAGNOSTIC != '1' || matrix.key == 'ipad-2')
         uses: actions/upload-artifact@v7
         with:
           name: ios-xcui-${{ matrix.key }}
