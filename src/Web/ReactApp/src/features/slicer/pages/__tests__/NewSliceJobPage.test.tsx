@@ -2661,12 +2661,11 @@ describe('NewSliceJobPage', () => {
           });
         });
 
-        expect(screen.getByRole('dialog', { name: 'G-code Preview' })).toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: 'G-code Preview' })).not.toBeInTheDocument();
 
         await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
 
-        expect(screen.getByRole('dialog', { name: 'G-code Preview' })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Close modal' }));
+        expect(screen.queryByRole('dialog', { name: 'G-code Preview' })).not.toBeInTheDocument();
 
         expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
         expect(screen.getAllByRole('button', { name: 'Preview' }).length).toBeGreaterThan(0);
@@ -2674,6 +2673,138 @@ describe('NewSliceJobPage', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    function completeJob(jobId = 'job-1') {
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Completed',
+          error: null,
+          progressPercent: 100,
+          artifactsRoute: `/api/artifacts/job/${jobId}`,
+        });
+      });
+    }
+
+    const latestWorkspaceModels = () =>
+      (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { models?: Array<{ id: string }> } | undefined)?.models ?? [];
+    const selectedProcessValue = () =>
+      Array.from(document.querySelectorAll('select')).find((s) => s.value.startsWith('system:'))?.value;
+
+    it('opens G-code preview only from an explicit Preview activation, not on completion or repeated updates', async () => {
+      await submitAndFail();
+      completeJob();
+      completeJob();
+      act(() => {
+        jobProgressRef.set({ ...jobProgressRef.value, filamentUsedGrams: 12.5 });
+      });
+
+      expect(screen.queryByRole('dialog', { name: 'G-code Preview' })).not.toBeInTheDocument();
+
+      const overlay = screen.getByRole('region', { name: 'Slice results' });
+      fireEvent.click(within(overlay).getByRole('button', { name: 'Preview' }));
+      expect(screen.getByRole('dialog', { name: 'G-code Preview' })).toBeInTheDocument();
+    });
+
+    it('hides completed results without resetting the job, models or selections, and can reopen them', async () => {
+      await submitAndFail();
+      completeJob();
+
+      const modelsBefore = latestWorkspaceModels().map((m) => m.id);
+      expect(modelsBefore.length).toBeGreaterThan(0);
+      const processBefore = selectedProcessValue();
+      expect(processBefore).toBe('system:0.20mm Standard @MK4S');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Hide results' }));
+
+      expect(screen.queryByRole('region', { name: 'Slice results' })).not.toBeInTheDocument();
+      const showResults = screen.getByRole('button', { name: 'Show slice results' });
+      expect(showResults).toHaveFocus();
+
+      // State preserved: same job, same plate models, same selections, no resubmission.
+      expect(latestWorkspaceModels().map((m) => m.id)).toEqual(modelsBefore);
+      expect((screen.getByTestId('printer-select') as HTMLSelectElement).value).toBe('printer-1');
+      expect(selectedProcessValue()).toBe(processBefore);
+      expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/job-1/).length).toBeGreaterThan(0);
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+
+      // Completed results remain reachable from the sidebar while hidden.
+      expect(screen.getByRole('button', { name: 'Show results' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download G-code' })).toBeInTheDocument();
+
+      // Repeated completed updates must not re-show the dismissed overlay.
+      completeJob();
+      expect(screen.queryByRole('region', { name: 'Slice results' })).not.toBeInTheDocument();
+
+      fireEvent.click(showResults);
+      const overlay = screen.getByRole('region', { name: 'Slice results' });
+      expect(within(overlay).getByRole('button', { name: 'Hide slice results' })).toHaveFocus();
+      expect(screen.queryByRole('dialog', { name: 'G-code Preview' })).not.toBeInTheDocument();
+      expect(latestWorkspaceModels().map((m) => m.id)).toEqual(modelsBefore);
+    });
+
+    it('closes a nested preview with Escape without hiding results or resetting the job', async () => {
+      await submitAndFail();
+      completeJob();
+      const modelsBefore = latestWorkspaceModels().map((m) => m.id);
+
+      const overlay = screen.getByRole('region', { name: 'Slice results' });
+      fireEvent.click(within(overlay).getByRole('button', { name: 'Preview' }));
+      const dialog = screen.getByRole('dialog', { name: 'G-code Preview' });
+
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'G-code Preview' })).not.toBeInTheDocument();
+      });
+      expect(screen.getByRole('region', { name: 'Slice results' })).toBeInTheDocument();
+      expect(latestWorkspaceModels().map((m) => m.id)).toEqual(modelsBefore);
+      expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+    });
+
+    it('keeps New Job as the explicit reset and shows a non-dismissible overlay for the next slice', async () => {
+      await submitAndFail();
+      completeJob();
+      fireEvent.click(screen.getByRole('button', { name: 'Hide results' }));
+      expect(latestWorkspaceModels().length).toBeGreaterThan(0);
+
+      const sidebarNewJob = screen.getAllByRole('button', { name: 'New Job' });
+      fireEvent.click(sidebarNewJob[0]);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: 'Show slice results' })).not.toBeInTheDocument();
+      });
+      expect(latestWorkspaceModels()).toHaveLength(0);
+      expect(screen.queryByRole('region', { name: /Slice (results|progress)/ })).not.toBeInTheDocument();
+    });
+
+    it('never offers dismissal while a retried slice is still in flight', async () => {
+      await submitAndFail();
+      vi.mocked(sliceJobService.submitJob).mockResolvedValue({
+        jobId: 'job-2',
+        queuePosition: null,
+      } as Awaited<ReturnType<typeof sliceJobService.submitJob>>);
+
+      const overlay = screen.getByRole('region', { name: 'Slice progress' });
+      fireEvent.click(within(overlay).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2));
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Processing',
+          error: null,
+          progressPercent: 40,
+        });
+      });
+
+      expect(screen.getByRole('region', { name: 'Slice progress' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Hide slice results' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Hide results' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Show slice results' })).not.toBeInTheDocument();
     });
     it('hides the stale in-flight progress message once the job completes', async () => {
       await submitAndFail();

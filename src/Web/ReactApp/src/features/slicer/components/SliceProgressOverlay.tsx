@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/common/components/ui';
-import { DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, DownloadIcon, EyeIcon, PrinterIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { sliceJobService } from '@/services/sliceJobService';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
@@ -18,6 +18,13 @@ interface SliceProgressOverlayProps {
   progress: SliceJobProgressState;
   onNewJob: () => void;
   onRetry: () => void;
+  /**
+   * Hides the overlay for a COMPLETED job without resetting any slicer state.
+   * Only offered once slicing has completed; active slicing is never dismissible.
+   */
+  onDismiss?: () => void;
+  /** Move focus to the dismiss control on mount (used when the user explicitly reopens results). */
+  focusDismissOnMount?: boolean;
   /**
    * Per-kg filament cost (from the selected OrcaSlicer filament profile's
    * `filament_cost`). Used for a best-effort material cost estimate. When
@@ -49,7 +56,7 @@ interface SliceProgressOverlayProps {
  * Inspired by OrcaSlicer's progress dialog — prominent, centered, 
  * with real-time progress ring and status details.
  */
-export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
+export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, onDismiss, focusDismissOnMount, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
   const queryClient = useQueryClient();
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
@@ -69,14 +76,16 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
   } | null>(null);
   const saveInFlightRef = useRef(false);
   const printResolutionInFlightRef = useRef(false);
-  const autoOpenedJobRef = useRef<string | null>(null);
+  const canDismiss = isCompleted && onDismiss != null;
+  const dismissButtonRef = useRef<HTMLButtonElement>(null);
+  // Captured once so live progress updates can never re-trigger focus.
+  const focusDismissOnMountRef = useRef(focusDismissOnMount);
 
   useEffect(() => {
-    if (isCompleted && progress.artifactsRoute && autoOpenedJobRef.current !== jobId) {
-      autoOpenedJobRef.current = jobId;
-      setPreviewOpen(true);
+    if (focusDismissOnMountRef.current) {
+      dismissButtonRef.current?.focus();
     }
-  }, [isCompleted, jobId, progress.artifactsRoute]);
+  }, []);
 
   const handleDownload = useCallback(async () => {
     if (!progress.artifactsRoute) return;
@@ -152,8 +161,25 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
       : 'stroke-pf-progress-fill';
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-lg">
-      <div className="flex flex-col items-center gap-4 p-8 max-w-sm text-center">
+    <div
+      role="region"
+      aria-label={isCompleted ? 'Slice results' : 'Slice progress'}
+      className="absolute inset-0 z-30 flex justify-center overflow-y-auto bg-black/60 backdrop-blur-sm rounded-lg"
+    >
+      {canDismiss && (
+        <Button
+          ref={dismissButtonRef}
+          variant="ghost"
+          size="sm"
+          control
+          className="absolute top-3 right-3 text-white/80"
+          aria-label="Hide slice results"
+          title="Hide slice results"
+          iconCenter={<CloseIcon className="w-4 h-4" />}
+          onClick={onDismiss}
+        />
+      )}
+      <div className="my-auto flex w-full flex-col items-center gap-4 p-8 max-w-sm text-center">
 
         {/* Progress ring */}
         <div className="relative">
@@ -249,17 +275,42 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
         {/* Terminal actions */}
         {isCompleted && (
-          <div className="flex flex-col items-center gap-2 mt-2">
-            <div className="flex flex-wrap items-center justify-center gap-2">
+          <div className="mt-2 flex w-full flex-col gap-3">
+            <div
+              role="group"
+              aria-label="Sliced G-code actions"
+              className="grid w-full grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2"
+            >
               {progress.artifactsRoute && (
-                <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  control
+                  className="w-full"
+                  iconLeft={<EyeIcon className="w-4 h-4" />}
+                  onClick={() => setPreviewOpen(true)}
+                >
                   Preview
                 </Button>
               )}
+              <Button
+                variant="success"
+                size="sm"
+                control
+                className="w-full"
+                iconLeft={<PrinterIcon className="w-4 h-4" />}
+                onClick={handlePrint}
+                loading={isResolvingPrint}
+                disabled={!progress.artifactsRoute || isResolvingPrint}
+              >
+                Print
+              </Button>
               {progress.artifactsRoute && (
                 <Button
                   variant="secondary"
                   size="sm"
+                  control
+                  className="w-full"
                   iconLeft={<DownloadIcon className="w-4 h-4" />}
                   onClick={handleDownload}
                   loading={isDownloading}
@@ -271,6 +322,8 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
               <Button
                 variant="secondary"
                 size="sm"
+                control
+                className="w-full"
                 iconLeft={<SaveIcon className="w-4 h-4" />}
                 onClick={handleSave}
                 loading={isSaving}
@@ -278,18 +331,6 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
                 title={progress.artifactsRoute ? undefined : 'No staged G-code artifact is available.'}
               >
                 Save to Library
-              </Button>
-              <Button
-                variant="success"
-                size="sm"
-                onClick={handlePrint}
-                loading={isResolvingPrint}
-                disabled={!progress.artifactsRoute || isResolvingPrint}
-              >
-                Print
-              </Button>
-              <Button variant="secondary" size="sm" onClick={onNewJob}>
-                New Job
               </Button>
             </div>
             {saveFeedback && (
@@ -300,15 +341,31 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
                 {saveFeedback.message}
               </p>
             )}
+            <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
+              {canDismiss ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  control
+                  onClick={onDismiss}
+                  title="Hide these results and return to the workspace. Your job, models and settings are kept."
+                >
+                  Hide results
+                </Button>
+              ) : <span />}
+              <Button variant="secondary" size="sm" control onClick={onNewJob}>
+                New Job
+              </Button>
+            </div>
           </div>
         )}
 
         {(isFailed || isCancelled) && (
-          <div className="flex items-center gap-3 mt-2">
-            <Button variant="primary" size="sm" onClick={onRetry} disabled={retryDisabled} loading={retryDisabled}>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+            <Button variant="primary" size="sm" control onClick={onRetry} disabled={retryDisabled} loading={retryDisabled}>
               Retry
             </Button>
-            <Button variant="secondary" size="sm" onClick={onNewJob}>
+            <Button variant="secondary" size="sm" control onClick={onNewJob}>
               New Job
             </Button>
           </div>
