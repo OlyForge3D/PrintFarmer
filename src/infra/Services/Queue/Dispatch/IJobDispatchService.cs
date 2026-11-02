@@ -50,6 +50,23 @@ public interface IJobDispatchService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Dispatches the exact job reviewed by the ready gate after the operator confirmed the
+    /// bed is clear. Identical to <see cref="DispatchReviewedJobAsync"/> except that this
+    /// printer's own PendingReady state is not treated as unavailable: the confirmation being
+    /// handed off is what releases that gate. Job and dispatch-state revisions, authorization,
+    /// offline/maintenance/disabled, occupancy, and compatibility gates remain enforced, and a
+    /// filament override still bypasses only the material-match gate.
+    /// </summary>
+    Task<QueuedPrintJobDto> DispatchBedClearConfirmedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Dispatches the exact reviewed job while bypassing only the filament gate under an
     /// explicit operator authorization. All other claim-time safety gates remain enforced.
     /// </summary>

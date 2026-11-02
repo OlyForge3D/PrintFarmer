@@ -130,7 +130,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 "32e94992-fc1b-46dc-83d8-25ae8782985a",
@@ -198,7 +198,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 It.IsAny<string>(),
