@@ -70,6 +70,9 @@
 
 ### Fixes
 
+- Preserve native filament setting types when saving editor changes, including
+  boolean vectors, percent suffixes and unedited extruder entries (#3643).
+
 - Preserve saved filament settings in named stock/custom profile selections by
   unwrapping stock profile settings before creating native job snapshots.
   Mixed saved/worker-library selections fetch missing stock settings from the

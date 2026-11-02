@@ -20,6 +20,10 @@ requested value with the newly generated Orca 2.4.2 `CONFIG_BLOCK`. A saved
 profile alone is not a pass. Unresolved keys fail the suite; explicit exclusions
 remain in the report and are never counted as verified.
 
+The filament editor adapts native vector settings to its controls and restores
+their string-array wire format on save. Unedited fields and hidden extruder
+entries are preserved; edited percentages retain their percent suffix.
+
 Use .NET SDK 10, the normal frontend dependencies, Playwright Chromium and a
 clean, committed worktree. Run:
 
