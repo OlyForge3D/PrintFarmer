@@ -181,6 +181,13 @@ public sealed class AdminOverviewService : IAdminOverviewService
             tiles.Add(BuildTileFromEntry("spoolman", "Spoolman", spoolman, SpoolmanDetail));
         }
 
+        if (report.Entries.TryGetValue("obico", out HealthReportEntry obico)
+            && obico.Data.TryGetValue("enabled", out object? enabled) && enabled is true)
+        {
+            tiles.Add(BuildTileFromEntry("obico", "Obico Failure Detection", obico,
+                entry => TruncateDescription(entry.Description)));
+        }
+
         return tiles;
     }
 
@@ -494,6 +501,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
     {
         "signalr" => "SignalR hub is not healthy",
         "spoolman" => "Spoolman integration is not healthy",
+        "obico" => "Obico failure detection is not healthy",
         "comprehensive" => "Core systems are not healthy",
         _ => $"Health check '{entryName}' is not healthy",
     };
