@@ -78,6 +78,13 @@ count as `configVerified`.
 An option absent from the shared baseline gets an explicit UI-saved per-key
 baseline before the second distinct edit. Both artifacts and the baseline job
 ID remain in the report; a key still absent remains unresolved.
+The two filament compatibility-condition scalars use Orca 2.4.2's audited CLI
+mapping: `compatible_prints_condition` becomes slot 0 of
+`compatible_process_expression_group` (one entry), and
+`compatible_printers_condition` becomes slot 1 of
+`compatible_machine_expression_group` (three entries). Both require exact
+single-filament cardinality and the correct slot; a same-named scalar from
+another profile is not evidence. The report retains the emitted vector.
 `run.json` and every coverage report identify the full source commit and tree, normalized
 SHA-256 identities of harness/registry inputs, a unique run ID and the engine
 binary hash. Uncommitted inputs, source changes during execution and stale

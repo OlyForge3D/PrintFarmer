@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import metadata from '../../src/features/slicer/generated/orcaSettingsMetadata.json' with { type: 'json' };
 import { provisionAdminAndLogin } from '../fixtures/emulator-setup';
 import {
-  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, heaterTargets, inventory, numericMutationStep, parseConfig,
+  assertChangedConfig, assertCommandEvidence, assertComplete, canonical, canonicalConfig, definition, engineConfigKey, heaterTargets, inventory, numericMutationStep, parseConfig,
   type CoverageRow, type ProfileKind, type SettingDefinition,
 } from './gcode-evidence';
 import { assertRunSource, type RunContext } from './run-context';
@@ -154,7 +154,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   const type = await control.getAttribute('type');
   if (type === 'checkbox') {
     const checked = await control.isChecked();
-    const value = baseline === undefined ? !checked : canonicalConfig(baseline, setting) === canonical(false, setting);
+    const value = baseline === undefined ? !checked : canonicalConfig(baseline, setting, kind) === canonical(false, setting);
     // The accessible checkbox is visually replaced by its label's SVG.
     // Space exercises the real keyboard handler without forced DOM clicks.
     if (checked === value) {
@@ -167,7 +167,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   }
   if (type === 'color') {
     const text = control.locator('..').getByPlaceholder('#000000', { exact: true });
-    const sameBaseline = baseline !== undefined && canonical('#123456', setting) === canonicalConfig(baseline, setting);
+    const sameBaseline = baseline !== undefined && canonical('#123456', setting) === canonicalConfig(baseline, setting, kind);
     const value = sameBaseline || await text.inputValue() === '#123456' ? '#654321' : '#123456';
     await text.fill(value);
     await text.blur();
@@ -188,7 +188,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
       nodes.map(node => (node as HTMLOptionElement).value));
     const current = await control.inputValue();
     const next = options.find(value => value !== current && value !== ''
-      && (baseline === undefined || canonical(value, setting) !== canonicalConfig(baseline, setting)));
+      && (baseline === undefined || canonical(value, setting) !== canonicalConfig(baseline, setting, kind)));
     if (next === undefined) throw new Error(`${setting.key}: no distinct valid enum alternative is offered by the editor`);
     await control.selectOption(next);
     return next;
@@ -209,7 +209,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
       .map(value => Number(value.toFixed(5)))
       .find(value => Number.isFinite(value)
         && value >= (setting.min ?? 0) && value <= (setting.max ?? Infinity)
-        && (baseline === undefined || canonical(String(value), setting) !== canonicalConfig(baseline, setting)));
+        && (baseline === undefined || canonical(String(value), setting) !== canonicalConfig(baseline, setting, kind)));
     if (next === undefined) throw new Error(`${setting.key}: no bounded, distinct numeric alternative`);
     await control.fill(String(next));
     await control.blur();
@@ -241,7 +241,7 @@ async function editControl(dialog: Locator, setting: SettingDefinition, baseline
   };
   if ((tag === 'textarea' || tag === 'input') && textValues[setting.key]) {
     const [first, second] = textValues[setting.key];
-    const sameBaseline = baseline !== undefined && canonical(first, setting) === canonicalConfig(baseline, setting);
+    const sameBaseline = baseline !== undefined && canonical(first, setting) === canonicalConfig(baseline, setting, kind);
     const next = sameBaseline || await control.inputValue() === first ? second : first;
     await control.fill(next);
     await control.blur();
@@ -468,10 +468,11 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
       }
       assertRunSource(context);
       row.attempted = true;
-      row.baseline = baseline.get(row.key);
+      const engineKey = engineConfigKey(row.profile, row.key);
+      row.baseline = baseline.get(engineKey);
       try {
         let effectiveBaseline = baseline;
-        if (!baseline.has(row.key) || row.key === 'enable_prime_tower') {
+        if (!baseline.has(engineKey) || row.key === 'enable_prime_tower') {
           // Nullable/conditional options may be absent until explicitly set.
           // Establish a real per-key baseline through the same save/select path,
           // then require a second distinct value and a second fresh artifact.
@@ -486,28 +487,31 @@ test('every registry setting has explicit editor-to-new-G-code evidence', async 
             row.baselineJobId = setupRow.jobId;
             if (setupRow.gcodeGenerated) row.baselineArtifact = `${label}.gcode`;
           }
-          const value = effectiveBaseline.get(row.key);
+          const value = effectiveBaseline.get(engineKey);
           if (value === undefined) {
             throw new Error(`${row.key}: neither the shared baseline nor an explicitly saved per-key baseline emits this key. Needs an audited engine/feature disposition; NOT verified.`);
           }
-          expect(canonicalConfig(value, setting), `${row.key}: per-key baseline did not retain its UI value`).toBe(canonical(first, setting));
+          expect(canonicalConfig(value, setting, row.profile), `${row.key}: per-key baseline did not retain its UI value`).toBe(canonical(first, setting));
           row.baseline = value;
         }
         await openJob(page, uploaded.id);
         row.requested = await applySetting(page, row, row.baseline, api, baselineGcode);
         const actual = await slice(page, api, root, `${row.profile}-${row.key}`, row);
-        row.emitted = actual.get(row.key);
-        assertChangedConfig(setting, row.requested, effectiveBaseline, actual);
+        row.emitted = actual.get(engineKey);
+        assertChangedConfig(setting, row.requested, effectiveBaseline, actual, row.profile);
         row.behaviorVerified = assertCommandEvidence(row.key, row.requested,
           readFileSync(join(root, `${row.profile}-${row.key}.gcode`), 'utf8'), baselineGcode);
         if (negativeControl === 'not run') {
           const corrupted = new Map(actual);
-          corrupted.set(row.key, row.baseline!);
-          expect(() => assertChangedConfig(setting, row.requested, effectiveBaseline, corrupted)).toThrow();
+          corrupted.set(engineKey, row.baseline!);
+          expect(() => assertChangedConfig(setting, row.requested, effectiveBaseline, corrupted, row.profile)).toThrow();
           negativeControl = `${row.profile}.${row.key}: replacing the newly generated value with baseline was rejected`;
         }
         row.status = 'config-verified';
         row.reason = 'Changed through the editor and Apply/save-select path; new job CONFIG_BLOCK matches distinct request. Configuration retention only, not physical behavior proof.';
+        if (engineKey !== row.key) {
+          row.reason += ` Orca 2.4.2 maps this filament scalar to ${engineKey}; the single-filament vector cardinality and filament slot are checked explicitly.`;
+        }
         if (row.dependencies) {
           row.reason += ' Same editor-set clumping-detection dependency is verified in both per-key baseline and changed artifact; the private machine fixture supplies its exclusion area.';
         }

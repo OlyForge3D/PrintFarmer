@@ -165,7 +165,29 @@ export function canonical(value: unknown, setting: SettingDefinition): string {
   return JSON.stringify(values.map(item => atom(item, setting)));
 }
 
-export function canonicalConfig(value: string, setting: SettingDefinition): string {
+// OrcaSlicer v2.4.2 src/OrcaSlicer.cpp's load-filaments scalar branch:
+// one filament occupies index 0 in the process group and index 1 in the
+// machine group (which also reserves slots for machine and process).
+function expressionGroup(profile: ProfileKind | undefined, key: string) {
+  if (profile !== 'filament') return undefined;
+  if (key === 'compatible_prints_condition') return { key: 'compatible_process_expression_group', index: 0, length: 1 };
+  if (key === 'compatible_printers_condition') return { key: 'compatible_machine_expression_group', index: 1, length: 3 };
+  return undefined;
+}
+
+export function engineConfigKey(profile: ProfileKind, key: string): string {
+  return expressionGroup(profile, key)?.key ?? key;
+}
+
+export function canonicalConfig(value: string, setting: SettingDefinition, profile?: ProfileKind): string {
+  const group = expressionGroup(profile, setting.key);
+  if (group) {
+    const values = decodeStrings(value);
+    if (values.length !== group.length) {
+      throw new Error(`${setting.key}: expected ${group.length} expression-group entries for the single-filament fixture, got ${values.length}`);
+    }
+    return canonical(values[group.index], setting);
+  }
   if (setting.coType === 'coString') return canonical(decodeString(value), setting);
   if (setting.coType === 'coStrings') return canonical(decodeStrings(value), setting);
   return canonical(value, setting);
@@ -182,16 +204,18 @@ export function assertChangedConfig(
   requested: unknown,
   baseline: Map<string, string>,
   actual: Map<string, string>,
+  profile: ProfileKind = 'process',
 ): void {
-  if (!baseline.has(setting.key)) throw new Error(`${setting.key}: baseline CONFIG_BLOCK did not emit this key`);
-  if (!actual.has(setting.key)) throw new Error(`${setting.key}: changed CONFIG_BLOCK dropped this key`);
+  const key = engineConfigKey(profile, setting.key);
+  if (!baseline.has(key)) throw new Error(`${setting.key}: baseline CONFIG_BLOCK did not emit this key (${key})`);
+  if (!actual.has(key)) throw new Error(`${setting.key}: changed CONFIG_BLOCK dropped this key (${key})`);
   const expected = canonical(requested, setting);
-  const before = canonicalConfig(baseline.get(setting.key)!, setting);
-  const after = canonicalConfig(actual.get(setting.key)!, setting);
+  const before = canonicalConfig(baseline.get(key)!, setting, profile);
+  const after = canonicalConfig(actual.get(key)!, setting, profile);
   if (expected === before) throw new Error(`${setting.key}: requested value did not change the resolved baseline`);
   if (after === before) throw new Error(`${setting.key}: effective value remained unchanged`);
   if (after !== expected) {
-    throw new Error(`${setting.key}: emitted ${actual.get(setting.key)} does not match requested ${JSON.stringify(requested)}`);
+    throw new Error(`${setting.key}: emitted ${key}=${actual.get(key)} does not match requested ${JSON.stringify(requested)}`);
   }
 }
 
@@ -204,8 +228,9 @@ export function assertComplete(rows: CoverageRow[]): void {
       || row.baseline === undefined || row.emitted === undefined) {
       throw new Error(`${row.profile}.${row.key}: verified status has no complete fresh-job evidence`);
     }
+    const key = engineConfigKey(row.profile, row.key);
     assertChangedConfig(definition(row.profile, row.key), row.requested,
-      new Map([[row.key, row.baseline]]), new Map([[row.key, row.emitted]]));
+      new Map([[key, row.baseline]]), new Map([[key, row.emitted]]), row.profile);
   }
   const unresolved = rows.filter(row => row.status === 'unresolved');
   if (unresolved.length) throw new Error(`${unresolved.length} settings unresolved: ${unresolved.map(row => `${row.profile}.${row.key}`).join(', ')}`);
