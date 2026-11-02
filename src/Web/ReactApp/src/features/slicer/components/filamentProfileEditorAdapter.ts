@@ -10,6 +10,11 @@ export function hydrateFilamentProfileSettings(
   rawSettings: Record<string, unknown>,
 ): Record<string, unknown> {
   const settings = { ...rawSettings };
+  if (!Object.hasOwn(settings, 'chamber_temperature')
+    && Object.hasOwn(settings, 'chamber_temperatures')) {
+    settings.chamber_temperature = settings.chamber_temperatures;
+  }
+  delete settings.chamber_temperatures;
   for (const [key, value] of Object.entries(settings)) {
     const meta = filamentMetadata[key];
     if (meta && vectorTypes.has(meta.coType) && Array.isArray(value)) {
@@ -53,6 +58,10 @@ export function serializeFilamentProfileSettings(
       && JSON.stringify(settings[key]) === JSON.stringify(originalSettings[key])) {
       continue;
     }
+    // Orca loads the legacy alias into the same option and can overwrite an edit.
+    if (key === 'chamber_temperature') {
+      delete serialized.chamber_temperatures;
+    }
     if (!hasCurrent) {
       delete serialized[key];
       continue;
@@ -66,7 +75,9 @@ export function serializeFilamentProfileSettings(
       const entries = Array.isArray(settings[key]) ? settings[key] : String(settings[key]).split(',');
       serialized[key] = entries.map((entry) => serializeEntry(entry, meta));
     } else {
-      const raw = rawSettings[key];
+      const raw = key === 'chamber_temperature' && !Object.hasOwn(rawSettings, key)
+        ? rawSettings.chamber_temperatures
+        : rawSettings[key];
       serialized[key] = [
         serializeEntry(settings[key], meta),
         ...(Array.isArray(raw) ? raw.slice(1) : []),

@@ -51,6 +51,10 @@ the process editor; without that dependency Orca 2.4.2 disables single-filament
 towers. The report records and verifies that dependency in both artifacts before
 requiring the distinct prime-tower value. Stock portable profiles are unchanged;
 this fixture setup is not machine-editor or physical clumping-detection coverage.
+Stock filament profiles can contain the legacy `chamber_temperatures` alias.
+The filament editor displays it as `chamber_temperature` and removes the alias
+only when that setting is edited or reset, so Orca cannot overwrite the edit
+with a stale legacy value. Unrelated edits preserve the original wire values.
 The build CLI uses the established NuGet package cache only as a **read-only
 local feed**. Restore/extraction, HTTP caches, lock state and CLI metadata have
 explicit private destinations; the subsequent build uses `--no-restore`.

@@ -68,6 +68,56 @@ describe('filament profile editor wire settings', () => {
     }, original, raw)).toEqual({ ...raw, nozzle_temperature: ['221', '215'] });
   });
 
+  it('hydrates a legacy chamber temperature and preserves hidden extruder entries on edit', () => {
+    const legacy = { chamber_temperatures: ['40', '45'], unrelated: ['keep'] };
+    const original = hydrateFilamentProfileSettings(legacy);
+    expect(original).toEqual({ chamber_temperature: '40', unrelated: ['keep'] });
+    expect(serializeFilamentProfileSettings({
+      ...original, chamber_temperature: 41,
+    }, original, legacy)).toEqual({
+      chamber_temperature: ['41', '45'], unrelated: ['keep'],
+    });
+    expect(legacy).toEqual({ chamber_temperatures: ['40', '45'], unrelated: ['keep'] });
+  });
+
+  it('prefers the canonical chamber temperature and removes a conflicting legacy alias on edit', () => {
+    const conflicting = {
+      chamber_temperature: ['40', '45'], chamber_temperatures: ['0', '5'],
+    };
+    const original = hydrateFilamentProfileSettings(conflicting);
+    expect(original).toEqual({ chamber_temperature: '40' });
+    expect(serializeFilamentProfileSettings({
+      ...original, chamber_temperature: 41,
+    }, original, conflicting)).toEqual({ chamber_temperature: ['41', '45'] });
+    expect(conflicting.chamber_temperatures).toEqual(['0', '5']);
+  });
+
+  it('removes both chamber temperature spellings when resetting ownership', () => {
+    const conflicting = {
+      chamber_temperature: ['40'], chamber_temperatures: ['0'], unrelated: 'keep',
+    };
+    const original = hydrateFilamentProfileSettings(conflicting);
+    expect(serializeFilamentProfileSettings({
+      unrelated: 'keep',
+    }, original, conflicting)).toEqual({ unrelated: 'keep' });
+    const legacy = { chamber_temperatures: ['40'], unrelated: 'keep' };
+    expect(serializeFilamentProfileSettings({
+      unrelated: 'keep',
+    }, hydrateFilamentProfileSettings(legacy), legacy)).toEqual({ unrelated: 'keep' });
+  });
+
+  it.each([
+    { chamber_temperatures: ['40', '45'] },
+    { chamber_temperature: ['40', '45'], chamber_temperatures: ['0', '5'] },
+  ])('preserves untouched chamber wire values when saving or editing an unrelated field', (chamber) => {
+    const untouched = { ...chamber, nozzle_temperature: ['200'] };
+    const original = hydrateFilamentProfileSettings(untouched);
+    expect(serializeFilamentProfileSettings(original, original, untouched)).toEqual(untouched);
+    expect(serializeFilamentProfileSettings({
+      ...original, nozzle_temperature: 201,
+    }, original, untouched)).toEqual({ ...untouched, nozzle_temperature: ['201'] });
+  });
+
   it.each([
     ['nozzle_temperature', 221.5],
     ['fan_min_speed', '60,NaN'],
