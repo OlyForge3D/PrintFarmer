@@ -11,6 +11,60 @@ npm run test:e2e:chromium            # Chromium only
 npm run test:e2e -- --project=firefox  # Firefox only
 ```
 
+## Settings Editor to Real Orca G-code
+
+The opt-in `slicer-settings` suite inventories **all** process and filament
+registry keys. It edits individual settings through the process Apply or
+filament save/select UI, submits new jobs to a real worker, and compares each
+requested value with the newly generated Orca 2.4.2 `CONFIG_BLOCK`. A saved
+profile alone is not a pass. Unresolved keys fail the suite; explicit exclusions
+remain in the report and are never counted as verified.
+
+Install the normal frontend dependencies and Playwright Chromium, and build the
+API, worker and native emulator from this worktree before running:
+
+```powershell
+cd <repo-root>\src
+dotnet build .\api\Farm.Web.Api.csproj -c Debug
+dotnet build .\orcaslicer-worker\Farm.OrcaSlicer.Worker.csproj -c Debug
+dotnet build .\moonraker-emulator\Farm.Moonraker.Emulator\Farm.Moonraker.Emulator.csproj -c Debug
+cd .\Web\ReactApp
+$env:ORCA_TEST_ROOT = '<private upstream OrcaSlicer 2.4.2 portable directory>'
+npm run test:e2e -- --config playwright.slicer-settings.config.ts
+```
+
+`ORCA_TEST_ROOT` must contain the executable and `resources\profiles`; do not
+point it at a shared worker's writable profile/cache directory. The dedicated
+config starts its own loopback API (15245), worker (15246), UI (13000), and
+Moonraker emulator (17125), refuses occupied ports, and creates fresh SQLite
+databases, model/artifact storage and profile caches on every invocation.
+The worker also receives private per-user engine configuration/cache paths.
+No Docker or physical printer is needed. Browser print/queue dispatch is
+blocked; generated files are **never** sent to a printer.
+
+Each run prints its scratch directory and writes `coverage.json`, baseline and
+per-setting G-code plus submitted profile snapshots there. Set
+`PF_SETTINGS_TEST_ROOT` to choose the parent evidence directory; retain evidence
+for diagnosis and remove only that run's directory when finished. Do not set
+the internal `PF_SETTINGS_RUN_ROOT`: Playwright passes it to its own test worker.
+The portable Windows binary rejects `--version`, so the harness disables that
+startup probe only for its private worker and instead requires the actual
+G-code header to identify 2.4.2.
+The report distinguishes UI attempts, accepted submissions, and `executed`
+settings with newly generated, downloaded G-code; only matching distinct values
+count as `configVerified`.
+
+Configuration retention is not physical behavior proof. Limited independent
+heater-command and extrusion-plane checks are recorded separately. A negative
+control must reject replacement of a changed emitted value with its baseline.
+Every registry key remains visible in the report, including non-emitted keys,
+unsupported controls, intentional submission-policy exclusions and failures;
+an incomplete run is not exhaustive coverage.
+
+For post-processing, the suite uses only its checked-in proof script: it refuses
+files outside the private run and appends a comment to complete Orca G-code.
+It never invokes a user-configured post-processing program.
+
 ## Monolith Smoke Journeys (Wire-Contract Corpus)
 
 `e2e/monolith-smoke/` (issue #2286) is a small, bounded set of authenticated
