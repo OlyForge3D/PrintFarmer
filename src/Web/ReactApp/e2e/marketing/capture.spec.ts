@@ -15,6 +15,7 @@ for (const scene of [
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.clock.setFixedTime(new Date(captureTime));
+    if (scene.name === 'fleet') await page.setViewportSize({ width: 1710, height: 1100 });
     await page.goto(scene.path);
     await expect(page.getByRole('heading', { name: scene.heading, exact: true })).toBeVisible();
     if (scene.name === 'materials') {
@@ -31,7 +32,14 @@ for (const scene of [
       for (const printer of printers) {
         const card = cards.filter({ has: page.getByText(printer.name, { exact: true }) });
         await expect(card).toBeInViewport({ ratio: 1 });
-        await expect(card.getByText(printer.modelName, { exact: true })).toBeVisible();
+        const modelLabel = card.getByText(printer.modelName, { exact: true });
+        await expect(modelLabel).toBeVisible();
+        expect(await modelLabel.evaluate(element => ({
+          clipped: element.scrollWidth > element.clientWidth,
+          text: element.textContent,
+        })), 'The complete model identity must be readable, not just present in the DOM').toEqual({
+          clipped: false, text: printer.modelName,
+        });
         const image = card.locator('[data-testid="compact-printer-image"] img');
         const expectedCover = `/assets/orcaslicer/${printer.manufacturerName.toLowerCase()}/${encodeURIComponent(printer.modelName)}_cover.png`;
         await expect(image).toHaveAttribute('src', expectedCover);

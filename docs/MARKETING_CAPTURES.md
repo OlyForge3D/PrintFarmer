@@ -43,6 +43,9 @@ manufacturer/model names recorded in `manifest.json`. The repository's
 `scripts/restore-orcaslicer-assets.js` extracts model covers from OrcaSlicer
 profile resources. The capture tests require the expected cover URL and a
 decoded image for each card, with all eight cards fully visible in a 4x2 grid.
+The fleet capture uses a 1710x1100 viewport so every complete model label fits
+the app's existing compact cards; tests reject ellipsized/clipped model text.
+Other scenes retain their 1600x1100 viewport. No app CSS or DOM is altered.
 
 [Third-party notices](../THIRD-PARTY-NOTICES.md#orcaslicer) identify bundled
 OrcaSlicer resources as AGPLv3 and require upstream notices to remain intact.
