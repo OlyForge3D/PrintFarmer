@@ -1,75 +1,160 @@
 <!DOCTYPE html>
+<!--
+THESIS: A farm in focus. Real operational screens, not a fictional dashboard.
+OWN-WORLD: PrintFarmer navy, saturated teal, blue hardware marks; oversized
+workhorse typography and precise rectangular image plates.
+STORY: See the fleet, follow the work, choose a self-hosted setup.
+FIRST VIEWPORT: Wide headline and clear setup action above a full-width fleet
+capture; product proof takes more space than marketing copy.
+FORM: Operational field guide, grounded structure 4; screenshot-led staging,
+seed 6bf9f90b. Preserve the established app identity, no theme replacement.
+-->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PrintFarmer</title>
-  <meta name="description" content="PrintFarmer — open-source, self-hosted 3D-printer farm management.">
+  <title>PrintFarmer - Your farm. In focus.</title>
+  <meta name="description" content="See your 3D printer fleet, track multi-print projects, and organize filament with PrintFarmer. Open-source, self-hosted farm management.">
+  <meta name="theme-color" content="#08101f">
+  <meta property="og:title" content="PrintFarmer - Your farm. In focus.">
+  <meta property="og:description" content="Open-source, self-hosted 3D printer farm management. Explore the real interface with synthetic demo data.">
+  <meta property="og:type" content="website">
   <link rel="canonical" href="https://olyforge3d.github.io/PrintFarmer/">
-  <style>
-    :root {
-      color-scheme: light dark;
-      --fg: #1b1f23;
-      --bg: #ffffff;
-      --muted: #4b5563;
-      --accent: #0b5fff;
-      --border: #d7dbe0;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --fg: #e6e8eb;
-        --bg: #14161a;
-        --muted: #aab0b8;
-        --accent: #6fa8ff;
-        --border: #30343a;
-      }
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-
-    a {
-      color: var(--accent);
-    }
-
-    a:focus-visible {
-      outline: 3px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    main {
-      max-width: 40rem;
-      margin: 0 auto;
-      padding: 3rem 1.25rem;
-    }
-
-    h1 {
-      font-size: 1.9rem;
-      margin-bottom: 0.25rem;
-    }
-
-    p {
-      color: var(--muted);
-    }
-
-    ul {
-      padding-left: 1.25rem;
-    }
-  </style>
+  <link rel="icon" type="image/svg+xml" href="assets/printfarmer-logo.svg">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main>
-    <h1>PrintFarmer</h1>
-    <p>Open-source, self-hosted 3D-printer farm management.</p>
-    <ul>
-      <li><a href="privacy/">Privacy Policy</a></li>
-      <li><a href="https://github.com/OlyForge3D/PrintFarmer">Source code on GitHub</a></li>
-    </ul>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="wordmark" href="./" aria-label="PrintFarmer home">
+      <img src="assets/printfarmer-logo.svg" alt="" width="40" height="40">
+      <span>PrintFarmer</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#features">Explore</a>
+      <a href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/INDEX.md">Docs</a>
+      <a href="https://github.com/OlyForge3D/PrintFarmer" class="source-link">GitHub <span aria-hidden="true">&#8599;</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Your farm.<br><span>In focus.</span></h1>
+        <div class="hero-intro">
+          <p>Less tab-hopping.<br> More making.</p>
+          <p class="description">One place to see your 3D printers, follow the work, and keep the next print moving. Open-source. Self-hosted. On your terms.</p>
+          <div class="actions">
+            <a class="button primary" href="#get-started">Get started <span aria-hidden="true">&#8599;</span></a>
+            <a class="text-link" href="#fleet">See the interface <span aria-hidden="true">&#8595;</span></a>
+          </div>
+        </div>
+      </div>
+      <figure class="fleet-plate" id="fleet">
+        <div class="plate-bar">
+          <span>YOUR FLEET, AT A GLANCE</span>
+          <span class="sample-label">REAL UI / SAMPLE DATA</span>
+        </div>
+        <a href="assets/captures/fleet.png" class="capture-link" aria-label="Open full-size printer fleet screenshot">
+          <img class="fleet-capture" src="assets/captures/fleet.png" width="1600" height="1100"
+            alt="PrintFarmer's Printers page with six synthetic printers: Atlas and Birch printing, Delta paused, Cedar and Ember idle, and Finch offline."
+            fetchpriority="high">
+          <span class="image-action" aria-hidden="true">Open full screenshot &#8599;</span>
+        </a>
+        <figcaption>Actual PrintFarmer web interface. All printers, jobs, materials, and figures shown are synthetic demo data. No live farm or camera feeds.</figcaption>
+      </figure>
+    </section>
+
+    <section class="ownership" aria-labelledby="ownership-title">
+      <div class="wrap ownership-inner">
+        <h2 id="ownership-title">Your printers.<br>Your infrastructure.</h2>
+        <div>
+          <p>Bring the fleet together without handing it over.</p>
+          <p>Run PrintFarmer on infrastructure you control. The web app brings fleet status, print projects, and filament inventory into a single workspace.</p>
+          <a class="text-link" href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/ARCHITECTURE.md">Explore the architecture <span aria-hidden="true">&#8599;</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="features wrap" id="features" aria-labelledby="features-title">
+      <div class="section-heading">
+        <h2 id="features-title">From the whole fleet<br>to the next detail.</h2>
+        <p>Not a concept render.<br>This is the workspace.</p>
+      </div>
+      <article class="feature feature-fleet">
+        <div class="feature-copy">
+          <h3>Read the room.<br> Without leaving it.</h3>
+          <p>Scan printing, paused, idle, and offline states together. See progress and temperature readouts on the printer cards, then open a printer when you need more detail.</p>
+          <a class="text-link" href="#fleet">View the fleet screenshot <span aria-hidden="true">&#8593;</span></a>
+        </div>
+        <div class="fleet-notes">
+          <p><strong>A fleet, not six browser tabs.</strong> The same printer list keeps different machine states visible side by side.</p>
+          <p><strong>Status with context.</strong> A paused print is not an idle printer. An offline printer is not a successful job.</p>
+          <p><strong>Go deeper when you need to.</strong> Compact and detailed views let you choose how much of the workspace a printer occupies.</p>
+        </div>
+      </article>
+      <article class="feature feature-detail">
+        <div class="feature-copy">
+          <h3>Keep the project<br> in the picture.</h3>
+          <p>Some work takes more than one print. Group files into projects and track completed prints, file counts, and overall progress without losing the bigger job.</p>
+          <a class="text-link" href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/FEATURES.md">Read the feature guide <span aria-hidden="true">&#8599;</span></a>
+        </div>
+        <figure>
+          <a href="assets/captures/projects.png" class="capture-link" aria-label="Open full-size projects screenshot">
+            <img class="detail-capture" src="assets/captures/projects.png" width="1600" height="1100" loading="lazy"
+              alt="Real Projects page with synthetic Workshop enclosure at 58 percent, Sensor mounting kit at 25 percent, and completed Cable management.">
+            <span class="image-action" aria-hidden="true">Open full screenshot &#8599;</span>
+          </a>
+          <figcaption>Projects view &middot; synthetic demo projects and progress.</figcaption>
+        </figure>
+      </article>
+      <article class="feature feature-detail">
+        <div class="feature-copy">
+          <h3>Know what<br> you're printing with.</h3>
+          <p>Keep filament definitions and physical spools in view with Spoolman. See material, remaining weight, and storage location, with separate views for filaments, spools, and material clusters.</p>
+          <a class="text-link" href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/INDEX.md">Find integration docs <span aria-hidden="true">&#8599;</span></a>
+        </div>
+        <figure>
+          <a href="assets/captures/materials.png" class="capture-link" aria-label="Open full-size filament inventory screenshot">
+            <img class="detail-capture" src="assets/captures/materials.png" width="1600" height="1100" loading="lazy"
+              alt="Real Filament Inventory Spools view showing synthetic Ocean blue, Signal orange, and Graphite PLA spools with remaining weights and workshop locations.">
+            <span class="image-action" aria-hidden="true">Open full screenshot &#8599;</span>
+          </a>
+          <figcaption>Filament Inventory &middot; synthetic Spoolman responses, not a live integration.</figcaption>
+        </figure>
+      </article>
+      <p class="proof-note">These captures demonstrate the real frontend with local API fixtures. They do not verify backend behavior, printer compatibility, hardware control, or a connected Spoolman installation.</p>
+    </section>
+
+    <section class="start wrap" id="get-started" aria-labelledby="start-title">
+      <div class="start-intro">
+        <h2 id="start-title">Make it<br>your workspace.</h2>
+        <p>Start with the deployment guide for your own farm, or run the API and React app locally if you're here to build.</p>
+        <a class="button primary" href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/DEPLOYMENT.md">Read the deployment guide <span aria-hidden="true">&#8599;</span></a>
+        <a class="text-link dev-link" href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/GETTING_STARTED.md">Set up for development <span aria-hidden="true">&#8599;</span></a>
+      </div>
+      <ol class="setup-steps">
+        <li><h3>Choose your host.</h3><p>Review the hardware guide and deployment options. Docker is the production path; native .NET and React processes are the local development path.</p><a href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/DEPLOYMENT_HARDWARE.md">Hardware guide &#8599;</a></li>
+        <li><h3>Set up deliberately.</h3><p>Follow the deployment guide for HTTPS, storage, and first-administrator bootstrap. Protect credentials before inviting users or connecting printers.</p></li>
+        <li><h3>Bring in your printers.</h3><p>Finish setup, add supported printers, and verify their reported state. Review backend-specific capabilities before sending commands.</p></li>
+      </ol>
+    </section>
+
+    <section class="closing" aria-labelledby="closing-title">
+      <div class="wrap closing-inner">
+        <h2 id="closing-title">Built in the open.<br>Run by you.</h2>
+        <div><p>Inspect the source. Read the docs.<br>Help shape what comes next.</p><a class="button light" href="https://github.com/OlyForge3D/PrintFarmer">Explore on GitHub <span aria-hidden="true">&#8599;</span></a></div>
+      </div>
+    </section>
   </main>
+  <footer class="wrap">
+    <a class="wordmark" href="./"><img src="assets/printfarmer-logo.svg" alt="" width="32" height="32"><span>PrintFarmer</span></a>
+    <p>Open-source, self-hosted 3D printer farm management.</p>
+    <nav aria-label="Footer navigation">
+      <a href="https://github.com/OlyForge3D/PrintFarmer/releases">Releases</a>
+      <a href="https://github.com/OlyForge3D/PrintFarmer/blob/development/docs/INDEX.md">Documentation</a>
+      <a href="privacy/">Privacy</a>
+    </nav>
+  </footer>
 </body>
 </html>
