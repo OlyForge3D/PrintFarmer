@@ -171,6 +171,16 @@ Content-Type: application/json
 ```
 
 `DELETE /api/profiles/custom-bundles/{bundleName}` removes a bundle.
+
+Rendered bundles appear in the worker hierarchy under their bundle name
+(`PrintFarmer-{familyId}`), not the catalog manufacturer. Selective import and
+`POST /api/slicer/profiles/resolve-for-model/{modelId}` (used when saving a
+default process profile as custom) therefore select every worker vendor bucket
+that holds a machine matched by the model's OrcaSlicer aliases, in addition to
+a bucket named after the catalog manufacturer. Only alias-matched machines and
+processes or filaments whose `compatible_printers` name such a machine are
+imported. Machine rows imported from a non-catalog bucket are attributed to the
+catalog manufacturer.
 `POST /api/profiles/cache/reload` performs a full in-process reload. Install and
 remove already perform that reload; callers do not need a second request.
 

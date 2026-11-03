@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -779,6 +780,282 @@ public class ProfilesServiceResolveOrImportTests
         Assert.Null(result.Error);
         Assert.False(result.Imported);
         Assert.Equal(winningProfileId, result.ProfileId);
+    }
+
+    private const string MicronCatalogManufacturer = "PrintersForAnts";
+    private const string MicronModelName = "Micron 180";
+    private const string MicronWorkerVendor = "PrintFarmer-0123456789abcdef0123456789abcdef";
+    private const string MicronMachineName = "Micron 180 0.4 nozzle";
+    private const string MicronProcessName = "0.06mm Fine 0.4 nozzle @Micron 180";
+
+    /// <summary>
+    /// "Save as custom" of a Micron 180 default process profile failed with "Manufacturer
+    /// 'PrintersForAnts' not found in worker profiles": Micron has no stock OrcaSlicer vendor, so
+    /// its profiles live in a rendered custom family bundle keyed "PrintFarmer-{familyId}" rather
+    /// than the catalog manufacturer name. Resolution must find the alias-matched bucket, import
+    /// the compatible process with its worker-resolved settings, and resolve the persisted row
+    /// again on the next call without contacting the worker.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_CustomFamilyVendorDiffersFromCatalog_ImportsProcessAndReusesIt()
+    {
+        MicronHarness harness = new();
+        ProcessProfileDto micronProcess = MicronProcess(layerHeight: 0.06, MicronMachineName);
+        ProcessProfileDto unrelatedSameName = MicronProcess(layerHeight: 0.3, "Voron 2.4 350 0.4 nozzle");
+
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            [MicronWorkerVendor] = ([MicronMachine()], [micronProcess]),
+            ["Voron"] = ([new MachineProfileDto { Name = "Voron 2.4 350 0.4 nozzle", Manufacturer = "Voron", PrinterModel = "Voron 2.4 350" }], [unrelatedSameName])
+        });
+
+        ResolveProfileForModelResultDto result = await harness.Service.ResolveOrImportProfileForModelAsync(
+            httpClient, harness.ModelId, ProfileResolutionType.Process, MicronProcessName, new ProfileViewer(Guid.NewGuid(), false), CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.True(result.Imported);
+        ProcessProfile persisted = Assert.Single(harness.Processes);
+        Assert.Equal(result.ProfileId, persisted.Id);
+        Assert.Equal(harness.ModelId, persisted.PrinterModelId);
+        Assert.Equal(MicronMachineName, persisted.CompatiblePrinters);
+        Assert.Equal(0.06, persisted.LayerHeight);
+        Assert.True(persisted.IsSystem);
+        Assert.Null(persisted.CreatedByUserId);
+
+        using HttpClient noWorker = new(new StubHttpMessageHandler(_ => throw new InvalidOperationException("Worker should not be called for an already-imported profile")));
+        ResolveProfileForModelResultDto reused = await harness.Service.ResolveOrImportProfileForModelAsync(
+            noWorker, harness.ModelId, ProfileResolutionType.Process, MicronProcessName, new ProfileViewer(Guid.NewGuid(), false), CancellationToken.None);
+
+        Assert.Null(reused.Error);
+        Assert.False(reused.Imported);
+        Assert.Equal(persisted.Id, reused.ProfileId);
+    }
+
+    /// <summary>
+    /// A machine imported from a custom family bundle is attributed to the catalog manufacturer,
+    /// not the opaque worker bundle name.
+    /// </summary>
+    [Fact]
+    public async Task ResolveOrImportProfileForModelAsync_CustomFamilyMachine_AttributesCatalogManufacturer()
+    {
+        MicronHarness harness = new();
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+        {
+            [MicronWorkerVendor] = ([MicronMachine()], [])
+        });
+
+        ResolveProfileForModelResultDto result = await harness.Service.ResolveOrImportProfileForModelAsync(
+            httpClient, harness.ModelId, ProfileResolutionType.Machine, MicronMachineName, ProfileViewer.Administrator, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        MachineProfile machine = Assert.Single(harness.Machines);
+        Assert.Equal(MicronCatalogManufacturer, machine.Manufacturer);
+        Assert.Equal(harness.ModelId, machine.PrinterModelId);
+    }
+
+    /// <summary>
+    /// Vendor bucket selection must not widen what is importable: a same-named process that is
+    /// only compatible with another vendor's machine, whether it sits in an unrelated bucket or in
+    /// the alias-matched bucket, is never substituted.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOrImportProfileForModelAsync_SameNameProcessIncompatibleWithAliasMachines_IsNotImported(bool inAliasBucket)
+    {
+        MicronHarness harness = new();
+        ProcessProfileDto incompatible = MicronProcess(layerHeight: 0.3, "Voron 2.4 350 0.4 nozzle");
+        Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])> buckets = inAliasBucket
+            ? new() { [MicronWorkerVendor] = ([MicronMachine()], [incompatible]) }
+            : new()
+            {
+                [MicronWorkerVendor] = ([MicronMachine()], []),
+                ["Voron"] = ([new MachineProfileDto { Name = "Voron 2.4 350 0.4 nozzle", Manufacturer = "Voron", PrinterModel = "Voron 2.4 350" }], [incompatible])
+            };
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(buckets);
+
+        ResolveProfileForModelResultDto result = await harness.Service.ResolveOrImportProfileForModelAsync(
+            httpClient, harness.ModelId, ProfileResolutionType.Process, MicronProcessName, ProfileViewer.Administrator, CancellationToken.None);
+
+        Assert.Null(result.ProfileId);
+        Assert.Contains("not found or is not compatible", result.Error, StringComparison.Ordinal);
+        Assert.Empty(harness.Processes);
+    }
+
+    /// <summary>
+    /// When no worker bucket holds an alias-matched machine and none is named after the catalog
+    /// manufacturer, the import still fails with the manufacturer error rather than scanning
+    /// unrelated vendors.
+    /// </summary>
+    [Fact]
+    public async Task ImportSelectedProfilesForModelAsync_NoBucketHoldsAliasMachine_ReturnsManufacturerError()
+    {
+        MicronHarness harness = new();
+        using HttpClient httpClient = CreateMicronWorkerHttpClient(
+            new Dictionary<string, (MachineProfileDto[], ProcessProfileDto[])>
+            {
+                ["Voron"] = ([new MachineProfileDto { Name = "Voron 2.4 350 0.4 nozzle", Manufacturer = "Voron", PrinterModel = "Voron 2.4 350" }], [MicronProcess(0.06, "Voron 2.4 350 0.4 nozzle")])
+            },
+            aliasMachines: [MicronMachine()]);
+
+        SelectiveProfileImportRequest request = new() { ManufacturerName = MicronCatalogManufacturer };
+        request.SelectedProcessProfiles.Add(MicronProcessName);
+
+        SelectiveProfileImportResultDto result = await harness.Service.ImportSelectedProfilesForModelAsync(
+            httpClient, harness.ModelId, request, CancellationToken.None);
+
+        Assert.Equal($"Manufacturer '{MicronCatalogManufacturer}' not found in worker profiles", result.Error);
+        Assert.Empty(harness.Processes);
+    }
+
+    private static MachineProfileDto MicronMachine() => new()
+    {
+        Name = MicronMachineName,
+        Manufacturer = MicronWorkerVendor,
+        PrinterModel = MicronModelName
+    };
+
+    private static ProcessProfileDto MicronProcess(double layerHeight, string compatibleMachine) => new()
+    {
+        Name = MicronProcessName,
+        Quality = "fine",
+        LayerHeight = layerHeight,
+        CompatiblePrinters = [compatibleMachine]
+    };
+
+    private sealed class MicronHarness
+    {
+        public Guid ModelId { get; } = Guid.NewGuid();
+
+        public List<MachineProfile> Machines { get; } = [];
+
+        public List<ProcessProfile> Processes { get; } = [];
+
+        public ProfilesService Service { get; }
+
+        public MicronHarness()
+        {
+            Guid manufacturerId = Guid.NewGuid();
+
+            Mock<IMachineProfileRepository> machineRepo = new(MockBehavior.Loose);
+            _ = machineRepo
+                .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new List<MachineProfile>(Machines));
+            _ = machineRepo
+                .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((MachineProfile?)null);
+            _ = machineRepo
+                .Setup(r => r.AddAsync(It.IsAny<MachineProfile>(), It.IsAny<CancellationToken>()))
+                .Callback<MachineProfile, CancellationToken>((p, _) => Machines.Add(p))
+                .Returns(Task.CompletedTask);
+
+            Mock<IProcessProfileRepository> processRepo = new(MockBehavior.Loose);
+            _ = processRepo
+                .Setup(r => r.GetByEngineAsync(SlicerType.OrcaSlicer, true, null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new List<ProcessProfile>(Processes));
+            _ = processRepo
+                .Setup(r => r.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProcessProfile?)null);
+            _ = processRepo
+                .Setup(r => r.AddAsync(It.IsAny<ProcessProfile>(), It.IsAny<CancellationToken>()))
+                .Callback<ProcessProfile, CancellationToken>((p, _) => Processes.Add(p))
+                .Returns(Task.CompletedTask);
+
+            Mock<ICatalogService> catalogService = new(MockBehavior.Loose);
+            _ = catalogService
+                .Setup(c => c.GetModelByIdAsync(ModelId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PrinterModelDto(ModelId, MicronModelName, manufacturerId));
+            _ = catalogService
+                .Setup(c => c.GetManufacturerByIdAsync(manufacturerId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ManufacturerDto(manufacturerId, MicronCatalogManufacturer));
+            _ = catalogService
+                .Setup(c => c.GetModelAliasesAsync(ModelId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<SlicerModelAliasDto> { new(Guid.NewGuid(), ModelId, MicronModelName, "OrcaSlicer") });
+
+            Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Loose);
+            _ = slicersService
+                .Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<SlicerService>
+                {
+                    new()
+                    {
+                        Name = "orca",
+                        SlicerType = 1,
+                        Host = "http://worker",
+                        Status = "Online",
+                        LastSeen = DateTime.UtcNow,
+                        Version = Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.SlicerVersion,
+                        CapabilitiesJson = $"[\"{Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.UpstreamSlicerCapability}\"]"
+                    }
+                });
+
+            Mock<IProfileParsingService> parsingService = new(MockBehavior.Loose);
+            _ = parsingService
+                .Setup(p => p.ParseAndPrepare(It.IsAny<string>()))
+                .Returns((string json) => (json, json, "hash-" + json.GetHashCode(StringComparison.Ordinal).ToString("x", CultureInfo.InvariantCulture)));
+
+            Service = CreateService(
+                processRepoOverride: processRepo.Object,
+                machineRepoOverride: machineRepo.Object,
+                catalogServiceOverride: catalogService.Object,
+                slicersServiceOverride: slicersService.Object,
+                parsingServiceOverride: parsingService.Object);
+        }
+    }
+
+    /// <summary>
+    /// Worker stub whose hierarchy is keyed by worker vendor bucket. The alias lookup returns
+    /// <paramref name="aliasMachines"/> when given, otherwise every machine whose PrinterModel
+    /// matches the requested alias.
+    /// </summary>
+    private static HttpClient CreateMicronWorkerHttpClient(
+        Dictionary<string, (MachineProfileDto[] Machines, ProcessProfileDto[] Processes)> buckets,
+        MachineProfileDto[]? aliasMachines = null)
+    {
+        AllProfilesResponseDto response = new();
+        foreach ((string vendor, (MachineProfileDto[] machines, ProcessProfileDto[] processes)) in buckets)
+        {
+            response.ByHierarchy[vendor] = new ManufacturerProfilesDto
+            {
+                Name = vendor,
+                Models = new Dictionary<string, PrinterModelProfilesDto>
+                {
+                    [vendor + "-model"] = new()
+                    {
+                        Name = machines.FirstOrDefault()?.PrinterModel ?? vendor,
+                        ModelId = vendor + "-model",
+                        MachineProfiles = [.. machines],
+                        FilamentProfiles = [],
+                        ProcessProfiles = [.. processes]
+                    }
+                }
+            };
+        }
+
+        string profilesJson = JsonSerializer.Serialize(response);
+
+        return new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/version", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            const string machinePrefix = "/api/profiles/machine/";
+            int machineIndex = path.IndexOf(machinePrefix, StringComparison.Ordinal);
+            if (machineIndex >= 0)
+            {
+                string alias = Uri.UnescapeDataString(path[(machineIndex + machinePrefix.Length)..]);
+                MachineProfileDto[] matches = aliasMachines ?? buckets.Values
+                    .SelectMany(bucket => bucket.Machines)
+                    .Where(machine => string.Equals(machine.PrinterModel, alias, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(matches)) };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(profilesJson) };
+        }));
     }
 
     private static ProfilesService CreateService(

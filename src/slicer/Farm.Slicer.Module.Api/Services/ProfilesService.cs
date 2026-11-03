@@ -938,7 +938,8 @@ public class ProfilesService(
         Guid? printerModelId,
         string? orcaVersion,
         bool checkDuplicates,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool attributeToCatalogManufacturer = false)
     {
         string profileJson = JsonSerializer.Serialize(machineProfile, CaseInsensitiveCompactJsonOptions);
         (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
@@ -967,7 +968,7 @@ public class ProfilesService(
         {
             Id = Guid.NewGuid(),
             Name = machineProfile.Name ?? string.Empty,
-            Manufacturer = machineProfile.Manufacturer ?? manufacturerName,
+            Manufacturer = attributeToCatalogManufacturer ? manufacturerName : machineProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer machine profile for {modelDisplayName}",
             SlicerType = SlicerType.OrcaSlicer,
             SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
@@ -1331,13 +1332,22 @@ public class ProfilesService(
                 return result;
             }
 
-            // Find the manufacturer's profiles (case-insensitive lookup)
-            string? matchedManufacturerKey = allProfiles.ByHierarchy.Keys
-                .FirstOrDefault(k => string.Equals(k, request.ManufacturerName, StringComparison.OrdinalIgnoreCase));
+            // The worker keys its hierarchy by OrcaSlicer vendor directory, which need not equal the
+            // catalog manufacturer name: rendered custom profile families live under
+            // "PrintFarmer-{familyId}" bundles (e.g. Micron 180 for catalog manufacturer
+            // "PrintersForAnts"). Select every vendor bucket that holds an alias-matched machine,
+            // plus the bucket named after the catalog manufacturer, rather than requiring the
+            // catalog name to be a raw worker key. The alias and compatible_printers guards below
+            // still decide which profiles may be imported.
+            List<(string Key, ManufacturerProfilesDto Profiles)> manufacturerBuckets = allProfiles.ByHierarchy
+                .Where(entry => entry.Value?.Models != null &&
+                    (string.Equals(entry.Key, request.ManufacturerName, StringComparison.OrdinalIgnoreCase) ||
+                     entry.Value.Models.Values.Any(model => model?.MachineProfiles?.Any(machine =>
+                         aliasMatchedMachineNames.Contains(machine.Name ?? string.Empty)) == true)))
+                .Select(entry => (entry.Key, entry.Value))
+                .ToList();
 
-            if (matchedManufacturerKey == null ||
-                !allProfiles.ByHierarchy.TryGetValue(matchedManufacturerKey, out ManufacturerProfilesDto? manufacturerProfiles) ||
-                manufacturerProfiles?.Models == null)
+            if (manufacturerBuckets.Count == 0)
             {
                 result.Error = $"Manufacturer '{request.ManufacturerName}' not found in worker profiles";
                 return result;
@@ -1354,13 +1364,19 @@ public class ProfilesService(
             }
 
             // Iterate through all models to find matching profiles
-            foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
+            foreach ((string bucketKey, PrinterModelProfilesDto? modelProfiles) in manufacturerBuckets
+                         .SelectMany(bucket => bucket.Profiles.Models.Values.Select(model => (bucket.Key, model))))
             {
                 if (modelProfiles == null)
                 {
                     continue;
                 }
 
+                // Rows from a vendor bucket other than the catalog manufacturer (e.g. a rendered
+                // custom family) are attributed to the catalog manufacturer, as
+                // ProfileManufacturerMaintenanceService does for family variants.
+                bool attributeToCatalogManufacturer =
+                    !string.Equals(bucketKey, request.ManufacturerName, StringComparison.OrdinalIgnoreCase);
                 string modelDisplayName = modelProfiles.Name ?? "Unknown";
 
                 // Import selected machine profiles
@@ -1385,7 +1401,8 @@ public class ProfilesService(
                         {
                             bool imported = await PersistMachineProfileAsync(
                                 machineProfile, request.ManufacturerName, modelDisplayName,
-                                printerModelId, orcaVersion, checkDuplicates: true, ct);
+                                printerModelId, orcaVersion, checkDuplicates: true, ct,
+                                attributeToCatalogManufacturer);
 
                             if (imported)
                             {
