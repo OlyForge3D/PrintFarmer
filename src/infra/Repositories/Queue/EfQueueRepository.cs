@@ -132,19 +132,38 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     /// <returns>List of compatible printers with model and toolhead information</returns>
     public async Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct)
     {
+        return await GetPrintersMatchingModelAsync(modelNameOrAlias, true, ct);
+    }
+
+    /// <summary>
+    /// Retrieves printers matching the specified model name or alias regardless of availability.
+    /// </summary>
+    public async Task<List<Printer>> GetPrintersMatchingModelAsync(string modelNameOrAlias, CancellationToken ct)
+    {
+        return await GetPrintersMatchingModelAsync(modelNameOrAlias, false, ct);
+    }
+
+    private async Task<List<Printer>> GetPrintersMatchingModelAsync(
+        string modelNameOrAlias,
+        bool availableOnly,
+        CancellationToken ct)
+    {
         // Normalize the search term for comparison
         string normalizedSearch = NormalizeModelName(modelNameOrAlias);
 
-        // Get all available printers with their models, aliases, and toolhead details (including nozzle)
-        List<Printer> allPrinters = await _db.Printers
+        // Load models, aliases, and toolhead details (including nozzle) for consistent matching.
+        IQueryable<Printer> query = _db.Printers
             .Include(p => p.Model)
                 .ThenInclude(m => m!.Aliases)
             .Include(p => p.Toolheads)
                 .ThenInclude(t => t.NozzleModel)
-                    .ThenInclude(n => n!.NozzleMaterial)
-            .AsSplitQuery()
-            .Where(p => p.IsAvailable)
-            .ToListAsync(ct);
+                    .ThenInclude(n => n!.NozzleMaterial);
+        if (availableOnly)
+        {
+            query = query.Where(p => p.IsAvailable);
+        }
+
+        List<Printer> allPrinters = await query.AsSplitQuery().ToListAsync(ct);
 
         // Filter in-memory for flexible matching (EF Core can't translate complex string normalization)
         return allPrinters.Where(p =>

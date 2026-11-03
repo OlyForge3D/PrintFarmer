@@ -117,7 +117,7 @@ public static class TelemetryStartup
                        .AddMeter("PrintFarmer.Slicing")
                        .AddMeter("PrintFarmer.SlicerService")
                        .AddMeter("PrintFarmer.FailureDetection")
-                       .AddMeter("PrintFarmer.API")
+                       .AddMeter(Farm.Web.Api.Telemetry.OctoPrintUploadMetrics.MeterName)
                        .AddMeter(Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics.MeterName)
                        .AddMeter(Farm.Infrastructure.Services.Webhooks.WebhookMetrics.MeterName)
                        .AddMeter(PrinterFileEnrichmentMetrics.MeterName)

@@ -156,8 +156,20 @@ When you upload a file with "Start print after upload" enabled:
 2. PrintFarmer attempts to queue it for a compatible printer
 3. Review the job in the **Print Queue** and follow your farm's approval workflow
 
-If no compatible printer is found, the response can report `UploadedOnly`; the
-file remains in the library for manual queueing.
+OrcaSlicer sends the `print` intent in multipart form data and does not send a
+PrintFarmer printer ID. PrintFarmer matches the G-code's extracted printer model
+to available printers; it does not infer a target from Orca's upload `path`.
+An optional `printerId` query parameter can explicitly target a printer for
+clients that know its PrintFarmer ID.
+
+If no eligible printer is available, the file remains in the library, but the
+upload-and-print request returns HTTP 409 with `status: "UploadedOnly"` and an
+`reasonCode` explaining why no queue job was created. OrcaSlicer reports non-2xx
+responses as upload failures; make a compatible printer available and retry.
+Upload-only requests still return success and do not create queue jobs. The file
+library deduplicates identical source bytes, but each accepted upload-and-print
+request is a separate print-job request; do not blindly retry after losing an
+HTTP 202 response.
 
 Without "Start print after upload", files are simply added to the library and can be queued manually later.
 
@@ -226,10 +238,28 @@ Body:
 - `print` (optional form field, default: false) - If true, submits the uploaded file to the queue
 - `printerId` (optional query parameter) - Specific printer GUID to assign the job to
 
-**Response:** Upload-only requests return the saved `file`. Successful queue
-submission returns HTTP 202 with `file`, `jobId`, `status: "Queued"`, and
-`assignedPrinter`. If no compatible printer is available, the file can instead
-be retained with `status: "UploadedOnly"` and an explanatory `message`.
+**Response:** Upload-only requests return HTTP 200 with the saved `file`.
+Successful queue submission returns HTTP 202 with `file`, `jobId`,
+`status: "Queued"`, and `assignedPrinter`. If a print request cannot be
+admitted, the uploaded file is retained and the endpoint returns HTTP 409 with
+`status: "UploadedOnly"`, a machine-readable `reasonCode`, and an explanatory
+`message`; no queue job was created. Known reason codes include
+`no_available_printer`, `printer_model_mismatch`, `printer_access_denied`,
+`nozzle_mismatch`, `material_mismatch`, and `queue_capacity` (the existing
+per-printer limit for five waiting jobs). Printer-group authorization failures
+return HTTP 403 with their own `reasonCode`. A model mismatch means no configured
+printer matches the requested model or alias; a matching but unavailable printer
+is reported as `no_available_printer`.
+
+### Upload-and-print telemetry
+
+The API records `octoprint.upload_print.queue_admissions` with bounded
+`outcome` and `reason` tags; it contains no filenames, file IDs, printer IDs,
+or G-code. HTTP traces include the request route and response status, while
+Warning-level admission logs include the reason code. Prometheus scraping is
+available when API telemetry is enabled; OTLP export and log retention depend
+on the deployment's telemetry configuration. Existing historical 2xx traces
+cannot prove that a queue job was created.
 
 **Note**: File management (listing, deleting) should be done through the PrintFarmer web interface, not through the OctoPrint API.
 

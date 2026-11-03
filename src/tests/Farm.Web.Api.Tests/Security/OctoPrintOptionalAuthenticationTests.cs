@@ -89,15 +89,15 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
                     Id: _fileId.ToString(), RequiredMaterial: "PLA",
                     ExtractedNozzleDiameter: 0.4, ExtractedPrinterModel: "Qidi Plus 4");
             });
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new JobQueuePrintJobDto
+            .ReturnsAsync(QueueJobAddResult.Queued(new JobQueuePrintJobDto
             {
                 Id = _jobId,
                 GcodeFileId = _fileId,
                 AssignedPrinterId = _printerId,
                 AssignedPrinterName = "Test Qidi Plus 4",
-            });
+            }));
 
         _host = new HostBuilder().ConfigureWebHost(builder => builder
             .UseTestServer()
@@ -358,7 +358,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         Exception denial = groupDenied
             ? new QueueGroupAccessDeniedException(Guid.NewGuid(), _userId)
             : new UnauthorizedAccessException("Printer access denied");
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), _userId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(denial);
 
@@ -366,7 +366,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         VerifyQueuedActor(_userId);
-        _queue.Verify(service => service.AddJobToQueueAsync(
+        _queue.Verify(service => service.AddJobToQueueWithOutcomeAsync(
             It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -461,15 +461,16 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     [Fact]
     public async Task Upload_AnonymousWithoutCompatiblePrinter_ReturnsUploadedOnly()
     {
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((JobQueuePrintJobDto?)null);
+            .ReturnsAsync(QueueJobAddResult.Rejected(QueueJobAddFailureReason.PrinterModelMismatch));
 
         using HttpResponseMessage response = await UploadAsync();
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("UploadedOnly", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("printer_model_mismatch", body.RootElement.GetProperty("reasonCode").GetString());
         Assert.Equal(_fileId.ToString(), body.RootElement.GetProperty("file").GetProperty("id").GetString());
         VerifyQueuedActor(null);
     }
@@ -533,7 +534,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
     private void VerifyQueuedActor(Guid? actor)
     {
-        _queue.Verify(service => service.AddJobToQueueAsync(
+        _queue.Verify(service => service.AddJobToQueueWithOutcomeAsync(
             It.Is<QueuePrintJobDto>(request =>
                 request.GcodeFileId == _fileId &&
                 request.AssignedPrinterId == _printerId &&

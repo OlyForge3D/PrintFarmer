@@ -14,6 +14,7 @@ using Farm.Modules.Gcode.DTOs;
 using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.DTOs;
+using Farm.Web.Api.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -60,6 +61,8 @@ public class OctoPrintCompatController : ControllerBase
     [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
     public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId)
     {
+        bool queueAdmissionAttempted = false;
+
         // Null is reserved for anonymous access explicitly allowed by the upload policy.
         // Authenticated callers must retain their real identity for queue resource ACLs.
         Guid? callerId = null;
@@ -211,24 +214,33 @@ public class OctoPrintCompatController : ControllerBase
                     enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
                     LogSanitizer.Sanitize(enqueueReq.RequiredMaterialType) ?? "(any)");
 
-                JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, callerId, HttpContext.RequestAborted);
+                queueAdmissionAttempted = true;
+                QueueJobAddResult queueResult = await _jobQueueService.AddJobToQueueWithOutcomeAsync(
+                    enqueueReq,
+                    callerId,
+                    HttpContext.RequestAborted);
+                JobQueuePrintJobDto? job = queueResult.Job;
                 if (job is null)
                 {
-                    _logger.LogInformation(
-                        "OctoPrint upload+print: No compatible printer found for {FileName}. Model={Model}, Material={Material}",
-                        sanitizedFileName,
-                        LogSanitizer.Sanitize(enqueueReq.RequiredPrinterModel) ?? "(any)",
-                        LogSanitizer.Sanitize(enqueueReq.RequiredMaterialType) ?? "(any)");
+                    QueueJobAddFailureReason reason = queueResult.FailureReason
+                        ?? throw new InvalidOperationException("Queue admission was rejected without a reason.");
+                    string reasonCode = OctoPrintUploadMetrics.ToReasonCode(reason);
+                    OctoPrintUploadMetrics.RecordRejected(reason);
+                    _logger.LogWarning(
+                        "OctoPrint upload+print admission failed after file upload. ReasonCode={ReasonCode}",
+                        reasonCode);
 
-                    return Ok(new
+                    return Conflict(new
                     {
                         file = uploadDto,
                         status = "UploadedOnly",
-                        message = "File uploaded successfully, but no compatible printer was found for automatic queuing. " +
-                                  "Please assign a printer manually from the Print Queue page."
+                        reasonCode,
+                        message = "File uploaded, but the print request could not be queued. " +
+                                  "No print job was created. Review the reason code, resolve the issue, and retry."
                     });
                 }
 
+                OctoPrintUploadMetrics.RecordQueued();
                 _logger.LogInformation(
                     "OctoPrint upload+print: file={FileName}, jobId={JobId}, assignedPrinter={PrinterName} ({PrinterId})",
                     sanitizedFileName, job.Id, LogSanitizer.Sanitize(job.AssignedPrinterName), LogSanitizer.Sanitize(job.AssignedPrinterId?.ToString()));
@@ -242,10 +254,15 @@ public class OctoPrintCompatController : ControllerBase
         {
             // gcode.PrinterGroupId ACL check (JobQueueService.AddJobToQueueAsync) denied the
             // caller submission rights to the file's printer group.
-            _logger.LogWarning("OctoPrint upload+print denied: caller {UserId} lacks submit access to the file's printer group", callerId);
+            _logger.LogWarning("OctoPrint upload+print admission denied. ReasonCode={ReasonCode}", "printer_group_access_denied");
+            if (queueAdmissionAttempted)
+            {
+                OctoPrintUploadMetrics.RecordRejected(QueueJobAddFailureReason.QueueGroupAccessDenied);
+            }
+
             return StatusCode(
                 StatusCodes.Status403Forbidden,
-                new { error = "You do not have permission to submit jobs to this printer group." });
+                new { reasonCode = "printer_group_access_denied", error = "You do not have permission to submit jobs to this printer group." });
         }
         catch (UnauthorizedAccessException)
         {
@@ -254,13 +271,23 @@ public class OctoPrintCompatController : ControllerBase
             // Submit-level access to the specific printer resolved for this job. Mapped to 403
             // (rather than mirroring JobQueueController's 404) for consistent, unambiguous
             // fail-closed semantics on this endpoint — see issue #1666's acceptance criteria.
-            _logger.LogWarning("OctoPrint upload+print denied: caller {UserId} lacks submit access to the target printer", callerId);
+            _logger.LogWarning("OctoPrint upload+print admission denied. ReasonCode={ReasonCode}", "printer_access_denied");
+            if (queueAdmissionAttempted)
+            {
+                OctoPrintUploadMetrics.RecordRejected(QueueJobAddFailureReason.PrinterAccessDenied);
+            }
+
             return StatusCode(
                 StatusCodes.Status403Forbidden,
-                new { error = "You do not have permission to submit jobs to this printer." });
+                new { reasonCode = "printer_access_denied", error = "You do not have permission to submit jobs to this printer." });
         }
         catch (Exception ex)
         {
+            if (queueAdmissionAttempted)
+            {
+                OctoPrintUploadMetrics.RecordRejected(QueueJobAddFailureReason.UnexpectedError);
+            }
+
             _logger.LogError(
                 ex,
                 "OctoPrint upload failed for file {FileName} ({Length} bytes). ExceptionType={ExceptionType}, Message={Message}",
