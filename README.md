@@ -24,6 +24,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Run Ralph (Squad work monitor)** | [Ralph reference](./.github/ralph-reference.md#how-ralph-runs-here) |
 | **Fix an issue** | [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) |
 | **Browse all docs** | [Documentation Index](./docs/INDEX.md) |
+| **Preview the website or regenerate demo screenshots** | [Isolated marketing captures](./docs/MARKETING_CAPTURES.md) |
 
 ## ✨ Key Features
 
