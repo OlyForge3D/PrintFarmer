@@ -56,7 +56,7 @@ public sealed class GcodeApiModule : IApiModule
             Farm.Infrastructure.Services.Queue.Dispatch.DispatchScorer>();
         _ = services.AddHostedService<PrinterFileQueueWorker>();
 
-        // Gcode safety validation (thermal/geometry sanity checks ahead of print dispatch).
+        // Empty-input validation and G-code report metadata; commands are not interpreted.
         services.TryAddSingleton<IGcodeSafetyValidator, GcodeSafetyValidator>();
 
         // Infrastructure-owned processing seam: bridges the infra IGcodeFileProcessingService
