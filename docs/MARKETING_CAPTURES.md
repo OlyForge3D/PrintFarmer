@@ -49,13 +49,51 @@ Other scenes retain their 1600x1100 viewport. No app CSS or DOM is altered.
 
 [Third-party notices](../THIRD-PARTY-NOTICES.md#orcaslicer) identify bundled
 OrcaSlicer resources as AGPLv3 and require upstream notices to remain intact.
-This is **not** per-image copyright provenance, marketing permission, or a
-trademark endorsement. The exact upstream revision, individual image authors
-and any separate vendor terms for these existing covers have not been
-established by this capture work. Before public marketing publication, the
-owner must resolve applicable attribution/source/notice obligations and any
-separate image/trademark restrictions. No blanket clearance is asserted and
-no public deployment is authorized by this change. Incorrect compatibility
+This is **not** a trademark endorsement. The deployment investigation confirmed
+that all eight local covers exactly match the Git blob IDs in
+[OrcaSlicer v2.4.2, revision `8500fcd`](https://github.com/OrcaSlicer/OrcaSlicer/tree/8500fcdccaa10b5099ac20d252af3a7c560046f1/resources/profiles).
+Paths below are relative to that revision's `resources/profiles/` directory:
+
+| Cover path | Matching Git blob ID |
+|---|---|
+| `Elegoo/Elegoo Centauri Carbon_cover.png` | `b5a208ff1787f294628ef9dcfa30fff03b875c24` |
+| `Snapmaker/Snapmaker U1_cover.png` | `8c8fc4f48964ae08b00833ee5e4fe8b6b6411a58` |
+| `Voron/Voron Trident 300_cover.png` | `8b8e89238514986aa0b95f49bdcd04401a64bd3a` |
+| `Sovol/Sovol SV08_cover.png` | `df9141873c9b7cc48130a6c641bf26efd4e4e1f2` |
+| `Ratrig/RatRig V-Core 4 400_cover.png` | `3181407d34fef8bb18770c80a4ced3b67eb25e38` |
+| `Flashforge/Flashforge AD5X_cover.png` | `70831c60f5adb28b153a8bd827cb4b5f8ea76fc6` |
+| `Prusa/Prusa MK4S_cover.png` | `72c82e468a08dc956e35d0f5af7c0361f5adaa5b` |
+| `Prusa/Prusa CORE One L_cover.png` | `d96da979fa168d6167802159d0613000077378ea` |
+
+The complete upstream tree contains no profile-level license, copyright,
+notice, or README files. Upstream declares AGPLv3, which permits commercial
+use subject to its conditions.
+[GitHub's inbound-license terms](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#6-contributions-under-repository-license)
+also require contributed content to be licensed under the repository's terms
+and contributors to have authority to do so. Those are meaningful licensing
+signals; absence of a separate per-image license is not proof of infringement.
+
+However, the inspected contribution history does not identify a complete
+underlying-image rights chain or all required attribution for these particular
+marketing images. For example,
+[the cover replacement PR](https://github.com/OrcaSlicer/OrcaSlicer/pull/13149)
+describes sourcing material from official sites and the internet without
+recording per-cover source URLs or permissions;
+[the CORE One L contribution](https://github.com/OrcaSlicer/OrcaSlicer/pull/11447)
+points to PrusaSlicer, while
+[the Sovol contribution](https://github.com/OrcaSlicer/OrcaSlicer/pull/5512)
+points to vendor-provided files. Neither establishes the complete rights chain
+of the later, exact cover bytes above. This investigation therefore does not
+establish a complete independent rights-chain audit. It also does not conclude
+that redistribution is prohibited. After reviewing this uncertainty, the owner
+explicitly directed retaining the images and deploying the approved site.
+The deployment uses the upstream AGPL declaration and contribution licensing
+basis without asserting separate vendor permission or legal clearance.
+
+`site/image-notices.html` credits OrcaSlicer and contributors, links each exact
+source cover, describes screenshot embedding/scaling, and disclaims endorsement
+or hardware certification. `site/assets/orcaslicer-LICENSE.txt` retains the exact
+upstream license text. Incorrect compatibility
 claims could mislead buyers; incorrect rights assumptions could harm image
 owners and expose the publisher to takedown or other claims. Local captures
 can be replaced; public redistribution may not be fully reversible.

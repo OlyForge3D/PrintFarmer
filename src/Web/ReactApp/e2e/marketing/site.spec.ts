@@ -32,6 +32,13 @@ test('site is static, populated, keyboard usable, and works under the project su
   }
   await page.getByRole('link', { name: 'Get started', exact: false }).click();
   await expect(page.getByRole('heading', { name: 'Make it your workspace.' })).toBeInViewport();
+  await page.getByRole('link', { name: 'Image credits', exact: true }).click();
+  await expect(page).toHaveURL(`${site}image-notices.html`);
+  await expect(page.getByRole('heading', { name: 'Image credits', exact: true })).toBeVisible();
+  await expect(page.locator('main li a')).toHaveCount(8);
+  const license = await request.get(`${site}assets/orcaslicer-LICENSE.txt`);
+  expect(license.status()).toBe(200);
+  expect(await license.text()).toContain('GNU AFFERO GENERAL PUBLIC LICENSE');
   await page.getByRole('link', { name: 'Privacy', exact: true }).click();
   await expect(page).toHaveURL(`${site}privacy/`);
   await expect(page.getByRole('heading', { name: /Privacy/ }).first()).toBeVisible();
