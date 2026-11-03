@@ -306,6 +306,11 @@ vi.mock('@/services/slicerService', () => ({
 }));
 
 // Mock slice job service
+vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
+  SendToPrinterModal: ({ isOpen, defaultPrinterId }: { isOpen: boolean; defaultPrinterId?: string | null }) =>
+    isOpen ? <div data-testid="print-modal" data-printer-id={defaultPrinterId} /> : null,
+}));
+
 vi.mock('@/services/sliceJobService', async () => {
   const actual = await vi.importActual<typeof import('@/services/sliceJobService')>('@/services/sliceJobService');
   return {
@@ -2686,6 +2691,24 @@ describe('NewSliceJobPage', () => {
         });
       });
     }
+
+    it('submits the physical printer and keeps it with the result after sidebar selection changes', async () => {
+      await submitAndFail();
+      expect(sliceJobService.submitJob).toHaveBeenCalledWith(
+        expect.objectContaining({ printerId: 'printer-1' }),
+      );
+      completeJob();
+
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-2' } });
+      expect(screen.getByTestId('printer-select')).toHaveValue('printer-2');
+
+      const overlay = screen.getByRole('region', { name: 'Slice results' });
+      fireEvent.click(within(overlay).getByRole('button', { name: 'Print' }));
+
+      expect(await screen.findByTestId('print-modal')).toHaveAttribute('data-printer-id', 'printer-1');
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+      expect(sliceJobService.addSliceToQueue).not.toHaveBeenCalled();
+    });
 
     const latestWorkspaceModels = () =>
       (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { models?: Array<{ id: string }> } | undefined)?.models ?? [];

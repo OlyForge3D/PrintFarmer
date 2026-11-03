@@ -1289,6 +1289,7 @@ public partial class SliceJobController(
         {
             Id = job.Id,
             Status = job.Status,
+            PrinterId = job.PrinterId,
             ProgressPercent = job.ProgressPercent,
             ProgressMessage = job.Status == SliceJobStatus.Processing
                 ? GetPublicProgressMessage(job.ProgressPercent)

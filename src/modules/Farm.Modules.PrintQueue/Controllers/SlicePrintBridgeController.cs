@@ -299,6 +299,21 @@ public class SlicePrintBridgeController(
             });
         }
 
+        if (request.AssignedPrinterId is Guid printerId)
+        {
+            if (resourceAuthorization is not null &&
+                !await resourceAuthorization.CanAccessPrinterAsync(
+                    User, printerId, PrinterGroupAccessLevel.Submit, ct))
+            {
+                return NotFound(new { error = "Printer not found.", printerId });
+            }
+
+            if (await printersService.FindByIdWithIncludesAsync(printerId, ct) is null)
+            {
+                return NotFound(new { error = "Printer not found.", printerId });
+            }
+        }
+
         // 3. Commit the staged artifact through the same durable promotion path used by Save.
         var actor = new CalibrationActor(
             userId,
@@ -351,7 +366,7 @@ public class SlicePrintBridgeController(
         var queueDto = new QueuePrintJobDto
         {
             GcodeFileId = promotion.Value.GcodeFileId,
-            AssignedPrinterId = null, // auto-dispatch
+            AssignedPrinterId = request.AssignedPrinterId,
             Priority = request.Priority ?? PrintJobPriority.Normal,
             Copies = request.Copies ?? 1,
             RequiredPrinterModel = request.RequiredPrinterModel,
