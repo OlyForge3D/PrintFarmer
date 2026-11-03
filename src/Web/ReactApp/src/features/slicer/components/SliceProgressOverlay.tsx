@@ -15,6 +15,7 @@ import {
 
 interface SliceProgressOverlayProps {
   jobId: string;
+  defaultPrinterId?: string | null;
   progress: SliceJobProgressState;
   onNewJob: () => void;
   onRetry: () => void;
@@ -56,7 +57,7 @@ interface SliceProgressOverlayProps {
  * Inspired by OrcaSlicer's progress dialog — prominent, centered, 
  * with real-time progress ring and status details.
  */
-export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, onDismiss, focusDismissOnMount, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
+export function SliceProgressOverlay({ jobId, defaultPrinterId, progress, onNewJob, onRetry, onDismiss, focusDismissOnMount, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
   const queryClient = useQueryClient();
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
@@ -392,6 +393,7 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, onDis
           }}
           jobId={jobId}
           artifactId={printArtifactId}
+          defaultPrinterId={defaultPrinterId}
           selectedSpoolId={selectedSpoolId}
           requiredPrinterModel={requiredPrinterModel}
           requiredMaterialType={requiredMaterialType}

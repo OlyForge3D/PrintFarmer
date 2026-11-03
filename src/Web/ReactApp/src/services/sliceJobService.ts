@@ -82,6 +82,7 @@ export function formatQueuePositionSuffix(
 
 export interface SliceJobStatusResponse {
   id: string;
+  printerId?: string | null;
   status: string;
   /**
    * Slicer engine version resolved on submit (issue #578). Null/undefined
@@ -240,6 +241,7 @@ export interface SpoolCostResponse {
 
 export interface AddSliceToQueueRequest {
   artifactId: string;
+  assignedPrinterId?: string | null;
   priority?: string;
   spoolId?: number;
   copies?: number;

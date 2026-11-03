@@ -19,6 +19,23 @@ script generates and preserves it without logging the value. Do not reuse
 access. Rotate the key by updating both services together; mismatches fail
 closed and remain retryable.
 
+## Printing results from the web slicer
+
+The completed slice's **Print** action defaults to **Add to Queue**, targeting
+the physical printer selected when that slice was submitted. Changing the
+sidebar selection later does not retarget an existing result; slice history
+also retains the original printer.
+
+You can change the target before submitting or explicitly select **Any compatible
+printer (auto-assign)**. Older slices without a saved printer use auto-assignment.
+If the saved printer is offline or unavailable, choose another target or
+auto-assignment explicitly; PrintFarmer does not silently substitute a printer.
+Queue submission uses the normal scheduling, approval, and filament checks.
+
+The secondary **Upload file only** option copies the file to the selected printer
+without creating a PrintFarmer job. **Start printing immediately** is unchecked by
+default. Opening the dialog or switching modes never submits or starts a print.
+
 ## Supported Slicers
 
 - **PrusaSlicer** (2.0+)

@@ -164,6 +164,9 @@ public class SliceJobStatusResponse
 
     public int ProgressPercent { get; set; }
 
+    /// <summary>The physical printer selected for this slice, if any.</summary>
+    public Guid? PrinterId { get; set; }
+
     public string? ProgressMessage { get; set; }
 
     public DateTime QueuedAt { get; set; }

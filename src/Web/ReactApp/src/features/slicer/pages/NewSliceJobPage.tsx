@@ -800,6 +800,7 @@ export const NewSliceJobPage: React.FC = () => {
   // Snapshot of cost/routing values captured at slice-submit time.
   // Keeps cost display and queue routing stable while sidebar stays editable.
   const [sliceSnapshot, setSliceSnapshot] = useState<{
+    printerId: string | undefined;
     filamentCostPerKg: number | null;
     requiredPrinterModel: string | undefined;
     requiredMaterialType: string | undefined;
@@ -2118,7 +2119,7 @@ export const NewSliceJobPage: React.FC = () => {
 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
-      printerId: undefined,
+      printerId: selectedPrinterForSlicing?.id,
       modelFileUrl: effectiveModelFileUrl,
       model3DId: resolveModel3DId(payloadModels, selectedModelId),
       modelFileName: effectiveModelFileName,
@@ -2160,6 +2161,7 @@ export const NewSliceJobPage: React.FC = () => {
     // Freeze spool/cost/routing at submit time so the overlay and queue call
     // reflect what was actually sliced, regardless of later sidebar edits.
     setSliceSnapshot({
+      printerId: request.printerId,
       filamentCostPerKg: filamentCostPerKg,
       requiredPrinterModel: requiredPrinterModel,
       requiredMaterialType: requiredMaterialType,
@@ -3451,6 +3453,7 @@ export const NewSliceJobPage: React.FC = () => {
             {submittedJobId && !isSliceResultsDismissed && (
               <SliceProgressOverlay
                 jobId={submittedJobId}
+                defaultPrinterId={sliceSnapshot?.printerId}
                 progress={jobProgress}
                 filamentCostPerKg={effectiveFilamentCostPerKg}
                 resolvedCostPerGram={resolvedCostPerGram}
