@@ -1,32 +1,41 @@
 import type { BrowserContext } from '@playwright/test';
 import { inventoryRouteSeeds } from '../fixtures/toolbar-routes-inventory';
 import { toolbarRouteUser } from '../fixtures/toolbar-routed';
-import { MotionType, PrinterBackend, PrintProjectStatus, type Printer, type PrintProjectListDto, type SpoolmanFilament, type QueueChangeFeed, type QueueChangeWatermark } from '../../src/types/api';
+import { MotionType, PrinterBackend, PrintProjectStatus, type Printer, type ManufacturerDto, type PrinterModelDto, type PrintProjectListDto, type SpoolmanFilament, type QueueChangeFeed, type QueueChangeWatermark } from '../../src/types/api';
 
 export const captureOrigin = 'http://127.0.0.1:4178';
 export const captureTime = '2026-10-30T14:00:00Z';
 const inventory = inventoryRouteSeeds();
 
-export const printers: Printer[] = ([
-  ['demo-1', 'Atlas', 'Printing', 64, 'enclosure-panel.gcode'],
-  ['demo-2', 'Birch', 'Printing', 32, 'sensor-mount.gcode'],
-  ['demo-3', 'Cedar', 'Idle', 0, ''],
-  ['demo-4', 'Delta', 'Paused', 48, 'cable-guide.gcode'],
-  ['demo-5', 'Ember', 'Idle', 0, ''],
-  ['demo-6', 'Finch', 'Offline', 0, ''],
-] as const).map(([id, name, state, progress, fileName]) => ({
+export const printers = ([
+  ['demo-1', 'Atlas', 'Printing', 64, 'enclosure-panel.gcode', 'Elegoo', 'Elegoo Centauri Carbon', PrinterBackend.SDCP, MotionType.CoreXY],
+  ['demo-2', 'Birch', 'Printing', 32, 'sensor-mount.gcode', 'Snapmaker', 'Snapmaker U1', PrinterBackend.Moonraker, MotionType.CoreXY],
+  ['demo-3', 'Cedar', 'Idle', 0, '', 'Voron', 'Voron Trident 300', PrinterBackend.Moonraker, MotionType.CoreXY],
+  ['demo-4', 'Delta', 'Paused', 48, 'cable-guide.gcode', 'Sovol', 'Sovol SV08', PrinterBackend.Moonraker, MotionType.CoreXY],
+  ['demo-5', 'Ember', 'Idle', 0, '', 'Ratrig', 'RatRig V-Core 4 400', PrinterBackend.Moonraker, MotionType.CoreXY],
+  ['demo-6', 'Finch', 'Offline', 0, '', 'Flashforge', 'Flashforge AD5X', PrinterBackend.FlashForge, MotionType.CoreXY],
+  ['demo-7', 'Grove', 'Printing', 76, 'bracket-set.gcode', 'Prusa', 'Prusa MK4S', PrinterBackend.PrusaLink, MotionType.Cartesian],
+  ['demo-8', 'Hazel', 'Idle', 0, '', 'Prusa', 'Prusa CORE One L', PrinterBackend.PrusaLink, MotionType.CoreXY],
+] as const).map(([id, name, state, progress, fileName, manufacturerName, modelName, backend, motionType]) => ({
   id, name, state, progress, fileName,
-  backend: PrinterBackend.Moonraker,
+  backend, manufacturerName, modelName, motionType,
   isOnline: state !== 'Offline', isEnabled: true, inMaintenance: false,
-  manufacturerName: 'Demo workshop', modelName: 'CoreXY 250',
-  motionType: MotionType.CoreXY,
   hotendTemp: state === 'Printing' ? 210 : 23,
   hotendTarget: state === 'Printing' ? 210 : 0,
   bedTemp: state === 'Printing' ? 60 : 23,
   bedTarget: state === 'Printing' ? 60 : 0,
   printTimeLeftSeconds: state === 'Printing' ? 3600 : undefined,
   obicoEnabled: false,
-}));
+} satisfies Printer));
+
+const manufacturers = [...new Set(printers.map(printer => printer.manufacturerName))].map(name => ({
+  id: `demo-${name.toLowerCase()}`, name,
+} satisfies ManufacturerDto));
+const printerModels = printers.map(printer => ({
+  id: `model-${printer.id}`, name: printer.modelName,
+  manufacturerId: `demo-${printer.manufacturerName.toLowerCase()}`,
+  motionType: printer.motionType, defaultBackend: printer.backend,
+} satisfies PrinterModelDto));
 
 const responses: Record<string, unknown> = {
   'GET /api/setup/status': { needsSetup: false },
@@ -44,7 +53,7 @@ const responses: Record<string, unknown> = {
     app: { version: 'demo', uptime: '01:00:00', hostname: 'demo-workshop' },
     cpu: { cores: 4, usagePercent: 10 }, memory: { usedBytes: 1000000000, totalBytes: 8000000000 },
     disk: { usedBytes: 1000000000, totalBytes: 8000000000, archiveBytes: 0, databaseBytes: 0 },
-    services: [], database: { engine: 'SQLite', version: 'demo', printerCount: 6, archiveCount: 0 },
+    services: [], database: { engine: 'SQLite', version: 'demo', printerCount: printers.length, archiveCount: 0 },
   },
   'GET /api/admin/release-updates': {
     status: 'UpToDate', updateAvailable: false, installedVersion: 'demo', channel: 'Stable',
@@ -55,8 +64,8 @@ const responses: Record<string, unknown> = {
   },
   'GET /api/job-queue/changes/watermark': { latestSequence: 0 } satisfies QueueChangeWatermark,
   'GET /api/job-queue/changes': { afterSequence: 0, nextSequence: 0, hasMore: false, events: [] } satisfies QueueChangeFeed,
-  'GET /api/catalog/manufacturers': inventory['/api/catalog/manufacturers'],
-  'GET /api/catalog/printer-models': inventory['/api/catalog/printer-models'],
+  'GET /api/catalog/manufacturers': manufacturers,
+  'GET /api/catalog/printer-models': printerModels,
   'GET /api/tags/objects': [],
   'GET /api/job-queue-analytics/printer-summaries': [],
   'GET /api/auto-dispatch/status': { globalEnabled: false, printers: [] },

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { captureOrigin, captureTime, isolateCapture } from './fixtures';
+import { captureOrigin, captureTime, isolateCapture, printers } from './fixtures';
 
 const assets = fileURLToPath(new URL('../../../../../site/assets/captures/', import.meta.url));
 
@@ -26,9 +26,25 @@ for (const scene of [
     await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0);
     await expect(page.locator('main [role="alert"]')).toHaveCount(0);
     if (scene.name === 'fleet') {
-      for (const name of ['Atlas', 'Birch', 'Cedar', 'Delta', 'Ember', 'Finch']) {
-        await expect(page.getByText(name, { exact: true })).toBeVisible();
+      const cards = page.locator('main article[data-pf-card]');
+      await expect(cards).toHaveCount(8);
+      for (const printer of printers) {
+        const card = cards.filter({ has: page.getByText(printer.name, { exact: true }) });
+        await expect(card).toBeInViewport({ ratio: 1 });
+        await expect(card.getByText(printer.modelName, { exact: true })).toBeVisible();
+        const image = card.locator('[data-testid="compact-printer-image"] img');
+        const expectedCover = `/assets/orcaslicer/${printer.manufacturerName.toLowerCase()}/${encodeURIComponent(printer.modelName)}_cover.png`;
+        await expect(image).toHaveAttribute('src', expectedCover);
+        await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
       }
+      const positions = await cards.evaluateAll(elements => elements.map(element => {
+        const { x, y } = element.getBoundingClientRect();
+        return { x: Math.round(x), y: Math.round(y) };
+      }));
+      expect(new Set(positions.map(position => position.x)).size, 'Four columns').toBe(4);
+      const rows = [...new Set(positions.map(position => position.y))];
+      expect(rows, 'Two complete rows').toHaveLength(2);
+      for (const y of rows) expect(positions.filter(position => position.y === y)).toHaveLength(4);
       await expect(page.getByText('64%', { exact: true })).toBeVisible();
     }
     if (scene.name === 'projects') {

@@ -16,8 +16,46 @@ The images demonstrate frontend presentation, **not** functioning hardware,
 backend safety, performance, or a verified Spoolman connection.
 
 The logo is copied from `src/Web/ReactApp/public/printfarmer-logo.svg`.
-Printer illustrations are the app's repository-owned generic CoreXY fallback,
-not customer photos, camera feeds, or vendor product photography.
+The fleet uses eight existing OrcaSlicer model cover images through the app's
+`PrinterImage` / `assetService` resolver and local asset manifest, not generic
+fallbacks or screenshot edits. No customer photos or camera feeds are used.
+
+## Models shown, connection evidence, and image rights
+
+The fixture interprets "Elegoo CC1" as the original Centauri Carbon and "adx5"
+as Flashforge AD5X. It selects the Trident 300 and V-Core 4 400 variants.
+The table records source-level connection evidence, **not** verified operation
+of these eight physical printers or every firmware/capability combination.
+
+| Model shown | Fixture backend | Evidence and limits |
+|---|---|---|
+| Elegoo Centauri Carbon | SDCP | `SdcpClient` explicitly targets this model. |
+| Snapmaker U1 | Moonraker | `MoonrakerDiscoveryProbe` and U1-specific client/subscription code handle its Moonraker-compatible interface. |
+| Voron Trident 300 | Moonraker | Conditional on a reachable compatible Klipper/Moonraker installation; no Trident-specific hardware proof was collected. |
+| Sovol SV08 | Moonraker | Conditional on its exposed compatible Moonraker API; no SV08-specific hardware proof was collected. |
+| RatRig V-Core 4 400 | Moonraker | Conditional on a compatible Klipper/Moonraker installation; no V-Core 4-specific hardware proof was collected. |
+| Flashforge AD5X | FlashForge | `FlashForgeBackendPlugin` explicitly notes AD5X's port 8080; `FlashForgeClient` parses its machine response. ZMOD/Moonraker is a separate firmware-dependent route, not used here. |
+| Prusa MK4S | PrusaLink | Generic `PrusaLinkDiscoveryProbe` / `IPrusaLinkClient` connection route; exact model/firmware capability coverage was not verified here. |
+| Prusa CORE One L | PrusaLink | Same generic PrusaLink route; the cover's presence does not establish CORE One L-specific hardware validation. |
+
+Cover files are under `src/Web/ReactApp/public/assets/orcaslicer/`, with exact
+manufacturer/model names recorded in `manifest.json`. The repository's
+`scripts/restore-orcaslicer-assets.js` extracts model covers from OrcaSlicer
+profile resources. The capture tests require the expected cover URL and a
+decoded image for each card, with all eight cards fully visible in a 4x2 grid.
+
+[Third-party notices](../THIRD-PARTY-NOTICES.md#orcaslicer) identify bundled
+OrcaSlicer resources as AGPLv3 and require upstream notices to remain intact.
+This is **not** per-image copyright provenance, marketing permission, or a
+trademark endorsement. The exact upstream revision, individual image authors
+and any separate vendor terms for these existing covers have not been
+established by this capture work. Before public marketing publication, the
+owner must resolve applicable attribution/source/notice obligations and any
+separate image/trademark restrictions. No blanket clearance is asserted and
+no public deployment is authorized by this change. Incorrect compatibility
+claims could mislead buyers; incorrect rights assumptions could harm image
+owners and expose the publisher to takedown or other claims. Local captures
+can be replaced; public redistribution may not be fully reversible.
 
 ## Marketing surface design
 
