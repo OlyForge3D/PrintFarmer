@@ -2008,7 +2008,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return null;
     }
 
-    private static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
+    internal static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
     {
         string modelName = Path.GetFileNameWithoutExtension(job.ModelFileName);
         string printerModel = job.Profile?.MachineProfile?.PrinterModel
@@ -2017,6 +2017,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string material = job.Profile?.ExtruderFilamentProfiles is { Count: > 1 }
             ? string.Join("+", job.Profile.ExtruderFilamentProfiles.Select(f => f.Material ?? "PLA"))
             : job.Profile?.FilamentProfile?.Material ?? "PLA";
+        if (job.Profile is null && job.NativeProfiles is { } native)
+        {
+            printerModel = ReadNativeFilenameValue(native.MachineJson, "printer_model", "name") ?? "Unknown";
+            material = native.ExtruderFilaments is { Count: > 0 } filaments
+                ? string.Join("+", filaments.Select(f => ReadNativeFilenameValue(f.Json, "filament_type", "material") ?? "PLA"))
+                : ReadNativeFilenameValue(native.FilamentJson, "filament_type", "material") ?? "PLA";
+        }
+
         string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
 
         string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
@@ -2029,6 +2037,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         File.Move(gcodeFilePath, newPath);
         return newPath;
+    }
+
+    private static string? ReadNativeFilenameValue(string json, params string[] keys)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        foreach (string key in keys)
+        {
+            if (document.RootElement.TryGetProperty(key, out JsonElement element)
+                && OrcaRawValueParser.ParseStringValue(element) is { Length: > 0 } value)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string FormatPrintTime(double totalSeconds)

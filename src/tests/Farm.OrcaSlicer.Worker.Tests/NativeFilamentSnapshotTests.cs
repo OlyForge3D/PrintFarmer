@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using FluentAssertions;
@@ -223,6 +224,65 @@ public sealed class NativeFilamentSnapshotTests : IDisposable
 
     private static NativeFilamentProfile Snapshot(string json) =>
         new(json, NativeSlicerProfiles.ComputeSha256(json));
+
+    [Theory]
+    [InlineData("""{"name":"Preset","printer_model":"Micron 180"}""", """{"filament_type":["PETG"]}""", false, "Micron_180_PETG")]
+    [InlineData("""{"name":"Micron preset"}""", """{"filament_type":"ABS"}""", false, "Micron_preset_ABS")]
+    [InlineData("""{"name":"Micron"}""", """{"material":["ASA"]}""", false, "Micron_ASA")]
+    [InlineData("""{"name":"Micron"}""", """{"filament_type":["PETG"]}""", true, "Micron_PETG+ABS")]
+    [InlineData("""{"name":"Micron"}""", """{"filament_type":"ABS"}""", true, "Micron_ABS+ABS")]
+    [InlineData("{}", "{}", false, "Unknown_PLA")]
+    public void RenameGcodeFile_NativeSnapshots_PreservesPrinterAndOrderedMaterials(
+        string machineJson, string filamentJson, bool multiple, string expectedProfileName)
+    {
+        NativeSlicerProfiles profiles = NativeSlicerProfiles.FromJob(
+            machineJson, ProcessJson, filamentJson, null, null, null)!;
+        if (multiple)
+        {
+            profiles = profiles with
+            {
+                ExtruderFilaments = [Snapshot(filamentJson), Snapshot("""{"filament_type":"ABS"}""")]
+            };
+        }
+
+        var job = new DistributedSlicingJob { ModelFileName = "part.stl", NativeProfiles = profiles };
+        AssertRenamedFile(job, $"part_{expectedProfileName}_1h1m.gcode");
+    }
+
+    [Fact]
+    public void RenameGcodeFile_LegacyProfile_PreservesDtoNaming()
+    {
+        var job = new DistributedSlicingJob
+        {
+            ModelFileName = "part.stl",
+            NativeProfiles = LegacyProfiles(),
+            Profile = new SlicerProfileDto
+            {
+                MachineProfile = new MachineProfileDto { PrinterModel = "Legacy printer" },
+                FilamentProfile = new FilamentProfileDto { Material = "PLA" },
+                ExtruderFilamentProfiles =
+                [
+                    new FilamentProfileDto { Material = "ASA" },
+                    new FilamentProfileDto { Material = "PETG" }
+                ]
+            }
+        };
+        AssertRenamedFile(job, "part_Legacy_printer_ASA+PETG_1h1m.gcode");
+    }
+
+    private void AssertRenamedFile(DistributedSlicingJob job, string expectedName)
+    {
+        _ = Directory.CreateDirectory(_workDir);
+        string originalPath = Path.Join(_workDir, "output.gcode");
+        File.WriteAllText(originalPath, "; preserved gcode");
+
+        string result = OrcaSlicingPipelineService.RenameGcodeFile(
+            originalPath, job, new OrcaSlicingPipelineService.GcodeMetadata { PrintTimeSeconds = 3660 });
+
+        _ = Path.GetFileName(result).Should().Be(expectedName);
+        _ = File.ReadAllText(result).Should().Be("; preserved gcode");
+        _ = File.Exists(originalPath).Should().BeFalse();
+    }
 
     private static NativeSlicerProfiles LegacyProfiles() =>
         NativeSlicerProfiles.FromJob(MachineJson, ProcessJson, FirstJson, null, null, null)!;
