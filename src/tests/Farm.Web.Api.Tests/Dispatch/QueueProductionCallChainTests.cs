@@ -2828,9 +2828,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "DbHeavy")]
-    public async Task AcknowledgeAndStartRoute_TwoMatchingEtags_LoserReturns412WithBothEtags()
+    public async Task AcknowledgeAndStartRoute_TwoMatchingEtags_LoserReturns412WithBothEtags(bool failEvidence)
     {
         Fixture fixture;
         byte[] initialJobRevision;
@@ -2848,6 +2850,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             initialJobRevision = job.RowVersion!.ToArray();
             initialDispatchRevision = state.RowVersion!.ToArray();
             printerRevision = printer.ConfigurationRevision;
+            if (failEvidence)
+            {
+                await seed.Database.ExecuteSqlRawAsync(
+                    """
+                    CREATE TRIGGER fail_bed_clear_evidence BEFORE INSERT ON BedClearEvaluations
+                    BEGIN SELECT RAISE(FAIL, 'Injected shadow evidence failure'); END;
+                    """);
+            }
         }
 
         await using AppDbContext winnerContext = CreateContext();
@@ -2911,6 +2921,26 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         jobEtag.Should().Be(Convert.ToBase64String(currentJob.RowVersion!));
         dispatchEtag.Should().Be(Convert.ToBase64String(currentDispatch.RowVersion!));
         (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+        BedClearCommandRecord command = await verify.BedClearCommandRecords.SingleAsync();
+        (await verify.QueueDispatchOutbox.AnyAsync(
+            candidate => candidate.Id == command.OutboxEventId)).Should().BeTrue();
+        currentDispatch.AcknowledgedJobId.Should().Be(fixture.JobId);
+        if (failEvidence)
+        {
+            (await verify.BedClearEvaluations.CountAsync()).Should().Be(0);
+            winnerContext.ChangeTracker.Entries<BedClearEvaluation>().Should().BeEmpty();
+            return;
+        }
+
+        BedClearEvaluation evaluation = await verify.BedClearEvaluations.SingleAsync();
+        evaluation.SourceAcknowledgementId.Should().Be(
+            (await verify.BedClearCommandRecords.SingleAsync()).Id);
+        evaluation.PrinterId.Should().Be(fixture.PrinterId);
+        evaluation.PrintJobId.Should().Be(fixture.JobId);
+        evaluation.State.Should().Be(BedClearEvaluationState.Pending);
+        evaluation.Verdict.Should().Be(BedClearDetectorVerdict.Unknown);
+        evaluation.Score.Should().BeNull();
+        evaluation.IsActiveReference.Should().BeFalse();
     }
 
     // =========================================================================

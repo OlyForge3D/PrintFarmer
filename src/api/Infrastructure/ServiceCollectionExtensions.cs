@@ -709,6 +709,17 @@ public static class ServiceCollectionExtensions
 
         // Register camera snapshot service - captures snapshots on print events
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotService, Farm.Infrastructure.Services.Cameras.CameraSnapshotService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.BedClearEvaluationProcessor>();
+        _ = services.AddSingleton<
+            Farm.Infrastructure.Services.Cameras.IBedClearImageHashService,
+            Farm.Web.Api.Services.Cameras.ImageSharpBedClearImageHashService>();
+        _ = services.AddHttpClient("BedClearSnapshot", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false,
+        });
         _ = services.AddHttpClient("CameraSnapshot", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
@@ -919,6 +930,9 @@ public static class ServiceCollectionExtensions
 
             _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryMetrics>();
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
+
+            // Shadow bed-clear analysis is durable and never part of the dispatch path.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.BedClearEvaluationBackgroundService>();
 
             // Durable attempt-fenced cancel/abort hardware command consumer.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();

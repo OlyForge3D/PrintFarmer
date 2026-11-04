@@ -3383,6 +3383,44 @@ export interface CameraDto {
   lastHealthCheck?: string;
 }
 
+export type BedClearDetectorVerdict = 'Unknown' | 'Clear' | 'Occupied';
+export type BedClearGroundTruth = 'Clear' | 'Occupied';
+export type BedClearEvaluationState = 'Pending' | 'Processing' | 'Complete';
+
+export interface BedClearEvaluationDto {
+  id: string;
+  printerId: string;
+  cameraId?: string | null;
+  printJobId?: string | null;
+  bedTypeId?: string | null;
+  sourceAcknowledgementId?: string | null;
+  acknowledgedBySubject: string;
+  acknowledgedAtUtc: string;
+  capturedAtUtc?: string | null;
+  isReferenceEligible: boolean;
+  toolheadX?: number | null;
+  toolheadY?: number | null;
+  toolheadZ?: number | null;
+  state: BedClearEvaluationState;
+  verdict: BedClearDetectorVerdict;
+  score?: number | null;
+  reasonCode?: string | null;
+  groundTruth?: BedClearGroundTruth | null;
+  groundTruthBySubject?: string | null;
+  groundTruthAtUtc?: string | null;
+  isActiveReference: boolean;
+  hasImage: boolean;
+}
+
+export interface BedClearDetectorMetricsDto {
+  sampleCount: number;
+  independentlyLabeledCount: number;
+  agreementRate?: number | null;
+  independentlyLabeledOccupiedCount: number;
+  falseClearCount: number;
+  falseClearRate?: number | null;
+}
+
 export interface CameraPrinterSummary {
   id: string;
   name: string;
