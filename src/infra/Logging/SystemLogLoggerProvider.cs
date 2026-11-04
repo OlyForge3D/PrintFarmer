@@ -329,12 +329,6 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
             HttpContext? httpContext = _httpContextAccessor?.HttpContext;
             if (httpContext != null)
             {
-                if (httpContext.Items.TryGetValue("CorrelationId", out object? itemCorrelationId) &&
-                    !string.IsNullOrWhiteSpace(itemCorrelationId?.ToString()))
-                {
-                    return itemCorrelationId!.ToString();
-                }
-
                 if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out StringValues correlationIds))
                 {
                     string? correlationId = correlationIds.Count > 0 ? correlationIds[0] : null;
@@ -351,6 +345,12 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
                     {
                         return requestId;
                     }
+                }
+
+                if (httpContext.Items.TryGetValue("CorrelationId", out object? itemCorrelationId) &&
+                    !string.IsNullOrWhiteSpace(itemCorrelationId?.ToString()))
+                {
+                    return itemCorrelationId!.ToString();
                 }
 
                 return httpContext.TraceIdentifier;

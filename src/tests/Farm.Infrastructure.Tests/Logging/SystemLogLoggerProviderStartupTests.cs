@@ -41,22 +41,22 @@ public sealed class SystemLogLoggerProviderStartupTests
         context.Request.Headers["X-Correlation-Id"] = new[] { "correlation-first", "correlation-second" };
         context.Request.Headers["X-Request-Id"] = new[] { "request-first", "request-second" };
         context.Items["CorrelationId"] = "middleware-id";
-        logger.LogWarning("Middleware correlation precedence");
+        logger.LogWarning("Correlation header takes precedence over middleware item");
 
         context.Items.Remove("CorrelationId");
         logger.LogWarning("First correlation header value");
 
         context.Request.Headers["X-Correlation-Id"] = new[] { "   ", "ignored-correlation-second" };
-        logger.LogWarning("Blank first correlation header falls back to first request value");
+        context.Items["CorrelationId"] = "middleware-id";
+        logger.LogWarning("Blank correlation header falls back to request header");
 
         context.Request.Headers.Remove("X-Correlation-Id");
-        logger.LogWarning("First request header value");
+        logger.LogWarning("Request header takes precedence over middleware item");
 
         context.Request.Headers["X-Request-Id"] = new[] { "   ", "ignored-request-second" };
-        logger.LogWarning("Blank first headers fall back to trace identifier");
+        logger.LogWarning("Blank headers fall back to middleware item");
 
         context.Request.Headers.Remove("X-Request-Id");
-        context.Items["CorrelationId"] = "middleware-id";
         logger.LogWarning("Middleware correlation fallback");
 
         context.Items.Clear();
@@ -78,11 +78,11 @@ public sealed class SystemLogLoggerProviderStartupTests
 
         persisted.Should().BeEquivalentTo(new Dictionary<string, string?>
         {
-            ["Middleware correlation precedence"] = "middleware-id",
+            ["Correlation header takes precedence over middleware item"] = "correlation-first",
             ["First correlation header value"] = "correlation-first",
-            ["Blank first correlation header falls back to first request value"] = "request-first",
-            ["First request header value"] = "request-first",
-            ["Blank first headers fall back to trace identifier"] = "trace-id",
+            ["Blank correlation header falls back to request header"] = "request-first",
+            ["Request header takes precedence over middleware item"] = "request-first",
+            ["Blank headers fall back to middleware item"] = "middleware-id",
             ["Middleware correlation fallback"] = "middleware-id",
             ["Trace identifier fallback"] = "trace-id",
         });

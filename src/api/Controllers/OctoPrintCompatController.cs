@@ -296,8 +296,9 @@ public class OctoPrintCompatController : ControllerBase
             {
                 OctoPrintUploadMetrics.RecordIndeterminate();
                 _logger.LogWarning(
-                    "OctoPrint upload+print outcome is indeterminate. ExceptionType={ExceptionType}",
-                    ex.GetType().Name);
+                    "OctoPrint upload+print outcome is indeterminate. ExceptionType={ExceptionType}, StackTrace={StackTrace}",
+                    ex.GetType().Name,
+                    LogSanitizer.Sanitize(ex.StackTrace));
                 return StatusCode(
                     StatusCodes.Status500InternalServerError,
                     new
