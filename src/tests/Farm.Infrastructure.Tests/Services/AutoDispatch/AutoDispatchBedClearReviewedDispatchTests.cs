@@ -75,6 +75,13 @@ public sealed class AutoDispatchBedClearReviewedDispatchTests : IDisposable
         result.FilamentOverrideApplied.Should().BeFalse();
         VerifyDispatchedOnce(job);
         (await _db.DispatchLogs.CountAsync()).Should().Be(1);
+        BedClearEvaluation sample = await _db.BedClearEvaluations.SingleAsync();
+        sample.PrinterId.Should().Be(printer.Id);
+        sample.PrintJobId.Should().Be(job.Id);
+        sample.State.Should().Be(BedClearEvaluationState.Pending);
+        sample.Verdict.Should().Be(BedClearDetectorVerdict.Unknown);
+        sample.Score.Should().BeNull();
+        sample.IsActiveReference.Should().BeFalse();
     }
 
     [Fact]

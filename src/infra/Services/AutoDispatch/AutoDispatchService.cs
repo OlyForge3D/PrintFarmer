@@ -640,6 +640,17 @@ public class AutoDispatchService(
             PrinterDispatchState dsEmpty = EnsureDispatchState(printer);
             dsEmpty.AutoDispatchState = AutoDispatchState.None;
             dsEmpty.BedPreConfirmed = false;
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+            db.BedClearEvaluations.Add(new BedClearEvaluation
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                BedTypeId = printer.BedTypeId,
+                SourceAcknowledgementId = Guid.NewGuid(),
+                AcknowledgedBySubject = actorSubject,
+                AcknowledgedAtUtc = now,
+                CreatedAtUtc = now,
+            });
             await db.SaveChangesAsync(ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
@@ -768,6 +779,32 @@ public class AutoDispatchService(
             filamentCheckVersion,
             reviewedPrinterVersion,
             OverrideApproved: filamentOverrideRequired);
+
+        DateTime acknowledgementTime = _timeProvider.GetUtcNow().UtcDateTime;
+        var detectorSample = new BedClearEvaluation
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            PrintJobId = nextJob.Id,
+            BedTypeId = printer.BedTypeId,
+            SourceAcknowledgementId = Guid.NewGuid(),
+            AcknowledgedBySubject = actorSubject,
+            AcknowledgedAtUtc = acknowledgementTime,
+            CreatedAtUtc = acknowledgementTime,
+        };
+        db.BedClearEvaluations.Add(detectorSample);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError(
+                exception,
+                "Could not persist shadow bed-clear evaluation for printer {PrinterId}; dispatch will continue.",
+                printerId);
+            db.Entry(detectorSample).State = EntityState.Detached;
+        }
 
         byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
             printer.DispatchState?.RowVersion ??

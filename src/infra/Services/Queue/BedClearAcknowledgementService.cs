@@ -626,6 +626,17 @@ public sealed class BedClearAcknowledgementService(
             ExpiresAtUtc = now + DefaultAcknowledgementTtl,
         };
         _ = _db.BedClearCommandRecords.Add(commandRecord);
+        _ = _db.BedClearEvaluations.Add(new BedClearEvaluation
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = request.PrinterId,
+            PrintJobId = request.JobId,
+            BedTypeId = printer.BedTypeId,
+            SourceAcknowledgementId = commandRecord.Id,
+            AcknowledgedBySubject = request.ActorSubject,
+            AcknowledgedAtUtc = now,
+            CreatedAtUtc = now,
+        });
 
         // Durable audit — committed in the SAME transaction as the acknowledgement.
         _ = QueueAuditWriter.Add(

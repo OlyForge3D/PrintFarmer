@@ -1,4 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { BedClearEvidencePanel } from '@/features/printers/components/BedClearEvidencePanel';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
 import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
@@ -1355,6 +1356,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </CollapsibleSection>
           );
         })()}
+        <CollapsibleSection title="Camera bed-clear evidence" defaultExpanded={false}>
+          <BedClearEvidencePanel printerId={printer.id} />
+        </CollapsibleSection>
         {window.PrintFarmerDebug?.expandablePrinterCardDisplay && (
           <div className="mt-3 p-2 bg-pf-bg-0 border border-pf-border rounded-sm text-xs text-pf-text-tertiary">
             {renderUnknown({ status, lastKnownHotendTemp, lastKnownBedTemp, lastKnownX, lastKnownY, lastKnownZ })}

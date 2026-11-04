@@ -80,4 +80,31 @@ export const cameraService = {
   ): Promise<DetectCameraEndpointsResponse> {
     return apiClient.detectCameraEndpoints(request);
   },
+
+  async getBedClearEvaluations(printerId: string) {
+    return apiClient.getBedClearEvaluations(printerId);
+  },
+
+  async captureBedClearEvaluation(printerId: string) {
+    return apiClient.captureBedClearEvaluation(printerId);
+  },
+
+  async getBedClearDetectorMetrics(printerId: string) {
+    return apiClient.getBedClearDetectorMetrics(printerId);
+  },
+
+  async getBedClearEvaluationImage(evaluationId: string) {
+    return apiClient.getBedClearEvaluationImage(evaluationId);
+  },
+
+  async labelBedClearEvaluation(
+    evaluationId: string,
+    groundTruth: 'Clear' | 'Occupied'
+  ) {
+    return apiClient.labelBedClearEvaluation(evaluationId, groundTruth);
+  },
+
+  async deleteBedClearEvaluation(evaluationId: string) {
+    return apiClient.deleteBedClearEvaluation(evaluationId);
+  },
 };

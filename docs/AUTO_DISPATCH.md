@@ -9,6 +9,7 @@
 - [Trigger Flow](#trigger-flow)
 - [Dispatch Cycle](#dispatch-cycle)
 - [Ready Gate Flow](#ready-gate-flow)
+- [Camera Bed-Clear Evidence](#camera-bed-clear-evidence-shadow-only)
 - [Scoring System](#scoring-system)
 - [Dispatch Modes](#dispatch-modes)
 - [Configuration](#configuration)
@@ -29,6 +30,93 @@ The Auto-Dispatch system automatically assigns print jobs to available printers 
 - Provides audit trails for all dispatch decisions
 - Supports both fully automatic and suggestion-based workflows
 - Implements safety gates for bed clearing between consecutive prints
+
+## Camera Bed-Clear Evidence (Shadow Only)
+
+The camera detector records `Clear`, `Occupied`, or `Unknown` plus a similarity
+score for evaluation. **It never acknowledges readiness, blocks dispatch, or
+bypasses the human bed-clear gate.** Scores are not probabilities or confidence.
+There is no automatic printer movement, homing, or hosted model service.
+
+Open a printer's details sidebar and expand **Camera bed-clear evidence**.
+Queue-read permission and printer-group access are required. Operators with
+bed-clear-acknowledgement permission can request **Capture shadow sample (no
+dispatch)**; use this for occupied examples, not a Ready click. Another operator
+must visually label each image. The UI hides the detector result until labeling
+to reduce confirmation bias. Only usable images independently labeled `Clear`
+become active references. Queue-write permission permits deletion of an image
+and its evidence/reference record, after confirmation.
+
+### Capture and Reference Scope
+
+Bed-clear acknowledgements create durable pending evaluations. A bounded
+background worker captures within five seconds or records `Unknown`, without
+waiting on the dispatch path. If dispatch has already started, the sample becomes
+`Unknown`; capturing a useful image never takes precedence over existing
+dispatch behavior. A separate shadow capture has no readiness or dispatch effect.
+
+Configure a bed type and an enabled **Bed** camera with a healthy, fresh snapshot
+endpoint. Frame the bed within the central 80% of the image; that rectangle is
+the initial ROI mask, not a configurable polygon. Position the toolhead and bed
+consistently yourself before requesting capture. The worker requires recent
+online idle telemetry and finite XYZ, and rejects observed motion or active
+jobs. References must match printer, camera, camera configuration timestamp, bed
+type, and XYZ within 0.5 mm. Updating camera configuration invalidates previous
+reference matching. After physically moving a camera or swapping a plate, update
+the configuration/bed type and remove obsolete references before collecting more.
+An unrecorded physical camera/plate change cannot be reliably detected.
+
+The initial comparison uses the median 64-bit perceptual-hash similarity against
+three matching reviewed references. Similarity at least 0.92 yields `Clear`, at
+most 0.78 yields `Occupied`, and the intervening range yields `Unknown`. These
+are experimental thresholds, not farm-validated safety limits. Too few usable
+references, invalid/dark/saturated/low-detail images, stale telemetry/camera
+health or advertised frame timestamps, timeouts, and capture errors yield
+`Unknown` with a reason. No-cache snapshot requests cannot prove frame freshness
+when a camera serves an old frame without identifying it.
+
+Evidence includes capture/review operator subjects, timestamps, acknowledgement
+identity (null for explicit shadow capture), camera/bed type, XYZ, verdict, score,
+and reason. Images stay in managed snapshot storage under `bed-clear/`, not a
+third-party training service. The UI lists the latest 100 samples. Evidence is
+retained until deleted; monitor snapshot-storage capacity and remove unwanted
+samples. Deleting evidence is irreversible and changes the evaluation denominator.
+
+### Evaluation and Promotion
+
+Agreement is matching verdicts divided by independently labeled image samples;
+`Unknown` counts as disagreement, not a correct classification. False-clear rate
+is `Clear` verdicts on independently labeled occupied images divided by all
+independently labeled occupied images. Both rates are nullable when their
+denominator is missing; positive-only Ready acknowledgements cannot establish a
+false-clear rate.
+
+Before any separate promotion decision, collect held-out farm-camera examples of
+finished parts, thin same-colour first layers, tools/scrapers, purge blobs, plate
+swaps, lighting changes, and occlusion. Small or visually indistinguishable
+objects can produce false Clears even when the image passes quality checks.
+An occupied example classified `Clear` falsifies the assumption that similarity
+establishes clearance. Trusting that result for dispatch could harm operators
+and damage printers; shadow mode deliberately gives it no such authority.
+
+### Detector API
+
+All routes are under `/api/bed-clear-detector`, use existing authentication and
+printer-group authorization, and serialize verdict/label/state names as strings.
+
+| Method and suffix | Purpose | Queue permission |
+| --- | --- | --- |
+| `GET printers/{printerId}/evaluations` | Latest 100 evidence records | `read` |
+| `POST printers/{printerId}/evaluations` | Request shadow capture; `202` with sample ID | `acknowledge-bed-clear` |
+| `GET printers/{printerId}/metrics` | Independent-label counts and nullable rates | `read` |
+| `GET evaluations/{evaluationId}/image` | Authorized stored image | `read` |
+| `PUT evaluations/{evaluationId}/label` | Body `{"groundTruth":"Clear"}` or `Occupied` | `acknowledge-bed-clear` |
+| `DELETE evaluations/{evaluationId}` | Remove evidence and reference/image | `write` |
+
+Self-labeling and labeling incomplete/imageless samples return `409`; inaccessible
+printers/samples return `404`. Deletion while capture is processing returns `409`.
+PostgreSQL, SQL Server, and SQLite migrations add the evidence table; no slicer
+schema changes are required.
 
 ## ~~KNOWN ISSUES~~ (All Resolved)
 

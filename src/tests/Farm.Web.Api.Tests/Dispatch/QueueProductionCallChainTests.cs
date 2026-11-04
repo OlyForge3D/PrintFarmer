@@ -2911,6 +2911,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         jobEtag.Should().Be(Convert.ToBase64String(currentJob.RowVersion!));
         dispatchEtag.Should().Be(Convert.ToBase64String(currentDispatch.RowVersion!));
         (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+        BedClearEvaluation evaluation = await verify.BedClearEvaluations.SingleAsync();
+        evaluation.SourceAcknowledgementId.Should().Be(
+            (await verify.BedClearCommandRecords.SingleAsync()).Id);
+        evaluation.PrinterId.Should().Be(fixture.PrinterId);
+        evaluation.PrintJobId.Should().Be(fixture.JobId);
+        evaluation.State.Should().Be(BedClearEvaluationState.Pending);
+        evaluation.Verdict.Should().Be(BedClearDetectorVerdict.Unknown);
+        evaluation.Score.Should().BeNull();
+        evaluation.IsActiveReference.Should().BeFalse();
     }
 
     // =========================================================================
