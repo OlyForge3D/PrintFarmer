@@ -872,6 +872,8 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
     [InlineData("system-id")]
     [InlineData("user-no-id")]
     [InlineData("empty-id")]
+    [InlineData("unknown-source")]
+    [InlineData("blank-name")]
     [InlineData("inconsistent-name")]
     [InlineData("inconsistent-order")]
     [InlineData("malformed-native")]
@@ -913,6 +915,12 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
                 break;
             case "empty-id":
                 selections.Filaments[0].CustomProfileId = Guid.Empty;
+                break;
+            case "unknown-source":
+                selections.Filaments[0].Source = "unknown";
+                break;
+            case "blank-name":
+                selections.Filaments[0].Name = " ";
                 break;
             case "inconsistent-name":
                 selections.Machine!.Name = "Different";

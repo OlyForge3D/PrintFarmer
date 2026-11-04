@@ -197,10 +197,20 @@ public partial class SliceJobController
         this, "invalid_profile_selection",
         "A selected profile is missing, renamed, inaccessible, ambiguous or does not match its source. Select the profiles again.");
 
-    private static bool ValidSelection(SliceProfileSelection? selection) =>
-        selection is not null && !string.IsNullOrWhiteSpace(selection.Name) &&
-        ((selection.Source == "system" && selection.CustomProfileId is null) ||
-         (selection.Source == "user" && selection.CustomProfileId is { } id && id != Guid.Empty));
+    private static bool ValidSelection(SliceProfileSelection? selection)
+    {
+        if (selection is null || string.IsNullOrWhiteSpace(selection.Name))
+        {
+            return false;
+        }
+
+        return selection.Source switch
+        {
+            "system" => selection.CustomProfileId is null,
+            "user" => selection.CustomProfileId is { } id && id != Guid.Empty,
+            _ => false
+        };
+    }
 
     private static bool SelectionNameMatches(JsonElement root, string property, string name) =>
         string.Equals(GetJsonString(root, property), name, StringComparison.Ordinal);
