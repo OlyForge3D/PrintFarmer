@@ -17,15 +17,11 @@ public static class OctoPrintUploadMetrics
     public static void RecordQueued() =>
         s_queueAdmissions.Add(1, new KeyValuePair<string, object?>("outcome", "queued"));
 
-    public static void RecordRejected(QueueJobAddFailureReason reason)
-    {
-        TagList tags = new()
-        {
-            { "outcome", "rejected" },
-            { "reason", ToReasonCode(reason) }
-        };
-        s_queueAdmissions.Add(1, tags);
-    }
+    public static void RecordRejected() =>
+        s_queueAdmissions.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"));
+
+    public static void RecordIndeterminate() =>
+        s_queueAdmissions.Add(1, new KeyValuePair<string, object?>("outcome", "indeterminate"));
 
     public static string ToReasonCode(QueueJobAddFailureReason reason) =>
         reason switch

@@ -45,7 +45,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
         _cts = new CancellationTokenSource();
 
         // Don't start the processing task immediately - wait for service provider to be fully configured
-        _processingTask = ProcessLogsAsync(_cts.Token);
+        _processingTask = Task.Run(() => ProcessLogsAsync(_cts.Token));
     }
 
     public ILogger CreateLogger(string categoryName)
@@ -329,17 +329,31 @@ internal class SystemLogLogger(string categoryName, BlockingCollection<SystemLog
             HttpContext? httpContext = _httpContextAccessor?.HttpContext;
             if (httpContext != null)
             {
-                // Check for X-Correlation-Id header (sent by frontend)
-                if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out StringValues correlationId))
+                if (httpContext.Items.TryGetValue("CorrelationId", out object? itemCorrelationId) &&
+                    !string.IsNullOrWhiteSpace(itemCorrelationId?.ToString()))
                 {
-                    return correlationId.ToString();
+                    return itemCorrelationId!.ToString();
                 }
 
-                // Fallback to X-Request-Id if available
-                if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out StringValues requestId))
+                if (httpContext.Request.Headers.TryGetValue("X-Correlation-Id", out StringValues correlationIds))
                 {
-                    return requestId.ToString();
+                    string? correlationId = correlationIds.Count > 0 ? correlationIds[0] : null;
+                    if (!string.IsNullOrWhiteSpace(correlationId))
+                    {
+                        return correlationId;
+                    }
                 }
+
+                if (httpContext.Request.Headers.TryGetValue("X-Request-Id", out StringValues requestIds))
+                {
+                    string? requestId = requestIds.Count > 0 ? requestIds[0] : null;
+                    if (!string.IsNullOrWhiteSpace(requestId))
+                    {
+                        return requestId;
+                    }
+                }
+
+                return httpContext.TraceIdentifier;
             }
         }
         catch
