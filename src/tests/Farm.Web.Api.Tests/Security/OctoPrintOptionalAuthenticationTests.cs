@@ -114,6 +114,10 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
             .ConfigureServices((context, services) =>
             {
                 services.AddPrintFarmerAuthentication(context.Configuration, context.HostingEnvironment);
+                services.AddLogging();
+                services.AddSingleton<CapturingWarningLoggerProvider>();
+                services.AddSingleton<ILoggerProvider>(serviceProvider =>
+                    serviceProvider.GetRequiredService<CapturingWarningLoggerProvider>());
                 services.AddSingleton(settingsService.Object);
                 services.AddSingleton(_apiKeys.Object);
                 services.AddSingleton(_users.Object);
@@ -490,10 +494,8 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("private queue detail"));
-        List<string?> outcomes = [];
+        var outcomes = new ConcurrentQueue<string?>();
         using MeterListener listener = CaptureQueueAdmissionOutcomes(outcomes);
-        using var warningProvider = new CapturingWarningLoggerProvider();
-        ((LoggerFactory)_host.Services.GetRequiredService<ILoggerFactory>()).AddProvider(warningProvider);
 
         using HttpResponseMessage response = await UploadAsync();
 
@@ -504,6 +506,8 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         Assert.DoesNotContain("private queue detail", responseBody, StringComparison.Ordinal);
         Assert.Contains("indeterminate", outcomes);
 
+        CapturingWarningLoggerProvider warningProvider =
+            _host.Services.GetRequiredService<CapturingWarningLoggerProvider>();
         (string Category, string Message)[] controllerWarnings = warningProvider.Warnings
             .Where(warning => warning.Category.EndsWith("OctoPrintCompatController", StringComparison.Ordinal))
             .ToArray();
@@ -523,7 +527,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException("queue admission canceled"));
-        List<string?> outcomes = [];
+        var outcomes = new ConcurrentQueue<string?>();
         using MeterListener listener = CaptureQueueAdmissionOutcomes(outcomes);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => UploadAsync());
@@ -589,7 +593,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         return await _client.PostAsync($"/api/files/local?printerId={_printerId}", form);
     }
 
-    private static MeterListener CaptureQueueAdmissionOutcomes(List<string?> outcomes)
+    private static MeterListener CaptureQueueAdmissionOutcomes(ConcurrentQueue<string?> outcomes)
     {
         var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
@@ -615,7 +619,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
                 }
             }
 
-            outcomes.Add(outcome);
+            outcomes.Enqueue(outcome);
         });
         listener.Start();
         return listener;
