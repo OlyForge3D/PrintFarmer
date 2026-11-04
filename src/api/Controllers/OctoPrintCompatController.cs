@@ -272,10 +272,7 @@ public class OctoPrintCompatController : ControllerBase
             // (rather than mirroring JobQueueController's 404) for consistent, unambiguous
             // fail-closed semantics on this endpoint — see issue #1666's acceptance criteria.
             _logger.LogWarning("OctoPrint upload+print admission denied. ReasonCode={ReasonCode}", "printer_access_denied");
-            if (queueAdmissionAttempted)
-            {
-                OctoPrintUploadMetrics.RecordRejected();
-            }
+            OctoPrintUploadMetrics.RecordRejected();
 
             return StatusCode(
                 printerId.HasValue ? StatusCodes.Status403Forbidden : StatusCodes.Status409Conflict,
