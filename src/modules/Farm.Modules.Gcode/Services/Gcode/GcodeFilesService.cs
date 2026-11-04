@@ -490,7 +490,23 @@ public partial class GcodeFilesService(
                 FileSize: existingFile.FileSizeBytes,
                 UploadedAt: existingFile.UpdatedAt,
                 IsDirectory: false,
-                Id: existingFile.Id.ToString());
+                Id: existingFile.Id.ToString(),
+                FileType: existingFile.FileType,
+                TargetModelName: existingFile.ExtractedPrinterModelName,
+                RequiredMaterial: existingFile.RequiredMaterial,
+                ExtractedSlicerName: existingFile.SlicerName,
+                ExtractedSlicerVersion: existingFile.SlicerVersion,
+                ExtractedPrintTime: existingFile.EstimatedPrintTimeMinutes,
+                ExtractedFilamentLength: existingFile.EstimatedFilamentLengthMm,
+                ExtractedNozzleDiameter: existingFile.RequiredNozzleDiameter,
+                ExtractedMaterial: existingFile.RequiredMaterial,
+                ExtractedPrinterModel: existingFile.ExtractedPrinterModelName,
+                ExtractedPrinterModelName: existingFile.ExtractedPrinterModelName,
+                ExtractedLayerHeight: existingFile.LayerHeight,
+                ExtractedInfill: existingFile.InfillPercentage,
+                ExtractedPerimeters: existingFile.Perimeters,
+                ExtractedHotendTemp: existingFile.PrintTemperature,
+                ExtractedBedTemp: existingFile.BedTemperature);
         }
 
         // No duplicate - create database record with metadata and thumbnail extraction

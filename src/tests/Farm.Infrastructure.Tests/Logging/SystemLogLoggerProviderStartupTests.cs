@@ -3,6 +3,7 @@ using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,78 @@ namespace Farm.Infrastructure.Tests.Logging;
 /// </summary>
 public sealed class SystemLogLoggerProviderStartupTests
 {
+    [Fact]
+    public async Task LogWarning_UsesCorrelationHeadersThenMiddlewareAndTraceFallbacks()
+    {
+        var startupStatus = new Mock<IStartupStatus>();
+        _ = startupStatus.SetupGet(status => status.IsDatabaseSchemaReady).Returns(true);
+        _ = startupStatus.SetupGet(status => status.IsFailed).Returns(false);
+        DbContextOptions<AppDbContext> dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"system-log-correlation-{Guid.NewGuid()}")
+            .Options;
+
+        var services = new ServiceCollection();
+        _ = services.AddHttpContextAccessor();
+        _ = services.AddScoped(_ => new AppDbContext(dbOptions));
+
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        using var provider = new SystemLogLoggerProvider(serviceProvider, startupStatus.Object, LogLevel.Warning);
+        ILogger logger = provider.CreateLogger("Correlation");
+        IHttpContextAccessor accessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
+
+        DefaultHttpContext context = new();
+        accessor.HttpContext = context;
+        context.TraceIdentifier = "trace-id";
+        context.Request.Headers["X-Correlation-Id"] = new[] { "correlation-first", "correlation-second" };
+        context.Request.Headers["X-Request-Id"] = new[] { "request-first", "request-second" };
+        context.Items["CorrelationId"] = "middleware-id";
+        logger.LogWarning("Correlation header takes precedence over middleware item");
+
+        context.Items.Remove("CorrelationId");
+        logger.LogWarning("First correlation header value");
+
+        context.Request.Headers["X-Correlation-Id"] = new[] { "   ", "ignored-correlation-second" };
+        context.Items["CorrelationId"] = "middleware-id";
+        logger.LogWarning("Blank correlation header falls back to request header");
+
+        context.Request.Headers.Remove("X-Correlation-Id");
+        logger.LogWarning("Request header takes precedence over middleware item");
+
+        context.Request.Headers["X-Request-Id"] = new[] { "   ", "ignored-request-second" };
+        logger.LogWarning("Blank headers fall back to middleware item");
+
+        context.Request.Headers.Remove("X-Request-Id");
+        logger.LogWarning("Middleware correlation fallback");
+
+        context.Items.Clear();
+        logger.LogWarning("Trace identifier fallback");
+
+        await using var assertionContext = new AppDbContext(dbOptions);
+        Dictionary<string, string?> persisted = [];
+        DateTime persistenceDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (persisted.Count < 7 && DateTime.UtcNow < persistenceDeadline)
+        {
+            persisted = await assertionContext.SystemLogs
+                .Where(log => log.Source == "Correlation")
+                .ToDictionaryAsync(log => log.Message, log => log.CorrelationId);
+            if (persisted.Count < 7)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25));
+            }
+        }
+
+        persisted.Should().BeEquivalentTo(new Dictionary<string, string?>
+        {
+            ["Correlation header takes precedence over middleware item"] = "correlation-first",
+            ["First correlation header value"] = "correlation-first",
+            ["Blank correlation header falls back to request header"] = "request-first",
+            ["Request header takes precedence over middleware item"] = "request-first",
+            ["Blank headers fall back to middleware item"] = "middleware-id",
+            ["Middleware correlation fallback"] = "middleware-id",
+            ["Trace identifier fallback"] = "trace-id",
+        });
+    }
+
     [Fact]
     public async Task LogWarning_BeforeDatabaseSchemaReady_DoesNotResolveDatabaseServices()
     {

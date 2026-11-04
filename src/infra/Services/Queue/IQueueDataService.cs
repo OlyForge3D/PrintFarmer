@@ -23,6 +23,13 @@ public interface IQueueDataService
     Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct);
 
     /// <summary>
+    /// Get printers matching a model name or alias regardless of availability.
+    /// </summary>
+    /// <param name="modelNameOrAlias">The printer model name or slicer alias to match</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    Task<List<Printer>> GetPrintersMatchingModelAsync(string modelNameOrAlias, CancellationToken ct);
+
+    /// <summary>
     /// Get all print jobs assigned to a specific printer, ordered by priority and queue time.
     /// </summary>
     /// <param name="printerId">The unique identifier of the printer.</param>

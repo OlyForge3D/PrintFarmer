@@ -1,4 +1,6 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -32,6 +34,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 
@@ -89,15 +92,15 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
                     Id: _fileId.ToString(), RequiredMaterial: "PLA",
                     ExtractedNozzleDiameter: 0.4, ExtractedPrinterModel: "Qidi Plus 4");
             });
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new JobQueuePrintJobDto
+            .ReturnsAsync(QueueJobAddResult.Queued(new JobQueuePrintJobDto
             {
                 Id = _jobId,
                 GcodeFileId = _fileId,
                 AssignedPrinterId = _printerId,
                 AssignedPrinterName = "Test Qidi Plus 4",
-            });
+            }));
 
         _host = new HostBuilder().ConfigureWebHost(builder => builder
             .UseTestServer()
@@ -111,6 +114,10 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
             .ConfigureServices((context, services) =>
             {
                 services.AddPrintFarmerAuthentication(context.Configuration, context.HostingEnvironment);
+                services.AddLogging();
+                services.AddSingleton<CapturingWarningLoggerProvider>();
+                services.AddSingleton<ILoggerProvider>(serviceProvider =>
+                    serviceProvider.GetRequiredService<CapturingWarningLoggerProvider>());
                 services.AddSingleton(settingsService.Object);
                 services.AddSingleton(_apiKeys.Object);
                 services.AddSingleton(_users.Object);
@@ -358,7 +365,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         Exception denial = groupDenied
             ? new QueueGroupAccessDeniedException(Guid.NewGuid(), _userId)
             : new UnauthorizedAccessException("Printer access denied");
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), _userId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(denial);
 
@@ -366,7 +373,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         VerifyQueuedActor(_userId);
-        _queue.Verify(service => service.AddJobToQueueAsync(
+        _queue.Verify(service => service.AddJobToQueueWithOutcomeAsync(
             It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -461,16 +468,71 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     [Fact]
     public async Task Upload_AnonymousWithoutCompatiblePrinter_ReturnsUploadedOnly()
     {
-        _queue.Setup(service => service.AddJobToQueueAsync(
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
                 It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((JobQueuePrintJobDto?)null);
+            .ReturnsAsync(QueueJobAddResult.Rejected(QueueJobAddFailureReason.PrinterModelMismatch));
 
         using HttpResponseMessage response = await UploadAsync();
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("UploadedOnly", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("queue_admission_failed", body.RootElement.GetProperty("reasonCode").GetString());
+        Assert.Equal(
+            new[] { "file", "message", "reasonCode", "status" },
+            body.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "fileName", "id" },
+            body.RootElement.GetProperty("file").EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
         Assert.Equal(_fileId.ToString(), body.RootElement.GetProperty("file").GetProperty("id").GetString());
+        VerifyQueuedActor(null);
+    }
+
+    [Fact]
+    public async Task Upload_QueueAdmissionThrows_ReturnsIndeterminateAndLogsSafeDiagnostics()
+    {
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
+                It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("private queue detail"));
+        var outcomes = new ConcurrentQueue<string?>();
+        using MeterListener listener = CaptureQueueAdmissionOutcomes(outcomes);
+
+        using HttpResponseMessage response = await UploadAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        string responseBody = await response.Content.ReadAsStringAsync();
+        using JsonDocument body = JsonDocument.Parse(responseBody);
+        AssertIndeterminateResponse(body.RootElement);
+        Assert.DoesNotContain("private queue detail", responseBody, StringComparison.Ordinal);
+        Assert.Contains("indeterminate", outcomes);
+
+        CapturingWarningLoggerProvider warningProvider =
+            _host.Services.GetRequiredService<CapturingWarningLoggerProvider>();
+        (string Category, string Message)[] controllerWarnings = warningProvider.Warnings
+            .Where(warning => warning.Category.EndsWith("OctoPrintCompatController", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Contains(controllerWarnings, warning =>
+            warning.Message.Contains("ExceptionType=InvalidOperationException", StringComparison.Ordinal) &&
+            warning.Message.Contains("StackTrace=", StringComparison.Ordinal));
+        Assert.DoesNotContain(controllerWarnings, warning =>
+            warning.Message.Contains("private queue detail", StringComparison.Ordinal) ||
+            warning.Message.Contains(_fileId.ToString(), StringComparison.Ordinal) ||
+            warning.Message.Contains("upload.gcode", StringComparison.Ordinal) ||
+            warning.Message.Contains("G28", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Upload_QueueAdmissionCanceled_RethrowsAndRecordsIndeterminate()
+    {
+        _queue.Setup(service => service.AddJobToQueueWithOutcomeAsync(
+                It.IsAny<QueuePrintJobDto>(), null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("queue admission canceled"));
+        var outcomes = new ConcurrentQueue<string?>();
+        using MeterListener listener = CaptureQueueAdmissionOutcomes(outcomes);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => UploadAsync());
+
+        Assert.Contains("indeterminate", outcomes);
         VerifyQueuedActor(null);
     }
 
@@ -531,9 +593,53 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
         return await _client.PostAsync($"/api/files/local?printerId={_printerId}", form);
     }
 
+    private static MeterListener CaptureQueueAdmissionOutcomes(ConcurrentQueue<string?> outcomes)
+    {
+        var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == Farm.Web.Api.Telemetry.OctoPrintUploadMetrics.MeterName &&
+                instrument.Name == "octoprint.upload_print.queue_admissions")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            string? outcome = null;
+            foreach (KeyValuePair<string, object?> tag in tags)
+            {
+                if (tag.Key == "outcome")
+                {
+                    outcome = tag.Value?.ToString();
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected upload metric tag: {tag.Key}");
+                }
+            }
+
+            outcomes.Enqueue(outcome);
+        });
+        listener.Start();
+        return listener;
+    }
+
+    private static void AssertIndeterminateResponse(JsonElement responseBody)
+    {
+        Assert.Equal("Indeterminate", responseBody.GetProperty("status").GetString());
+        Assert.Equal("queue_admission_indeterminate", responseBody.GetProperty("reasonCode").GetString());
+        Assert.Equal(
+            new[] { "file", "message", "reasonCode", "status" },
+            responseBody.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "fileName", "id" },
+            responseBody.GetProperty("file").EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+    }
+
     private void VerifyQueuedActor(Guid? actor)
     {
-        _queue.Verify(service => service.AddJobToQueueAsync(
+        _queue.Verify(service => service.AddJobToQueueWithOutcomeAsync(
             It.Is<QueuePrintJobDto>(request =>
                 request.GcodeFileId == _fileId &&
                 request.AssignedPrinterId == _printerId &&
@@ -556,5 +662,41 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     {
         Assert.Empty(_files.Invocations);
         Assert.Empty(_queue.Invocations);
+    }
+
+    private sealed class CapturingWarningLoggerProvider : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<(string Category, string Message)> _warnings = new();
+
+        public IReadOnlyCollection<(string Category, string Message)> Warnings => _warnings.ToArray();
+
+        public ILogger CreateLogger(string categoryName) => new CapturingWarningLogger(categoryName, _warnings);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingWarningLogger(
+            string categoryName,
+            ConcurrentQueue<(string Category, string Message)> warnings) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (IsEnabled(logLevel))
+                {
+                    warnings.Enqueue((categoryName, formatter(state, exception)));
+                }
+            }
+        }
     }
 }

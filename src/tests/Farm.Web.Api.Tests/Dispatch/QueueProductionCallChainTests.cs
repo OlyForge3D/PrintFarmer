@@ -8165,6 +8165,24 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         public Task<List<Printer>> GetCompatiblePrintersAsync(string modelNameOrAlias, CancellationToken ct) =>
             GetAvailablePrintersAsync(ct);
 
+        public async Task<List<Printer>> GetPrintersMatchingModelAsync(string modelNameOrAlias, CancellationToken ct)
+        {
+            string normalizedSearch = NormalizeModelName(modelNameOrAlias);
+            List<Printer> printers = await db.Printers
+                .Include(p => p.Model)
+                    .ThenInclude(model => model!.Aliases)
+                .ToListAsync(ct);
+            return printers.Where(printer =>
+                printer.Model is not null &&
+                (NormalizeModelName(printer.Model.Name ?? string.Empty) == normalizedSearch ||
+                 printer.Model.Aliases?.Any(alias =>
+                     NormalizeModelName(alias.SlicerModelName ?? string.Empty) == normalizedSearch) == true))
+                .ToList();
+        }
+
+        private static string NormalizeModelName(string name) =>
+            name.ToLowerInvariant().Replace('-', ' ').Replace('_', ' ').Trim();
+
         public Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct) =>
             db.PrintJobs
                 .Where(j => j.AssignedPrinterId == printerId)
