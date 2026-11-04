@@ -65,14 +65,38 @@ describe('machine-aware filament bed setting visibility', () => {
     expect(isBedTemperatureSettingVisible('hot_plate_temp', context)).toBe(true);
   });
 
-  it('keeps all surfaces without machine/plate context and for Bambu printers', () => {
+  it('keeps all surfaces without machine/plate context', () => {
     expect(isBedTemperatureSettingVisible('hot_plate_temp', undefined)).toBe(true);
     for (const plate of [undefined, 'Default Plate', 'Unsupported']) {
       expect(getSingleBedTemperatureKey({ supportMultiBedTypes: false, bedType: plate })).toBeUndefined();
     }
-    const context = getFilamentBedContext({ support_multi_bed_types: '0', curr_bed_type: 'Textured PEI Plate' }, {}, '', 'Bambu Lab');
+  });
+
+  it.each(['BBL', 'Bambu', 'Bambu Lab', 'BambuLab', ' bBl ', ' BAMBU '])(
+    'keeps all surfaces for Bambu bundle manufacturer %s despite a single-bed flag', manufacturer => {
+      const context = getFilamentBedContext({
+        support_multi_bed_types: '0', curr_bed_type: 'Textured PEI Plate',
+      }, {}, '', manufacturer);
+      expect(context.supportMultiBedTypes).toBe(true);
+      expect(getSingleBedTemperatureKey(context)).toBeUndefined();
+      expect(isBedTemperatureSettingVisible('hot_plate_temp', context)).toBe(true);
+    },
+  );
+
+  it.each([undefined, '', '  '])('recognizes custom Bambu machine models without a manufacturer %j', manufacturer => {
+    const context = getFilamentBedContext({
+      printer_model: ' BAmBu Lab X1 Carbon', support_multi_bed_types: '0', curr_bed_type: 'Textured PEI Plate',
+    }, {}, '', manufacturer);
     expect(context.supportMultiBedTypes).toBe(true);
     expect(isBedTemperatureSettingVisible('hot_plate_temp', context)).toBe(true);
+  });
+
+  it('does not exempt non-Bambu machines from the single-bed flag', () => {
+    const context = getFilamentBedContext({
+      printer_model: 'Micron', support_multi_bed_types: '0', curr_bed_type: 'Textured PEI Plate',
+    }, {}, '', 'Voron');
+    expect(context.supportMultiBedTypes).toBe(false);
+    expect(isBedTemperatureSettingVisible('hot_plate_temp', context)).toBe(false);
   });
 
   it('uses resolved inherited machine values and never guesses missing inheritance', () => {

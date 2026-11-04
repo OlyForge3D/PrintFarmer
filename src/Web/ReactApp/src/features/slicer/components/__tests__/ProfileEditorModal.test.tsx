@@ -9,7 +9,7 @@ import {
   type OrcaFilamentProfile,
   type OrcaMachineProfile,
 } from '@/services/slicerProfilesService';
-import type { FilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
+import { getFilamentBedContext, type FilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
@@ -81,6 +81,7 @@ describe('ProfileEditorModal filament profiles', () => {
     expect(screen.getByTitle('Textured Plate other layers')).toHaveValue(60);
     expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Cool Plate first layer')).not.toBeInTheDocument();
+    expect(screen.getByText('Bed surface: Textured PEI Plate. Hidden surface values are preserved.')).toBeInTheDocument();
     fireEvent.change(screen.getByTitle('Textured Plate first layer'), { target: { value: '67' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -96,6 +97,24 @@ describe('ProfileEditorModal filament profiles', () => {
     expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
     expect(screen.getByTitle('Smooth PEI / High Temp Plate first layer')).toBeInTheDocument();
     expect(screen.getByTitle('Cool Plate first layer')).toBeInTheDocument();
+    expect(screen.queryByText(/Hidden surface values are preserved/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { manufacturer: 'BBL', printer_model: 'Bambu Lab X1 Carbon' },
+    { manufacturer: 'Bambu', printer_model: 'Bambu Lab P1S' },
+    { manufacturer: '', printer_model: ' Bambu Lab A1' },
+  ])('shows all bed pairs for Bambu machine context %j', machine => {
+    renderEditor('filament', {
+      name: 'PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: {},
+    }, getFilamentBedContext({
+      ...machine, support_multi_bed_types: '0', curr_bed_type: 'Textured PEI Plate',
+    }, {}, '', machine.manufacturer));
+    for (const plate of ['Cool Plate', 'Engineering Plate', 'Smooth PEI / High Temp Plate', 'Textured Plate']) {
+      expect(screen.getByTitle(`${plate} first layer`)).toBeInTheDocument();
+      expect(screen.getByTitle(`${plate} other layers`)).toBeInTheDocument();
+    }
+    expect(screen.getByText('Bed surface: Textured PEI Plate. Showing all bed-surface settings.')).toBeInTheDocument();
   });
 
   it('explains why all surfaces are shown without selected machine context', () => {

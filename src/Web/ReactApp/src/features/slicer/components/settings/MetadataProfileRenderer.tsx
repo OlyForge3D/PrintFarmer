@@ -20,6 +20,7 @@ import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
 import { getMetadataForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import {
+  getSingleBedTemperatureKey,
   isBedTemperatureSettingVisible,
   type FilamentBedContext,
 } from '@/features/slicer/utils/bedSurfaceTemperature';
@@ -234,7 +235,9 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
               ? 'Machine multi-bed support is unknown. Showing all bed-surface settings.'
               : !filamentBedContext.bedType || filamentBedContext.bedType === 'Default Plate'
                 ? 'Active bed surface is unknown. Showing all bed-surface settings.'
-                : `Bed surface: ${filamentBedContext.bedType}. Hidden surface values are preserved.`}
+                : getSingleBedTemperatureKey(filamentBedContext)
+                  ? `Bed surface: ${filamentBedContext.bedType}. Hidden surface values are preserved.`
+                  : `Bed surface: ${filamentBedContext.bedType}. Showing all bed-surface settings.`}
         </p>
       )}
       {/* Tab bar + Advanced toggle */}

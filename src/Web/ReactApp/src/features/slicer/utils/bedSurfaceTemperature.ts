@@ -24,7 +24,10 @@ function readNativeBoolean(value: unknown): boolean | undefined {
 export function getFilamentBedContext(
   machine: Settings, process: Settings, selectedBedType: string, manufacturer?: string,
 ): FilamentBedContext {
-  const isBambu = manufacturer === 'Bambu Lab' || manufacturer === 'BambuLab';
+  const vendor = manufacturer?.trim().toLowerCase();
+  const model = machine?.printer_model;
+  const isBambu = ['bbl', 'bambu', 'bambu lab', 'bambulab'].includes(vendor ?? '')
+    || (!vendor && typeof model === 'string' && model.trimStart().toLowerCase().startsWith('bambu lab'));
   return {
     bedType: resolveBedType(selectedBedType, process, machine),
     supportMultiBedTypes: isBambu || readNativeBoolean(machine?.support_multi_bed_types),
