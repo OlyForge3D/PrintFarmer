@@ -24,7 +24,8 @@ import {
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { getErrorMessage } from '@/common/utils/apiErrors';
-import { BED_TYPE_OPTIONS } from '@/features/slicer/components/settings';
+import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
+import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import type { Model } from '@/types/models';
 
 export interface QuickSliceModalProps {
@@ -157,6 +158,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     setSelectedMachineProfileId('');
     setSelectedFilamentProfileId('');
     setSelectedProcessProfileId('');
+    setSelectedBedType('');
   }, []);
 
   // Handler that cascades resets when machine changes
@@ -164,6 +166,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     setSelectedMachineProfileId(machineId);
     setSelectedFilamentProfileId('');
     setSelectedProcessProfileId('');
+    setSelectedBedType('');
   }, []);
 
   const submitMutation = useMutation({
@@ -245,13 +248,12 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       modelFileName: model.fileName || model.name,
       slicerEngine: 0, // OrcaSlicer
       ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),
-      slicerProfileJson: JSON.stringify({
+      slicerProfileJson: buildSlicerProfileJson({
         machineProfileName: effectiveMachineProfileId,
         filamentProfileName: effectiveFilamentProfileId,
-        processProfileName: effectiveProcessProfileId,
-        overrides: {
-          ...(selectedBedType ? { curr_bed_type: selectedBedType } : {}),
-        },
+        processPresetId: effectiveProcessProfileId,
+        overrides: {},
+        bedType: selectedBedType,
       }),
       requiredCapabilitiesJson: '[]',
       priority: 1,
@@ -344,18 +346,15 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           </Select>
         </FormField>
 
-        <FormField label="Bed Type" htmlFor="qs-bed-type">
-          <Select
-            id="qs-bed-type"
-            value={selectedBedType}
-            onChange={(e) => setSelectedBedType(e.target.value)}
-          >
-            <option value="">Inherit from profile</option>
-            {BED_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </Select>
-        </FormField>
+        <BedSurfaceSettings
+          id="qs-bed-type"
+          selectedBedType={selectedBedType}
+          onChange={setSelectedBedType}
+          machineSettings={machineProfiles.find(profile => profile.name === effectiveMachineProfileId)?.settings}
+          manufacturer={machineProfiles.find(profile => profile.name === effectiveMachineProfileId)?.manufacturer}
+          processSettings={processProfiles.find(profile => profile.name === effectiveProcessProfileId)?.settings}
+          filaments={[filamentProfiles.find(profile => profile.name === effectiveFilamentProfileId)]}
+        />
 
         {error && <Alert type="error">{error}</Alert>}
       </div>

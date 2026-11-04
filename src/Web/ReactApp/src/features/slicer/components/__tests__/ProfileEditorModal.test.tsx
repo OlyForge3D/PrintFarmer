@@ -9,6 +9,7 @@ import {
   type OrcaFilamentProfile,
   type OrcaMachineProfile,
 } from '@/services/slicerProfilesService';
+import type { FilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
@@ -19,6 +20,7 @@ vi.mock('@/services/slicerProfilesService', () => ({
 function renderEditor(
   profileType: 'machine' | 'filament',
   profile: OrcaMachineProfile | OrcaFilamentProfile,
+  filamentBedContext?: FilamentBedContext,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -34,6 +36,7 @@ function renderEditor(
         onClose={vi.fn()}
         profileType={profileType}
         originalProfile={profile}
+        filamentBedContext={filamentBedContext}
       />
     </QueryClientProvider>,
   );
@@ -63,6 +66,76 @@ describe('ProfileEditorModal filament profiles', () => {
       nozzleTemperature: 200, bedTemperature: 60, printSpeed: 50, settings,
     });
   }
+
+  it('shows only the active textured pair for a single-bed machine and preserves all hidden settings when saving', async () => {
+    const raw = {
+      inherits: 'Micron filament base',
+      hot_plate_temp_initial_layer: ['0', '0'], hot_plate_temp: ['0', '0'],
+      textured_plate_temp_initial_layer: ['65', '61'], textured_plate_temp: ['60', '56'],
+      cool_plate_temp_initial_layer: ['35'], cool_plate_temp: ['30'],
+    };
+    renderEditor('filament', {
+      name: 'Micron PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: raw,
+    }, { supportMultiBedTypes: false, bedType: 'Textured PEI Plate' });
+    expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65);
+    expect(screen.getByTitle('Textured Plate other layers')).toHaveValue(60);
+    expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Cool Plate first layer')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTitle('Textured Plate first layer'), { target: { value: '67' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0].rawJson))
+      .toEqual({ ...raw, textured_plate_temp_initial_layer: ['67', '61'] });
+  });
+
+  it.each([true, undefined])('shows every native bed pair for multi-bed/unknown support %s', supportMultiBedTypes => {
+    renderEditor('filament', {
+      name: 'PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60, settings: {},
+    }, { supportMultiBedTypes, bedType: 'Textured PEI Plate' });
+    expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
+    expect(screen.getByTitle('Smooth PEI / High Temp Plate first layer')).toBeInTheDocument();
+    expect(screen.getByTitle('Cool Plate first layer')).toBeInTheDocument();
+  });
+
+  it('explains why all surfaces are shown without selected machine context', () => {
+    renderFilamentEditor({});
+    expect(screen.getByText('No selected machine context. Showing all bed-surface settings.')).toBeInTheDocument();
+    expect(screen.getByTitle('Smooth PEI / High Temp Plate first layer')).toBeInTheDocument();
+    expect(screen.getByTitle('Textured Plate first layer')).toBeInTheDocument();
+  });
+
+  it('retains edited hidden surfaces when machine context toggles between multi-bed and single-bed', async () => {
+    const profile: OrcaFilamentProfile = {
+      name: 'Micron PLA', material: 'PLA', nozzleTemperature: 210, bedTemperature: 0, printSpeed: 60,
+      settings: {
+        inherits: 'Micron base',
+        hot_plate_temp_initial_layer: ['0', '0'], hot_plate_temp: ['0', '0'],
+        textured_plate_temp_initial_layer: ['65', '61'], textured_plate_temp: ['60', '56'],
+      },
+    };
+    const queryClient = new QueryClient();
+    const editor = (supportMultiBedTypes: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <ProfileEditorModal isOpen onClose={vi.fn()} profileType="filament" originalProfile={profile}
+          filamentBedContext={{ supportMultiBedTypes, bedType: 'Textured PEI Plate' }} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(editor(true));
+    fireEvent.change(screen.getByTitle('Smooth PEI / High Temp Plate other layers'), { target: { value: '42' } });
+    rerender(editor(false));
+    expect(screen.queryByTitle('Smooth PEI / High Temp Plate other layers')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTitle('Textured Plate other layers'), { target: { value: '62' } });
+    rerender(editor(true));
+    expect(screen.getByTitle('Smooth PEI / High Temp Plate other layers')).toHaveValue(42);
+    expect(screen.getByTitle('Textured Plate other layers')).toHaveValue(62);
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0].rawJson)).toEqual({
+      ...profile.settings, hot_plate_temp: ['42', '0'], textured_plate_temp: ['62', '56'],
+    });
+  });
 
   it('hydrates native arrays and uploads edited temperature, boolean, percent and G-code vectors', async () => {
     const user = userEvent.setup();

@@ -30,6 +30,8 @@ export interface SlicerProfilePayloadInput {
   processPresetId: string;
   /** Process setting overrides, already scrubbed for the target engine version. */
   overrides: Record<string, unknown>;
+  /** Empty/omitted preserves the profile's native bed surface. */
+  bedType?: string;
 }
 
 /**
@@ -64,6 +66,9 @@ export function buildSlicerProfileJson(input: SlicerProfilePayloadInput): string
     ...(input.filamentColours ? { filamentColours: input.filamentColours } : {}),
     ...(input.filamentColour ? { filamentColour: input.filamentColour } : {}),
     processProfileName: stripProcessPresetPrefix(input.processPresetId),
-    overrides: input.overrides,
+    overrides: {
+      ...input.overrides,
+      ...(input.bedType ? { curr_bed_type: input.bedType } : {}),
+    },
   });
 }

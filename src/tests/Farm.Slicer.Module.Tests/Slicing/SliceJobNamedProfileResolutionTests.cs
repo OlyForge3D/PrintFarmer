@@ -127,6 +127,65 @@ public sealed class SliceJobNamedProfileResolutionTests : IAsyncLifetime, IDispo
         _ = process.RootElement.GetProperty("layer_height").GetString().Should().Be("0.28");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Textured PEI Plate")]
+    [InlineData("High Temp Plate")]
+    public async Task Submit_WithBedSurfaceSelection_PreservesNativeTemperatureVectors(string? selectedBedType)
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        await AddProfilesAsync(userId, filamentName: CustomFilamentName);
+        const string machineJson = """{"type":"machine","printer_model":"Micron representative","nozzle_diameter":["0.4"],"support_multi_bed_types":"0","curr_bed_type":"Textured PEI Plate"}""";
+        const string filamentJson = """{"type":"filament","filament_type":["PLA"],"hot_plate_temp":["0","0"],"hot_plate_temp_initial_layer":["0","0"],"textured_plate_temp":["60","55"],"textured_plate_temp_initial_layer":["65","60"]}""";
+        const string processJson = """{"type":"process","layer_height":"0.2","bed_temperature_formula":"by_highest_temp"}""";
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            (await db.MachineProfiles.SingleAsync(p => p.Name == "Test Machine")).RawJson = machineJson;
+            (await db.ProcessProfiles.SingleAsync(p => p.Name == "Test Process")).RawJson = processJson;
+            (await db.FilamentProfiles.SingleAsync(p => p.Name == CustomFilamentName)).RawJson = filamentJson;
+            _ = await db.SaveChangesAsync();
+        }
+
+        Dictionary<string, object> overrides = [];
+        if (selectedBedType is not null)
+        {
+            overrides["curr_bed_type"] = selectedBedType;
+        }
+
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = JsonSerializer.Serialize(new
+            {
+                machineProfileName = "Test Machine",
+                processProfileName = "Test Process",
+                filamentProfileName = CustomFilamentName,
+                overrides,
+            }),
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+        _ = claimed.MachineProfileJson.Should().Be(machineJson);
+        _ = claimed.FilamentProfileJson.Should().Be(filamentJson);
+        _ = claimed.FilamentProfileSha256.Should().Be(Sha256(filamentJson));
+        using JsonDocument process = JsonDocument.Parse(claimed.ProcessProfileJson!);
+        _ = process.RootElement.GetProperty("bed_temperature_formula").GetString().Should().Be("by_highest_temp");
+        if (selectedBedType is null)
+        {
+            _ = process.RootElement.TryGetProperty("curr_bed_type", out _).Should().BeFalse();
+        }
+        else
+        {
+            _ = process.RootElement.GetProperty("curr_bed_type").GetString().Should().Be(selectedBedType);
+        }
+
+        _ = claimed.ProcessProfileSha256.Should().Be(Sha256(claimed.ProcessProfileJson!));
+    }
+
     [Fact(DisplayName = "A compatibility override is rejected rather than snapshotted onto the native process profile")]
     public async Task Submit_WithCompatibilityOverride_DoesNotSnapshotItOntoTheProcessProfile()
     {

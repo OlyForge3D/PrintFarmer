@@ -33,6 +33,7 @@ import {
 } from '@/features/slicer/components/machineProfileEditorAdapter';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
+import type { FilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 
 export type ProfileType = 'machine' | 'filament';
 
@@ -47,6 +48,7 @@ interface ProfileEditorModalProps {
   originalProfile: OrcaMachineProfile | OrcaFilamentProfile | null;
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
+  filamentBedContext?: FilamentBedContext;
 }
 
 /**
@@ -89,6 +91,7 @@ export function ProfileEditorModal({
   profileType,
   originalProfile,
   onSaveSuccess,
+  filamentBedContext,
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
   const profileNameId = React.useId();
@@ -271,6 +274,7 @@ export function ProfileEditorModal({
           settings={settings}
           originalSettings={originalSettings}
           onUpdate={handleUpdate}
+          filamentBedContext={filamentBedContext}
           additionalSettings={profileType === 'machine'
             ? MACHINE_PROFILE_ADDITIONAL_SETTINGS
             : undefined}

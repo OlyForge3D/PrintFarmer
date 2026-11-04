@@ -35,6 +35,8 @@ import {
   useMachineCompatibleProfiles,
 } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
+import { BedSurfaceSettings } from '@/features/slicer/components/BedSurfaceSettings';
+import { getFilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 import {
   SlicerSettingsPanel,
   type OrcaProcessSettings,
@@ -1071,7 +1073,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, [selectedProcessPresetId, customProfilesData]);
 
   // Get the selected machine profile object (system or custom/imported)
-  const selectedMachineProfile = useMemo(() => {
+  const selectedMachineProfile = useMemo<OrcaMachineProfile | null>(() => {
     if (!selectedMachineProfileId) return null;
     if (machineProfilesData?.length) {
       const system = machineProfilesData.find(p => p.name === selectedMachineProfileId);
@@ -1083,9 +1085,11 @@ export const NewSliceJobPage: React.FC = () => {
     if (custom) {
       // Keep original profile name for compatibility queries; store printer_model separately for display
       let printerModel: string | undefined;
+      let settings: Record<string, unknown> | undefined;
       if (custom.rawJson) {
         try {
           const parsed = JSON.parse(custom.rawJson) as Record<string, unknown>;
+          settings = parsed;
           if (typeof parsed.printer_model === 'string' && parsed.printer_model) {
             printerModel = parsed.printer_model;
           }
@@ -1096,6 +1100,7 @@ export const NewSliceJobPage: React.FC = () => {
         manufacturer: '',
         description: custom.description,
         printerModel,
+        settings,
       };
     }
     return null;
@@ -1740,6 +1745,22 @@ export const NewSliceJobPage: React.FC = () => {
     return allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId]);
 
+  const [bedSurfaceSelection, setBedSurfaceSelection] = useState({ machine: '', value: '' });
+  const selectedBedType = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
+  const processOverrides = useMemo(() => buildProcessOverrides({
+    slicerSettings,
+    originalProcessSettings,
+    advancedProcessSettings,
+    simpleMode: slicerMode !== 'Advanced',
+    engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
+  }), [slicerSettings, originalProcessSettings, advancedProcessSettings, slicerMode, selectedEngineVersion, latestAvailableForEngine]);
+  const filamentBedContext = getFilamentBedContext(
+    selectedMachineProfile?.settings,
+    { ...resolvedProcessProfile?.settings, ...processOverrides },
+    selectedBedType,
+    selectedMachineProfile?.manufacturer,
+  );
+
   // Per-kg filament cost from the selected profile, for best-effort material cost.
   const filamentCostPerKg = useMemo(
     () => sliceJobService.parseOrcaNumeric(selectedFilamentProfile?.settings?.filament_cost),
@@ -2109,14 +2130,6 @@ export const NewSliceJobPage: React.FC = () => {
     // unmodified defaults would clobber the profile's tuned/inherited values.
     // In Simple mode the adhesion keys are always sent explicitly so the slicer
     // matches the displayed choice; values are normalised to Orca's string form.
-    const processOverrides = buildProcessOverrides({
-      slicerSettings,
-      originalProcessSettings,
-      advancedProcessSettings,
-      simpleMode: slicerMode !== 'Advanced',
-      engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
-    });
-
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       printerId: selectedPrinterForSlicing?.id,
@@ -2139,6 +2152,7 @@ export const NewSliceJobPage: React.FC = () => {
         filamentColour: singleFilamentColour,
         processPresetId: selectedProcessPresetId,
         overrides: processOverrides,
+        bedType: selectedBedType,
       }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
@@ -2171,7 +2185,6 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
     return true;
   }, [
-    advancedProcessSettings,
     allFilamentProfiles,
     bedModels,
     extruderFilamentColours,
@@ -2179,13 +2192,14 @@ export const NewSliceJobPage: React.FC = () => {
     filamentCostPerKg,
     modelFileName,
     modelFileUrl,
-    originalProcessSettings,
     physicalToolheads,
     printerIsMultiToolhead,
     requiredMaterialType,
     requiredNozzleDiameter,
     requiredPrinterModel,
     selectedFilamentProfileId,
+    selectedBedType,
+    processOverrides,
     selectedMachineProfileId,
     selectedProcessPresetId,
     selectedEngineVersion,
@@ -3074,7 +3088,7 @@ export const NewSliceJobPage: React.FC = () => {
                 {/* Show selected profile's temperature info */}
                 {selectedFilamentProfile && (
                   <div className="text-xs text-pf-text-muted">
-                    {selectedFilamentProfile.nozzleTemperature ?? 210}°C nozzle, {selectedFilamentProfile.bedTemperature ?? 60}°C bed
+                    {selectedFilamentProfile.nozzleTemperature ?? 210}°C nozzle
                   </div>
                 )}
               </>
@@ -3088,6 +3102,18 @@ export const NewSliceJobPage: React.FC = () => {
             )}
           </div>
           )}
+
+          <BedSurfaceSettings
+            id="slice-bed-type"
+            selectedBedType={selectedBedType}
+            onChange={value => setBedSurfaceSelection({ machine: selectedMachineProfileId, value })}
+            machineSettings={selectedMachineProfile?.settings}
+            manufacturer={selectedMachineProfile?.manufacturer}
+            processSettings={{ ...resolvedProcessProfile?.settings, ...processOverrides }}
+            filaments={printerIsMultiToolhead
+              ? physicalToolheads.map((_, index) => allFilamentProfiles.find(profile => profile.name === extruderFilamentProfileIds[index]))
+              : [selectedFilamentProfile]}
+          />
 
           {/* PROCESS PROFILE - with Reset, Save-as, and profile management menu */}
           <div className="bg-pf-panel border border-pf-border rounded-lg p-3 space-y-2">
@@ -3494,6 +3520,7 @@ export const NewSliceJobPage: React.FC = () => {
         isOpen={profileEditorOpen}
         onClose={() => { setProfileEditorOpen(false); setFilamentEditProfile(null); }}
         profileType={profileEditorType}
+        filamentBedContext={filamentBedContext}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
           (filamentEditProfile ?? selectedFilamentProfile ?? null)

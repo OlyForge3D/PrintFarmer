@@ -20,6 +20,10 @@ import { useSlicerViewMode } from '@/features/slicer/hooks/useSlicerViewMode';
 import { MetadataTabRenderer } from '@/features/slicer/components/settings/MetadataTabRenderer';
 import { getMetadataForVersion } from '@/features/slicer/components/settings/orcaSettingsMetadataResolver';
 import {
+  isBedTemperatureSettingVisible,
+  type FilamentBedContext,
+} from '@/features/slicer/utils/bedSurfaceTemperature';
+import {
   isSettingModified,
   type MetadataSectionAddition,
   type ProfileType,
@@ -68,6 +72,8 @@ export interface MetadataProfileEditorProps {
   additionalSections?: readonly MetadataSectionAddition[];
   /** Advanced metadata keys deliberately promoted into Simple mode */
   simpleModeSettingKeys?: ReadonlySet<string>;
+  /** Resolved machine/active-plate context; omitted in engine-agnostic editors. */
+  filamentBedContext?: FilamentBedContext;
 }
 
 export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
@@ -81,6 +87,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   additionalSettings,
   additionalSections,
   simpleModeSettingKeys,
+  filamentBedContext,
 }) => {
   const scopedBundle = useMemo(
     () => getMetadataForVersion(engineVersion),
@@ -88,8 +95,12 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
   );
   const baseProfileMeta = scopedBundle.profileTypes[profileType];
   const profileMeta = useMemo(() => {
+    const settings = Object.fromEntries(
+      Object.entries(baseProfileMeta.settings).filter(([key]) =>
+        profileType !== 'filament' || isBedTemperatureSettingVisible(key, filamentBedContext)),
+    );
     if (!additionalSettings && !additionalSections?.length) {
-      return baseProfileMeta;
+      return { ...baseProfileMeta, settings };
     }
 
     const existingFieldKeys = new Set(
@@ -116,10 +127,10 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
         // Generated Orca metadata is authoritative when an additional entry graduates
         // into the bundle; this ordering prevents a stale local definition from winning.
         ...(additionalSettings ?? {}),
-        ...baseProfileMeta.settings,
+        ...settings,
       },
     };
-  }, [additionalSections, additionalSettings, baseProfileMeta]);
+  }, [additionalSections, additionalSettings, baseProfileMeta, profileType, filamentBedContext]);
   const [viewMode, toggleViewMode] = useSlicerViewMode();
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 
@@ -215,6 +226,17 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
 
   return (
     <div className={`bg-pf-bg-1 rounded-lg border border-pf-border flex flex-col ${className}`}>
+      {profileType === 'filament' && (
+        <p className="px-4 pt-2 text-sm text-pf-text-secondary">
+          {!filamentBedContext
+            ? 'No selected machine context. Showing all bed-surface settings.'
+            : filamentBedContext.supportMultiBedTypes === undefined
+              ? 'Machine multi-bed support is unknown. Showing all bed-surface settings.'
+              : !filamentBedContext.bedType || filamentBedContext.bedType === 'Default Plate'
+                ? 'Active bed surface is unknown. Showing all bed-surface settings.'
+                : `Bed surface: ${filamentBedContext.bedType}. Hidden surface values are preserved.`}
+        </p>
+      )}
       {/* Tab bar + Advanced toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-pf-border">
         <div className="flex gap-3 overflow-x-auto" role="tablist" aria-label="Profile settings sections">

@@ -1237,6 +1237,54 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Bed-surface temperatures', () => {
+    it('sends the explicitly selected native surface and shows its values instead of the hot-plate summary', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '0' } },
+      ]);
+      vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
+        { ...mockFilamentProfiles[0], bedTemperature: 0, settings: {
+          hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
+          textured_plate_temp_initial_layer: ['65'], textured_plate_temp: ['60'],
+        } },
+      ]);
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+      await screen.findByText('Bed first layer: 0°C; other layers: 0°C');
+      fireEvent.change(screen.getByLabelText('Bed Type'), { target: { value: 'Textured PEI Plate' } });
+      expect(screen.getByText('Bed first layer: 65°C; other layers: 60°C')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true);
+      });
+      await act(async () => {
+        const props = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice: () => void };
+        props.onSlice();
+      });
+      await waitFor(() => expect(sliceJobService.submitJob).toHaveBeenCalled());
+      const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)![0];
+      const payload = JSON.parse(request.slicerProfileJson);
+      expect(payload.overrides.curr_bed_type).toBe('Textured PEI Plate');
+      expect(Object.keys(payload.overrides).some(key => key.includes('plate_temp'))).toBe(false);
+    });
+
+    it('passes the active surface and machine single-bed flag into the filament editor', async () => {
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { ...mockMachineProfiles[0], settings: { curr_bed_type: 'Textured PEI Plate', support_multi_bed_types: '0' } },
+      ]);
+      vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
+        { ...mockFilamentProfiles[0], settings: {
+          hot_plate_temp_initial_layer: ['0'], hot_plate_temp: ['0'],
+          textured_plate_temp_initial_layer: ['65'], textured_plate_temp: ['60'],
+        } },
+      ]);
+      renderWithProviders(<NewSliceJobPage />);
+      await screen.findByText('Bed first layer: 65°C; other layers: 60°C');
+      fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      await waitFor(() => expect(screen.getByTitle('Textured Plate first layer')).toHaveValue(65));
+      expect(screen.queryByTitle('Smooth PEI / High Temp Plate first layer')).not.toBeInTheDocument();
+    });
+  });
+
   describe('Filament Profile Filtering', () => {
     it('should fetch filament profiles filtered by selected machine', async () => {
       renderWithProviders(<NewSliceJobPage />);
@@ -2106,11 +2154,11 @@ describe('NewSliceJobPage', () => {
       slicerModeRef.value = 'Simple';
     });
 
-    it('does not render a bed type selector in advanced mode', async () => {
+    it('keeps the explicit bed surface selector available in advanced mode without forcing an override', async () => {
       renderWithProviders(<NewSliceJobPage />);
 
       await waitFor(() => {
-        expect(screen.queryByLabelText(/bed type/i)).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/bed type/i)).toHaveValue('');
       });
     });
   });

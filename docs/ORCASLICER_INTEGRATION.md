@@ -92,6 +92,35 @@ current worker release.
 2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` configures the previous engine and its service name. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
 3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
 
+### Bed surfaces and filament temperatures
+
+The web slicer and Quick Slice preserve the profile's bed surface unless the
+operator explicitly chooses another **Bed Type**. That choice is submitted as
+`overrides.curr_bed_type` and included in the native process configuration; it
+does not rewrite the filament's temperature arrays.
+
+Bed summaries read the selected surface's native first-layer and other-layer
+keys, not the legacy hot-plate summary. Zero stays zero, missing/unsupported
+values appear as **Unknown**, and each extruder's profile values remain separate.
+These are profile values, not proof of the generated heating commands:
+OrcaSlicer's active-filament selection, `bed_temperature_formula`, and custom
+start G-code still determine what reaches the printer.
+
+The filament editor honors the selected machine's resolved
+`support_multi_bed_types`. When false and the active `curr_bed_type` is known,
+only that surface's temperature pair is visible (not necessarily
+`hot_plate_temp`). When true, all surface pairs are available; Bambu machines
+retain multi-bed behavior. Missing machine/plate context is reported honestly
+and leaves all pairs visible. Hiding a surface never deletes its values or
+changes profile inheritance; saving an edit preserves other surfaces and the
+remaining native vector entries.
+
+This matches OrcaSlicer v2.4.0's
+[filament visibility rule](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/slic3r/GUI/Tab.cpp)
+and [native surface-key lookup](https://github.com/SoftFever/OrcaSlicer/blob/6d9eb1792f50d11ea12d60526b6ace58666354fd/src/libslic3r/PrintConfig.hpp).
+It does not establish the cause of an existing failed physical print without
+that job's profiles, effective surface and generated start G-code.
+
 ### Runtime custom profile overlay
 
 The worker scans one composed root at `/app/profiles`. Its container entrypoint
