@@ -286,6 +286,8 @@ vi.mock('@/services/slicerProfilesService', () => ({
     // and clones a profile (by GUID) into the user's custom profiles.
     resolveProfileForModel: vi.fn(),
     cloneProfile: vi.fn(),
+    updateCustomProfile: vi.fn(),
+    uploadProfile: vi.fn(),
   }
 }));
 
@@ -1234,10 +1236,65 @@ describe('NewSliceJobPage', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
 
       expect(screen.queryByText(/No machine profiles available/)).not.toBeInTheDocument();
+      vi.mocked(slicerProfilesService.updateCustomProfile).mockResolvedValue({
+        id: 'custom-machine-1', name: 'Custom MK4 0.8 nozzle', profileType: 'machine',
+        isSystem: false, createdAt: '2026-04-28T00:00:00Z',
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Machine profile options menu' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledWith(
+        'custom-machine-1',
+        { rawJson: JSON.stringify({ printer_model: 'MK4', nozzle_diameter: [0.8] }) },
+      ));
+      expect(slicerProfilesService.uploadProfile).not.toHaveBeenCalled();
     });
   });
 
   describe('Bed-surface temperatures', () => {
+    it.each([false, true])('updates the selected custom filament ID from the real caller (multi-toolhead: %s)', async multi => {
+      const custom = {
+        id: 'owned-filament-id', name: 'My MK4 PLA', profileType: 'filament' as const,
+        isSystem: false, createdAt: '2026-11-03T00:00:00Z',
+        rawJson: JSON.stringify({
+          compatible_printers: ['Prusa MK4 0.4 nozzle'],
+          textured_plate_temp: ['62', '57'],
+        }),
+      };
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 0, filamentProfileCount: 1, processProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.updateCustomProfile).mockResolvedValue(custom);
+      if (multi) {
+        vi.mocked(apiClient.getPrinterDetails).mockResolvedValue({
+          ...mockPrinterDetails,
+          backend: PrinterBackend.PrusaLink,
+          toolheads: [
+            { id: 'th-1', index: 0, nozzleDiameter: 0.4, isPrimary: true },
+            { id: 'th-2', index: 1, nozzleDiameter: 0.4, isPrimary: false },
+          ],
+        });
+      }
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalled());
+      const container = multi ? await screen.findByTestId('extruder-filament-1') : await screen.findByTestId('single-filament-section');
+      fireEvent.click(within(container).getByRole('button', { name: multi ? '-- Select Filament --' : 'My MK4 PLA' }));
+      fireEvent.click(within(await screen.findByRole('dialog', { name: 'Filament selector' })).getByRole('button', { name: /My MK4 PLA/ }));
+      if (multi) {
+        fireEvent.click(screen.getByRole('button', { name: 'Edit Extruder 2 filament settings' }));
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+      }
+      await screen.findByRole('heading', { name: 'Edit Filament Profile: My MK4 PLA' });
+      expect(screen.getByTitle('Textured Plate other layers')).toHaveValue(62);
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledWith(
+        'owned-filament-id', { rawJson: custom.rawJson },
+      ));
+      expect(slicerProfilesService.uploadProfile).not.toHaveBeenCalled();
+    });
+
     it('sends the explicitly selected native surface and shows its values instead of the hot-plate summary', async () => {
       vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
         { ...mockMachineProfiles[0], settings: { curr_bed_type: 'High Temp Plate', support_multi_bed_types: '0' } },

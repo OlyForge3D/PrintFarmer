@@ -123,6 +123,12 @@ that job's profiles, effective surface and generated start G-code.
 
 ### Runtime custom profile overlay
 
+In the web slicer's machine and filament editors, **Save** updates an existing
+user profile in place. **Save as** creates a separately named copy. Saving a
+system profile always asks for a custom name and creates a user copy; it never
+changes the system source. Both actions are available even without edits.
+Copies retain native settings and the source's printer associations.
+
 The worker scans one composed root at `/app/profiles`. Its container entrypoint
 creates symbolic links for both immutable stock entries from
 `/opt/orcaslicer/resources/profiles` and writable custom entries from

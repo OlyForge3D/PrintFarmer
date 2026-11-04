@@ -407,7 +407,7 @@ export const NewSliceJobPage: React.FC = () => {
   const [extruderFilamentColours, setExtruderFilamentColours] = useState<Record<number, string>>({});
 
   // Filament profile targeted by the per-row "edit" action (multi-extruder).
-  const [filamentEditProfile, setFilamentEditProfile] = useState<OrcaFilamentProfile | null>(null);
+  const [filamentEditProfileName, setFilamentEditProfileName] = useState<string | null>(null);
 
   // === OrcaSlicer-style Settings Panel ===
   const [slicerSettings, setSlicerSettings] = useState<OrcaProcessSettings>({} as OrcaProcessSettings);
@@ -2958,12 +2958,12 @@ export const NewSliceJobPage: React.FC = () => {
                           size="sm"
                           className="p-1 h-auto shrink-0"
                           onClick={() => {
-                            setFilamentEditProfile(selectedProfile ?? null);
+                            setFilamentEditProfileName(selectedName);
                             setProfileEditorType('filament');
                             setProfileEditorOpen(true);
                           }}
-                          disabled={!selectedProfile}
-                          title={selectedProfile ? 'Edit filament settings' : 'Select a filament first'}
+                          disabled={!selectedProfile && !customFilamentProfiles.some(p => p.name === selectedName)}
+                          title={selectedName ? 'Edit filament settings' : 'Select a filament first'}
                           aria-label={`Edit Extruder ${idx + 1} filament settings`}
                         >
                           <EditIcon className="w-3.5 h-3.5" />
@@ -3008,7 +3008,7 @@ export const NewSliceJobPage: React.FC = () => {
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
                       onClick={() => {
                         setFilamentMenuOpen(false);
-                        setFilamentEditProfile(null);
+                        setFilamentEditProfileName(null);
                         setProfileEditorType('filament');
                         setProfileEditorOpen(true);
                       }}
@@ -3518,13 +3518,21 @@ export const NewSliceJobPage: React.FC = () => {
       {/* Profile Editor Modal - for editing selected profile settings */}
       <ProfileEditorModal
         isOpen={profileEditorOpen}
-        onClose={() => { setProfileEditorOpen(false); setFilamentEditProfile(null); }}
+        onClose={() => { setProfileEditorOpen(false); setFilamentEditProfileName(null); }}
         profileType={profileEditorType}
         filamentBedContext={filamentBedContext}
         originalProfile={
           profileEditorType === 'machine' ? (selectedMachineProfile ?? null) :
-          (filamentEditProfile ?? selectedFilamentProfile ?? null)
+          (allFilamentProfiles.find(p => p.name === (filamentEditProfileName ?? selectedFilamentProfileId)) ?? null)
         }
+        customProfile={customProfilesData?.profiles.find(p =>
+          p.profileType === profileEditorType &&
+          p.name === (profileEditorType === 'machine'
+            ? selectedMachineProfileId
+            : filamentEditProfileName ?? selectedFilamentProfileId) &&
+          !(profileEditorType === 'machine'
+            ? machineProfilesData?.some(system => system.name === p.name)
+            : allFilamentProfiles.some(system => system.name === p.name)))}
         onSaveSuccess={(_profileId, profileName) => {
           qc.invalidateQueries({ queryKey: ['customProfiles'] });
           qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
