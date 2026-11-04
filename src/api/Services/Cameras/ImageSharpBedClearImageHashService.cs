@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Cameras;
+﻿using Farm.Infrastructure.Services.Cameras;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;

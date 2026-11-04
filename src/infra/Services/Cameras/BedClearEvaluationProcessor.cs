@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -77,6 +77,60 @@ public sealed class BedClearEvaluationProcessor(
             {
                 logger.LogError(exception, "Bed-clear evaluation {EvaluationId} failed.", id);
                 await CompleteUnknownAsync(id, "evaluation_failed", ct);
+            }
+        }
+    }
+
+    public async Task CleanupOrphanedImagesAsync(CancellationToken ct)
+    {
+        var snapshotRoot = new DirectoryInfo(storagePathService.GetSnapshotStorageDirectory());
+        var evidenceRoot = new DirectoryInfo(Path.Combine(snapshotRoot.FullName, "bed-clear"));
+        if (!evidenceRoot.Exists)
+        {
+            return;
+        }
+
+        if ((snapshotRoot.Attributes & FileAttributes.ReparsePoint) != 0 ||
+            (evidenceRoot.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            logger.LogWarning("Skipping bed-clear image cleanup through a linked storage directory.");
+            return;
+        }
+
+        foreach (DirectoryInfo directory in evidenceRoot.EnumerateDirectories())
+        {
+            ct.ThrowIfCancellationRequested();
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0 ||
+                !Guid.TryParseExact(directory.Name, "N", out Guid printerId) ||
+                await db.Printers.AnyAsync(printer => printer.Id == printerId, ct))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (FileInfo image in directory.EnumerateFiles())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if ((image.Attributes & FileAttributes.ReparsePoint) == 0 &&
+                        string.Equals(image.Extension, ".jpg", StringComparison.OrdinalIgnoreCase) &&
+                        Guid.TryParseExact(Path.GetFileNameWithoutExtension(image.Name), "N", out _))
+                    {
+                        image.Delete();
+                    }
+                }
+
+                if (!directory.EnumerateFileSystemInfos().Any())
+                {
+                    directory.Delete();
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                logger.LogError(
+                    exception,
+                    "Could not remove orphaned bed-clear images for printer {PrinterId}; cleanup will retry.",
+                    printerId);
             }
         }
     }
@@ -407,6 +461,7 @@ public sealed class BedClearEvaluationBackgroundService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        DateTimeOffset nextCleanup = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -415,6 +470,11 @@ public sealed class BedClearEvaluationBackgroundService(
                 BedClearEvaluationProcessor processor =
                     scope.ServiceProvider.GetRequiredService<BedClearEvaluationProcessor>();
                 await processor.ProcessPendingAsync(stoppingToken);
+                if (_timeProvider.GetUtcNow() >= nextCleanup)
+                {
+                    await processor.CleanupOrphanedImagesAsync(stoppingToken);
+                    nextCleanup = _timeProvider.GetUtcNow().AddHours(1);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

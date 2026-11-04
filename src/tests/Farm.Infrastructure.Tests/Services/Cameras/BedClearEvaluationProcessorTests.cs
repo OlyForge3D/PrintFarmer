@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cameras;
@@ -68,6 +68,50 @@ public sealed class BedClearEvaluationProcessorTests : IDisposable
         File.Exists(Path.Combine(_root, sample.ImageFilePath!)).Should().BeTrue();
         (await _db.PrintJobs.CountAsync()).Should().Be(0);
         (await _db.PrinterDispatchStates.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CleanupOrphanedImages_AfterPrinterDeletion_RemovesOnlyManagedImagesOfDeletedPrinters()
+    {
+        BedClearEvaluation sample = await AddSampleAsync();
+        BedClearEvaluationProcessor processor = CreateProcessor();
+        await processor.ProcessPendingAsync(CancellationToken.None);
+        await _db.Entry(sample).ReloadAsync();
+        string capturedImage = Path.Combine(_root, sample.ImageFilePath!);
+        File.Exists(capturedImage).Should().BeTrue();
+
+        var livePrinter = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Retained printer",
+            ServerUrl = "http://retained-printer.invalid",
+            ManufacturerId = _printer.ManufacturerId,
+            ModelId = _printer.ModelId,
+        };
+        _db.Printers.Add(livePrinter);
+        await _db.SaveChangesAsync();
+        string liveDirectory = Path.Combine(_root, "bed-clear", livePrinter.Id.ToString("N"));
+        Directory.CreateDirectory(liveDirectory);
+        string liveImage = Path.Combine(liveDirectory, $"{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(liveImage, [1]);
+        string unmanagedFile = Path.Combine(Path.GetDirectoryName(capturedImage)!, "keep.txt");
+        await File.WriteAllTextAsync(unmanagedFile, "Unmanaged file");
+        string unrelatedDirectory = Path.Combine(_root, "bed-clear", "not-a-printer");
+        Directory.CreateDirectory(unrelatedDirectory);
+        string unrelatedImage = Path.Combine(unrelatedDirectory, $"{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(unrelatedImage, [1]);
+
+        _db.Printers.Remove(_printer);
+        await _db.SaveChangesAsync();
+        (await _db.BedClearEvaluations.CountAsync()).Should().Be(0);
+
+        await processor.CleanupOrphanedImagesAsync(CancellationToken.None);
+        await processor.CleanupOrphanedImagesAsync(CancellationToken.None);
+
+        File.Exists(capturedImage).Should().BeFalse();
+        File.Exists(liveImage).Should().BeTrue();
+        File.Exists(unmanagedFile).Should().BeTrue();
+        File.Exists(unrelatedImage).Should().BeTrue();
     }
 
     [Theory]

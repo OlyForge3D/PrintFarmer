@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;

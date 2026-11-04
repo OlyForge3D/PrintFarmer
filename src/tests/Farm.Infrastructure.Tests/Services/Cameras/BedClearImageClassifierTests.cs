@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cameras;
 
 namespace Farm.Infrastructure.Tests.Services.Cameras;

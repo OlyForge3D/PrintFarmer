@@ -49,9 +49,11 @@ and its evidence/reference record, after confirmation.
 
 ### Capture and Reference Scope
 
-Bed-clear acknowledgements create durable pending evaluations. A bounded
-background worker captures within five seconds or records `Unknown`, without
-waiting on the dispatch path. If dispatch has already started, the sample becomes
+After a bed-clear acknowledgement commits, a best-effort write creates a durable
+pending evaluation. Evidence-storage failures are logged and do not reject the
+acknowledgement or prevent dispatch. A bounded background worker captures within
+five seconds or records `Unknown`, without waiting on the dispatch path. If
+dispatch has already started, the sample becomes
 `Unknown`; capturing a useful image never takes precedence over existing
 dispatch behavior. A separate shadow capture has no readiness or dispatch effect.
 
@@ -81,6 +83,9 @@ and reason. Images stay in managed snapshot storage under `bed-clear/`, not a
 third-party training service. The UI lists the latest 100 samples. Evidence is
 retained until deleted; monitor snapshot-storage capacity and remove unwanted
 samples. Deleting evidence is irreversible and changes the evaluation denominator.
+After printer deletion, a background sweep removes its managed evidence images on
+the next cleanup pass (at worker startup and hourly thereafter); failed file
+deletions are logged and retried.
 
 ### Evaluation and Promotion
 

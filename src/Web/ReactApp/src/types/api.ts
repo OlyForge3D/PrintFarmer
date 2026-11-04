@@ -3390,24 +3390,24 @@ export type BedClearEvaluationState = 'Pending' | 'Processing' | 'Complete';
 export interface BedClearEvaluationDto {
   id: string;
   printerId: string;
-  cameraId: string | null;
-  printJobId: string | null;
-  bedTypeId: string | null;
-  sourceAcknowledgementId: string | null;
+  cameraId?: string | null;
+  printJobId?: string | null;
+  bedTypeId?: string | null;
+  sourceAcknowledgementId?: string | null;
   acknowledgedBySubject: string;
   acknowledgedAtUtc: string;
-  capturedAtUtc: string | null;
+  capturedAtUtc?: string | null;
   isReferenceEligible: boolean;
-  toolheadX: number | null;
-  toolheadY: number | null;
-  toolheadZ: number | null;
+  toolheadX?: number | null;
+  toolheadY?: number | null;
+  toolheadZ?: number | null;
   state: BedClearEvaluationState;
   verdict: BedClearDetectorVerdict;
-  score: number | null;
-  reasonCode: string | null;
-  groundTruth: BedClearGroundTruth | null;
-  groundTruthBySubject: string | null;
-  groundTruthAtUtc: string | null;
+  score?: number | null;
+  reasonCode?: string | null;
+  groundTruth?: BedClearGroundTruth | null;
+  groundTruthBySubject?: string | null;
+  groundTruthAtUtc?: string | null;
   isActiveReference: boolean;
   hasImage: boolean;
 }
@@ -3415,10 +3415,10 @@ export interface BedClearEvaluationDto {
 export interface BedClearDetectorMetricsDto {
   sampleCount: number;
   independentlyLabeledCount: number;
-  agreementRate: number | null;
+  agreementRate?: number | null;
   independentlyLabeledOccupiedCount: number;
   falseClearCount: number;
-  falseClearRate: number | null;
+  falseClearRate?: number | null;
 }
 
 export interface CameraPrinterSummary {

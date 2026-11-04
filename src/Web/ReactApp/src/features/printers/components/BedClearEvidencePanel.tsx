@@ -14,11 +14,11 @@ interface BedClearEvidencePanelProps {
 const evaluationsKey = (printerId: string) => ['bed-clear-evaluations', printerId] as const;
 const metricsKey = (printerId: string) => ['bed-clear-detector-metrics', printerId] as const;
 
-function formatRate(rate: number | null): string {
-  return rate === null ? 'Unavailable' : `${(rate * 100).toFixed(1)}%`;
+function formatRate(rate: number | null | undefined): string {
+  return rate == null ? 'Unavailable' : `${(rate * 100).toFixed(1)}%`;
 }
 
-function formatReason(reasonCode: string | null): string | null {
+function formatReason(reasonCode: string | null | undefined): string | null {
   return reasonCode?.replaceAll('_', ' ') ?? null;
 }
 
@@ -82,7 +82,7 @@ function EvaluationCard({
           {evaluation.state === 'Pending' || evaluation.state === 'Processing'
             ? <Badge variant="default">{evaluation.state}</Badge>
             : null}
-          {evaluation.groundTruth && evaluation.score !== null && <span className="text-xs text-pf-text-secondary">Similarity {(evaluation.score * 100).toFixed(1)}% (not confidence)</span>}
+          {evaluation.groundTruth && evaluation.score != null && <span className="text-xs text-pf-text-secondary">Similarity {(evaluation.score * 100).toFixed(1)}% (not confidence)</span>}
         </div>
         {evaluation.reasonCode && (evaluation.groundTruth || !evaluation.hasImage) && <p className="text-sm text-pf-text-secondary">Reason: {formatReason(evaluation.reasonCode)}</p>}
         {evaluation.hasImage
@@ -215,7 +215,7 @@ export function BedClearEvidencePanel({ printerId }: BedClearEvidencePanelProps)
           <p>
             False-clear rate {formatRate(metricsQuery.data.falseClearRate)} from {metricsQuery.data.independentlyLabeledOccupiedCount} independently labeled occupied samples.
           </p>
-          {metricsQuery.data.falseClearRate === null && (
+          {metricsQuery.data.falseClearRate == null && (
             <p className="text-xs text-pf-warning">Unavailable until at least one independently labeled occupied sample exists.</p>
           )}
         </div>

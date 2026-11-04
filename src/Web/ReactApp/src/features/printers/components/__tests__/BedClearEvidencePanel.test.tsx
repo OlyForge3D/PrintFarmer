@@ -105,6 +105,26 @@ describe('BedClearEvidencePanel', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['bed-clear-detector-metrics', 'printer-1'] });
   });
 
+  it('handles null fields omitted by the API without NaN metrics or similarity', async () => {
+    const evaluation = sample({ verdict: 'Unknown', groundTruth: 'Occupied', groundTruthBySubject: 'reviewer' });
+    delete evaluation.score;
+    delete evaluation.reasonCode;
+    service.getBedClearEvaluations.mockResolvedValue([evaluation]);
+    service.getBedClearDetectorMetrics.mockResolvedValue({
+      sampleCount: 1,
+      independentlyLabeledCount: 0,
+      independentlyLabeledOccupiedCount: 0,
+      falseClearCount: 0,
+    });
+    renderPanel();
+
+    expect(await screen.findByText(/False-clear rate Unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/Agreement Unavailable/)).toBeInTheDocument();
+    expect(screen.getByText(/until at least one independently labeled occupied sample/)).toBeInTheDocument();
+    expect(await screen.findByText('Detector: Unknown')).toBeInTheDocument();
+    expect(screen.queryByText(/NaN|Similarity/)).not.toBeInTheDocument();
+  });
+
   it('does not offer self-labeling to the capturing operator', async () => {
     auth.user.id = 'capturer';
     renderPanel();
