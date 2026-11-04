@@ -1061,7 +1061,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// <exception cref="InvalidOperationException">
     /// Thrown when no profiles were delivered or when a document fails its digest check.
     /// </exception>
-    private static async Task<Dictionary<string, string>> WriteNativeProfilesAsync(
+    internal static async Task<Dictionary<string, string>> WriteNativeProfilesAsync(
         NativeSlicerProfiles? profiles,
         string workDir,
         CancellationToken cancellationToken)
@@ -1074,24 +1074,53 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         VerifyDigest("machine", profiles.MachineJson, profiles.MachineSha256);
         VerifyDigest("process", profiles.ProcessJson, profiles.ProcessSha256);
-        VerifyDigest("filament", profiles.FilamentJson, profiles.FilamentSha256);
+        if (profiles.ExtruderFilaments is { } extruderFilaments)
+        {
+            NativeSlicerProfiles.ValidateExtruderFilaments(extruderFilaments);
+            for (int i = 0; i < extruderFilaments.Count; i++)
+            {
+                VerifyDigest($"filament_{i}", extruderFilaments[i].Json, extruderFilaments[i].Sha256);
+            }
+        }
+        else
+        {
+            VerifyDigest("filament", profiles.FilamentJson, profiles.FilamentSha256);
+        }
 
         string machineJsonPath = Path.Join(workDir, "machine.json");
         string processJsonPath = Path.Join(workDir, "process.json");
-        string filamentJsonPath = Path.Join(workDir, "filament.json");
 
         // Written verbatim: OrcaSlicer consumes its own profile schema, so re-serializing a CLR DTO
         // shape here would produce files the slicer cannot load.
         await File.WriteAllTextAsync(machineJsonPath, profiles.MachineJson, cancellationToken);
         await File.WriteAllTextAsync(processJsonPath, profiles.ProcessJson, cancellationToken);
-        await File.WriteAllTextAsync(filamentJsonPath, profiles.FilamentJson, cancellationToken);
-
-        return new Dictionary<string, string>
+        var result = new Dictionary<string, string>
         {
             { "machine", machineJsonPath },
-            { "process", processJsonPath },
-            { "filament", filamentJsonPath }
+            { "process", processJsonPath }
         };
+
+        if (profiles.ExtruderFilaments is { } filaments)
+        {
+            var filamentPaths = new List<string>(filaments.Count);
+            for (int i = 0; i < filaments.Count; i++)
+            {
+                string path = Path.Join(workDir, $"filament_{i}.json");
+                await File.WriteAllTextAsync(path, filaments[i].Json, cancellationToken);
+                filamentPaths.Add(path);
+                result[$"filament_{i}"] = path;
+            }
+
+            result["filament"] = string.Join(";", filamentPaths);
+        }
+        else
+        {
+            string path = Path.Join(workDir, "filament.json");
+            await File.WriteAllTextAsync(path, profiles.FilamentJson, cancellationToken);
+            result["filament"] = path;
+        }
+
+        return result;
     }
 
     private static void VerifyDigest(string kind, string content, string expectedSha256)
@@ -1689,7 +1718,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             profilePaths = await WriteNativeProfilesAsync(job.NativeProfiles, workDir, cancellationToken);
             job.MachineProfileSha256 = job.NativeProfiles.MachineSha256;
             job.ProcessProfileSha256 = job.NativeProfiles.ProcessSha256;
-            job.FilamentProfileSha256 = job.NativeProfiles.FilamentSha256;
+            job.FilamentProfileSha256 = job.NativeProfiles.ExtruderFilaments is { } filaments
+                ? ComputeProfileSetSha256(filaments.Select(filament => filament.Json))
+                : job.NativeProfiles.FilamentSha256;
         }
         else
         {
@@ -1977,7 +2008,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return null;
     }
 
-    private static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
+    internal static string RenameGcodeFile(string gcodeFilePath, DistributedSlicingJob job, GcodeMetadata metadata)
     {
         string modelName = Path.GetFileNameWithoutExtension(job.ModelFileName);
         string printerModel = job.Profile?.MachineProfile?.PrinterModel
@@ -1986,6 +2017,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string material = job.Profile?.ExtruderFilamentProfiles is { Count: > 1 }
             ? string.Join("+", job.Profile.ExtruderFilamentProfiles.Select(f => f.Material ?? "PLA"))
             : job.Profile?.FilamentProfile?.Material ?? "PLA";
+        if (job.Profile is null && job.NativeProfiles is { } native)
+        {
+            printerModel = ReadNativeFilenameValue(native.MachineJson, "printer_model", "name") ?? "Unknown";
+            material = native.ExtruderFilaments is { Count: > 0 } filaments
+                ? string.Join("+", filaments.Select(f => ReadNativeFilenameValue(f.Json, "filament_type", "material") ?? "PLA"))
+                : ReadNativeFilenameValue(native.FilamentJson, "filament_type", "material") ?? "PLA";
+        }
+
         string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
 
         string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
@@ -1998,6 +2037,21 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         File.Move(gcodeFilePath, newPath);
         return newPath;
+    }
+
+    private static string? ReadNativeFilenameValue(string json, params string[] keys)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        foreach (string key in keys)
+        {
+            if (document.RootElement.TryGetProperty(key, out JsonElement element)
+                && OrcaRawValueParser.ParseStringValue(element) is { Length: > 0 } value)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string FormatPrintTime(double totalSeconds)

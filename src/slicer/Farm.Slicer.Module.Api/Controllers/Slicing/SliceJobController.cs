@@ -354,7 +354,9 @@ public partial class SliceJobController(
                 "A model file name is required.");
         }
 
-        IActionResult? profileFailure = await BindResolvedProfilesAsync(job, request, userId, ct);
+        IActionResult? profileFailure = request.ProfileSelections is not null
+            ? await BindExplicitProfilesAsync(job, request, userId, ct)
+            : await BindResolvedProfilesAsync(job, request, userId, ct);
         if (profileFailure is not null)
         {
             return profileFailure;
@@ -1385,6 +1387,7 @@ public partial class SliceJobController(
             MachineProfileJson = job.MachineProfileJson,
             ProcessProfileJson = job.ProcessProfileJson,
             FilamentProfileJson = job.FilamentProfileJson,
+            ExtruderFilamentProfilesJson = job.ExtruderFilamentProfilesJson,
             MachineProfileSha256 = job.MachineProfileSha256,
             ProcessProfileSha256 = job.ProcessProfileSha256,
             FilamentProfileSha256 = job.FilamentProfileSha256,

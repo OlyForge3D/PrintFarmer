@@ -4,7 +4,7 @@
  * This modal provides:
  * - OrcaSlicer-style profile editing interface
  * - Edit existing profile settings with visual change tracking
- * - Save modifications as new custom profile
+ * - Update user profiles or save a new custom copy
  * - Reset individual settings to original values
  * 
  * Supports two profile types:
@@ -32,7 +32,8 @@ import {
   serializeMachineProfileSettings,
 } from '@/features/slicer/components/machineProfileEditorAdapter';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
-import type { OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
+import type { CustomProfile, OrcaMachineProfile, OrcaFilamentProfile } from '@/services/slicerProfilesService';
+import type { FilamentBedContext } from '@/features/slicer/utils/bedSurfaceTemperature';
 
 export type ProfileType = 'machine' | 'filament';
 
@@ -45,8 +46,11 @@ interface ProfileEditorModalProps {
   profileType: ProfileType;
   /** Original profile data (for name and as starting point) */
   originalProfile: OrcaMachineProfile | OrcaFilamentProfile | null;
+  /** User-owned source from the custom profile list; absent for library profiles. */
+  customProfile?: CustomProfile;
   /** Callback when custom profile is saved successfully */
   onSaveSuccess?: (profileId: string, profileName: string) => void;
+  filamentBedContext?: FilamentBedContext;
 }
 
 /**
@@ -88,7 +92,9 @@ export function ProfileEditorModal({
   onClose,
   profileType,
   originalProfile,
+  customProfile,
   onSaveSuccess,
+  filamentBedContext,
 }: ProfileEditorModalProps) {
   const queryClient = useQueryClient();
   const profileNameId = React.useId();
@@ -97,6 +103,9 @@ export function ProfileEditorModal({
   const [profileName, setProfileName] = useState('');
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const sourceName = customProfile?.name ?? originalProfile?.name;
+  const canUpdateSource = Boolean(customProfile && !customProfile.isSystem);
   
   // Unified settings state — works for all profile types
   const [settings, setSettings] = useState<Record<string, unknown>>({});
@@ -106,15 +115,36 @@ export function ProfileEditorModal({
   // Initialize profile name and reset state when modal opens
   React.useEffect(() => {
     if (isOpen) {
-      setProfileName(getDefaultProfileName(profileType, originalProfile?.name));
+      setProfileName(getDefaultProfileName(profileType, sourceName));
       setShowSaveForm(false);
       setSaveError(null);
-      const extracted = extractSettings(profileType, originalProfile);
+      setLoadError(null);
+      let raw = extractRawSettings(originalProfile);
+      if (customProfile) {
+        try {
+          const parsed: unknown = JSON.parse(customProfile.rawJson ?? '');
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Profile settings must be a JSON object');
+          }
+          raw = { ...parsed };
+        } catch (error) {
+          setSettings({});
+          setOriginalSettings({});
+          setRawSettings({});
+          setLoadError(`Cannot load custom profile: ${error instanceof Error ? error.message : 'Invalid JSON'}`);
+          return;
+        }
+      }
+      const extracted = customProfile
+        ? extractSettings(profileType, profileType === 'machine'
+          ? { name: customProfile.name, manufacturer: '', settings: raw }
+          : { name: customProfile.name, material: '', nozzleTemperature: 0, bedTemperature: 0, printSpeed: 0, settings: raw })
+        : extractSettings(profileType, originalProfile);
       setSettings(extracted);
       setOriginalSettings(extracted);
-      setRawSettings(extractRawSettings(originalProfile));
+      setRawSettings(raw);
     }
-  }, [isOpen, profileType, originalProfile]);
+  }, [isOpen, profileType, originalProfile, customProfile, sourceName]);
   
   // Handle individual setting updates
   const handleUpdate = React.useCallback((key: string, value: unknown) => {
@@ -134,16 +164,22 @@ export function ProfileEditorModal({
     [originalSettings, settings],
   );
   
-  // Save mutation using uploadProfile
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (saveAs: boolean) => {
       const serializedSettings = profileType === 'machine'
         ? serializeMachineProfileSettings(settings, originalSettings, rawSettings)
         : serializeFilamentProfileSettings(settings, originalSettings, rawSettings);
+      if (customProfile && canUpdateSource && !saveAs) {
+        return slicerProfilesService.updateCustomProfile(customProfile.id, {
+          rawJson: JSON.stringify(serializedSettings),
+        });
+      }
       const response = await slicerProfilesService.uploadProfile({
         name: profileName.trim(),
         profileType,
         rawJson: JSON.stringify(serializedSettings),
+        ...(customProfile?.printerModelId ? { printerModelId: customProfile.printerModelId } : {}),
+        ...(customProfile?.compatiblePrinters ? { compatiblePrinters: customProfile.compatiblePrinters } : {}),
       });
       return response;
     },
@@ -165,15 +201,21 @@ export function ProfileEditorModal({
   });
   
   const handleSave = () => {
-    if (!profileName.trim()) {
+    if (loadError || saveMutation.isPending) return;
+    if (!showSaveForm && !canUpdateSource) {
+      setShowSaveForm(true);
+      return;
+    }
+    if (showSaveForm && !profileName.trim()) {
       setSaveError('Profile name is required');
       return;
     }
     setSaveError(null);
-    saveMutation.mutate();
+    saveMutation.mutate(showSaveForm);
   };
   
   const handleSaveAsClick = () => {
+    setSaveError(null);
     setShowSaveForm(true);
   };
   
@@ -186,13 +228,13 @@ export function ProfileEditorModal({
   const modalTitle = useMemo(() => {
     switch (profileType) {
       case 'machine':
-        return `Edit Machine Profile${originalProfile?.name ? `: ${originalProfile.name}` : ''}`;
+        return `Edit Machine Profile${sourceName ? `: ${sourceName}` : ''}`;
       case 'filament':
-        return `Edit Filament Profile${originalProfile?.name ? `: ${originalProfile.name}` : ''}`;
+        return `Edit Filament Profile${sourceName ? `: ${sourceName}` : ''}`;
       default:
         return 'Edit Profile';
     }
-  }, [profileType, originalProfile]);
+  }, [profileType, sourceName]);
   
   return (
     <Modal
@@ -213,13 +255,16 @@ export function ProfileEditorModal({
               Cancel
             </Button>
             {!showSaveForm ? (
-              <Button 
-                variant="primary" 
-                onClick={handleSaveAsClick}
-                disabled={!hasChanges}
-              >
-                Save as Custom Profile
-              </Button>
+              <>
+                {canUpdateSource && (
+                  <Button variant="secondary" onClick={handleSaveAsClick} disabled={saveMutation.isPending}>
+                    Save as
+                  </Button>
+                )}
+                <Button variant="primary" onClick={handleSave} loading={saveMutation.isPending}>
+                  Save
+                </Button>
+              </>
             ) : (
               <>
                 <Button variant="secondary" onClick={handleCancelSave}>
@@ -238,7 +283,9 @@ export function ProfileEditorModal({
         </div>
       }
     >
-      {/* Save Form (shown when Save as Custom clicked) */}
+      {loadError && <Alert type="error">{loadError}</Alert>}
+      {!showSaveForm && saveError && <Alert type="error">{saveError}</Alert>}
+      {/* Save-as form */}
       {showSaveForm && (
         <div className="mb-4 p-4 bg-pf-bg-1 rounded-lg border border-pf-border">
           <label
@@ -271,6 +318,7 @@ export function ProfileEditorModal({
           settings={settings}
           originalSettings={originalSettings}
           onUpdate={handleUpdate}
+          filamentBedContext={filamentBedContext}
           additionalSettings={profileType === 'machine'
             ? MACHINE_PROFILE_ADDITIONAL_SETTINGS
             : undefined}

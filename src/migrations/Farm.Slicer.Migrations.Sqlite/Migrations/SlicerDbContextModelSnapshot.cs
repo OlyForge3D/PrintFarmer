@@ -15,7 +15,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Artifact", b =>
                 {
@@ -753,6 +753,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtruderFilamentProfilesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FailureReason")

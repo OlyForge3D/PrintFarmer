@@ -18,7 +18,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -759,6 +759,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer");
 
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtruderFilamentProfilesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FailureReason")
