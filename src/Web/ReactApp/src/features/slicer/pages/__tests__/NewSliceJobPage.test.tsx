@@ -1252,6 +1252,106 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
+    it.each([false, true])('keeps same-name machine ownership when switching between user and system rows (restored: %s)', async restored => {
+      const custom = {
+        id: 'owned-machine-id', name: mockMachineProfiles[0].name, profileType: 'machine' as const,
+        isSystem: false, createdAt: '2026-11-03T00:00:00Z',
+        rawJson: JSON.stringify({ printer_model: 'MK4', nozzle_diameter: ['0.4'], support_multi_bed_types: '0' }),
+      };
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 1, filamentProfileCount: 0, processProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.updateCustomProfile).mockResolvedValue(custom);
+      if (restored) {
+        localStorage.setItem('sliceJob.selectedPrinterId', mockPrinterDetails.id);
+        localStorage.setItem('sliceJob.selectedMachineProfileId', custom.name);
+        localStorage.setItem('sliceJob.selectedMachineProfileId.customId', custom.id);
+      }
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => expect(slicerProfilesService.getMachineProfilesForModel).toHaveBeenCalled());
+      for (const owned of [true, false]) {
+        fireEvent.click(await screen.findByRole('button', { name: /^Machine profile:/ }));
+        const group = await screen.findByRole('region', { name: owned ? 'My machine profiles' : '0.4 mm machine profiles' });
+        if (restored && owned) {
+          expect(within(group).getAllByRole('button')[0]).toHaveAttribute('aria-pressed', 'true');
+        }
+        fireEvent.click(within(group).getAllByRole('button')[0]);
+        expect(localStorage.getItem('sliceJob.selectedMachineProfileId.customId')).toBe(owned ? custom.id : null);
+        fireEvent.click(screen.getByRole('button', { name: 'Machine profile options menu' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+        if (owned) {
+          await waitFor(() => expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledWith(
+            custom.id, { rawJson: custom.rawJson },
+          ));
+          await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+        } else {
+          expect(await screen.findByLabelText('Custom Profile Name')).toBeInTheDocument();
+          expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledTimes(1);
+        }
+      }
+    });
+
+    it.each([false, true])('keeps same-name filament ownership when switching user to system (multi-toolhead: %s)', async multi => {
+      const custom = {
+        id: 'same-name-filament-id', name: mockFilamentProfiles[0].name, profileType: 'filament' as const,
+        isSystem: false, createdAt: '2026-11-03T00:00:00Z',
+        rawJson: JSON.stringify({ compatible_printers: ['Prusa MK4 0.4 nozzle'], textured_plate_temp: ['62', '57'] }),
+      };
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [custom], totalCount: 1, machineProfileCount: 0, filamentProfileCount: 1, processProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([
+        { ...mockFilamentProfiles[0], settings: { textured_plate_temp: ['51'] } },
+      ]);
+      vi.mocked(slicerProfilesService.updateCustomProfile).mockResolvedValue(custom);
+      if (multi) {
+        vi.mocked(apiClient.getPrinterDetails).mockResolvedValue({
+          ...mockPrinterDetails, backend: PrinterBackend.PrusaLink,
+          toolheads: [
+            { id: 'th-1', index: 0, nozzleDiameter: 0.4, isPrimary: true },
+            { id: 'th-2', index: 1, nozzleDiameter: 0.4, isPrimary: false },
+          ],
+        });
+      } else {
+        localStorage.setItem('sliceJob.selectedFilamentProfileId', custom.name);
+        localStorage.setItem('sliceJob.selectedFilamentProfileId.customId', custom.id);
+      }
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalled());
+      const container = multi ? await screen.findByTestId('extruder-filament-1') : await screen.findByTestId('single-filament-section');
+      for (const owned of [true, false]) {
+        const trigger = within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!;
+        fireEvent.click(trigger);
+        const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
+        fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: custom.name } });
+        const row = within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' });
+        if (!multi && owned) {
+          expect(row).toHaveAttribute('aria-current', 'true');
+        }
+        fireEvent.click(row);
+        if (!multi) {
+          expect(localStorage.getItem('sliceJob.selectedFilamentProfileId.customId')).toBe(owned ? custom.id : null);
+        }
+        if (multi) {
+          fireEvent.click(screen.getByRole('button', { name: 'Edit Extruder 2 filament settings' }));
+        } else {
+          fireEvent.click(screen.getByRole('button', { name: 'Filament profile options menu' }));
+          fireEvent.click(screen.getByRole('button', { name: 'Edit settings' }));
+        }
+        await screen.findByRole('heading', { name: `Edit Filament Profile: ${custom.name}` });
+        expect(screen.getByTitle('Textured Plate other layers')).toHaveValue(owned ? 62 : 51);
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        if (owned) {
+          await waitFor(() => expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledWith(custom.id, { rawJson: custom.rawJson }));
+          await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument());
+        } else {
+          expect(await screen.findByLabelText('Custom Profile Name')).toBeInTheDocument();
+          expect(slicerProfilesService.updateCustomProfile).toHaveBeenCalledTimes(1);
+        }
+      }
+    });
+
     it.each([false, true])('updates the selected custom filament ID from the real caller (multi-toolhead: %s)', async multi => {
       const custom = {
         id: 'owned-filament-id', name: 'My MK4 PLA', profileType: 'filament' as const,

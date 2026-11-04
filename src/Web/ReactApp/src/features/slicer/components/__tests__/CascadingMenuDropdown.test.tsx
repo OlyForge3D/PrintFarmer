@@ -129,7 +129,7 @@ describe('FilamentProfileDropdown trigger', () => {
     fireEvent(window, new Event('scroll'));
     expect(menu).toHaveStyle({ top: 'auto', bottom: '302px', left: '672px', maxHeight: '400px' });
     fireEvent.click(screen.getByRole('button', { name: /Saved filament/ }));
-    expect(onSelect).toHaveBeenCalledWith('Saved filament', 'custom');
+    expect(onSelect).toHaveBeenCalledWith('Saved filament', 'custom', 'custom');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
