@@ -1252,6 +1252,69 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Bed-surface temperatures', () => {
+    it.each([false, true])('submits source-qualified same-name selections (multi-toolhead: %s)', async multi => {
+      const machine = {
+        id: 'owned-machine-id', name: mockMachineProfiles[0].name, profileType: 'machine' as const,
+        isSystem: false, createdAt: '2026-11-03T00:00:00Z',
+        rawJson: JSON.stringify({ printer_model: 'MK4', nozzle_diameter: ['0.4'] }),
+      };
+      const filament = {
+        id: 'same-name-filament-id', name: mockFilamentProfiles[0].name, profileType: 'filament' as const,
+        isSystem: false, createdAt: '2026-11-03T00:00:00Z',
+        rawJson: JSON.stringify({ compatible_printers: ['Prusa MK4 0.4 nozzle'], textured_plate_temp: ['62'] }),
+      };
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [machine, filament], totalCount: 2, machineProfileCount: 1, filamentProfileCount: 1, processProfileCount: 0,
+      });
+      localStorage.setItem('sliceJob.selectedMachineProfileId', machine.name);
+      localStorage.setItem('sliceJob.selectedMachineProfileId.customId', machine.id);
+      localStorage.setItem('sliceJob.selectedFilamentProfileId', filament.name);
+      localStorage.setItem('sliceJob.selectedFilamentProfileId.customId', filament.id);
+      if (multi) {
+        vi.mocked(apiClient.getPrinterDetails).mockResolvedValue({
+          ...mockPrinterDetails, backend: PrinterBackend.PrusaLink,
+          toolheads: [
+            { id: 'th-1', index: 0, nozzleDiameter: 0.4, isPrimary: true },
+            { id: 'th-2', index: 1, nozzleDiameter: 0.4, isPrimary: false },
+          ],
+        });
+      }
+      renderWithProviders(<NewSliceJobPage />, { route: '/slicer?modelId=model-3d-1' });
+      await waitFor(() => expect(slicerProfilesService.getFilamentProfilesForMachines).toHaveBeenCalled());
+      await waitFor(() => expect(Array.from(document.querySelectorAll('select')).some(select => select.value.startsWith('system:'))).toBe(true));
+      for (const owned of [true, false]) {
+        fireEvent.click(await screen.findByRole('button', { name: /^Machine profile:/ }));
+        fireEvent.click(within(await screen.findByRole('region', {
+          name: owned ? 'My machine profiles' : '0.4 mm machine profiles',
+        })).getAllByRole('button')[0]);
+        const containers = multi
+          ? [await screen.findByTestId('extruder-filament-0'), await screen.findByTestId('extruder-filament-1')]
+          : [await screen.findByTestId('single-filament-section')];
+        for (const container of containers) {
+          fireEvent.click(within(container).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!);
+          const picker = await screen.findByRole('dialog', { name: 'Filament selector' });
+          fireEvent.change(within(picker).getByPlaceholderText('Search filaments...'), { target: { value: filament.name } });
+          fireEvent.click(within(picker).getByRole('button', { name: owned ? /★.*Generic PLA @MK4/ : 'Generic PLA @MK4' }));
+        }
+        await act(async () => {
+          const props = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice: () => void };
+          props.onSlice();
+        });
+        await waitFor(() => expect(sliceJobService.submitJob).toHaveBeenCalledTimes(owned ? 1 : 2));
+        const request = vi.mocked(sliceJobService.submitJob).mock.calls.at(-1)![0];
+        const expectedFilament = owned
+          ? { source: 'user', name: filament.name, customProfileId: filament.id }
+          : { source: 'system', name: filament.name };
+        expect(request.profileSelections).toEqual({
+          machine: owned
+            ? { source: 'user', name: machine.name, customProfileId: machine.id }
+            : { source: 'system', name: machine.name },
+          process: { source: 'system', name: expect.any(String) },
+          filaments: multi ? [expectedFilament, expectedFilament] : [expectedFilament],
+        });
+      }
+    });
+
     it.each([false, true])('keeps same-name machine ownership when switching between user and system rows (restored: %s)', async restored => {
       const custom = {
         id: 'owned-machine-id', name: mockMachineProfiles[0].name, profileType: 'machine' as const,

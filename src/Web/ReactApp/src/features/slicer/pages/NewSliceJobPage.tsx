@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
   sliceJobService,
   SubmitSliceJobRequest,
+  type SliceProfileSelection,
   formatQueuePositionSuffix,
 } from '@/services/sliceJobService';
 import { slicerService, type SlicerEngineInfo } from '@/services/slicerService';
@@ -186,7 +187,7 @@ function normalizeHexNoHash(input: unknown): string | undefined {
  * OrcaSlicer `filament_colour` / `default_filament_colour` settings. Each may be
  * a string or a per-extruder string array. Falls back to a neutral grey.
  */
-function getFilamentProfileColour(profile: OrcaFilamentProfile | undefined): string {
+function getFilamentProfileColour(profile: Pick<OrcaFilamentProfile, 'settings'> | undefined): string {
   const settings = profile?.settings;
   if (settings) {
     const candidates = [settings.filament_colour, settings.default_filament_colour];
@@ -218,6 +219,12 @@ const MODELS_LIST_BASIC_QUERY_KEY = ['modelsListBasic'];
 interface ProfileSelection {
   name: string;
   customId?: string;
+}
+
+function toSliceProfileSelection(selection: ProfileSelection): SliceProfileSelection {
+  return selection.customId
+    ? { source: 'user', name: selection.name, customProfileId: selection.customId }
+    : { source: 'system', name: selection.name };
 }
 
 async function fetchModelsListBasic(): Promise<ModelListItem[]> {
@@ -1782,6 +1789,27 @@ export const NewSliceJobPage: React.FC = () => {
       allFilamentProfiles.find((p: OrcaFilamentProfile) => p.name === selectedFilamentProfileId);
   }, [allFilamentProfiles, selectedFilamentProfileId, filamentSelection.customId]);
 
+  const getSelectionColour = useCallback((selection: ProfileSelection): string => {
+    if (!selection.customId) {
+      return getFilamentProfileColour(allFilamentProfiles.find(p => p.name === selection.name));
+    }
+    const profile = customProfilesData?.profiles.find(p =>
+      p.id === selection.customId && p.profileType === 'filament');
+    if (!profile?.rawJson) return DEFAULT_FILAMENT_COLOUR;
+    try {
+      const parsed: unknown = JSON.parse(profile.rawJson);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_FILAMENT_COLOUR;
+      const raw = parsed as Record<string, unknown>;
+      const settings = raw.settings && typeof raw.settings === 'object' && !Array.isArray(raw.settings)
+        ? raw.settings as Record<string, unknown> : raw;
+      return getFilamentProfileColour({ settings });
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      // Display only; the server rejects invalid native JSON before queuing.
+      return DEFAULT_FILAMENT_COLOUR;
+    }
+  }, [allFilamentProfiles, customProfilesData]);
+
   const [bedSurfaceSelection, setBedSurfaceSelection] = useState({ machine: '', value: '' });
   const selectedBedType = bedSurfaceSelection.machine === selectedMachineProfileId ? bedSurfaceSelection.value : '';
   const processOverrides = useMemo(() => buildProcessOverrides({
@@ -2149,17 +2177,24 @@ export const NewSliceJobPage: React.FC = () => {
 
     // Build per-slice filament colour overrides (hex, with '#'). Defaults come
     // from each selected profile's filament_colour and are user-overridable.
-    const resolveExtruderColour = (idx: number, profileName: string): string => {
+    const resolveExtruderColour = (idx: number, selection: ProfileSelection): string => {
       const override = extruderFilamentColours[idx];
-      const colour = override ?? getFilamentProfileColour(allFilamentProfiles.find(p => p.name === profileName));
+      const colour = override ?? getSelectionColour(selection);
       return `#${colour.replace(/^#/, '')}`;
     };
     const extruderFilamentColoursPayload = printerIsMultiToolhead
-      ? physicalToolheads.map((_, i) => resolveExtruderColour(i, extruderFilamentProfileIds[i] ?? ''))
+      ? physicalToolheads.map((_, i) => resolveExtruderColour(i, extruderFilamentSelections[i] ?? { name: '' }))
       : undefined;
     const singleFilamentColour = printerIsMultiToolhead
       ? undefined
-      : resolveExtruderColour(0, selectedFilamentProfileId);
+      : resolveExtruderColour(0, filamentSelection);
+
+    if (selectedProcessPresetId.startsWith('custom:') && !selectedCustomProcessProfile) {
+      const msg = 'The selected process profile is no longer available. Select it again.';
+      setError(msg);
+      toast.error(msg);
+      return false;
+    }
 
     // Process-setting overrides: send ONLY the keys the user actually changed in
     // the editor — never the full ~300-key metadata baseline. The named process
@@ -2187,13 +2222,25 @@ export const NewSliceJobPage: React.FC = () => {
         filamentProfileNames: extruderFilamentNames,
         filamentColours: extruderFilamentColoursPayload,
         filamentColour: singleFilamentColour,
-        processPresetId: selectedProcessPresetId,
+        processPresetId: selectedCustomProcessProfile
+          ? selectedCustomProcessProfile.name : selectedProcessPresetId,
         overrides: processOverrides,
         bedType: selectedBedType,
       }),
       slicerProfileId: selectedProcessPresetId.startsWith('custom:')
             ? selectedProcessPresetId.slice('custom:'.length)
             : undefined,
+      ...(slicerInfo.engine === 0 ? {
+        profileSelections: {
+          machine: toSliceProfileSelection(machineSelection),
+          process: selectedCustomProcessProfile
+            ? toSliceProfileSelection({ name: selectedCustomProcessProfile.name, customId: selectedCustomProcessProfile.id })
+            : toSliceProfileSelection({ name: selectedProcessPresetId.replace(/^system:/, '') }),
+          filaments: printerIsMultiToolhead
+            ? physicalToolheads.map((_, i) => toSliceProfileSelection(extruderFilamentSelections[i] ?? { name: '' }))
+            : [toSliceProfileSelection(filamentSelection)],
+        },
+      } : {}),
       requiredCapabilitiesJson: '[]',
       priority: 1,
       modelTransformJson: primaryModel
@@ -2222,7 +2269,11 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation.mutate(request);
     return true;
   }, [
-    allFilamentProfiles,
+    getSelectionColour,
+    machineSelection,
+    filamentSelection,
+    extruderFilamentSelections,
+    selectedCustomProcessProfile,
     bedModels,
     extruderFilamentColours,
     extruderFilamentProfileIds,
@@ -2949,7 +3000,7 @@ export const NewSliceJobPage: React.FC = () => {
                     const selectedName = extruderFilamentProfileIds[idx] ?? '';
                     const selection = extruderFilamentSelections[idx] ?? { name: '' };
                     const selectedProfile = selection.customId ? undefined : allFilamentProfiles.find(p => p.name === selectedName);
-                    const swatchColour = extruderFilamentColours[idx] ?? getFilamentProfileColour(selectedProfile);
+                    const swatchColour = extruderFilamentColours[idx] ?? getSelectionColour(selection);
 
                     return (
                       <div
@@ -2979,7 +3030,11 @@ export const NewSliceJobPage: React.FC = () => {
                               setExtruderFilamentSelections(prev => ({ ...prev, [idx]: { name, customId } }));
                               // Default the colour swatch from the newly selected profile.
                               const sp = source === 'system' ? allFilamentProfiles.find(p => p.name === name) : undefined;
-                              setExtruderFilamentColours(prev => ({ ...prev, [idx]: getFilamentProfileColour(sp) }));
+                              setExtruderFilamentColours(prev => {
+                                const next = { ...prev };
+                                delete next[idx];
+                                return next;
+                              });
                               // Also keep the primary filament in sync (first extruder = primary)
                               if (idx === 0) {
                                 setSelectedFilamentProfileId(name, customId);
@@ -3099,7 +3154,7 @@ export const NewSliceJobPage: React.FC = () => {
                   <ColorPicker
                     swatchOnly
                     swatchClassName="w-7 h-7"
-                    value={extruderFilamentColours[0] ?? getFilamentProfileColour(selectedFilamentProfile)}
+                    value={extruderFilamentColours[0] ?? getSelectionColour(filamentSelection)}
                     onChange={(hex) => setExtruderFilamentColours(prev => ({ ...prev, 0: hex }))}
                     aria-label="Filament colour"
                   />
@@ -3115,7 +3170,11 @@ export const NewSliceJobPage: React.FC = () => {
                       onSelect={(name, source, customId) => {
                         setSelectedFilamentProfileId(name, customId);
                         const sp = source === 'system' ? allFilamentProfiles.find(p => p.name === name) : undefined;
-                        setExtruderFilamentColours(prev => ({ ...prev, 0: getFilamentProfileColour(sp) }));
+                        setExtruderFilamentColours(prev => {
+                          const next = { ...prev };
+                          delete next[0];
+                          return next;
+                        });
                         if (source === 'system') {
                           setSelectedFilamentMaterial(sp?.material || '');
                         } else {

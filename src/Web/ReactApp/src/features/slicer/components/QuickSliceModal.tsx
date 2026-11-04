@@ -247,6 +247,11 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       model3DId: model.id,
       modelFileName: model.fileName || model.name,
       slicerEngine: 0, // OrcaSlicer
+      profileSelections: {
+        machine: { source: 'system', name: effectiveMachineProfileId },
+        process: { source: 'system', name: effectiveProcessProfileId.replace(/^system:/, '') },
+        filaments: [{ source: 'system', name: effectiveFilamentProfileId }],
+      },
       ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),
       slicerProfileJson: buildSlicerProfileJson({
         machineProfileName: effectiveMachineProfileId,

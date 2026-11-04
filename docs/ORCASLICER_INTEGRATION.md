@@ -79,11 +79,11 @@ current worker release.
 
 - Every OrcaSlicer plugin registers itself under a `(name, version)` key in `ISlicerRegistry`. `SlicerPluginDiscovery` de-duplicates on that tuple so a repeated version is a no-op.
 - Slice jobs carry an optional `slicerEngineVersion` (persisted on `SliceJob` — see the `AddSliceJobSlicerEngineVersion` migrations for PostgreSQL and SQL Server). `SliceJobController.SubmitAsync` validates the version against the registry and returns HTTP 400 with the list of registered versions if it's unknown.
-- The controller **server-derives** `RequiredCapabilitiesJson`:
+- For legacy selections, the controller **server-derives** `RequiredCapabilitiesJson`:
   - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
   - Unpinned → `["orcaslicer"]` only.
   This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
-- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, which emits `["orcaslicer","orcaslicer:<Worker:EngineVersion>","stl-processing","gcode-generation"]`. Both `SlicerRegistrationClient` (initial registration payload) and `QueueConsumerService` (per-poll capability list) use the same provider so they never drift.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, including `orcaslicer`, `orcaslicer:<Worker:EngineVersion>`, `orcaslicer:native-profile-selections-v1`, `orcaslicer:<Worker:EngineVersion>:native-profile-selections-v1`, `stl-processing`, and `gcode-generation`. Both `SlicerRegistrationClient` and `QueueConsumerService` use the same provider.
 - `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
 
 ### Deploying a second (previous) worker
@@ -396,6 +396,30 @@ Wait for `GET /api/slicers/engines` to report `2.3.1` as
 11. UI receives notification, refreshes job status
 12. User downloads G-code
 ```
+
+The web slicer submits `profileSelections` for OrcaSlicer jobs: `machine`,
+`process`, and an extruder-ordered `filaments` array. Every entry carries
+`source` (`system` or `user`) and `name`; `user` entries also require
+`customProfileId`. The API authorizes user IDs against the authenticated user,
+public visibility or administrator access, rather than trusting request
+`userId`. A missing, renamed, inaccessible, wrong-type or ambiguous profile
+returns `invalid_profile_selection`; an unavailable stock library returns 503.
+Neither falls back to a same-named profile from the other source. Legacy clients
+that omit `profileSelections` retain the existing resolution contract.
+
+Explicit per-extruder selections persist ordered native filament documents and
+SHA-256 digests in `SliceJob.ExtruderFilamentProfilesJson`. The claim transports
+that same snapshot list to the worker, which verifies every digest before writing
+`filament_0.json`, `filament_1.json`, and subsequent files in order.
+`--load-filaments` receives those paths joined by semicolons. The completion digest
+hashes the ordered documents separated by a NUL byte. Malformed or empty explicit
+lists fail instead of falling back to name-based lookup; legacy jobs without the
+list retain the single native filament path or legacy named-profile behavior.
+Explicit selections require only the matching composite capability:
+`orcaslicer:native-profile-selections-v1` when unpinned, or
+`orcaslicer:<version>:native-profile-selections-v1` when pinned. Do not mix in
+generic capabilities: OR-any matching would allow an unsupported worker to claim
+the job.
 
 ---
 

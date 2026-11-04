@@ -343,6 +343,11 @@ describe('QuickSliceModal', () => {
         const submittedRequest = mockSubmitJob.mock.calls.at(-1)?.[0];
         expect(submittedRequest?.slicerProfileJson).toEqual(expect.any(String));
         expect(submittedRequest?.slicerProfileJson).not.toContain('curr_bed_type');
+        expect(submittedRequest?.profileSelections).toEqual({
+          machine: { source: 'system', name: 'Machine A' },
+          process: { source: 'system', name: '0.20mm Standard' },
+          filaments: [{ source: 'system', name: 'PLA Generic' }],
+        });
       });
     });
   });

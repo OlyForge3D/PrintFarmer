@@ -271,6 +271,10 @@ public class SliceJob
     [JsonIgnore]
     public string? FilamentProfileJson { get; set; }
 
+    /// <summary>Ordered immutable native filament documents and digests for explicit extruder selections.</summary>
+    [JsonIgnore]
+    public string? ExtruderFilamentProfilesJson { get; set; }
+
     /// <summary>
     /// SHA-256 (hex) of the effective native machine profile. For named legacy selections this is
     /// recorded from the authenticated worker's completion report.

@@ -1,7 +1,13 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Farm.Slicer.Module.Models;
+
+/// <summary>An immutable native filament document and its expected SHA-256 digest.</summary>
+/// <param name="Json">The exact native filament profile JSON.</param>
+/// <param name="Sha256">Expected SHA-256 (hex) of the UTF-8 document.</param>
+public sealed record NativeFilamentProfile(string Json, string Sha256);
 
 /// <summary>
 /// The exact native slicer profile documents delivered with a claimed job, plus their digests.
@@ -25,6 +31,9 @@ public sealed record NativeSlicerProfiles(
     string ProcessSha256,
     string FilamentSha256)
 {
+    /// <summary>Exact native filament snapshots in extruder order, when explicitly selected.</summary>
+    public IReadOnlyList<NativeFilamentProfile>? ExtruderFilaments { get; init; }
+
     /// <summary>
     /// Builds a profile set from persisted job columns, filling in any digest the job did not record.
     /// </summary>
@@ -34,19 +43,36 @@ public sealed record NativeSlicerProfiles(
     /// <param name="machineSha256">Recorded machine digest, if any.</param>
     /// <param name="processSha256">Recorded process digest, if any.</param>
     /// <param name="filamentSha256">Recorded filament digest, if any.</param>
-    /// <returns>The profile set, or <see langword="null"/> when any document is missing.</returns>
+    /// <param name="extruderFilamentProfilesJson">Ordered native filament snapshots, if explicitly selected.</param>
+    /// <returns>The profile set, or <see langword="null"/> when a legacy job is missing a document.</returns>
+    /// <exception cref="JsonException">An explicit snapshot list or document contains invalid JSON.</exception>
+    /// <exception cref="InvalidOperationException">Explicit snapshots are empty, malformed or missing required native profiles.</exception>
     public static NativeSlicerProfiles? FromJob(
         string? machineJson,
         string? processJson,
         string? filamentJson,
         string? machineSha256,
         string? processSha256,
-        string? filamentSha256)
+        string? filamentSha256,
+        string? extruderFilamentProfilesJson = null)
     {
+        IReadOnlyList<NativeFilamentProfile>? extruderFilaments = null;
+        if (extruderFilamentProfilesJson is not null)
+        {
+            extruderFilaments = JsonSerializer.Deserialize<List<NativeFilamentProfile>>(
+                extruderFilamentProfilesJson, JsonSerializerOptions.Web);
+            ValidateExtruderFilaments(extruderFilaments);
+        }
+
         if (string.IsNullOrWhiteSpace(machineJson) ||
             string.IsNullOrWhiteSpace(processJson) ||
             string.IsNullOrWhiteSpace(filamentJson))
         {
+            if (extruderFilamentProfilesJson is not null)
+            {
+                throw new InvalidOperationException("Explicit native filament snapshots require native machine, process and filament profiles.");
+            }
+
             return null;
         }
 
@@ -56,7 +82,36 @@ public sealed record NativeSlicerProfiles(
             filamentJson,
             Coalesce(machineSha256, machineJson),
             Coalesce(processSha256, processJson),
-            Coalesce(filamentSha256, filamentJson));
+            Coalesce(filamentSha256, filamentJson))
+        {
+            ExtruderFilaments = extruderFilaments
+        };
+    }
+
+    /// <summary>Rejects empty or malformed explicit snapshots rather than resolving profiles by name.</summary>
+    /// <param name="profiles">The ordered explicit snapshots.</param>
+    public static void ValidateExtruderFilaments(IReadOnlyList<NativeFilamentProfile>? profiles)
+    {
+        if (profiles is not { Count: > 0 })
+        {
+            throw new InvalidOperationException("Explicit native filament snapshots must not be empty.");
+        }
+
+        foreach (NativeFilamentProfile profile in profiles)
+        {
+            if (profile is null || string.IsNullOrWhiteSpace(profile.Json) ||
+                string.IsNullOrWhiteSpace(profile.Sha256) ||
+                profile.Sha256.Length != 64 || !profile.Sha256.All(char.IsAsciiHexDigit))
+            {
+                throw new InvalidOperationException("An explicit native filament snapshot is missing its document or SHA-256 digest.");
+            }
+
+            using JsonDocument document = JsonDocument.Parse(profile.Json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("An explicit native filament snapshot must contain a JSON object.");
+            }
+        }
     }
 
     /// <summary>Computes the uppercase hexadecimal SHA-256 of a UTF-8 payload.</summary>

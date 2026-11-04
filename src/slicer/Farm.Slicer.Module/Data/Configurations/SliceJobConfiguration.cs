@@ -51,6 +51,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.MachineProfileJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.ProcessProfileJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.FilamentProfileJson).HasColumnType("TEXT");
+        _ = builder.Property(j => j.ExtruderFilamentProfilesJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.MachineProfileSha256).HasMaxLength(64);
         _ = builder.Property(j => j.ProcessProfileSha256).HasMaxLength(64);
         _ = builder.Property(j => j.FilamentProfileSha256).HasMaxLength(64);
