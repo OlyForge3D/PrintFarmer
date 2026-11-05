@@ -230,6 +230,8 @@ jobs:
               command: ["bash", "-c", "gunicorn --bind 0.0.0.0:3333 --workers 1 --timeout 120 wsgi"]
               ports:
                 - "127.0.0.1:3333:3333"
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
             printguard:
               ports:
                 - "127.0.0.1:8000:8000"
@@ -241,6 +243,7 @@ jobs:
           Image.new("RGB", (64, 64), (128, 128, 128)).save(sys.argv[1], format="JPEG", quality=90)
           PY
           echo "PROVIDER_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
+          echo "PROVIDER_PROBE_SNAPSHOT_URL=http://host.docker.internal:8765/frame.jpg" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_COMPOSE=$probe_dir/compose/docker-compose.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_OVERRIDE=$probe_dir/ports.override.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_IMAGE=$probe_dir/frame.jpg" >> "$GITHUB_ENV"
@@ -323,6 +326,27 @@ jobs:
           PY
           echo "PROVIDER_PROBE_COMPOSE=$provider_compose" >> "$GITHUB_ENV"
 
+      - name: Serve synthetic camera snapshot to provider network
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 \
+            --bind 0.0.0.0 \
+            --directory "$PROVIDER_PROBE_DIR" \
+            > "$PROVIDER_PROBE_DIR/snapshot-fixture.log" 2>&1 &
+          echo "$!" > "$PROVIDER_PROBE_DIR/snapshot-fixture.pid"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$PROVIDER_PROBE_SNAPSHOT_URL" \
+              --output "$PROVIDER_PROBE_DIR/snapshot-served.jpg"; then
+              cmp "$PROVIDER_PROBE_IMAGE" "$PROVIDER_PROBE_DIR/snapshot-served.jpg"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Synthetic camera snapshot server did not become ready."
+          cat "$PROVIDER_PROBE_DIR/snapshot-fixture.log"
+          exit 1
+
       - name: Pull provider images and record immutable image identities
         shell: bash
         run: |
@@ -393,6 +417,8 @@ jobs:
                   byte[] image = await File.ReadAllBytesAsync(
                       Environment.GetEnvironmentVariable("PROVIDER_PROBE_IMAGE")
                       ?? throw new InvalidOperationException("PROVIDER_PROBE_IMAGE is not set."));
+                  string snapshotUrl = Environment.GetEnvironmentVariable("PROVIDER_PROBE_SNAPSHOT_URL")
+                      ?? throw new InvalidOperationException("PROVIDER_PROBE_SNAPSHOT_URL is not set.");
                   using ServiceProvider services = new ServiceCollection()
                       .AddHttpClient()
                       .BuildServiceProvider();
@@ -417,7 +443,10 @@ jobs:
                       NullLogger<PrintGuardFailureDetectionProvider>.Instance);
 
                   FailureDetectionProviderResult obicoResult = await obico.AnalyzeAsync(
-                      new FailureDetectionProviderRequest(image, "http://127.0.0.1:3333"));
+                      new FailureDetectionProviderRequest(
+                          image,
+                          "http://127.0.0.1:3333",
+                          SnapshotUrl: snapshotUrl));
                   FailureDetectionProviderResult printGuardResult = await printGuard.AnalyzeAsync(
                       new FailureDetectionProviderRequest(image, "http://127.0.0.1:8000/api/v1/classify"));
 
@@ -442,6 +471,7 @@ jobs:
         working-directory: src
         env:
           PROVIDER_PROBE_IMAGE: ${{ runner.temp }}/provider-inference/frame.jpg
+          PROVIDER_PROBE_SNAPSHOT_URL: http://host.docker.internal:8765/frame.jpg
         run: |
           dotnet restore ./tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj
           dotnet test ./tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj \
@@ -455,6 +485,9 @@ jobs:
         shell: bash
         run: |
           if [ -f "$PROVIDER_PROBE_COMPOSE" ]; then
+            if [ -f "$PROVIDER_PROBE_DIR/snapshot-fixture.pid" ]; then
+              kill "$(cat "$PROVIDER_PROBE_DIR/snapshot-fixture.pid")" 2>/dev/null || true
+            fi
             docker compose \
               -f "$PROVIDER_PROBE_COMPOSE" \
               -f "$PROVIDER_PROBE_OVERRIDE" \
