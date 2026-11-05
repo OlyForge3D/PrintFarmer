@@ -23,29 +23,30 @@ public sealed class TrackedMotionRetirementMigrationTests
         await using AppDbContext context = CreateContext(connection);
         IMigrator migrator = context.GetService<IMigrator>();
         await migrator.MigrateAsync(PreviousMigration);
+        await using AppDbContext seedContext = CreatePrePrintGuardContext(connection);
 
         var released = new List<PrinterDispatchState>();
         var retained = new List<PrinterDispatchState>();
         foreach (string operation in RetiredOperations)
         {
-            released.Add(AddBarrier(context, operation));
+            released.Add(AddBarrier(seedContext, operation));
 
-            PrinterDispatchState stateJob = AddBarrier(context, operation);
+            PrinterDispatchState stateJob = AddBarrier(seedContext, operation);
             stateJob.ActiveJobId = Guid.NewGuid();
             retained.Add(stateJob);
 
-            PrinterDispatchState stateAttempt = AddBarrier(context, operation);
+            PrinterDispatchState stateAttempt = AddBarrier(seedContext, operation);
             stateAttempt.ActiveDispatchAttemptId = Guid.NewGuid();
             retained.Add(stateAttempt);
 
-            PrinterDispatchState physicalAttempt = AddBarrier(context, operation);
+            PrinterDispatchState physicalAttempt = AddBarrier(seedContext, operation);
             physicalAttempt.PhysicalControlAttemptId = Guid.NewGuid();
             retained.Add(physicalAttempt);
 
             foreach (PrintJobStatus status in new[] { PrintJobStatus.Starting, PrintJobStatus.Printing, PrintJobStatus.Paused })
             {
-                PrinterDispatchState occupied = AddBarrier(context, operation);
-                context.PrintJobs.Add(new PrintJob
+                PrinterDispatchState occupied = AddBarrier(seedContext, operation);
+                seedContext.PrintJobs.Add(new PrintJob
                 {
                     Id = Guid.NewGuid(),
                     AssignedPrinterId = occupied.PrinterId,
@@ -57,8 +58,8 @@ public sealed class TrackedMotionRetirementMigrationTests
 
             foreach (DispatchAttemptOutcome outcome in new[] { DispatchAttemptOutcome.InProgress, DispatchAttemptOutcome.Unknown, DispatchAttemptOutcome.Accepted })
             {
-                PrinterDispatchState dispatch = AddBarrier(context, operation);
-                context.QueueDispatchAttempts.Add(new QueueDispatchAttempt
+                PrinterDispatchState dispatch = AddBarrier(seedContext, operation);
+                seedContext.QueueDispatchAttempts.Add(new QueueDispatchAttempt
                 {
                     Id = Guid.NewGuid(),
                     PrinterId = dispatch.PrinterId,
@@ -68,8 +69,8 @@ public sealed class TrackedMotionRetirementMigrationTests
                 retained.Add(dispatch);
             }
 
-            PrinterDispatchState reconciliation = AddBarrier(context, operation);
-            context.QueueDispatchAttempts.Add(new QueueDispatchAttempt
+            PrinterDispatchState reconciliation = AddBarrier(seedContext, operation);
+            seedContext.QueueDispatchAttempts.Add(new QueueDispatchAttempt
             {
                 Id = Guid.NewGuid(),
                 PrinterId = reconciliation.PrinterId,
@@ -83,18 +84,18 @@ public sealed class TrackedMotionRetirementMigrationTests
 
         foreach (string operation in new[] { "pause", "resume", "cancel", "emergency_stop", "upload", "set_temperature" })
         {
-            retained.Add(AddBarrier(context, operation));
+            retained.Add(AddBarrier(seedContext, operation));
         }
 
-        PrinterDispatchState noCommand = AddBarrier(context, "async_motion");
+        PrinterDispatchState noCommand = AddBarrier(seedContext, "async_motion");
         noCommand.PhysicalControlCommandId = null;
         retained.Add(noCommand);
 
-        PrinterDispatchState historyOnly = AddBarrier(context, "async_motion");
-        context.PrintJobs.AddRange(
+        PrinterDispatchState historyOnly = AddBarrier(seedContext, "async_motion");
+        seedContext.PrintJobs.AddRange(
             new PrintJob { Id = Guid.NewGuid(), AssignedPrinterId = historyOnly.PrinterId, Status = PrintJobStatus.Completed },
             new PrintJob { Id = Guid.NewGuid(), AssignedPrinterId = historyOnly.PrinterId, Status = PrintJobStatus.Queued });
-        context.QueueDispatchAttempts.Add(new QueueDispatchAttempt
+        seedContext.QueueDispatchAttempts.Add(new QueueDispatchAttempt
         {
             Id = Guid.NewGuid(),
             PrinterId = historyOnly.PrinterId,
@@ -111,8 +112,8 @@ public sealed class TrackedMotionRetirementMigrationTests
             """ALTER TABLE "QueueDispatchAttempts" ADD COLUMN "BackendSenderSettledAtUtc" TEXT NULL;""");
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "Printers" ADD COLUMN "ShowExternalSpool" INTEGER NOT NULL DEFAULT 0;""");
-        await context.SaveChangesAsync();
-        context.ChangeTracker.Clear();
+        await seedContext.SaveChangesAsync();
+        seedContext.ChangeTracker.Clear();
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "QueueDispatchAttempts" DROP COLUMN "BackendSenderSettledAtUtc";""");
         _ = await context.Database.ExecuteSqlRawAsync(
@@ -286,6 +287,11 @@ public sealed class TrackedMotionRetirementMigrationTests
             .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Migrations.Sqlite"))
             .Options);
 
+    private static PrePrintGuardAppDbContext CreatePrePrintGuardContext(SqliteConnection connection) =>
+        new(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection, options => options.MigrationsAssembly("Farm.Migrations.Sqlite"))
+            .Options);
+
     private static PrinterDispatchState AddBarrier(AppDbContext context, string operation)
     {
         Manufacturer manufacturer = context.Manufacturers.Local.FirstOrDefault()
@@ -319,5 +325,14 @@ public sealed class TrackedMotionRetirementMigrationTests
         context.Printers.Add(printer);
         context.PrinterDispatchStates.Add(state);
         return state;
+    }
+
+    private sealed class PrePrintGuardAppDbContext(DbContextOptions<AppDbContext> options) : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+        }
     }
 }

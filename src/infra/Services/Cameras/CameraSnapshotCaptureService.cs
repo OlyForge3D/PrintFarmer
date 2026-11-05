@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Logging;
+﻿using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.FailureDetection;
 using Microsoft.Extensions.Logging;

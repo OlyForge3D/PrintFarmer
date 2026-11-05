@@ -183,10 +183,15 @@ public sealed class PrinterFileCatalogPersistenceTests
             Folder = folder,
             FileSizeBytes = 17,
         };
-        context.AddRange(printer, asset);
-        await context.SaveChangesAsync();
+        await using (AppDbContext legacyContext = CreatePrePrintGuardContext(context))
+        {
+            legacyContext.AddRange(printer, asset);
+            await legacyContext.SaveChangesAsync();
+        }
+
         await AssertDetailsUpgradeAsync(context);
-        Assert.Equal(asset.Id, (await context.GcodeFiles.SingleAsync(x => x.Id == asset.Id)).Id);
+        printer = await context.Printers.SingleAsync(x => x.Id == printer.Id);
+        asset = await context.GcodeFiles.Include(file => file.Folder).SingleAsync(x => x.Id == asset.Id);
 
         PrinterFileLocation location = NewLocation(printer.Id, "gcodes", "one/model.gcode");
         location.RegisteredPrinter = printer;
@@ -424,6 +429,28 @@ public sealed class PrinterFileCatalogPersistenceTests
         new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connection, provider => provider.MigrationsAssembly("Farm.Migrations.Sqlite")).Options);
 
+    private static PrePrintGuardAppDbContext CreatePrePrintGuardContext(AppDbContext context)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        switch (context.Database.ProviderName)
+        {
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                options.UseSqlite(context.Database.GetDbConnection());
+                break;
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+                options.UseNpgsql(context.Database.GetDbConnection());
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                options.UseSqlServer(context.Database.GetDbConnection());
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Unsupported provider '{context.Database.ProviderName}' for the pre-PrintGuard migration fixture.");
+        }
+
+        return new PrePrintGuardAppDbContext(options.Options);
+    }
+
     private static AppDbContext CreateProviderContext(string provider, string? connectionString = null)
     {
         DbContextOptionsBuilder<AppDbContext> options = new();
@@ -446,5 +473,14 @@ public sealed class PrinterFileCatalogPersistenceTests
         }
 
         return new AppDbContext(options.Options);
+    }
+
+    private sealed class PrePrintGuardAppDbContext(DbContextOptions<AppDbContext> options) : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+        }
     }
 }

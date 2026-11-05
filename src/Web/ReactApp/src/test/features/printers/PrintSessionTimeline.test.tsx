@@ -72,7 +72,7 @@ describe('PrintSessionTimeline', () => {
     const items = within(timeline).getAllByRole('listitem');
 
     expect(within(items[0]).getByText('Print started')).toBeInTheDocument();
-    expect(within(items[1]).getByText('Failure incident detected')).toBeInTheDocument();
+    expect(within(items[1]).getByText('PrintGuard failure incident detected')).toBeInTheDocument();
     expect(within(items[2]).getByText('Print auto-paused')).toBeInTheDocument();
     expect(within(items[3]).getByText('Print completed')).toBeInTheDocument();
     expect(screen.getByText('91% confidence')).toBeInTheDocument();

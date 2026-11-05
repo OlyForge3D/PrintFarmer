@@ -107,7 +107,8 @@ public class FailureDetectionControllerTests : IClassFixture<CustomWebApplicatio
 
         await using var enabledFactory = new CustomWebApplicationFactory(new Dictionary<string, string?>
         {
-            ["Obico:Enabled"] = "true"
+            ["Obico:Enabled"] = "true",
+            ["Obico:ObicoApiUrl"] = "https://obico.example.test"
         });
         await enabledFactory.ResetDataAsync();
         using HttpClient enabledClient = await enabledFactory.CreateAdminClientAsync();

@@ -79,7 +79,9 @@ public sealed class DatabaseMigrationTests
             "20261025192142_AddPrinterFileCatalog",
             "20261026153717_RetireGcodeHarvest",
             "20261027134803_PersistPrinterFileDetails",
-            "20261027212835_AddPrinterFileEnrichment");
+            "20261027212835_AddPrinterFileEnrichment",
+            "20261104222416_AddPrinterPrintGuardEnabled",
+            "20261105000821_AddFailureDetectionIncidentProvider");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -110,18 +112,24 @@ public sealed class DatabaseMigrationTests
             FileHash = "existing-owned-hash",
             Folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" },
         };
-        context.AddRange(printer, local);
-        await context.SaveChangesAsync();
+        await using (PrePrintGuardAppDbContext legacyContext = CreatePrePrintGuardContext(context))
+        {
+            legacyContext.AddRange(printer, local);
+            await legacyContext.SaveChangesAsync();
+        }
+
         await ProviderAwareMigrationRunner.MigrateAsync(context, DatabaseMigrationTarget.Core, NullLogger.Instance);
-        Assert.Equal(local.FileHash, (await context.GcodeFiles.SingleAsync(x => x.Id == local.Id)).FileHash);
-        Assert.Equal(printer.Name, (await context.Printers.SingleAsync(x => x.Id == printer.Id)).Name);
+        Printer migratedPrinter = await context.Printers.SingleAsync(x => x.Id == printer.Id);
+        GcodeFile migratedLocal = await context.GcodeFiles.SingleAsync(x => x.Id == local.Id);
+        Assert.Equal(local.FileHash, migratedLocal.FileHash);
+        Assert.Equal(printer.Name, migratedPrinter.Name);
         foreach (string path in new[] { "Parts/Café.gcode", "parts/Café.gcode" })
         {
             context.PrinterFileLocations.Add(new()
             {
                 Id = Guid.NewGuid(),
-                SourcePrinterId = printer.Id,
-                RegisteredPrinterId = printer.Id,
+                SourcePrinterId = migratedPrinter.Id,
+                RegisteredPrinterId = migratedPrinter.Id,
                 StorageRoot = "gcodes",
                 RelativePath = path,
                 IdentityKey = Farm.Infrastructure.Services.Printers.PrinterInventoryPath.ComputeIdentity("gcodes", path),
@@ -135,23 +143,23 @@ public sealed class DatabaseMigrationTests
         {
             Id = Guid.NewGuid(),
             OperationId = Guid.NewGuid(),
-            SourcePrinterId = printer.Id,
+            SourcePrinterId = migratedPrinter.Id,
             LocationId = source.Id,
-            GcodeFileId = local.Id,
+            GcodeFileId = migratedLocal.Id,
             StorageRoot = source.StorageRoot,
             RelativePath = source.RelativePath,
-            ContentSha256 = local.FileHash,
+            ContentSha256 = migratedLocal.FileHash,
         });
         await context.SaveChangesAsync();
-        context.Printers.Remove(printer);
+        context.Printers.Remove(migratedPrinter);
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         Assert.All(await context.PrinterFileLocations.ToArrayAsync(), location =>
         {
             Assert.Null(location.RegisteredPrinterId);
-            Assert.Equal(printer.Id, location.SourcePrinterId);
+            Assert.Equal(migratedPrinter.Id, location.SourcePrinterId);
         });
-        Assert.Equal(local.Id, (await context.PrinterFileOrigins.SingleAsync()).GcodeFileId);
+        Assert.Equal(migratedLocal.Id, (await context.PrinterFileOrigins.SingleAsync()).GcodeFileId);
         Assert.Single(await context.GcodeFiles.ToArrayAsync());
         Assert.False(context.Database.HasPendingModelChanges());
     }
@@ -807,7 +815,9 @@ public sealed class DatabaseMigrationTests
             "20261025192142_AddPrinterFileCatalog",
             "20261026153717_RetireGcodeHarvest",
             "20261027134803_PersistPrinterFileDetails",
-            "20261027212835_AddPrinterFileEnrichment");
+            "20261027212835_AddPrinterFileEnrichment",
+            "20261104222416_AddPrinterPrintGuardEnabled",
+            "20261105000821_AddFailureDetectionIncidentProvider");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1369,6 +1379,8 @@ public sealed class DatabaseMigrationTests
                 "20261026153721_RetireGcodeHarvest",
                 "20261027134806_PersistPrinterFileDetails",
                 "20261027212852_AddPrinterFileEnrichment",
+                "20261104222340_AddPrinterPrintGuardEnabled",
+                "20261105000821_AddFailureDetectionIncidentProvider",
             ]
             :
             [
@@ -1413,6 +1425,8 @@ public sealed class DatabaseMigrationTests
                 "20261026153726_RetireGcodeHarvest",
                 "20261027134809_PersistPrinterFileDetails",
                 "20261027212909_AddPrinterFileEnrichment",
+                "20261104222359_AddPrinterPrintGuardEnabled",
+                "20261105000821_AddFailureDetectionIncidentProvider",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
@@ -1478,6 +1492,16 @@ public sealed class DatabaseMigrationTests
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
             .Options;
         return new AppDbContext(options);
+    }
+
+    private static PrePrintGuardAppDbContext CreatePrePrintGuardContext(AppDbContext context)
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(
+                context.Database.GetDbConnection(),
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
+            .Options;
+        return new PrePrintGuardAppDbContext(options);
     }
 
     private static AppDbContext CreateCoreContextWithoutMigrations(SqliteConnection connection)
@@ -1666,6 +1690,15 @@ public sealed class DatabaseMigrationTests
             CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
             PRAGMA foreign_keys = ON;
             """;
+    }
+
+    private sealed class PrePrintGuardAppDbContext(DbContextOptions<AppDbContext> options) : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+        }
     }
 }
 
