@@ -4825,29 +4825,42 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         )
         try await initialConnect.value
 
+        await socketA.waitForSendCount(3)
+        let farmSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[2])
+        )
+        XCTAssertEqual(farmSubscribe.target, "SubscribeToFarmAsync")
+        XCTAssertEqual(farmSubscribe.argumentCount, 0)
+        await socketA.waitForReceiveEnrollments(count: 3)
+        socketA.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(farmSubscribe.invocationId)
+            )
+        )
+
         let replacement = Task {
             await service.replacePrinterSubscriptions([printerC, printerB])
         }
-        await socketA.waitForSendCount(3)
+        await socketA.waitForSendCount(4)
         let unsubscribe = try XCTUnwrap(
-            try decodeSignalRClientInvocation(socketA.snapshotSent()[2])
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[3])
         )
         XCTAssertEqual(unsubscribe.target, "UnsubscribeFromPrinterAsync")
         XCTAssertEqual(unsubscribe.stringArgument, printerA.uuidString)
-        await socketA.waitForReceiveEnrollments(count: 3)
+        await socketA.waitForReceiveEnrollments(count: 4)
         socketA.completeReceive(
             with: try makeSignalRCompletion(
                 invocationId: try XCTUnwrap(unsubscribe.invocationId)
             )
         )
 
-        await socketA.waitForSendCount(4)
+        await socketA.waitForSendCount(5)
         let incrementalSubscribe = try XCTUnwrap(
-            try decodeSignalRClientInvocation(socketA.snapshotSent()[3])
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[4])
         )
         XCTAssertEqual(incrementalSubscribe.target, "SubscribeToPrintersAsync")
         XCTAssertEqual(incrementalSubscribe.stringArrayArgument, [printerC.uuidString])
-        await socketA.waitForReceiveEnrollments(count: 4)
+        await socketA.waitForReceiveEnrollments(count: 5)
         socketA.completeReceive(
             with: try makeSignalRCompletion(
                 invocationId: try XCTUnwrap(incrementalSubscribe.invocationId),
@@ -4856,7 +4869,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         )
         await replacement.value
 
-        await socketA.waitForReceiveEnrollments(count: 5)
+        await socketA.waitForReceiveEnrollments(count: 6)
         socketA.failReceive(with: URLError(.networkConnectionLost))
         await sleeper.waitForNextSleep()
         await sleeper.release()
@@ -4880,25 +4893,229 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             )
         )
 
+        await socketB.waitForSendCount(3)
+        let replayFarmSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketB.snapshotSent()[2])
+        )
+        XCTAssertEqual(replayFarmSubscribe.target, "SubscribeToFarmAsync")
+        await socketB.waitForReceiveEnrollments(count: 3)
+        socketB.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(replayFarmSubscribe.invocationId)
+            )
+        )
+
         await service.replacePrinterSubscriptions([printerB, printerC])
         XCTAssertEqual(
             socketA.snapshotSent().count,
-            4,
-            "the original transport must send only handshake, initial subscribe, unsubscribe, and incremental subscribe"
+            5,
+            "the original transport must send handshake, printer/farm subscriptions, unsubscribe, and incremental subscribe"
         )
         XCTAssertEqual(
             socketB.snapshotSent().count,
-            2,
-            "the replacement transport must send only its handshake and the exact desired subscription replay"
+            3,
+            "the replacement transport must replay printer and farm subscriptions after handshake"
         )
 
         await service.disconnect()
     }
 
+    func testAuthorizedQueueGroupsDeliverQueueChangesAndReconcileMembership() async throws {
+        let printerId = UUID(uuidString: "81500000-0000-0000-0000-000000000101")!
+        let firstJobId = UUID(uuidString: "81500000-0000-0000-0000-000000000102")!
+        let secondJobId = UUID(uuidString: "81500000-0000-0000-0000-000000000103")!
+        let firstProjectId = UUID(uuidString: "81500000-0000-0000-0000-000000000104")!
+        let secondProjectId = UUID(uuidString: "81500000-0000-0000-0000-000000000105")!
+        let resources = QueueSubscriptionResourcesStore(
+            QueueSubscriptionResources(
+                printerIds: [printerId],
+                jobIds: [firstJobId],
+                projectIds: [firstProjectId]
+            )
+        )
+        let socket = MockSignalRWebSocket()
+        let reconnectedSocket = MockSignalRWebSocket()
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socket, reconnectedSocket]),
+            sleeper: sleeper,
+            queueSubscriptionResourcesProvider: { resources.snapshot() }
+        )
+        let jobService = MockJobService()
+        let viewModel = JobListViewModel()
+        viewModel.configure(jobService: jobService)
+        viewModel.configure(jobAnalyticsService: MockJobAnalyticsService())
+        await viewModel.loadJobs()
+        let initialLoadCount = jobService.listAllJobsCallCount
+        viewModel.configureSignalR(service)
+
+        let connectTask = Task { try await service.connect() }
+        await socket.waitForReceiveCall()
+        socket.completeReceive(with: .data(makeSignalRHandshakeData()))
+        try await connectTask.value
+        var nextReceiveEnrollment = 2
+
+        let initialTargets = [
+            "SubscribeToFarmAsync",
+            "SubscribeToPrintersAsync",
+            "SubscribeToQueueJobAsync",
+            "SubscribeToProjectAsync",
+        ]
+        for (index, target) in initialTargets.enumerated() {
+            let sentIndex = index + 1
+            await socket.waitForSendCount(sentIndex + 1)
+            let invocation = try XCTUnwrap(
+                try decodeSignalRClientInvocation(socket.snapshotSent()[sentIndex])
+            )
+            XCTAssertEqual(invocation.target, target)
+            if target == "SubscribeToFarmAsync" {
+                XCTAssertEqual(invocation.argumentCount, 0)
+            }
+            if target == "SubscribeToQueueJobAsync" {
+                XCTAssertEqual(invocation.stringArgument, firstJobId.uuidString)
+            }
+            if target == "SubscribeToProjectAsync" {
+                XCTAssertEqual(invocation.stringArgument, firstProjectId.uuidString)
+            }
+            if target == "SubscribeToPrintersAsync" {
+                XCTAssertEqual(invocation.stringArrayArgument, [printerId.uuidString])
+            }
+            await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+            socket.completeReceive(
+                with: try makeSignalRCompletion(
+                    invocationId: try XCTUnwrap(invocation.invocationId),
+                    result: target == "SubscribeToPrintersAsync" ? [printerId.uuidString] : nil
+                )
+            )
+            nextReceiveEnrollment += 1
+        }
+
+        await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+        await waitForQueueRefresh(after: initialLoadCount, from: jobService)
+        let connectionRefreshCount = jobService.listAllJobsCallCount
+
+        await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+        socket.completeReceive(
+            with: try makeSignalRServerInvocation(
+                target: "jobqueueupdate",
+                argument: #"{"printerId":null,"jobs":[]}"#
+            )
+        )
+        nextReceiveEnrollment += 1
+        await waitForQueueRefresh(after: connectionRefreshCount, from: jobService)
+        let reorderRefreshCount = jobService.listAllJobsCallCount
+
+        await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+        socket.completeReceive(
+            with: try makeSignalRServerInvocation(
+                target: "queueevent",
+                argument: #"{"eventType":"PrintFarmer.Queue.JobUpdated.v1","jobId":"\#(firstJobId.uuidString)"}"#
+            )
+        )
+        nextReceiveEnrollment += 1
+        await waitForQueueRefresh(after: reorderRefreshCount, from: jobService)
+        XCTAssertEqual(jobService.listAllJobsCallCount, reorderRefreshCount + 1)
+
+        await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+        resources.replace(
+            QueueSubscriptionResources(
+                printerIds: [printerId],
+                jobIds: [secondJobId],
+                projectIds: [secondProjectId]
+            )
+        )
+        socket.completeReceive(
+            with: try makeSignalRServerInvocation(target: "queueresourceschanged")
+        )
+
+        let membershipTargets = [
+            ("UnsubscribeFromQueueJobAsync", firstJobId.uuidString),
+            ("UnsubscribeFromProjectAsync", firstProjectId.uuidString),
+            ("SubscribeToQueueJobAsync", secondJobId.uuidString),
+            ("SubscribeToProjectAsync", secondProjectId.uuidString),
+        ]
+        for (offset, expected) in membershipTargets.enumerated() {
+            let sentIndex = initialTargets.count + 1 + offset
+            await socket.waitForSendCount(sentIndex + 1)
+            let invocation = try XCTUnwrap(
+                try decodeSignalRClientInvocation(socket.snapshotSent()[sentIndex])
+            )
+            XCTAssertEqual(invocation.target, expected.0)
+            XCTAssertEqual(invocation.stringArgument, expected.1)
+            await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+            socket.completeReceive(
+                with: try makeSignalRCompletion(
+                    invocationId: try XCTUnwrap(invocation.invocationId)
+                )
+            )
+            nextReceiveEnrollment += 1
+        }
+
+        await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
+        socket.failReceive(with: URLError(.networkConnectionLost))
+        await sleeper.waitForNextSleep()
+        await sleeper.release()
+        await reconnectedSocket.waitForReceiveCall()
+        reconnectedSocket.completeReceive(with: .data(makeSignalRHandshakeData()))
+        var reconnectReceiveEnrollment = 2
+
+        let reconnectTargets = [
+            "SubscribeToPrintersAsync",
+            "SubscribeToFarmAsync",
+            "SubscribeToQueueJobAsync",
+            "SubscribeToProjectAsync",
+        ]
+        for (index, target) in reconnectTargets.enumerated() {
+            let sentIndex = index + 1
+            await reconnectedSocket.waitForSendCount(sentIndex + 1)
+            let invocation = try XCTUnwrap(
+                try decodeSignalRClientInvocation(reconnectedSocket.snapshotSent()[sentIndex])
+            )
+            XCTAssertEqual(invocation.target, target)
+            if target == "SubscribeToPrintersAsync" {
+                XCTAssertEqual(invocation.stringArrayArgument, [printerId.uuidString])
+            }
+            if target == "SubscribeToQueueJobAsync" {
+                XCTAssertEqual(invocation.stringArgument, secondJobId.uuidString)
+            }
+            if target == "SubscribeToProjectAsync" {
+                XCTAssertEqual(invocation.stringArgument, secondProjectId.uuidString)
+            }
+            await reconnectedSocket.waitForReceiveEnrollments(count: reconnectReceiveEnrollment)
+            reconnectedSocket.completeReceive(
+                with: try makeSignalRCompletion(
+                    invocationId: try XCTUnwrap(invocation.invocationId),
+                    result: target == "SubscribeToPrintersAsync" ? [printerId.uuidString] : nil
+                )
+            )
+            reconnectReceiveEnrollment += 1
+        }
+
+        viewModel.deactivate()
+        await service.disconnect()
+    }
+
+    private func waitForQueueRefresh(
+        after count: Int,
+        from service: MockJobService,
+        timeout: Duration = .seconds(5)
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while service.listAllJobsCallCount <= count, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertGreaterThan(
+            service.listAllJobsCallCount,
+            count,
+            "The production SignalR subscription path should reach the queue refresh consumer"
+        )
+    }
+
     private func makeService(
         sockets: MockWebSocketSwitcher,
         sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper(),
-        inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold
+        inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold,
+        queueSubscriptionResourcesProvider: QueueSubscriptionResourcesProvider? = nil
     ) -> SignalRService {
         installNegotiateHandler()
         return SignalRService(
@@ -4908,8 +5125,30 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             reconnectBackoff: { _ in 1 },
             reconnectSleeper: sleeper.makeSleeper(),
             inboundStalenessThreshold: inboundStalenessThreshold,
-            webSocketFactory: { _ in sockets.next() }
+            webSocketFactory: { _ in sockets.next() },
+            queueSubscriptionResourcesProvider: queueSubscriptionResourcesProvider
         )
+    }
+}
+
+private final class QueueSubscriptionResourcesStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: QueueSubscriptionResources
+
+    init(_ value: QueueSubscriptionResources) {
+        self.value = value
+    }
+
+    func snapshot() -> QueueSubscriptionResources {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func replace(_ value: QueueSubscriptionResources) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
     }
 }
 
@@ -4930,6 +5169,7 @@ private func makeSignalRHandshakeData(
 private struct DecodedSignalRClientInvocation {
     let invocationId: String?
     let target: String
+    let argumentCount: Int
     let stringArgument: String?
     let stringArrayArgument: [String]?
 }
@@ -4952,16 +5192,37 @@ private func decodeSignalRClientInvocation(
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           json["type"] as? Int == 1,
           let target = json["target"] as? String,
-          let arguments = json["arguments"] as? [Any],
-          let firstArgument = arguments.first else {
+          let arguments = json["arguments"] as? [Any] else {
         return nil
     }
+    let firstArgument = arguments.first
     return DecodedSignalRClientInvocation(
         invocationId: json["invocationId"] as? String,
         target: target,
+        argumentCount: arguments.count,
         stringArgument: firstArgument as? String,
         stringArrayArgument: firstArgument as? [String]
     )
+}
+
+private func makeSignalRServerInvocation(
+    target: String,
+    argument: String? = nil
+) throws -> URLSessionWebSocketTask.Message {
+    var payload: [String: Any] = [
+        "type": 1,
+        "target": target,
+        "arguments": [],
+    ]
+    if let argument {
+        payload["arguments"] = [try JSONSerialization.jsonObject(
+            with: Data(argument.utf8),
+            options: [.fragmentsAllowed]
+        )]
+    }
+    var data = try JSONSerialization.data(withJSONObject: payload)
+    data.append(SignalRFrameParser.recordSeparator)
+    return .data(data)
 }
 
 private func makeSignalRCompletion(

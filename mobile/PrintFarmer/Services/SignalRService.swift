@@ -26,6 +26,8 @@ extension URLSessionWebSocketTask: SignalRWebSocket {}
 /// test releases each attempt so retries can be proven deterministically
 /// without wall-clock waits (r9 blocker #4).
 typealias SignalRReconnectSleeper = @Sendable (TimeInterval) async -> Void
+typealias QueueSubscriptionResourcesProvider =
+    @Sendable () async throws -> QueueSubscriptionResources
 
 /// Default production sleeper — wraps `Task.sleep(for:)` and returns
 /// silently on cancellation so the reconnect flow can honor its
@@ -138,6 +140,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// exponential curve.
     private let reconnectBackoff: @Sendable (Int) -> TimeInterval
     private let readinessWaitObserver: @Sendable () -> Void
+    private let queueSubscriptionResourcesProvider: QueueSubscriptionResourcesProvider?
 
     static let defaultReconnectBackoff: @Sendable (Int) -> TimeInterval = { attempt in
         let base = min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
@@ -341,9 +344,18 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// Desired printer groups survive automatic reconnects. Applied groups are
     /// transport-scoped and are cleared whenever the socket is replaced.
     private var desiredPrinterSubscriptionIds: Set<String> = []
+    private var desiredQueuePrinterSubscriptionIds: Set<String> = []
     private var appliedPrinterSubscriptionIds: Set<String> = []
+    private var desiredQueueJobSubscriptionIds: Set<String> = []
+    private var appliedQueueJobSubscriptionIds: Set<String> = []
+    private var desiredQueueProjectSubscriptionIds: Set<String> = []
+    private var appliedQueueProjectSubscriptionIds: Set<String> = []
     private var printerSubscriptionGeneration: UInt64 = 0
-    private var printerSubscriptionTail: Task<Void, Never>?
+    private var queueResourceSubscriptionGeneration: UInt64 = 0
+    private var subscriptionReconciliationTail: Task<Void, Never>?
+    private var queueResourceRefreshRequested = false
+    private var queueResourceRefreshToken: UUID?
+    private var queueResourceRefreshTask: Task<Void, Never>?
     private var nextHubInvocationId: UInt64 = 0
     private var pendingHubInvocations: [String: HubInvocationWaiter] = [:]
 
@@ -375,6 +387,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         maxReconnectAttempts: Int? = nil,
         inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold,
         webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil,
+        queueSubscriptionResourcesProvider: QueueSubscriptionResourcesProvider? = nil,
         readinessWaitObserver: @escaping @Sendable () -> Void = {}
     ) {
         self.serverURL = serverURL
@@ -384,6 +397,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.reconnectSleeper = reconnectSleeper
         self.maxReconnectAttempts = maxReconnectAttempts
         self.inboundStalenessThreshold = inboundStalenessThreshold
+        self.queueSubscriptionResourcesProvider = queueSubscriptionResourcesProvider
         self.readinessWaitObserver = readinessWaitObserver
         // Capture `session` in a local Sendable so the closure escapes
         // safely into the actor-agnostic factory.
@@ -656,12 +670,22 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // that DID enqueue `.connected` while it was still current
         // will have that state observed before we override it here.
         // (r8 blocker #2: atomic state mutation + publication order.)
-        let reconnect: Task<Void, Never>? = lifecycleSync {
+        let cancelledTasks: (reconnect: Task<Void, Never>?, resourceRefresh: Task<Void, Never>?) = lifecycleSync {
             self.intentionalDisconnect = true
             self.generation &+= 1
             self.printerSubscriptionGeneration &+= 1
+            self.queueResourceSubscriptionGeneration &+= 1
             self.desiredPrinterSubscriptionIds.removeAll(keepingCapacity: true)
+            self.desiredQueuePrinterSubscriptionIds.removeAll(keepingCapacity: true)
             self.appliedPrinterSubscriptionIds.removeAll(keepingCapacity: true)
+            self.desiredQueueJobSubscriptionIds.removeAll(keepingCapacity: true)
+            self.appliedQueueJobSubscriptionIds.removeAll(keepingCapacity: true)
+            self.desiredQueueProjectSubscriptionIds.removeAll(keepingCapacity: true)
+            self.appliedQueueProjectSubscriptionIds.removeAll(keepingCapacity: true)
+            self.queueResourceRefreshRequested = false
+            self.queueResourceRefreshToken = nil
+            let resourceRefresh = self.queueResourceRefreshTask
+            self.queueResourceRefreshTask = nil
             self.tearDownLocked()
             let r = self.reconnectTask
             self.reconnectTask = nil
@@ -673,9 +697,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // authority. See connect() supersede for full comment.
             self.finalizingOwnerToken = nil
             self.connectionStateHub.setState(.disconnected)
-            return r
+            return (r, resourceRefresh)
         }
-        reconnect?.cancel()
+        cancelledTasks.reconnect?.cancel()
+        cancelledTasks.resourceRefresh?.cancel()
         logger.info("Disconnected from SignalR hub")
     }
 
@@ -912,6 +937,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             throw NetworkError.invalidResponse
         }
         _ = enqueuePrinterSubscriptionReconciliation()
+        enqueueFarmSubscription(connectionGeneration: myGen)
+        scheduleQueueSubscriptionResourceRefresh()
         logger.info("Connected to SignalR hub at \(self.serverURL.absoluteString)")
     }
 
@@ -920,6 +947,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         let invocationId: String
         let target: String
         let arguments: [Argument]
+    }
+
+    private struct NoArgumentClientInvocation: Encodable, Sendable {
+        let type = 1
+        let invocationId: String
+        let target: String
+        let arguments: [String] = []
     }
 
     private enum HubInvocationError: LocalizedError, Sendable {
@@ -934,6 +968,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 return "\(target) completed without the expected result"
             }
         }
+    }
+
+    private enum QueueResourceGroup {
+        case job
+        case project
     }
 
     private final class HubInvocationWaiter: @unchecked Sendable {
@@ -981,7 +1020,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 self.printerSubscriptionGeneration &+= 1
             }
             let subscriptionGeneration = self.printerSubscriptionGeneration
-            let predecessor = self.printerSubscriptionTail
+            let predecessor = self.subscriptionReconciliationTail
             let task = Task { [weak self] in
                 await predecessor?.value
                 guard let self else { return }
@@ -989,7 +1028,46 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     subscriptionGeneration: subscriptionGeneration
                 )
             }
-            self.printerSubscriptionTail = task
+            self.subscriptionReconciliationTail = task
+            return task
+        }
+    }
+
+    private func enqueueFarmSubscription(connectionGeneration: UInt64) {
+        lifecycleSync {
+            let predecessor = self.subscriptionReconciliationTail
+            let task = Task { [weak self] in
+                await predecessor?.value
+                guard let self else { return }
+                do {
+                    _ = try await self.sendHubInvocation(
+                        target: "SubscribeToFarmAsync",
+                        connectionGeneration: connectionGeneration
+                    )
+                } catch HubInvocationError.server("resource_forbidden") {
+                    // This group is intentionally restricted to farm admins.
+                } catch {
+                    self.logger.warning(
+                        "Failed to subscribe to farm SignalR group: \(error.localizedDescription)"
+                    )
+                }
+            }
+            self.subscriptionReconciliationTail = task
+        }
+    }
+
+    private func enqueueQueueResourceSubscriptionReconciliation() -> Task<Void, Never> {
+        lifecycleSync {
+            let subscriptionGeneration = self.queueResourceSubscriptionGeneration
+            let predecessor = self.subscriptionReconciliationTail
+            let task = Task { [weak self] in
+                await predecessor?.value
+                guard let self else { return }
+                await self.reconcileQueueResourceSubscriptions(
+                    subscriptionGeneration: subscriptionGeneration
+                )
+            }
+            self.subscriptionReconciliationTail = task
             return task
         }
     }
@@ -1009,7 +1087,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             }
             return (
                 self.generation,
-                self.desiredPrinterSubscriptionIds,
+                self.desiredPrinterSubscriptionIds.union(
+                    self.desiredQueuePrinterSubscriptionIds
+                ),
                 self.appliedPrinterSubscriptionIds
             )
         }
@@ -1067,6 +1147,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 self.appliedPrinterSubscriptionIds.formUnion(authorizedSet)
                 if self.printerSubscriptionGeneration == subscriptionGeneration {
                     self.desiredPrinterSubscriptionIds.subtract(rejectedIds)
+                    self.desiredQueuePrinterSubscriptionIds.subtract(rejectedIds)
                 }
             }
             if !rejectedIds.isEmpty {
@@ -1078,6 +1159,207 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             logger.warning(
                 "Failed to subscribe to printer SignalR groups: \(error.localizedDescription)"
             )
+        }
+    }
+
+    private func reconcileQueueResourceSubscriptions(
+        subscriptionGeneration: UInt64
+    ) async {
+        let snapshot: (
+            connectionGeneration: UInt64,
+            desiredJobs: Set<String>,
+            appliedJobs: Set<String>,
+            desiredProjects: Set<String>,
+            appliedProjects: Set<String>
+        )? = lifecycleSync {
+            guard self.queueResourceSubscriptionGeneration == subscriptionGeneration,
+                  self.connectionStateHub.snapshot() == .connected,
+                  self.webSocketTask != nil else {
+                return nil
+            }
+            return (
+                self.generation,
+                self.desiredQueueJobSubscriptionIds,
+                self.appliedQueueJobSubscriptionIds,
+                self.desiredQueueProjectSubscriptionIds,
+                self.appliedQueueProjectSubscriptionIds
+            )
+        }
+        guard let snapshot else { return }
+
+        await reconcileQueueResourceGroups(
+            target: "UnsubscribeFromQueueJobAsync",
+            ids: snapshot.appliedJobs.subtracting(snapshot.desiredJobs),
+            connectionGeneration: snapshot.connectionGeneration,
+            subscriptionGeneration: subscriptionGeneration,
+            group: .job,
+            isCurrent: { self.queueResourceSubscriptionGeneration == subscriptionGeneration },
+            isUnsubscribe: true
+        )
+        await reconcileQueueResourceGroups(
+            target: "UnsubscribeFromProjectAsync",
+            ids: snapshot.appliedProjects.subtracting(snapshot.desiredProjects),
+            connectionGeneration: snapshot.connectionGeneration,
+            subscriptionGeneration: subscriptionGeneration,
+            group: .project,
+            isCurrent: { self.queueResourceSubscriptionGeneration == subscriptionGeneration },
+            isUnsubscribe: true
+        )
+        guard lifecycleSync({
+            self.generation == snapshot.connectionGeneration
+                && self.queueResourceSubscriptionGeneration == subscriptionGeneration
+        }) else {
+            return
+        }
+
+        await reconcileQueueResourceGroups(
+            target: "SubscribeToQueueJobAsync",
+            ids: snapshot.desiredJobs.subtracting(snapshot.appliedJobs),
+            connectionGeneration: snapshot.connectionGeneration,
+            subscriptionGeneration: subscriptionGeneration,
+            group: .job,
+            isCurrent: { self.queueResourceSubscriptionGeneration == subscriptionGeneration }
+        )
+        await reconcileQueueResourceGroups(
+            target: "SubscribeToProjectAsync",
+            ids: snapshot.desiredProjects.subtracting(snapshot.appliedProjects),
+            connectionGeneration: snapshot.connectionGeneration,
+            subscriptionGeneration: subscriptionGeneration,
+            group: .project,
+            isCurrent: { self.queueResourceSubscriptionGeneration == subscriptionGeneration }
+        )
+    }
+
+    private func reconcileQueueResourceGroups(
+        target: String,
+        ids: Set<String>,
+        connectionGeneration: UInt64,
+        subscriptionGeneration: UInt64,
+        group: QueueResourceGroup,
+        isCurrent: () -> Bool,
+        isUnsubscribe: Bool = false
+    ) async {
+        for resourceId in ids.sorted() {
+            do {
+                _ = try await sendHubInvocation(
+                    target: target,
+                    argument: resourceId,
+                    connectionGeneration: connectionGeneration
+                )
+                lifecycleSync {
+                    guard self.generation == connectionGeneration else { return }
+                    switch group {
+                    case .job:
+                        if isUnsubscribe {
+                            self.appliedQueueJobSubscriptionIds.remove(resourceId)
+                        } else {
+                            self.appliedQueueJobSubscriptionIds.insert(resourceId)
+                        }
+                    case .project:
+                        if isUnsubscribe {
+                            self.appliedQueueProjectSubscriptionIds.remove(resourceId)
+                        } else {
+                            self.appliedQueueProjectSubscriptionIds.insert(resourceId)
+                        }
+                    }
+                }
+            } catch {
+                logger.warning(
+                    "Failed to reconcile SignalR resource group \(target) for \(resourceId): \(error.localizedDescription)"
+                )
+                if !isUnsubscribe {
+                    lifecycleSync {
+                        guard self.generation == connectionGeneration,
+                              self.queueResourceSubscriptionGeneration == subscriptionGeneration else {
+                            return
+                        }
+                        switch group {
+                        case .job:
+                            self.desiredQueueJobSubscriptionIds.remove(resourceId)
+                        case .project:
+                            self.desiredQueueProjectSubscriptionIds.remove(resourceId)
+                        }
+                    }
+                }
+                if lifecycleSync({ self.generation != connectionGeneration || !isCurrent() }) {
+                    return
+                }
+                continue
+            }
+            guard lifecycleSync({
+                self.generation == connectionGeneration && isCurrent()
+            }) else {
+                return
+            }
+        }
+    }
+
+    private func scheduleQueueSubscriptionResourceRefresh() {
+        guard queueSubscriptionResourcesProvider != nil else { return }
+        lifecycleSync {
+            self.queueResourceRefreshRequested = true
+            guard self.queueResourceRefreshToken == nil else { return }
+            let token = UUID()
+            self.queueResourceRefreshToken = token
+            let task = Task { [weak self] in
+                guard let self else { return }
+                await self.refreshQueueSubscriptionResources(token: token)
+            }
+            self.queueResourceRefreshTask = task
+        }
+    }
+
+    private func refreshQueueSubscriptionResources(token: UUID) async {
+        guard let queueSubscriptionResourcesProvider else { return }
+        while true {
+            let connectionGeneration: UInt64? = lifecycleSync {
+                guard self.queueResourceRefreshToken == token else { return nil }
+                guard self.queueResourceRefreshRequested else {
+                    self.queueResourceRefreshToken = nil
+                    self.queueResourceRefreshTask = nil
+                    return nil
+                }
+                self.queueResourceRefreshRequested = false
+                guard self.connectionStateHub.snapshot() == .connected,
+                      self.webSocketTask != nil else {
+                    self.queueResourceRefreshToken = nil
+                    self.queueResourceRefreshTask = nil
+                    return nil
+                }
+                return self.generation
+            }
+            guard let connectionGeneration else { return }
+
+            do {
+                let resources = try await queueSubscriptionResourcesProvider()
+                let applied = lifecycleSync {
+                    guard self.queueResourceRefreshToken == token,
+                          self.generation == connectionGeneration,
+                          self.connectionStateHub.snapshot() == .connected else {
+                        return false
+                    }
+                    self.desiredQueuePrinterSubscriptionIds = Set(
+                        resources.printerIds.map(\.uuidString)
+                    )
+                    self.desiredQueueJobSubscriptionIds = Set(
+                        resources.jobIds.map(\.uuidString)
+                    )
+                    self.desiredQueueProjectSubscriptionIds = Set(
+                        resources.projectIds.map(\.uuidString)
+                    )
+                    self.printerSubscriptionGeneration &+= 1
+                    self.queueResourceSubscriptionGeneration &+= 1
+                    return true
+                }
+                if applied {
+                    await enqueuePrinterSubscriptionReconciliation().value
+                    await enqueueQueueResourceSubscriptionReconciliation().value
+                }
+            } catch {
+                logger.warning(
+                    "Failed to load authorized queue SignalR resources: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
@@ -1110,6 +1392,59 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             invocationId: prepared.invocationId,
             target: target,
             arguments: [argument]
+        )
+        var data = try JSONEncoder().encode(invocation)
+        data.append(Self.recordSeparator)
+
+        do {
+            try await prepared.socket.send(.data(data))
+            try Task.checkCancellation()
+
+            let stillCurrent = lifecycleSync {
+                self.generation == connectionGeneration
+                    && self.connectionStateHub.snapshot() == .connected
+                    && self.webSocketTask === prepared.socket
+            }
+            guard stillCurrent else {
+                throw NetworkError.invalidResponse
+            }
+            return try await prepared.waiter.value()
+        } catch {
+            failHubInvocation(
+                invocationId: prepared.invocationId,
+                error: error
+            )
+            throw error
+        }
+    }
+
+    private func sendHubInvocation(
+        target: String,
+        connectionGeneration: UInt64
+    ) async throws -> Data? {
+        let prepared: (
+            invocationId: String,
+            socket: SignalRWebSocket,
+            waiter: HubInvocationWaiter
+        )? = lifecycleSync {
+            guard self.generation == connectionGeneration,
+                  self.connectionStateHub.snapshot() == .connected,
+                  let socket = self.webSocketTask else {
+                return nil
+            }
+            self.nextHubInvocationId &+= 1
+            let invocationId = String(self.nextHubInvocationId)
+            let waiter = HubInvocationWaiter()
+            self.pendingHubInvocations[invocationId] = waiter
+            return (invocationId, socket, waiter)
+        }
+        guard let prepared else {
+            throw NetworkError.invalidResponse
+        }
+
+        let invocation = NoArgumentClientInvocation(
+            invocationId: prepared.invocationId,
+            target: target
         )
         var data = try JSONEncoder().encode(invocation)
         data.append(Self.recordSeparator)
@@ -1546,6 +1881,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private func handleInvocation(target rawTarget: String, firstArgument argData: Data?) {
         if ShiftTaskInvalidation.supportedTargets.contains(rawTarget) {
             taskInvalidationHub.deliver(ShiftTaskInvalidation(target: rawTarget))
+            return
+        }
+
+        if rawTarget.lowercased() == "queueresourceschanged" {
+            scheduleQueueSubscriptionResourceRefresh()
             return
         }
 
@@ -2442,6 +2782,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         setWebSocketTaskLocked(nil)
         appliedPrinterSubscriptionIds.removeAll(keepingCapacity: true)
+        appliedQueueJobSubscriptionIds.removeAll(keepingCapacity: true)
+        appliedQueueProjectSubscriptionIds.removeAll(keepingCapacity: true)
         let pendingWaiters = Array(pendingHubInvocations.values)
         pendingHubInvocations.removeAll(keepingCapacity: true)
         for waiter in pendingWaiters {

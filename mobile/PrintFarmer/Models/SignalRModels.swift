@@ -156,6 +156,14 @@ struct QueueEvent: Codable, Sendable, Equatable {
     static let undecodable = QueueEvent(eventType: "unknown")
 }
 
+/// Authorized queue resources used to restore SignalR group membership.
+/// Matches the backend `QueueSubscriptionResourcesDto` response.
+struct QueueSubscriptionResources: Decodable, Sendable, Equatable {
+    let printerIds: [UUID]
+    let jobIds: [UUID]
+    let projectIds: [UUID]
+}
+
 /// Payload of the lowercase `camerasupdated` SignalR event
 /// (`CamerasUpdatedEvent`, #3684): the printer whose linked cameras changed
 /// and its current camera ids. Consumers reload the printer's camera
