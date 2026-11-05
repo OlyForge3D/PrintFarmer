@@ -193,6 +193,7 @@ jobs:
       # The generated Compose file includes the monitoring overlay, which
       # requires this value during parsing even though the probe never starts Grafana.
       GRAFANA_ADMIN_PASSWORD: provider-probe-unused
+      OBICO_ML_IMAGE: thespaghettidetective/ml_api:base-1.2-linux-amd64
       PRINTGUARD_IMAGE: ghcr.io/oliverbravery/printguard:2.6.5
     steps:
       - name: Checkout
@@ -332,7 +333,7 @@ jobs:
           {
             echo "Compose version: $(docker compose version --short)"
             docker image inspect --format='{{.RepoTags}} {{.Id}} {{.RepoDigests}}' \
-              thespaghettidetective/ml_api:base-1.4
+              "$OBICO_ML_IMAGE"
             docker image inspect --format='{{.RepoTags}} {{.Id}} {{.RepoDigests}}' \
               ghcr.io/oliverbravery/printguard:2.6.5
           } | tee "$PROVIDER_PROBE_DIR/image-identities.txt"
