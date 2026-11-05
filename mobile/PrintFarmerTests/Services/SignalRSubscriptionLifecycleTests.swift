@@ -5032,40 +5032,56 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         try await connectTask.value
         var nextReceiveEnrollment = 2
 
-        let initialTargets = [
-            "SubscribeToFarmAsync",
-            "SubscribeToPrintersAsync",
-            "SubscribeToQueueJobAsync",
-            "SubscribeToProjectAsync",
-        ]
-        for (index, target) in initialTargets.enumerated() {
+        var initialTargets: [String] = []
+        for index in 0..<4 {
             let sentIndex = index + 1
             await socket.waitForSendCount(sentIndex + 1)
             let invocation = try XCTUnwrap(
                 try decodeSignalRClientInvocation(socket.snapshotSent()[sentIndex])
             )
-            XCTAssertEqual(invocation.target, target)
-            if target == "SubscribeToFarmAsync" {
+            if index < 2 {
+                XCTAssertTrue(
+                    ["SubscribeToFarmAsync", "SubscribeToPrintersAsync"].contains(invocation.target)
+                )
+                XCTAssertFalse(initialTargets.contains(invocation.target))
+            } else {
+                XCTAssertEqual(
+                    invocation.target,
+                    index == 2 ? "SubscribeToQueueJobAsync" : "SubscribeToProjectAsync"
+                )
+            }
+            if invocation.target == "SubscribeToFarmAsync" {
                 XCTAssertEqual(invocation.argumentCount, 0)
             }
-            if target == "SubscribeToQueueJobAsync" {
+            if invocation.target == "SubscribeToQueueJobAsync" {
                 XCTAssertEqual(invocation.stringArgument, firstJobId.uuidString)
             }
-            if target == "SubscribeToProjectAsync" {
+            if invocation.target == "SubscribeToProjectAsync" {
                 XCTAssertEqual(invocation.stringArgument, firstProjectId.uuidString)
             }
-            if target == "SubscribeToPrintersAsync" {
+            if invocation.target == "SubscribeToPrintersAsync" {
                 XCTAssertEqual(invocation.stringArrayArgument, [printerId.uuidString])
             }
             await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
             socket.completeReceive(
                 with: try makeSignalRCompletion(
                     invocationId: try XCTUnwrap(invocation.invocationId),
-                    result: target == "SubscribeToPrintersAsync" ? [printerId.uuidString] : nil
+                    result: invocation.target == "SubscribeToPrintersAsync"
+                        ? [printerId.uuidString]
+                        : nil
                 )
             )
+            initialTargets.append(invocation.target)
             nextReceiveEnrollment += 1
         }
+        XCTAssertEqual(
+            Set(initialTargets.prefix(2)),
+            Set(["SubscribeToFarmAsync", "SubscribeToPrintersAsync"])
+        )
+        XCTAssertEqual(
+            Array(initialTargets.dropFirst(2)),
+            ["SubscribeToQueueJobAsync", "SubscribeToProjectAsync"]
+        )
 
         await socket.waitForReceiveEnrollments(count: nextReceiveEnrollment)
         await waitForQueueRefresh(after: initialLoadCount, from: jobService)
@@ -5112,7 +5128,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             ("SubscribeToProjectAsync", secondProjectId.uuidString),
         ]
         for (offset, expected) in membershipTargets.enumerated() {
-            let sentIndex = initialTargets.count + 1 + offset
+            let sentIndex = 4 + 1 + offset
             await socket.waitForSendCount(sentIndex + 1)
             let invocation = try XCTUnwrap(
                 try decodeSignalRClientInvocation(socket.snapshotSent()[sentIndex])
@@ -5136,37 +5152,56 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         reconnectedSocket.completeReceive(with: .data(makeSignalRHandshakeData()))
         var reconnectReceiveEnrollment = 2
 
-        let reconnectTargets = [
-            "SubscribeToPrintersAsync",
-            "SubscribeToFarmAsync",
-            "SubscribeToQueueJobAsync",
-            "SubscribeToProjectAsync",
-        ]
-        for (index, target) in reconnectTargets.enumerated() {
+        var reconnectTargets: [String] = []
+        for index in 0..<4 {
             let sentIndex = index + 1
             await reconnectedSocket.waitForSendCount(sentIndex + 1)
             let invocation = try XCTUnwrap(
                 try decodeSignalRClientInvocation(reconnectedSocket.snapshotSent()[sentIndex])
             )
-            XCTAssertEqual(invocation.target, target)
-            if target == "SubscribeToPrintersAsync" {
+            if index < 2 {
+                XCTAssertTrue(
+                    ["SubscribeToFarmAsync", "SubscribeToPrintersAsync"].contains(invocation.target)
+                )
+                XCTAssertFalse(reconnectTargets.contains(invocation.target))
+            } else {
+                XCTAssertEqual(
+                    invocation.target,
+                    index == 2 ? "SubscribeToQueueJobAsync" : "SubscribeToProjectAsync"
+                )
+            }
+            if invocation.target == "SubscribeToPrintersAsync" {
                 XCTAssertEqual(invocation.stringArrayArgument, [printerId.uuidString])
             }
-            if target == "SubscribeToQueueJobAsync" {
+            if invocation.target == "SubscribeToFarmAsync" {
+                XCTAssertEqual(invocation.argumentCount, 0)
+            }
+            if invocation.target == "SubscribeToQueueJobAsync" {
                 XCTAssertEqual(invocation.stringArgument, secondJobId.uuidString)
             }
-            if target == "SubscribeToProjectAsync" {
+            if invocation.target == "SubscribeToProjectAsync" {
                 XCTAssertEqual(invocation.stringArgument, secondProjectId.uuidString)
             }
             await reconnectedSocket.waitForReceiveEnrollments(count: reconnectReceiveEnrollment)
             reconnectedSocket.completeReceive(
                 with: try makeSignalRCompletion(
                     invocationId: try XCTUnwrap(invocation.invocationId),
-                    result: target == "SubscribeToPrintersAsync" ? [printerId.uuidString] : nil
+                    result: invocation.target == "SubscribeToPrintersAsync"
+                        ? [printerId.uuidString]
+                        : nil
                 )
             )
+            reconnectTargets.append(invocation.target)
             reconnectReceiveEnrollment += 1
         }
+        XCTAssertEqual(
+            Set(reconnectTargets.prefix(2)),
+            Set(["SubscribeToFarmAsync", "SubscribeToPrintersAsync"])
+        )
+        XCTAssertEqual(
+            Array(reconnectTargets.dropFirst(2)),
+            ["SubscribeToQueueJobAsync", "SubscribeToProjectAsync"]
+        )
 
         viewModel.deactivate()
         await service.disconnect()
