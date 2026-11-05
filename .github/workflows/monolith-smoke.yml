@@ -193,6 +193,7 @@ jobs:
       # The generated Compose file includes the monitoring overlay, which
       # requires this value during parsing even though the probe never starts Grafana.
       GRAFANA_ADMIN_PASSWORD: provider-probe-unused
+      PRINTGUARD_IMAGE: ghcr.io/oliverbravery/printguard:2.6.5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -241,6 +242,84 @@ jobs:
           echo "PROVIDER_PROBE_COMPOSE=$probe_dir/compose/docker-compose.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_OVERRIDE=$probe_dir/ports.override.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_IMAGE=$probe_dir/frame.jpg" >> "$GITHUB_ENV"
+
+      - name: Isolate generated provider services
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_compose="$PROVIDER_PROBE_COMPOSE"
+          provider_compose="$PROVIDER_PROBE_DIR/providers.compose.yml"
+          python - "$source_compose" "$provider_compose" <<'PY'
+          import sys
+          from ruamel.yaml import YAML
+          from ruamel.yaml.comments import CommentedMap
+
+          source_path, output_path = sys.argv[1:]
+          yaml = YAML()
+          yaml.preserve_quotes = True
+          with open(source_path, encoding="utf-8") as source:
+              compose = yaml.load(source)
+
+          services = compose.get("services", {})
+          selected = {"obico-ml-api", "printguard"}
+          missing = selected - set(services)
+          if missing:
+              raise SystemExit(f"Generated Compose is missing provider services: {sorted(missing)}")
+
+          pending = list(selected)
+          while pending:
+              service_name = pending.pop()
+              dependencies = services[service_name].get("depends_on", {})
+              if isinstance(dependencies, dict):
+                  dependencies = dependencies.keys()
+              for dependency in dependencies:
+                  if dependency not in services:
+                      raise SystemExit(
+                          f"Provider service {service_name} depends on missing service {dependency}"
+                      )
+                  if dependency not in selected:
+                      selected.add(dependency)
+                      pending.append(dependency)
+
+          network_names = set()
+          volume_names = set()
+          for service_name in selected:
+              service = services[service_name]
+              networks = service.get("networks", [])
+              network_names.update(networks.keys() if isinstance(networks, dict) else networks)
+              for mount in service.get("volumes", []):
+                  if isinstance(mount, str):
+                      name = mount.split(":", 1)[0]
+                  elif isinstance(mount, dict) and mount.get("type") == "volume":
+                      name = mount.get("source")
+                  else:
+                      continue
+                  if name:
+                      volume_names.add(name)
+
+          result = CommentedMap()
+          for key in ("version", "name"):
+              if key in compose:
+                  result[key] = compose[key]
+          result["services"] = CommentedMap(
+              (name, services[name]) for name in services if name in selected
+          )
+          for section, names in (("networks", network_names), ("volumes", volume_names)):
+              definitions = compose.get(section, {})
+              absent = names - set(definitions)
+              if absent:
+                  raise SystemExit(
+                      f"Generated provider services reference undefined {section}: {sorted(absent)}"
+                  )
+              if names:
+                  result[section] = CommentedMap(
+                      (name, definitions[name]) for name in definitions if name in names
+                  )
+
+          with open(output_path, "w", encoding="utf-8") as output:
+              yaml.dump(result, output)
+          PY
+          echo "PROVIDER_PROBE_COMPOSE=$provider_compose" >> "$GITHUB_ENV"
 
       - name: Pull provider images and record immutable image identities
         shell: bash
