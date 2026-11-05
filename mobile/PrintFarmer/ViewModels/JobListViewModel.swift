@@ -34,6 +34,8 @@ final class JobListViewModel {
     private var printerService: (any PrinterServiceProtocol)?
     @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
     @ObservationIgnored private var queueEventSubscription: SignalRSubscription?
+    @ObservationIgnored private var queueSubscriptionResourcesReconciledSubscription:
+        SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var lastSignalRState: SignalRConnectionState?
@@ -190,6 +192,7 @@ final class JobListViewModel {
         if signalRServiceIdentity == serviceIdentity,
            queueUpdateSubscription != nil,
            queueEventSubscription != nil,
+           queueSubscriptionResourcesReconciledSubscription != nil,
            connectionStateSubscription != nil {
             return
         }
@@ -206,6 +209,12 @@ final class JobListViewModel {
                 await self?.handleQueueInvalidation()
             }
         }
+        queueSubscriptionResourcesReconciledSubscription =
+            service.onQueueSubscriptionResourcesReconciled { [weak self] in
+                Task { @MainActor [weak self] in
+                    await self?.handleQueueInvalidation()
+                }
+            }
 
         let registration = service.onConnectionStateChanged { [weak self] state in
             Task { @MainActor [weak self] in
@@ -240,9 +249,11 @@ final class JobListViewModel {
     private func tearDownSignalR() {
         queueUpdateSubscription?.cancel()
         queueEventSubscription?.cancel()
+        queueSubscriptionResourcesReconciledSubscription?.cancel()
         connectionStateSubscription?.cancel()
         queueUpdateSubscription = nil
         queueEventSubscription = nil
+        queueSubscriptionResourcesReconciledSubscription = nil
         connectionStateSubscription = nil
         signalRServiceIdentity = nil
         lastSignalRState = nil

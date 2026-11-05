@@ -121,6 +121,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// Lowercase `queueevent` (queue outbox envelope) and `camerasupdated`
     /// invalidation hubs (#3684). Both are refetch hints only.
     private let queueEventHub: SignalREventHub<QueueEvent>
+    private let queueSubscriptionResourcesReconciledHub: SignalREventHub<Void>
     private let camerasUpdatedHub: SignalREventHub<CamerasUpdatedEvent>
 
     /// Race-free connection-state read. Delegates to the hub's serial
@@ -354,6 +355,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var queueResourceSubscriptionGeneration: UInt64 = 0
     private var subscriptionReconciliationTail: Task<Void, Never>?
     private var queueResourceRefreshRequested = false
+    private var queueResourceRefreshRequiresQueueInvalidation = false
     private var queueResourceRefreshToken: UUID?
     private var queueResourceRefreshTask: Task<Void, Never>?
     private var nextHubInvocationId: UInt64 = 0
@@ -415,6 +417,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
         self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
         self.queueEventHub = SignalREventHub<QueueEvent>(coordinator: coordinator)
+        self.queueSubscriptionResourcesReconciledHub = SignalREventHub<Void>(coordinator: coordinator)
         self.camerasUpdatedHub = SignalREventHub<CamerasUpdatedEvent>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
@@ -683,6 +686,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.desiredQueueProjectSubscriptionIds.removeAll(keepingCapacity: true)
             self.appliedQueueProjectSubscriptionIds.removeAll(keepingCapacity: true)
             self.queueResourceRefreshRequested = false
+            self.queueResourceRefreshRequiresQueueInvalidation = false
             self.queueResourceRefreshToken = nil
             let resourceRefresh = self.queueResourceRefreshTask
             self.queueResourceRefreshTask = nil
@@ -787,6 +791,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     @discardableResult
     func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription {
         queueEventHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onQueueSubscriptionResourcesReconciled(
+        _ handler: @escaping @Sendable () -> Void
+    ) -> SignalRSubscription {
+        queueSubscriptionResourcesReconciledHub.subscribe { _ in handler() }
     }
 
     @discardableResult
@@ -1294,10 +1305,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
     }
 
-    private func scheduleQueueSubscriptionResourceRefresh() {
+    private func scheduleQueueSubscriptionResourceRefresh(invalidateQueue: Bool = false) {
         guard queueSubscriptionResourcesProvider != nil else { return }
         lifecycleSync {
             self.queueResourceRefreshRequested = true
+            self.queueResourceRefreshRequiresQueueInvalidation =
+                self.queueResourceRefreshRequiresQueueInvalidation || invalidateQueue
             guard self.queueResourceRefreshToken == nil else { return }
             let token = UUID()
             self.queueResourceRefreshToken = token
@@ -1311,24 +1324,41 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     private func refreshQueueSubscriptionResources(token: UUID) async {
         guard let queueSubscriptionResourcesProvider else { return }
+        var didReconcileResources = false
         while true {
-            let connectionGeneration: UInt64? = lifecycleSync {
-                guard self.queueResourceRefreshToken == token else { return nil }
+            let step: (
+                connectionGeneration: UInt64?,
+                shouldFinish: Bool,
+                shouldInvalidateQueue: Bool
+            ) = lifecycleSync {
+                guard self.queueResourceRefreshToken == token else {
+                    return (nil, false, false)
+                }
                 guard self.queueResourceRefreshRequested else {
+                    let shouldInvalidateQueue =
+                        self.queueResourceRefreshRequiresQueueInvalidation && didReconcileResources
+                    self.queueResourceRefreshRequiresQueueInvalidation = false
                     self.queueResourceRefreshToken = nil
                     self.queueResourceRefreshTask = nil
-                    return nil
+                    return (nil, true, shouldInvalidateQueue)
                 }
                 self.queueResourceRefreshRequested = false
                 guard self.connectionStateHub.snapshot() == .connected,
                       self.webSocketTask != nil else {
+                    self.queueResourceRefreshRequiresQueueInvalidation = false
                     self.queueResourceRefreshToken = nil
                     self.queueResourceRefreshTask = nil
-                    return nil
+                    return (nil, false, false)
                 }
-                return self.generation
+                return (self.generation, false, false)
             }
-            guard let connectionGeneration else { return }
+            if step.shouldFinish {
+                if step.shouldInvalidateQueue {
+                    queueSubscriptionResourcesReconciledHub.deliver(())
+                }
+                return
+            }
+            guard let connectionGeneration = step.connectionGeneration else { return }
 
             do {
                 let resources = try await queueSubscriptionResourcesProvider()
@@ -1354,8 +1384,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 if applied {
                     await enqueuePrinterSubscriptionReconciliation().value
                     await enqueueQueueResourceSubscriptionReconciliation().value
+                    didReconcileResources = true
                 }
             } catch {
+                didReconcileResources = false
                 logger.warning(
                     "Failed to load authorized queue SignalR resources: \(error.localizedDescription)"
                 )
@@ -1883,9 +1915,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             taskInvalidationHub.deliver(ShiftTaskInvalidation(target: rawTarget))
             return
         }
-
         if rawTarget.lowercased() == "queueresourceschanged" {
-            scheduleQueueSubscriptionResourceRefresh()
+            scheduleQueueSubscriptionResourceRefresh(invalidateQueue: true)
             return
         }
 

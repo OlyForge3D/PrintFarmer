@@ -4920,6 +4920,83 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         await service.disconnect()
     }
 
+    func testQueueResourceChangeRefreshesQueueAfterNewJobSubscription() async throws {
+        let newJob = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+        let newJobId = try XCTUnwrap(UUID(uuidString: newJob.job.id))
+        let resources = QueueSubscriptionResourcesStore(
+            QueueSubscriptionResources(printerIds: [], jobIds: [], projectIds: [])
+        )
+        let socket = MockSignalRWebSocket()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socket]),
+            queueSubscriptionResourcesProvider: { resources.snapshot() }
+        )
+        let jobService = MockJobService()
+        jobService.queuedJobResponsesByLoad = [[], [], [newJob]]
+        let viewModel = JobListViewModel()
+        viewModel.configure(jobService: jobService)
+        viewModel.configure(jobAnalyticsService: MockJobAnalyticsService())
+        await viewModel.loadJobs()
+        let initialLoadCount = jobService.listAllJobsCallCount
+        viewModel.configureSignalR(service)
+
+        let connectTask = Task { try await service.connect() }
+        await socket.waitForReceiveCall()
+        socket.completeReceive(with: .data(makeSignalRHandshakeData()))
+        try await connectTask.value
+
+        await socket.waitForSendCount(2)
+        let farmSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socket.snapshotSent()[1])
+        )
+        XCTAssertEqual(farmSubscribe.target, "SubscribeToFarmAsync")
+        await socket.waitForReceiveEnrollments(count: 2)
+        socket.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(farmSubscribe.invocationId)
+            )
+        )
+
+        await waitForQueueRefresh(after: initialLoadCount, from: jobService)
+        await waitForQueueIdle(viewModel)
+        XCTAssertTrue(viewModel.jobs.isEmpty)
+        let connectedLoadCount = jobService.listAllJobsCallCount
+
+        resources.replace(
+            QueueSubscriptionResources(printerIds: [], jobIds: [newJobId], projectIds: [])
+        )
+        await socket.waitForReceiveEnrollments(count: 3)
+        socket.completeReceive(
+            with: try makeSignalRServerInvocation(target: "queueresourceschanged")
+        )
+
+        await socket.waitForSendCount(3)
+        let jobSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socket.snapshotSent()[2])
+        )
+        XCTAssertEqual(jobSubscribe.target, "SubscribeToQueueJobAsync")
+        XCTAssertEqual(jobSubscribe.stringArgument, newJobId.uuidString)
+        XCTAssertEqual(
+            jobService.listAllJobsCallCount,
+            connectedLoadCount,
+            "The queue refresh must wait until the new job group subscription completes"
+        )
+        socket.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(jobSubscribe.invocationId)
+            )
+        )
+
+        await waitForQueueRefresh(after: connectedLoadCount, from: jobService)
+        await waitForQueueJob(newJob.job.id, in: viewModel)
+        XCTAssertEqual(viewModel.jobs.map(\.job.id), [newJob.job.id])
+
+        viewModel.deactivate()
+        await service.disconnect()
+    }
+
     func testAuthorizedQueueGroupsDeliverQueueChangesAndReconcileMembership() async throws {
         let printerId = UUID(uuidString: "81500000-0000-0000-0000-000000000101")!
         let firstJobId = UUID(uuidString: "81500000-0000-0000-0000-000000000102")!
@@ -5108,6 +5185,33 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             service.listAllJobsCallCount,
             count,
             "The production SignalR subscription path should reach the queue refresh consumer"
+        )
+    }
+
+    private func waitForQueueIdle(
+        _ viewModel: JobListViewModel,
+        timeout: Duration = .seconds(5)
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while viewModel.isLoading, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertFalse(viewModel.isLoading, "The queue refresh should complete")
+    }
+
+    private func waitForQueueJob(
+        _ jobId: String,
+        in viewModel: JobListViewModel,
+        timeout: Duration = .seconds(5)
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while !viewModel.jobs.contains(where: { $0.job.id == jobId }),
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(
+            viewModel.jobs.contains(where: { $0.job.id == jobId }),
+            "The canonical queue refresh should include the newly visible job"
         )
     }
 

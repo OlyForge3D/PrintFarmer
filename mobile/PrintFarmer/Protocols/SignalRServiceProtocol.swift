@@ -56,6 +56,13 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     @discardableResult
     func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription
 
+    /// Registers for a queue invalidation after an authorized queue-resource
+    /// snapshot has been reconciled following `queueresourceschanged`.
+    @discardableResult
+    func onQueueSubscriptionResourcesReconciled(
+        _ handler: @escaping @Sendable () -> Void
+    ) -> SignalRSubscription
+
     /// Subscribes to the lowercase `camerasupdated` event (#3684) raised when
     /// a printer's linked cameras change. Handlers reload that printer's
     /// camera metadata.
@@ -121,6 +128,14 @@ extension SignalRServiceProtocol {
     /// Default for test doubles that never emit queue envelopes.
     @discardableResult
     func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription {
+        SignalRSubscription {}
+    }
+
+    /// Default for services that do not reconcile production queue groups.
+    @discardableResult
+    func onQueueSubscriptionResourcesReconciled(
+        _ handler: @escaping @Sendable () -> Void
+    ) -> SignalRSubscription {
         SignalRSubscription {}
     }
 
