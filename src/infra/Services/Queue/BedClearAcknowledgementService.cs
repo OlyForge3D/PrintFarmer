@@ -724,6 +724,32 @@ public sealed class BedClearAcknowledgementService(
             throw;
         }
 
+        // Shadow evidence must never participate in the dispatch-critical transaction.
+        var detectorSample = new BedClearEvaluation
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = request.PrinterId,
+            PrintJobId = request.JobId,
+            BedTypeId = printer.BedTypeId,
+            SourceAcknowledgementId = commandRecord.Id,
+            AcknowledgedBySubject = request.ActorSubject,
+            AcknowledgedAtUtc = now,
+            CreatedAtUtc = now,
+        };
+        _db.BedClearEvaluations.Add(detectorSample);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError(
+                exception,
+                "Could not persist shadow bed-clear evaluation for printer {PrinterId}; acknowledgement remains committed.",
+                request.PrinterId);
+            _db.Entry(detectorSample).State = EntityState.Detached;
+        }
+
         _logger.LogInformation(
             "Bed-clear acknowledged and durable backend-start command queued: " +
             "Job={JobId} Printer={PrinterId} Actor={Actor} Command={CommandId}",

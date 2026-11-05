@@ -380,6 +380,115 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("BedClearCommandRecords");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AcknowledgedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CameraConfigurationAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CameraId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CapturedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GroundTruth")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("GroundTruthAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GroundTruthBySubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ImageFilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("IsActiveReference")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsReferenceEligible")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ProcessingStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("double precision");
+
+                    b.Property<Guid?>("SourceAcknowledgementId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<double?>("ToolheadX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("ToolheadY")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("ToolheadZ")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BedTypeId");
+
+                    b.HasIndex("CameraId");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("SourceAcknowledgementId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearEvaluations_Acknowledgement");
+
+                    b.HasIndex("State")
+                        .HasDatabaseName("IX_BedClearEvaluations_State");
+
+                    b.HasIndex("PrinterId", "CameraId", "BedTypeId", "IsActiveReference", "GroundTruth")
+                        .HasDatabaseName("IX_BedClearEvaluations_ReferenceScope");
+
+                    b.ToTable("BedClearEvaluations", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8937,6 +9046,25 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsRequired();
 
                     b.Navigation("UserBalance");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationAttempt", b =>

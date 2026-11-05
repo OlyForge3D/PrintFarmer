@@ -42,6 +42,9 @@ failure status, and fallback details are available in tooltips rather than text
 chips. An unavailable preview retains one short placeholder. Stream-only cameras
 do not gain an invented snapshot endpoint.
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
+✅ **Shadow Bed-Clear Evaluation** - Per-printer camera references and independently
+labeled false-clear metrics; human readiness remains the dispatch gate.
+See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidence-shadow-only).
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities

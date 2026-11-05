@@ -80,6 +80,7 @@ public sealed class DatabaseMigrationTests
             "20261026153717_RetireGcodeHarvest",
             "20261027134803_PersistPrinterFileDetails",
             "20261027212835_AddPrinterFileEnrichment",
+            "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider");
         second.LegacySchemaBaselined.Should().BeFalse();
@@ -816,6 +817,7 @@ public sealed class DatabaseMigrationTests
             "20261026153717_RetireGcodeHarvest",
             "20261027134803_PersistPrinterFileDetails",
             "20261027212835_AddPrinterFileEnrichment",
+            "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
@@ -1379,6 +1381,7 @@ public sealed class DatabaseMigrationTests
                 "20261026153721_RetireGcodeHarvest",
                 "20261027134806_PersistPrinterFileDetails",
                 "20261027212852_AddPrinterFileEnrichment",
+                "20261104185029_AddBedClearEvaluations",
                 "20261104222340_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
             ]
@@ -1425,6 +1428,7 @@ public sealed class DatabaseMigrationTests
                 "20261026153726_RetireGcodeHarvest",
                 "20261027134809_PersistPrinterFileDetails",
                 "20261027212909_AddPrinterFileEnrichment",
+                "20261104185033_AddBedClearEvaluations",
                 "20261104222359_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
             ];

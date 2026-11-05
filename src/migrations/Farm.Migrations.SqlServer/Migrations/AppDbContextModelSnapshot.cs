@@ -381,6 +381,116 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("BedClearCommandRecords");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AcknowledgedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AcknowledgedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CameraConfigurationAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CameraId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CapturedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GroundTruth")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime?>("GroundTruthAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GroundTruthBySubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ImageFilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActiveReference")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReferenceEligible")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ProcessingStartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("float");
+
+                    b.Property<Guid?>("SourceAcknowledgementId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<double?>("ToolheadX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ToolheadY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("ToolheadZ")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BedTypeId");
+
+                    b.HasIndex("CameraId");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("SourceAcknowledgementId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearEvaluations_Acknowledgement")
+                        .HasFilter("[SourceAcknowledgementId] IS NOT NULL");
+
+                    b.HasIndex("State")
+                        .HasDatabaseName("IX_BedClearEvaluations_State");
+
+                    b.HasIndex("PrinterId", "CameraId", "BedTypeId", "IsActiveReference", "GroundTruth")
+                        .HasDatabaseName("IX_BedClearEvaluations_ReferenceScope");
+
+                    b.ToTable("BedClearEvaluations", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8961,6 +9071,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("UserBalance");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationAttempt", b =>
