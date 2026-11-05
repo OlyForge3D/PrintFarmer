@@ -1883,6 +1883,27 @@ public partial class PrintersController(
             return BadRequest(metrologyProblem);
         }
 
+        // Validate PrintGuard opt-in before provider updates that may persist through a separate
+        // DbContext, such as Obico server assignment.
+        if (dto.PrintGuardEnabled == true && !p.PrintGuardEnabled)
+        {
+            PrintGuardShadowSettings? settings = _printGuardSettings?.CurrentValue;
+            if (settings is null
+                || !settings.Enabled
+                || !settings.TryGetClassificationEndpoint(out _))
+            {
+                return BadRequest(new
+                {
+                    error = "PrintGuard is not enabled with valid deployment configuration. Configure PFARM__PrintGuardShadow__Enabled and PFARM__PrintGuardShadow__ApiUrl before opting in a printer."
+                });
+            }
+
+            if (p.Cameras == null || p.Cameras.Count == 0)
+            {
+                return BadRequest(new { error = "PrintGuard monitoring requires at least one camera configured on the printer." });
+            }
+        }
+
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
         // from PopulateCredential's decrypt → EncryptSensitiveFieldsOnTrackedEntities's re-encrypt cycle
         string? originalApiKey = p.ApiKey;
@@ -2073,25 +2094,6 @@ public partial class PrintersController(
 
         if (dto.PrintGuardEnabled.HasValue && dto.PrintGuardEnabled.Value != p.PrintGuardEnabled)
         {
-            if (dto.PrintGuardEnabled.Value)
-            {
-                PrintGuardShadowSettings? settings = _printGuardSettings?.CurrentValue;
-                if (settings is null
-                    || !settings.Enabled
-                    || !settings.TryGetClassificationEndpoint(out _))
-                {
-                    return BadRequest(new
-                    {
-                        error = "PrintGuard is not enabled with valid deployment configuration. Configure PFARM__PrintGuardShadow__Enabled and PFARM__PrintGuardShadow__ApiUrl before opting in a printer."
-                    });
-                }
-
-                if (p.Cameras == null || p.Cameras.Count == 0)
-                {
-                    return BadRequest(new { error = "PrintGuard monitoring requires at least one camera configured on the printer." });
-                }
-            }
-
             p.PrintGuardEnabled = dto.PrintGuardEnabled.Value;
         }
 
