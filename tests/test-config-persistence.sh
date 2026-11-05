@@ -453,6 +453,25 @@ case "\$1" in
         effective_obico_ml_image
         rm -f "\$ENV_FILE"
         ;;
+    valid-ipv6-registry-port)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE='[2001:db8::1]:5000/example/obico-ml-api:Custom_Tag'
+        effective_obico_ml_image
+        ;;
+    invalid-image-shell-syntax)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE='example/obico-ml-api:custom;touch /tmp/obico-image-injected'
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    invalid-image-newline)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE=\$'example/obico-ml-api:custom\nINJECTED=yes'
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
     *)
         exit 2
         ;;
@@ -483,6 +502,13 @@ EOF
     capture_output "'$helper_script' shell-image-precedence"
     assert_contains "$(get_output)" "example/shell-override:arm64" \
         "An explicit shell image override should take precedence over the .env value" || true
+    capture_output "'$helper_script' valid-ipv6-registry-port"
+    assert_contains "$(get_output)" "[2001:db8::1]:5000/example/obico-ml-api:Custom_Tag" \
+        "A custom image with an IPv6 registry and port should remain valid" || true
+    assert_exit_code 0 "'$helper_script' invalid-image-shell-syntax" \
+        "A custom image containing shell syntax should be rejected" || true
+    assert_exit_code 0 "'$helper_script' invalid-image-newline" \
+        "A custom image containing a newline should be rejected" || true
 
     local regen_dir="$TEST_TEMP_DIR/obico-arm64-regenerate"
     mkdir -p "$regen_dir"
@@ -527,6 +553,18 @@ EOF
         "Regeneration should accept an explicit custom shell image override" || true
     assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/shell-override:arm64" \
         "Regeneration should prefer and preserve the explicit shell image over the .env value" || true
+
+    local injection_marker="$TEST_TEMP_DIR/obico-image-injected"
+    cp ".env" "$TEST_TEMP_DIR/obico-image-env.before"
+    capture_output "OBICO_ML_IMAGE='example/obico-ml-api:custom; touch $injection_marker' DOCKER_DEFAULT_PLATFORM=linux/amd64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_not_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should reject a custom image containing shell syntax" || true
+    if [ -e "$injection_marker" ]; then
+        fail_test "Rejected custom image shell syntax must not execute a command"
+    fi
+    if ! cmp -s ".env" "$TEST_TEMP_DIR/obico-image-env.before"; then
+        fail_test "Rejected custom image shell syntax must not modify .env"
+    fi
 
     if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
         pass_test

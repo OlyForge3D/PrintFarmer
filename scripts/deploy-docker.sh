@@ -4013,6 +4013,22 @@ effective_docker_runtime_architecture() {
     printf '%s' "$architecture" | tr '[:upper:]' '[:lower:]'
 }
 
+validate_obico_ml_image_reference() {
+    local image="$1"
+    local unsafe_characters="$image"
+    local LC_ALL=C
+
+    unsafe_characters="${unsafe_characters//[[:alnum:]._:@+-]/}"
+    unsafe_characters="${unsafe_characters//\//}"
+    unsafe_characters="${unsafe_characters//\[/}"
+    unsafe_characters="${unsafe_characters//\]/}"
+
+    if [[ -z "$image" || -n "$unsafe_characters" ]]; then
+        print_error "OBICO_ML_IMAGE must be a single-line Docker image reference without whitespace or shell metacharacters."
+        return 1
+    fi
+}
+
 effective_obico_ml_image() {
     local env_file="${ENV_FILE:-.env}"
     local shell_image="${OBICO_ML_IMAGE:-}"
@@ -4030,6 +4046,11 @@ effective_obico_ml_image() {
         \"*\") image="${image:1:${#image}-2}" ;;
         \'*\') image="${image:1:${#image}-2}" ;;
     esac
+
+    if [ -n "$image" ] && ! validate_obico_ml_image_reference "$image"; then
+        return 1
+    fi
+
     printf '%s' "$image"
 }
 
@@ -4037,7 +4058,10 @@ validate_obico_runtime_platform() {
     [ "${DEPLOY_OBICO_ML:-no}" = "yes" ] || return 0
 
     local image
-    image=$(effective_obico_ml_image)
+    if ! image=$(effective_obico_ml_image); then
+        return 1
+    fi
+
     if [ "$image" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
         return 0
     fi
@@ -5058,7 +5082,10 @@ generate_env_file() {
     local obico_ml_image
     local printguard_api_token printguard_request_timeout_seconds printguard_capture_timeout_seconds
     local printguard_cpu_limit printguard_memory_limit printguard_cpu_request printguard_memory_request
-    obico_ml_image=$(effective_obico_ml_image)
+    if ! obico_ml_image=$(effective_obico_ml_image); then
+        return 1
+    fi
+
     if [ "$obico_ml_image" = "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
         obico_ml_image=""
     fi
