@@ -435,6 +435,24 @@ case "\$1" in
         validate_obico_runtime_platform true
         rm -f "\$ENV_FILE"
         ;;
+    pinned-image-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=%s\n' "\$OBICO_ML_IMAGE_DEFAULT" > "\$ENV_FILE"
+        if validate_obico_runtime_platform true; then
+            exit 1
+        fi
+        rm -f "\$ENV_FILE"
+        ;;
+    shell-image-precedence)
+        DEPLOY_OBICO_ML=yes
+        OBICO_ML_IMAGE=example/shell-override:arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=example/env-file-override:arm64\n' > "\$ENV_FILE"
+        effective_obico_ml_image
+        rm -f "\$ENV_FILE"
+        ;;
     *)
         exit 2
         ;;
@@ -460,6 +478,11 @@ EOF
         "Unknown runtime platform should fail strict deployment validation" || true
     assert_exit_code 0 "'$helper_script' custom-image-arm64" \
         "An explicitly selected custom image should not inherit the pinned image's platform restriction" || true
+    assert_exit_code 0 "'$helper_script' pinned-image-arm64" \
+        "A persisted pinned image must still enforce the AMD64-only platform restriction" || true
+    capture_output "'$helper_script' shell-image-precedence"
+    assert_contains "$(get_output)" "example/shell-override:arm64" \
+        "An explicit shell image override should take precedence over the .env value" || true
 
     local regen_dir="$TEST_TEMP_DIR/obico-arm64-regenerate"
     mkdir -p "$regen_dir"
@@ -489,6 +512,21 @@ EOF
         "Regeneration should allow a custom Obico image on an ARM64 runtime target" || true
     assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/obico-ml-api:arm64" \
         "Regeneration should preserve the custom Obico image override" || true
+
+    printf 'OBICO_ML_IMAGE=%s\n' "ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee" > ".env"
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/amd64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should accept the pinned image on an AMD64 runtime target" || true
+    if grep -q '^OBICO_ML_IMAGE=' ".env"; then
+        fail_test "Regeneration should not persist the pinned default image as an operator override"
+    fi
+
+    printf 'OBICO_ML_IMAGE=example/env-file-override:arm64\n' > ".env"
+    capture_output "OBICO_ML_IMAGE=example/shell-override:arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should accept an explicit custom shell image override" || true
+    assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/shell-override:arm64" \
+        "Regeneration should prefer and preserve the explicit shell image over the .env value" || true
 
     if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
         pass_test

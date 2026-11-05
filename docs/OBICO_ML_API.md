@@ -74,8 +74,8 @@ curl http://localhost:3333/hc/
 
 **Docker Compose (`.env` file):**
 ```bash
-# Pinned publisher image (AMD64 runtime only)
-OBICO_ML_IMAGE=ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
+# Optional custom image; omit to use the pinned default (AMD64 runtime only)
+OBICO_ML_IMAGE=registry.example/obico-ml-api:custom
 
 # Resource limits
 OBICO_ML_CPU_LIMIT=2.0
@@ -87,11 +87,13 @@ OBICO_ML_MEMORY_REQUEST=512m
 OBICO_ML_DEBUG=False
 ```
 
-The deployment script preserves `OBICO_ML_IMAGE` when regenerating `.env`.
-The pinned image is AMD64-only, so bundled Obico is rejected when the effective
-Docker runtime target is not AMD64. Set `OBICO_ML_IMAGE` to an image compatible
-with your runtime to use a different architecture; compatibility of custom
-images is the operator's responsibility.
+The deployment script preserves a custom `OBICO_ML_IMAGE` when regenerating
+`.env`; it leaves the pinned default out so future default image updates are
+not frozen by generated configuration. The pinned image is AMD64-only, so
+bundled Obico is rejected when the effective Docker runtime target is not
+AMD64. Set `OBICO_ML_IMAGE` to an image compatible with your runtime to use a
+different architecture; compatibility of custom images is the operator's
+responsibility.
 
 **PrintFarmer API:**
 ```bash

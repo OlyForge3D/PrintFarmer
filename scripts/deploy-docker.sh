@@ -734,10 +734,15 @@ get_kv_from_file() {
 
 load_env_file() {
     if [ -f "$ENV_FILE" ]; then
+        local obico_ml_image_override="${OBICO_ML_IMAGE:-}"
         set -a
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
+        if [ -n "$obico_ml_image_override" ] && [ "$obico_ml_image_override" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+            OBICO_ML_IMAGE="$obico_ml_image_override"
+            export OBICO_ML_IMAGE
+        fi
     fi
 }
 
@@ -4010,8 +4015,11 @@ effective_docker_runtime_architecture() {
 
 effective_obico_ml_image() {
     local env_file="${ENV_FILE:-.env}"
-    local image="${OBICO_ML_IMAGE:-${OBICO_ML_IMAGE_DEFAULT:-}}"
-    if [ -f "$env_file" ] && grep -q '^OBICO_ML_IMAGE=' "$env_file"; then
+    local shell_image="${OBICO_ML_IMAGE:-}"
+    local image="${OBICO_ML_IMAGE_DEFAULT:-$shell_image}"
+    if [ -n "$shell_image" ] && [ "$shell_image" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        image="$shell_image"
+    elif [ -f "$env_file" ] && grep -q '^OBICO_ML_IMAGE=' "$env_file"; then
         image=$(get_kv_from_file "$env_file" "OBICO_ML_IMAGE")
         if [ -z "$image" ]; then
             image="${OBICO_ML_IMAGE_DEFAULT:-$OBICO_ML_IMAGE}"
@@ -5051,6 +5059,9 @@ generate_env_file() {
     local printguard_api_token printguard_request_timeout_seconds printguard_capture_timeout_seconds
     local printguard_cpu_limit printguard_memory_limit printguard_cpu_request printguard_memory_request
     obico_ml_image=$(effective_obico_ml_image)
+    if [ "$obico_ml_image" = "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        obico_ml_image=""
+    fi
     if [ "${PFARM__Obico__Enabled+x}" = "x" ]; then
         obico_enabled="$PFARM__Obico__Enabled"
     else
