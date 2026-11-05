@@ -14,11 +14,12 @@ The Obico ML API analyzes 3D printer camera images and detects print failures in
 - Other print anomalies
 
 PrintFarmer supports two independently configured analysis providers. When
-both are enabled and available for a printer, the monitor sends the same
-captured JPEG to each and reports the cycle as paired-frame analysis. When only
-one provider is available, it analyzes that frame independently and the cycle
-is reported as unpaired. A provider failure does not invalidate the other
-provider's result.
+both are enabled and available for a printer, the monitor reports paired-frame
+analysis only when both providers actually consume the same captured JPEG.
+Obico's legacy URL-based snapshot fallback does not count as paired, even if
+inference succeeds, because it may analyze a different frame. When only one
+provider is available, it analyzes independently and the cycle is reported as
+unpaired. A provider failure does not invalidate the other provider's result.
 
 Detection is advisory only. PrintFarmer does not automatically pause, cancel,
 or control printers based on these results. Operators remain responsible for
@@ -42,6 +43,17 @@ the publisher's
 image. The service is available only on the internal Docker network and does
 not publish a host port. Do not expose it directly: the publisher documents
 that the service has no built-in authentication of its own.
+
+The bundled Obico image does not support ARM64 runtime targets. Deployment
+rejects the bundled service when the effective Docker runtime target is ARM64;
+use an AMD64 Docker runtime target (including emulation where appropriate), or
+disable the bundled Obico service and configure an external Obico API. The
+deploy script checks `DOCKER_DEFAULT_PLATFORM` when set, otherwise it queries
+the active Docker engine, which also handles remote Docker contexts. Configuration
+validation and regeneration warn if they cannot determine the target; an actual
+deployment with bundled Obico fails closed if the target cannot be determined.
+The deploy script's `--platform` option selects the build platform and is not
+by itself the Compose runtime target.
 
 ### Configure Obico ML API
 

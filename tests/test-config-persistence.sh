@@ -353,6 +353,115 @@ EOF
     fi
 }
 
+test_obico_runtime_platform_guard() {
+    start_test "bundled Obico runtime platform validation"
+
+    local failures_before=$TESTS_FAILED
+    local helper_script="$TEST_TEMP_DIR/obico-platform-helper.sh"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$DEPLOY_SCRIPT"
+unset DOCKER_DEFAULT_PLATFORM
+print_error() { printf '%s\n' "\$*" >&2; }
+print_info() { printf '%s\n' "\$*"; }
+print_warning() { printf '%s\n' "\$*"; }
+print_success() { :; }
+print_header() { :; }
+
+docker() {
+    if [[ "\${1:-}" != "info" ]]; then
+        printf 'unexpected docker invocation: %s\n' "\$*" >&2
+        return 2
+    fi
+    printf '%s' "\${MOCK_DOCKER_INFO:-}"
+    return "\${MOCK_DOCKER_STATUS:-0}"
+}
+
+case "\$1" in
+    explicit-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    explicit-amd64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/amd64
+        validate_obico_runtime_platform
+        ;;
+    docker-info-arm64)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_INFO=linux/arm64
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
+    disabled-provider)
+        DEPLOY_OBICO_ML=no
+        MOCK_DOCKER_STATUS=1
+        validate_obico_runtime_platform true
+        ;;
+    unknown-warning)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_STATUS=1
+        validate_obico_runtime_platform
+        ;;
+    unknown-strict)
+        DEPLOY_OBICO_ML=yes
+        MOCK_DOCKER_STATUS=1
+        if validate_obico_runtime_platform true; then
+            exit 1
+        fi
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "'$helper_script' explicit-arm64" \
+        "An explicit ARM64 runtime target should reject bundled Obico" || true
+    assert_exit_code 0 "'$helper_script' explicit-amd64" \
+        "An explicit AMD64 runtime target should allow bundled Obico" || true
+    assert_exit_code 0 "'$helper_script' docker-info-arm64" \
+        "Docker engine architecture should detect ARM64 when no override is set" || true
+    assert_exit_code 0 "'$helper_script' disabled-provider" \
+        "Disabling bundled Obico should bypass platform detection" || true
+    assert_exit_code 0 "'$helper_script' unknown-warning" \
+        "Unknown runtime platform should warn but allow config-only validation" || true
+    assert_exit_code 0 "'$helper_script' unknown-strict" \
+        "Unknown runtime platform should fail strict deployment validation" || true
+
+    local regen_dir="$TEST_TEMP_DIR/obico-arm64-regenerate"
+    mkdir -p "$regen_dir"
+    cd "$regen_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=no
+EOF
+    printf 'existing env content\n' > ".env"
+    cp ".deploy-config" "$TEST_TEMP_DIR/obico-arm64-config.before"
+    cp ".env" "$TEST_TEMP_DIR/obico-arm64-env.before"
+
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_not_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should reject bundled Obico for an ARM64 runtime target" || true
+    if ! cmp -s ".deploy-config" "$TEST_TEMP_DIR/obico-arm64-config.before"; then
+        fail_test "Rejected ARM64 regeneration must not modify .deploy-config"
+    fi
+    if ! cmp -s ".env" "$TEST_TEMP_DIR/obico-arm64-env.before"; then
+        fail_test "Rejected ARM64 regeneration must not modify .env"
+    fi
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Test configuration loading displays monitoring settings
 test_config_loading_display() {
     start_test "configuration loading displays monitoring settings"
@@ -989,6 +1098,7 @@ run_all_tests() {
     test_config_loading_display
     test_go2rtc_interactive_default_uses_persisted_value
     test_legacy_distributed_slicing_config_migrates_worker_defaults
+    test_obico_runtime_platform_guard
     test_explicit_worker_disable_remains_disabled
     test_disabled_slicing_defaults_missing_worker_settings
     test_disabled_worker_defaults_missing_count

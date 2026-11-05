@@ -3993,10 +3993,50 @@ find_next_free_port() {
     return 1
 }
 
+effective_docker_runtime_architecture() {
+    local platform="${DOCKER_DEFAULT_PLATFORM:-}"
+    if [ -z "$platform" ]; then
+        platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null) || return 1
+    fi
+    [ -n "$platform" ] || return 1
+
+    local architecture="$platform"
+    if [[ "$architecture" == */* ]]; then
+        architecture="${architecture#*/}"
+        architecture="${architecture%%/*}"
+    fi
+    printf '%s' "$architecture" | tr '[:upper:]' '[:lower:]'
+}
+
+validate_obico_runtime_platform() {
+    [ "${DEPLOY_OBICO_ML:-no}" = "yes" ] || return 0
+
+    local require_known="${1:-false}"
+    local architecture
+    if ! architecture=$(effective_docker_runtime_architecture); then
+        if [ "$require_known" = "true" ]; then
+            print_error "Cannot determine the effective Docker runtime platform for the bundled Obico ML API."
+            print_info "Check Docker connectivity or disable the bundled Obico service with --exclude-obico-ml."
+            return 1
+        fi
+        print_warning "Could not determine the Docker runtime platform; verify the bundled Obico image supports the target before deployment."
+        return 0
+    fi
+
+    case "$architecture" in
+        arm64|aarch64)
+            print_error "The bundled Obico ML API image does not support ARM64 runtime targets."
+            print_info "Use an AMD64 Docker runtime target (with emulation if needed), or disable the bundled service with --exclude-obico-ml and configure an external Obico API."
+            return 1
+            ;;
+    esac
+}
+
 # Validate configuration & enforce safe constraints (ports, scaling, numeric values)
 validate_configuration() {
     print_header "🧪 Validating Configuration"
     validate_http_bind_address || return 1
+    validate_obico_runtime_platform || return 1
 
     : "${ENABLE_DISTRIBUTED_SLICING:=false}"
     : "${ENABLE_ORCA_WORKER:=no}"
@@ -5728,6 +5768,12 @@ run_compose_build_with_snapshot_repair() {
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
 
+    if [ "$DRY_RUN" = "true" ]; then
+        validate_obico_runtime_platform || return 1
+    else
+        validate_obico_runtime_platform true || return 1
+    fi
+
     # Source the .env file into the current shell so that environment variables
     # are available to the script and are properly passed to docker compose.
     # This ensures that health check commands can access variables like MSSQL_SA_PASSWORD.
@@ -6146,6 +6192,10 @@ EOF
     resolve_orcaslicer_container_digest
     if [ -f "$ENV_FILE" ]; then
         update_kv_file "$ENV_FILE" "ORCASLICER_CONTAINER_DIGEST" "$ORCASLICER_CONTAINER_DIGEST"
+    fi
+
+    if [ "$DRY_RUN" != "true" ]; then
+        validate_obico_runtime_platform true || return 1
     fi
 
     print_info "Step 2/3: Starting containers..."
@@ -7959,6 +8009,11 @@ main() {
         restore_config_overrides
         if ! normalize_worker_configuration; then
             print_error "Stored worker configuration is invalid."
+            exit 1
+        fi
+
+        if ! validate_obico_runtime_platform; then
+            print_error "Deployment configuration is invalid."
             exit 1
         fi
 
