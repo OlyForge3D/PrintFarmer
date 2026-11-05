@@ -396,14 +396,23 @@ jobs:
         shell: bash
         run: |
           cat > src/tests/Farm.Infrastructure.Tests/HostedProviderInferenceTests.cs <<'CS'
+          using System.Reflection;
           using System.Text.Json;
+          using Farm.Infrastructure.Data;
+          using Farm.Infrastructure.Domain;
           using Farm.Infrastructure.Services.Cameras;
           using Farm.Infrastructure.Services.FailureDetection;
+          using Farm.Infrastructure.Services.Printers;
+          using Farm.Infrastructure.Services.SignalR;
           using Farm.Infrastructure.Settings;
           using FluentAssertions;
+          using Microsoft.AspNetCore.SignalR;
+          using Microsoft.Data.Sqlite;
+          using Microsoft.EntityFrameworkCore;
           using Microsoft.Extensions.DependencyInjection;
           using Microsoft.Extensions.Logging;
           using Microsoft.Extensions.Logging.Abstractions;
+          using Microsoft.Extensions.Options;
           using Moq;
           using Xunit;
           using Xunit.Abstractions;
@@ -413,57 +422,192 @@ jobs:
           public sealed class HostedProviderInferenceTests(ITestOutputHelper output)
           {
               [Fact]
-              public async Task HostedProviders_ReturnLiveInferenceForEachProviderAndCombinedMode()
+              public async Task HostedProviders_RunMonitorCycleAndIsolateProviderFailures()
               {
                   byte[] image = await File.ReadAllBytesAsync(
                       Environment.GetEnvironmentVariable("PROVIDER_PROBE_IMAGE")
                       ?? throw new InvalidOperationException("PROVIDER_PROBE_IMAGE is not set."));
                   string snapshotUrl = Environment.GetEnvironmentVariable("PROVIDER_PROBE_SNAPSHOT_URL")
                       ?? throw new InvalidOperationException("PROVIDER_PROBE_SNAPSHOT_URL is not set.");
-                  using ServiceProvider services = new ServiceCollection()
-                      .AddHttpClient()
-                      .BuildServiceProvider();
-                  IHttpClientFactory clients = services.GetRequiredService<IHttpClientFactory>();
+                  using var connection = new SqliteConnection("Data Source=:memory:");
+                  await connection.OpenAsync();
+                  DbContextOptions<AppDbContext> dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+                      .UseSqlite(connection)
+                      .Options;
+                  using (AppDbContext setupContext = new(dbOptions))
+                  {
+                      await setupContext.Database.EnsureCreatedAsync();
+                      Manufacturer manufacturer = new() { Id = Guid.NewGuid(), Name = "Hosted provider manufacturer" };
+                      PrinterModel model = new()
+                      {
+                          Id = Guid.NewGuid(),
+                          ManufacturerId = manufacturer.Id,
+                          Name = "Hosted provider model",
+                      };
+                      Printer printerEntity = new()
+                      {
+                          Id = Guid.NewGuid(),
+                          Name = "Hosted provider printer",
+                          ServerUrl = "http://printer.local",
+                          BackendPort = 7125,
+                          ManufacturerId = manufacturer.Id,
+                          ModelId = model.Id,
+                          ObicoEnabled = true,
+                          PrintGuardEnabled = true,
+                      };
+                      Camera camera = new()
+                      {
+                          Id = Guid.NewGuid(),
+                          Name = "Hosted provider camera",
+                          SnapshotUrl = snapshotUrl,
+                          IsEnabled = true,
+                      };
+                      printerEntity.CameraLinks.Add(new CameraPrinter
+                      {
+                          CameraId = camera.Id,
+                          Camera = camera,
+                          PrinterId = printerEntity.Id,
+                          Printer = printerEntity,
+                          IsPrimary = true,
+                      });
+                      setupContext.Manufacturers.Add(manufacturer);
+                      setupContext.PrinterModels.Add(model);
+                      setupContext.Printers.Add(printerEntity);
+                      setupContext.Cameras.Add(camera);
+                      setupContext.PrintJobs.Add(new PrintJob
+                      {
+                          Id = Guid.NewGuid(),
+                          Name = "hosted-provider-job.gcode",
+                          AssignedPrinterId = printerEntity.Id,
+                          Status = PrintJobStatus.Printing,
+                          Priority = 0,
+                          QueuePosition = 0,
+                          QueuedAt = DateTime.UtcNow.AddMinutes(-10),
+                          CreatedAt = DateTime.UtcNow.AddMinutes(-10),
+                          UpdatedAt = DateTime.UtcNow.AddMinutes(-10),
+                      });
+                      await setupContext.SaveChangesAsync();
+                  }
 
                   Mock<ISettingsService> settings = new(MockBehavior.Strict);
-                  settings.Setup(item => item.Get<ObicoSettings>())
-                      .Returns(new ObicoSettings
-                      {
-                          ObicoApiUrl = "http://127.0.0.1:3333",
-                          ConfidenceThreshold = 0.7m,
-                          AnalysisTimeoutSeconds = 60,
-                      });
-                  Mock<ICameraSnapshotCaptureService> snapshots = new(MockBehavior.Strict);
-                  ObicoFailureDetectionService obico = new(
-                      clients,
-                      settings.Object,
-                      NullLogger<ObicoFailureDetectionService>.Instance,
-                      snapshots.Object);
-                  PrintGuardFailureDetectionProvider printGuard = new(
-                      clients,
-                      NullLogger<PrintGuardFailureDetectionProvider>.Instance);
-
-                  FailureDetectionProviderResult obicoResult = await obico.AnalyzeAsync(
-                      new FailureDetectionProviderRequest(
-                          image,
-                          "http://127.0.0.1:3333",
-                          SnapshotUrl: snapshotUrl));
-                  FailureDetectionProviderResult printGuardResult = await printGuard.AnalyzeAsync(
-                      new FailureDetectionProviderRequest(image, "http://127.0.0.1:8000/api/v1/classify"));
-
-                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new { mode = "obico", result = obicoResult }));
-                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new { mode = "printguard", result = printGuardResult }));
-                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new
+                  ObicoSettings obicoSettings = new()
                   {
-                      mode = "combined",
-                      obico = obicoResult,
-                      printguard = printGuardResult,
-                  }));
+                      Enabled = true,
+                      ObicoApiUrl = "http://127.0.0.1:3333",
+                      ConfidenceThreshold = 1m,
+                      ScanIntervalSeconds = 30,
+                      WarmupGracePeriodSeconds = 0,
+                      AnalysisTimeoutSeconds = 60,
+                  };
+                  settings.Setup(item => item.Get<ObicoSettings>())
+                      .Returns(() => obicoSettings);
+                  PrintGuardShadowSettings printGuardSettings = new()
+                  {
+                      Enabled = true,
+                      ApiUrl = "http://127.0.0.1:8000",
+                      ApiToken = null,
+                      RequestTimeoutSeconds = 60,
+                      CaptureTimeoutSeconds = 10,
+                  };
+                  Mock<IOptionsMonitor<PrintGuardShadowSettings>> printGuardOptions = new();
+                  printGuardOptions.SetupGet(options => options.CurrentValue).Returns(() => printGuardSettings);
+                  Mock<ICameraSnapshotCaptureService> snapshots = new(MockBehavior.Strict);
+                  snapshots.Setup(service => service.CaptureAsync(
+                          snapshotUrl,
+                          It.IsAny<int>(),
+                          It.IsAny<CancellationToken>()))
+                      .ReturnsAsync(CameraSnapshotCaptureResult.Succeeded(image));
+                  Mock<IPrinterStatusCacheReader> statusCache = new();
+                  Mock<IClientProxy> clientProxy = new();
+                  clientProxy.Setup(proxy => proxy.SendCoreAsync(
+                          It.IsAny<string>(),
+                          It.IsAny<object[]>(),
+                          It.IsAny<CancellationToken>()))
+                      .Returns(Task.CompletedTask);
+                  Mock<IHubClients> hubClients = new();
+                  hubClients.Setup(clients => clients.Group(It.IsAny<string>())).Returns(clientProxy.Object);
+                  Mock<IHubContext<PrinterHub>> hub = new();
+                  hub.SetupGet(context => context.Clients).Returns(hubClients.Object);
 
-                  obicoResult.ErrorMessage.Should().BeNull();
-                  obicoResult.Score.Should().BeInRange(0m, 1m);
-                  printGuardResult.ErrorMessage.Should().BeNull();
-                  printGuardResult.Score.Should().BeInRange(0m, 1m);
+                  ServiceCollection registrations = new();
+                  registrations.AddHttpClient();
+                  registrations.AddHttpClient("PrintGuard", client => client.Timeout = Timeout.InfiniteTimeSpan);
+                  registrations.AddScoped(_ => new AppDbContext(dbOptions));
+                  registrations.AddScoped<IFailureDetectionIncidentHistoryService, FailureDetectionIncidentHistoryService>();
+                  registrations.AddSingleton<ISettingsService>(settings.Object);
+                  registrations.AddSingleton<IOptionsMonitor<PrintGuardShadowSettings>>(printGuardOptions.Object);
+                  registrations.AddSingleton<ICameraSnapshotCaptureService>(snapshots.Object);
+                  registrations.AddScoped<ObicoFailureDetectionService>();
+                  registrations.AddKeyedScoped<IFailureDetectionProvider>(
+                      "Obico",
+                      (provider, _) => provider.GetRequiredService<ObicoFailureDetectionService>());
+                  registrations.AddScoped<PrintGuardFailureDetectionProvider>();
+                  registrations.AddKeyedScoped<IFailureDetectionProvider>(
+                      "PrintGuard",
+                      (provider, _) => provider.GetRequiredService<PrintGuardFailureDetectionProvider>());
+
+                  using ServiceProvider services = registrations.BuildServiceProvider();
+                  using AppDbContext printerContext = new(dbOptions);
+                  Printer printer = await printerContext.Printers.SingleAsync();
+                  statusCache.Setup(cache => cache.GetStatus(printer.Id)).Returns(new PrinterStatusDto(
+                      printer.Id,
+                      true,
+                      "Printing",
+                      JobName: "hosted-provider-job.gcode",
+                      FileName: "hosted-provider-job.gcode"));
+                  FailureDetectionMonitorStatusStore monitorStatus = new();
+                  PrintFailureMonitorService monitor = new(
+                      services.GetRequiredService<IServiceScopeFactory>(),
+                      monitorStatus,
+                      statusCache.Object,
+                      hub.Object,
+                      new FailureDetectionMetrics(),
+                      NullLogger<PrintFailureMonitorService>.Instance);
+                  MethodInfo runCycle = typeof(PrintFailureMonitorService).GetMethod(
+                      "RunMonitoringCycleAsync",
+                      BindingFlags.Instance | BindingFlags.NonPublic)
+                      ?? throw new InvalidOperationException("RunMonitoringCycleAsync was not found.");
+
+                  async Task RunCycleAsync()
+                  {
+                      var cycle = (Task)(runCycle.Invoke(monitor, [CancellationToken.None])
+                          ?? throw new InvalidOperationException("Monitor cycle returned no task."));
+                      await cycle;
+                  }
+
+                  async Task<FailureDetectionMonitorStatusDto> GetMonitorResultAsync(string mode)
+                  {
+                      await RunCycleAsync();
+                      FailureDetectionMonitorStatusDto status = monitorStatus.GetSnapshot();
+                      output.WriteLine("MONITOR_RESULT " + JsonSerializer.Serialize(new { mode, status }));
+                      status.LastError.Should().BeNull();
+                      status.Printers.Should().ContainSingle();
+                      return status;
+                  }
+
+                  FailureDetectionMonitorStatusDto combined = await GetMonitorResultAsync("combined");
+                  FailureDetectionPrinterStatusDto combinedPrinter = combined.Printers.Single();
+                  combinedPrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "Obico" && provider.LastOutcome == "healthy");
+                  combinedPrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "PrintGuard" && provider.LastOutcome == "healthy");
+
+                  obicoSettings.ObicoApiUrl = "http://127.0.0.1:1";
+                  FailureDetectionMonitorStatusDto obicoUnavailable = await GetMonitorResultAsync("obico-unavailable");
+                  FailureDetectionPrinterStatusDto obicoUnavailablePrinter = obicoUnavailable.Printers.Single();
+                  obicoUnavailablePrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "Obico" && provider.LastOutcome == "error");
+                  obicoUnavailablePrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "PrintGuard" && provider.LastOutcome == "healthy");
+
+                  obicoSettings.ObicoApiUrl = "http://127.0.0.1:3333";
+                  printGuardSettings.ApiUrl = "http://127.0.0.1:1";
+                  FailureDetectionMonitorStatusDto printGuardUnavailable = await GetMonitorResultAsync("printguard-unavailable");
+                  FailureDetectionPrinterStatusDto printGuardUnavailablePrinter = printGuardUnavailable.Printers.Single();
+                  printGuardUnavailablePrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "Obico" && provider.LastOutcome == "healthy");
+                  printGuardUnavailablePrinter.Providers.Should().ContainSingle(provider =>
+                      provider.Provider == "PrintGuard" && provider.LastOutcome == "error");
               }
           }
           CS
