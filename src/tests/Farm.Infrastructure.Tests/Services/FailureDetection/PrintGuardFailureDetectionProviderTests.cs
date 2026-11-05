@@ -143,7 +143,7 @@ public class PrintGuardFailureDetectionProviderTests
     {
         var settings = new Farm.Infrastructure.Settings.PrintGuardShadowSettings
         {
-            ApiUrl = "http://user:password@printguard.local?token=secret",
+            ApiUrl = new UriBuilder("http", "printguard.local") { UserName = "user", Password = "password", Query = "token=secret" }.Uri.AbsoluteUri,
         };
 
         settings.TryGetClassificationEndpoint(out Uri? endpoint).Should().BeFalse();
