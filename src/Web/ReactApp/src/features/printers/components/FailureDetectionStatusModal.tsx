@@ -75,18 +75,18 @@ function getFailureDetectionErrorNextStep(reason: string): string | null {
 
   if (
     normalizedReason.includes('snapshot url request')
-    || normalizedReason.includes('reachable from the obico server')
+    || normalizedReason.includes('reachable from the detection provider')
     || normalizedReason.includes('private to the printer lan')
     || normalizedReason.includes('printer lan')
   ) {
-    return 'Make the linked camera snapshot feed reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.';
+    return 'Make the linked camera snapshot feed reachable from the configured detection provider, or switch to a camera feed that PrintFarmer can fetch locally.';
   }
 
   if (
     normalizedReason.includes('snapshot fetch timeout')
     || normalizedReason.includes('could not download the camera snapshot')
   ) {
-    return 'Open the latest snapshot and confirm the camera responds from PrintFarmer before relying on failure detection or auto-pause.';
+    return 'Open the latest snapshot and confirm the camera responds from PrintFarmer before relying on failure alerts.';
   }
 
   if (
@@ -94,7 +94,7 @@ function getFailureDetectionErrorNextStep(reason: string): string | null {
     || normalizedReason.includes('timed out while analyzing')
     || normalizedReason.includes('request timeout')
   ) {
-    return 'Check the Obico ML service load and camera reachability, then retry once the service is responding normally.';
+    return 'Check the detection provider and camera reachability, then retry once the provider is responding normally.';
   }
 
   return null;
@@ -109,7 +109,7 @@ function getFailureDetectionNextStep(
   if (!status) {
     return enabled
       ? 'Give the runtime a moment to report whether this print is actively being watched.'
-      : 'Enable failure detection before expecting monitoring or auto-pause coverage on this printer.';
+      : 'Enable failure detection before expecting live monitoring on this printer.';
   }
 
   switch (displayState ?? status.state) {
@@ -121,11 +121,11 @@ function getFailureDetectionNextStep(
       return 'Add and enable a usable linked camera snapshot feed so failure detection can inspect frames from this printer.';
     case 'error':
       return getFailureDetectionErrorNextStep(status.reason)
-        ?? 'Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.';
+        ?? 'Check the failure-detection service connection and camera reachability before relying on failure alerts.';
     case 'disabled':
       return enabled
         ? 'Monitoring is standing by. Start a print or verify this printer is eligible for the runtime to begin scanning.'
-        : 'Turn on failure detection for this printer if you want the runtime to watch jobs and auto-pause on confirmed failures.';
+        : 'Turn on failure detection for this printer if you want the runtime to watch active jobs.';
     default:
       return enabled
         ? 'Wait for the monitoring runtime to confirm current coverage for this printer.'
@@ -142,6 +142,23 @@ function DetailTile({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm text-pf-text-primary">{value}</div>
     </div>
   );
+}
+
+function getProviderOutcomeLabel(outcome: string, confidence?: number): string {
+  switch (outcome) {
+    case 'failure':
+      return confidence == null
+        ? 'Failure detected'
+        : `Failure detected (${Math.round(confidence * 100)}% confidence)`;
+    case 'healthy':
+      return 'No failure detected';
+    case 'error':
+      return 'Analysis error';
+    case 'none':
+      return 'No scans yet';
+    default:
+      return outcome;
+  }
 }
 
 export function FailureDetectionStatusModal({
@@ -249,11 +266,11 @@ export function FailureDetectionStatusModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Spaghetti detection details"
+      title="Failure detection details"
       width="max-w-4xl"
       maxHeight="max-h-[85vh]"
-      titleIcon={<ShieldIcon className={clsx('h-5 w-5', iconColorClass)} ariaLabel="Spaghetti detection" />}
-      closeAriaLabel={`Close spaghetti detection details for ${resolvedPrinterName}`}
+      titleIcon={<ShieldIcon className={clsx('h-5 w-5', iconColorClass)} ariaLabel="Failure detection" />}
+      closeAriaLabel={`Close failure detection details for ${resolvedPrinterName}`}
     >
       <div className="space-y-5">
         {/* Status header — always full width */}
@@ -272,6 +289,9 @@ export function FailureDetectionStatusModal({
             </Badge>
           </div>
           <p className="mt-3 text-sm leading-6 text-pf-text-primary">{detail}</p>
+          <p className="mt-2 text-xs text-pf-text-secondary">
+            Detection findings do not trigger automatic printer actions.
+          </p>
           {status?.state === 'monitoring' && status.lastConfidence != null && (
             <div className="mt-4 flex items-end gap-4">
               <ConfidenceGauge value={1 - status.lastConfidence} size="lg" />
@@ -295,13 +315,47 @@ export function FailureDetectionStatusModal({
           {lastScan && <DetailTile label="Last scan" value={lastScan} />}
           {lastOutcome && <DetailTile label="Latest outcome" value={lastOutcome} />}
           {lastFailure && <DetailTile label="Last failure detected" value={lastFailure} />}
-          {status?.lastAutoPaused != null && (
-            <DetailTile
-              label="Auto-pause"
-              value={status.lastAutoPaused ? 'Triggered on the last result' : 'Did not trigger on the last result'}
-            />
-          )}
         </div>
+
+        {status?.providers && status.providers.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
+              Provider results
+            </h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {status.providers.map((provider) => {
+                const providerName = provider.provider === 'PrintGuard'
+                  ? 'PrintGuard'
+                  : provider.provider === 'Obico'
+                    ? 'Obico'
+                    : provider.provider;
+                const providerState = getFailureDetectionStateLabel(provider.state, provider.state !== 'disabled');
+                const analyzedAt = formatFailureDetectionDateTime(provider.lastAnalyzedAt);
+
+                return (
+                  <div
+                    key={provider.provider}
+                    className="rounded-lg border border-pf-border bg-pf-bg-0 px-4 py-3"
+                    data-testid={`failure-detection-provider-${provider.provider.toLowerCase()}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="font-medium text-pf-text-primary">{providerName}</h4>
+                      <Badge variant={getFailureDetectionStateVariant(provider.state)} size="sm">
+                        {providerState}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-pf-text-primary">{provider.reason}</p>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-pf-text-secondary">
+                      <span>{getProviderOutcomeLabel(provider.lastOutcome, provider.lastConfidence)}</span>
+                      <span>{provider.analysisMode === 'paired-frame' ? 'Paired frame' : 'Unpaired analysis'}</span>
+                      {analyzedAt && <span>Last analyzed {analyzedAt}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* 2-column layout on large screens: context/action left, history right */}
         <div className="grid gap-5 lg:grid-cols-2">
@@ -387,7 +441,7 @@ export function FailureDetectionStatusModal({
                         >
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant={event.autoPaused ? 'error' : 'warning'} size="sm">
-                              {confidencePercent}% confidence
+                              {event.provider} · {confidencePercent}% confidence
                             </Badge>
                             <span className="text-sm text-pf-text-primary">{detectedAt}</span>
                             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
@@ -437,7 +491,7 @@ export function FailureDetectionStatusModal({
                 </h3>
                 <p className="text-sm leading-6 text-pf-text-secondary">
                   Use the selected session to see what happened around a failure: when the job queued,
-                  when printing started, when failure detection fired, and whether auto-pause followed.
+                  when printing started, when failure detection fired, and what action followed.
                 </p>
               </div>
 

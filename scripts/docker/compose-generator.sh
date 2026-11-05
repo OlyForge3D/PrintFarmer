@@ -30,6 +30,7 @@ readonly -a CONTAINER_VERSION_VARS=(
     ORCASLICER_CONTAINER_DIGEST
     BUILD_VERBOSITY
     OBICO_ML_IMAGE
+    PRINTGUARD_IMAGE
     GO2RTC_IMAGE
 )
 if [[ -f "$VERSIONS_FILE" ]]; then
@@ -227,6 +228,7 @@ OPTIONS:
     --include-discovery     Include printer discovery service
     --include-moonraker-emulator   Include the repository-built Moonraker protocol emulator
     --include-obico-ml      Include Obico ML API for AI print failure detection
+    --include-printguard    Include PrintGuard image classification service
     --include-go2rtc        Include go2rtc RTSP-to-WebRTC bridge sidecar
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
     --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
@@ -300,6 +302,7 @@ parse_args() {
     INCLUDE_MOONRAKER_EMULATOR="false"
     INCLUDE_SPOOLMAN="false"
     INCLUDE_OBICO_ML="false"
+    INCLUDE_PRINTGUARD="false"
     INCLUDE_GO2RTC="false"
     ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-}"
     ENABLE_ORCA_WORKER_PREVIOUS="${ENABLE_ORCA_WORKER_PREVIOUS:-}"
@@ -340,6 +343,8 @@ parse_args() {
                 INCLUDE_SPOOLMAN="true"; shift ;;
             --include-obico-ml|--enable-obico-ml)
                 INCLUDE_OBICO_ML="true"; shift ;;
+            --include-printguard)
+                INCLUDE_PRINTGUARD="true"; shift ;;
             --include-go2rtc)
                 INCLUDE_GO2RTC="true"; shift ;;
             --enable-orca-worker)
@@ -1009,6 +1014,16 @@ generate_compose() {
             addons_merged=true
         else
             log_warning "Failed to merge Obico ML API service, continuing without it"
+        fi
+    fi
+
+    # Conditionally merge PrintGuard's advisory image-classification service.
+    if [[ "$INCLUDE_PRINTGUARD" == "true" ]]; then
+        if merge_addon_services "$compose_file" "printguard"; then
+            log_info "Merged PrintGuard image-classification service"
+            addons_merged=true
+        else
+            log_warning "Failed to merge PrintGuard service, continuing without it"
         fi
     fi
     

@@ -45,6 +45,7 @@ describe('PrintSessionTimeline', () => {
     const incidents: FailureDetectionEvent[] = [
       {
         id: 'incident-1',
+        provider: 'PrintGuard',
         printerId: 'printer-1',
         printerName: 'Voron 2.4',
         confidence: 0.91,
@@ -65,6 +66,7 @@ describe('PrintSessionTimeline', () => {
     expect(screen.getByText('Selected session')).toBeInTheDocument();
     expect(screen.getByText('Calibration Cube')).toBeInTheDocument();
     expect(screen.getByText('1 incident')).toBeInTheDocument();
+    expect(screen.getByText('PrintGuard failure incident detected')).toBeInTheDocument();
 
     const timeline = screen.getByRole('list', { name: /print session timeline for calibration cube/i });
     const items = within(timeline).getAllByRole('listitem');

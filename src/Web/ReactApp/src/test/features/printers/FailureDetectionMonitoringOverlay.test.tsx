@@ -79,7 +79,7 @@ describe("FailureDetectionMonitoringOverlay", () => {
         />,
       );
 
-      const icon = screen.getByLabelText("Spaghetti detection");
+      const icon = screen.getByLabelText("Failure detection");
       expect([...icon.classList].some((c) => c.startsWith("text-white/"))).toBe(true);
       expect([...icon.classList].some((c) => c.startsWith("text-pf-"))).toBe(false);
     },
@@ -106,7 +106,7 @@ describe("FailureDetectionMonitoringOverlay", () => {
     );
 
     const trigger = screen.getByRole("button", {
-      name: /open spaghetti detection details for voron 2.4/i,
+      name: /open failure detection details for voron 2.4/i,
     });
 
     expect(trigger).toHaveTextContent("Checking");
@@ -124,7 +124,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "none",
       lastAnalyzedAt: undefined,
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     renderWithQueryClient(
@@ -146,7 +145,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "error",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     const { container } = renderWithQueryClient(
@@ -169,7 +167,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "error",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     renderWithQueryClient(
@@ -191,7 +188,24 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "none",
       lastAnalyzedAt: undefined,
       lastConfidence: undefined,
-      lastAutoPaused: false,
+      providers: [
+        {
+          provider: "Obico",
+          state: "monitoring",
+          reason: "Monitoring via global Obico ML settings.",
+          lastAnalyzedAt: "2026-01-15T10:30:00Z",
+          lastOutcome: "healthy",
+          analysisMode: "paired-frame",
+        },
+        {
+          provider: "PrintGuard",
+          state: "error",
+          reason: "PrintGuard analysis failed.",
+          lastAnalyzedAt: "2026-01-15T10:30:00Z",
+          lastOutcome: "error",
+          analysisMode: "unpaired",
+        },
+      ],
     };
 
     renderWithQueryClient(
@@ -200,12 +214,18 @@ describe("FailureDetectionMonitoringOverlay", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /open spaghetti detection details for voron 2.4/i,
+        name: /open failure detection details for voron 2.4/i,
       }),
     );
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Spaghetti detection details")).toBeInTheDocument();
+    expect(screen.getByText("Failure detection details")).toBeInTheDocument();
+    expect(screen.getByText("Detection findings do not trigger automatic printer actions.")).toBeInTheDocument();
+    expect(screen.getByTestId("failure-detection-provider-obico")).toHaveTextContent("Paired frame");
+    expect(screen.getByTestId("failure-detection-provider-obico")).toHaveTextContent("No failure detected");
+    expect(screen.getByTestId("failure-detection-provider-printguard")).toHaveTextContent("Unpaired analysis");
+    expect(screen.getByTestId("failure-detection-provider-printguard")).toHaveTextContent("Analysis error");
+    expect(screen.getByTestId("failure-detection-provider-printguard")).toHaveTextContent("PrintGuard analysis failed.");
     expect(
       screen.getAllByText("No enabled camera snapshot URL is configured.")
         .length,
@@ -226,7 +246,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "healthy",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     const { container } = renderWithQueryClient(
@@ -249,7 +268,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       monitoringEnabled: true,
       confidenceThreshold: 0.7,
       scanIntervalSeconds: 60,
-      autoPauseOnFailure: true,
       configuredPrinterCount: 1,
       activelyMonitoredPrinterCount: 1,
       lastAnalyzedPrinterCount: 1,
@@ -269,7 +287,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
           lastAnalyzedAt: "2026-03-25T12:00:05Z",
           lastOutcome: "error",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         },
       ],
     };
@@ -289,14 +306,14 @@ describe("FailureDetectionMonitoringOverlay", () => {
     });
 
     const trigger = await screen.findByRole("button", {
-      name: /open spaghetti detection details for voron 2.4/i,
+      name: /open failure detection details for voron 2.4/i,
     });
     expect(trigger).toHaveTextContent("Monitor error");
 
     fireEvent.click(trigger);
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Spaghetti detection details")).toBeInTheDocument();
+    expect(screen.getByText("Failure detection details")).toBeInTheDocument();
     expect(
       screen.getAllByText(
         /Configured Obico server is not exposing a supported prediction route/,
@@ -304,7 +321,7 @@ describe("FailureDetectionMonitoringOverlay", () => {
     ).toHaveLength(1);
     expect(
       screen.getByText(
-        "Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.",
+        "Check the failure-detection service connection and camera reachability before relying on failure alerts.",
       ),
     ).toBeInTheDocument();
   });
@@ -323,7 +340,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "error",
       lastAnalyzedAt: "2026-03-25T12:00:05Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     renderWithQueryClient(
@@ -332,7 +348,7 @@ describe("FailureDetectionMonitoringOverlay", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /open spaghetti detection details for voron 2.4/i,
+        name: /open failure detection details for voron 2.4/i,
       }),
     );
 
@@ -363,7 +379,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastOutcome: "error",
       lastAnalyzedAt: "2026-03-25T12:00:05Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     renderWithQueryClient(
@@ -372,7 +387,7 @@ describe("FailureDetectionMonitoringOverlay", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /open spaghetti detection details for voron 2.4/i,
+        name: /open failure detection details for voron 2.4/i,
       }),
     );
 

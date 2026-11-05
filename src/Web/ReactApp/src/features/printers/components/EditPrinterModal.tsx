@@ -98,6 +98,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         backendPort: printerDetails.backendPort ?? undefined,
         frontendPort: printerDetails.frontendPort ?? undefined,
         obicoEnabled: printerDetails.obicoEnabled ?? false,
+        printGuardEnabled: printerDetails.printGuardEnabled ?? false,
         useModelDispatchDefaults: printerDetails.useModelDispatchDefaults ?? true,
         wattage: printerDetails.wattage ?? undefined,
         machineHourlyRate: printerDetails.machineHourlyRate ?? undefined,
@@ -188,7 +189,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
       'supportedMaterials', 'maxBuildVolumeX', 'maxBuildVolumeY', 'maxBuildVolumeZ',
       'hasHeatedBed', 'hasEnclosure', 'multiMaterial',
       'maxHotendTemp', 'maxBedTemp', 'supportsAutoLeveling', 'maxPrintSpeed',
-      'backendPort', 'frontendPort', 'obicoEnabled', 'useModelDispatchDefaults',
+      'backendPort', 'frontendPort', 'obicoEnabled', 'printGuardEnabled', 'useModelDispatchDefaults',
       'wattage', 'machineHourlyRate', 'buddyCameraIp', 'showExternalSpool'
     ];
     
@@ -499,10 +500,11 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
   if (!isOpen || !formData) return null;
 
-  const hasCameraForObico = linkedCameras.some(
+  const hasEnabledLinkedCamera = linkedCameras.some(
     (camera) => camera.isEnabled && !!(camera.streamUrl || camera.snapshotUrl),
   );
-  const canToggleObico = hasCameraForObico || !!formData.obicoEnabled;
+  const canToggleObico = hasEnabledLinkedCamera || !!formData.obicoEnabled;
+  const canTogglePrintGuard = hasEnabledLinkedCamera || !!formData.printGuardEnabled;
 
   const filteredModels = models || [];
 
@@ -1145,14 +1147,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
               </FormField>
             )}
 
-            {/* Obico AI Failure Detection */}
+            {/* Provider-specific failure detection */}
             <FormField 
-              label="Obico AI Monitoring" 
+              label="Obico Monitoring"
               htmlFor="obico-enabled"
               helper={
-                !hasCameraForObico
-                  ? "Configure and enable a linked camera on the Cameras page to enable failure detection."
-                  : "Enable AI-powered print failure detection. Requires a camera. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
+                !hasEnabledLinkedCamera
+                  ? "Configure and enable a linked camera on the Cameras page to enable Obico failure detection."
+                  : "Enable Obico failure detection for this printer. The app uses the best available Obico ML server when one is configured, or falls back to the global Obico Failure Detection settings."
               }
             >
               <Checkbox
@@ -1161,13 +1163,37 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                 disabled={!canToggleObico}
                 onChange={e => {
                   const enabling = e.target.checked;
-                  if (enabling && !hasCameraForObico) {
+                  if (enabling && !hasEnabledLinkedCamera) {
                     toast.error('Obico monitoring requires an enabled linked camera. Configure one on the Cameras page first.');
                     return;
                   }
                   handleInputChange('obicoEnabled', enabling);
                 }}
                 label="Enable Obico monitoring for this printer"
+              />
+            </FormField>
+            <FormField
+              label="PrintGuard Monitoring"
+              htmlFor="print-guard-enabled"
+              helper={
+                !hasEnabledLinkedCamera
+                  ? "Configure and enable a linked camera on the Cameras page to enable PrintGuard failure detection."
+                  : "Enable PrintGuard failure detection for this printer. This runs independently of Obico monitoring."
+              }
+            >
+              <Checkbox
+                id="print-guard-enabled"
+                checked={formData.printGuardEnabled ?? false}
+                disabled={!canTogglePrintGuard}
+                onChange={e => {
+                  const enabling = e.target.checked;
+                  if (enabling && !hasEnabledLinkedCamera) {
+                    toast.error('PrintGuard monitoring requires an enabled linked camera. Configure one on the Cameras page first.');
+                    return;
+                  }
+                  handleInputChange('printGuardEnabled', enabling);
+                }}
+                label="Enable PrintGuard monitoring for this printer"
               />
             </FormField>
           </form>

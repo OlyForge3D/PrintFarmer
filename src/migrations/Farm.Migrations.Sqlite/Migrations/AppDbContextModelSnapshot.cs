@@ -2045,6 +2045,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("ResolvedAtUtc")
                         .HasColumnType("TEXT");
 
@@ -6058,6 +6063,9 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<string>("Password")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("PrintGuardEnabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("TEXT");

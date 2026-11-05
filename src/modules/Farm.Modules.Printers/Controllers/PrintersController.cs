@@ -1363,7 +1363,8 @@ public partial class PrintersController(
             false,
             false,
             rowVersion,
-            p.ShowExternalSpool);
+            p.ShowExternalSpool,
+            p.PrintGuardEnabled);
     }
 
     /// <summary>
@@ -2067,6 +2068,16 @@ public partial class PrintersController(
             }
         }
 
+        if (dto.PrintGuardEnabled.HasValue && dto.PrintGuardEnabled.Value != p.PrintGuardEnabled)
+        {
+            if (dto.PrintGuardEnabled.Value && (p.Cameras == null || p.Cameras.Count == 0))
+            {
+                return BadRequest(new { error = "PrintGuard monitoring requires at least one camera configured on the printer." });
+            }
+
+            p.PrintGuardEnabled = dto.PrintGuardEnabled.Value;
+        }
+
         // Track if any capability field changed to conditionally update LastCapabilityUpdate
         bool capabilityChanged = false;
 
@@ -2400,7 +2411,8 @@ public partial class PrintersController(
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: EncodeRowVersion(p.RowVersion),
             ConfigurationRevision: p.ConfigurationRevision,
-            ShowExternalSpool: p.ShowExternalSpool);
+            ShowExternalSpool: p.ShowExternalSpool,
+            PrintGuardEnabled: p.PrintGuardEnabled);
 
         return Ok(dtoResponse);
     }

@@ -39,6 +39,7 @@ namespace Farm.Infrastructure;
 /// <param name="FrontendUrl">Calculated frontend URL, sanitized for client navigation during serialization.</param>
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
+/// <param name="PrintGuardEnabled">Whether PrintGuard failure detection is enabled for the printer.</param>
 /// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
 /// <param name="UseModelDispatchDefaults">Whether this printer inherits dispatch settings from its model.</param>
 /// <param name="CameraAccessMode">Client presentation mode for snapshot-only versus stream-capable cameras.</param>
@@ -105,7 +106,8 @@ public record PrinterDto(
     bool ShowExternalSpool = false,
     string? ActiveExtruderId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null,
+    bool PrintGuardEnabled = false)
 {
     /// <summary>
     /// Credential-free native web URL, with query parameters and fragments removed.

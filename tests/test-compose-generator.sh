@@ -979,6 +979,56 @@ test_all_addon_stacks() {
     pass_test
 }
 
+test_provider_addon_selection() {
+    start_test "provider addon selection is independently optional"
+
+    local default_dir="$TEST_TEMP_DIR/provider-default"
+    local obico_dir="$TEST_TEMP_DIR/provider-obico"
+    local printguard_dir="$TEST_TEMP_DIR/provider-printguard"
+    local both_dir="$TEST_TEMP_DIR/provider-both"
+
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $default_dir"
+    local default_content
+    default_content="$(cat "$default_dir/docker-compose.yml")"
+    assert_not_contains "$default_content" "  obico-ml-api:" "Obico service should be off by default"
+    assert_not_contains "$default_content" "ghcr.io/oliverbravery/printguard:" "PrintGuard service should be off by default"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-obico-ml --output-dir $obico_dir"
+    local obico_content
+    obico_content="$(cat "$obico_dir/docker-compose.yml")"
+    assert_contains "$obico_content" "  obico-ml-api:" "Obico should be independently selectable"
+    assert_not_contains "$obico_content" "ghcr.io/oliverbravery/printguard:" "PrintGuard should remain off when only Obico is selected"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-printguard --output-dir $printguard_dir"
+    local printguard_content
+    printguard_content="$(cat "$printguard_dir/docker-compose.yml")"
+    local expected_printguard_image
+    expected_printguard_image="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$PRINTGUARD_IMAGE"
+    )"
+    assert_equals "ghcr.io/oliverbravery/printguard:2.6.5" "$expected_printguard_image" "Container versions should pin the verified publisher image and version"
+    assert_contains "$printguard_content" "$expected_printguard_image" "PrintGuard should use the image from container-versions.conf"
+    assert_contains "$printguard_content" '- printfarmer-network' "PrintGuard should remain on the internal application network"
+    assert_not_contains "$printguard_content" '8000:8000' "PrintGuard must not publish its port to the host"
+    assert_contains "$printguard_content" "http://127.0.0.1:8000/api/health" "PrintGuard should be health-checked over its local API"
+    assert_contains "$printguard_content" 'cpus: "${PRINTGUARD_CPU_LIMIT:-2.0}"' "PrintGuard CPU limit should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'memory: ${PRINTGUARD_MEMORY_LIMIT:-2gb}' "PrintGuard memory limit should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'cpus: "${PRINTGUARD_CPU_REQUEST:-0.5}"' "PrintGuard CPU request should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'memory: ${PRINTGUARD_MEMORY_REQUEST:-512m}' "PrintGuard memory request should be configurable with a bounded default"
+    assert_contains "$printguard_content" "cap_drop:" "PrintGuard should drop all Linux capabilities"
+    assert_contains "$printguard_content" "no-new-privileges:true" "PrintGuard should prevent privilege escalation"
+    assert_not_contains "$printguard_content" "  obico-ml-api:" "Obico should remain off when only PrintGuard is selected"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-obico-ml --include-printguard --output-dir $both_dir"
+    local both_content
+    both_content="$(cat "$both_dir/docker-compose.yml")"
+    assert_contains "$both_content" "  obico-ml-api:" "Obico should be selectable alongside PrintGuard"
+    assert_contains "$both_content" "$expected_printguard_image" "PrintGuard should be selectable alongside Obico"
+
+    pass_test
+}
+
 # Test combined addon stacks
 test_combined_addon_stacks() {
     start_test "combined addon stacks"
@@ -2372,6 +2422,7 @@ run_all_tests() {
     test_postgres_passwordless_connection_string_fails_fast
     test_monitoring_inclusion
     test_all_addon_stacks
+    test_provider_addon_selection
     test_combined_addon_stacks
     test_dry_run_mode
     test_output_directory_creation
@@ -2680,6 +2731,7 @@ test_addon_templates_yaml_syntax() {
         "docker-compose.telemetry.yml"
         "docker-compose.security.yml"
         "docker-compose.registry.yml"
+        "docker-compose.printguard.yml"
     )
     
     # Each addon template should be valid YAML

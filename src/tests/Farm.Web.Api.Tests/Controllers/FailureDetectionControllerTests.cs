@@ -319,8 +319,7 @@ public class FailureDetectionControllerTests : IClassFixture<CustomWebApplicatio
         status.TryGetProperty("scanIntervalSeconds", out var scanIntervalSeconds).Should().BeTrue();
         scanIntervalSeconds.ValueKind.Should().Be(JsonValueKind.Number);
 
-        status.TryGetProperty("autoPauseOnFailure", out var autoPauseOnFailure).Should().BeTrue();
-        autoPauseOnFailure.ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
+        status.TryGetProperty("autoPauseOnFailure", out _).Should().BeFalse();
 
         // The default test configuration has Obico disabled (Enabled = false)
         // This verifies that the status correctly reflects the runtime configuration

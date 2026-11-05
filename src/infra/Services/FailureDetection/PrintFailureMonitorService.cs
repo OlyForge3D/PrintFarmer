@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -10,13 +11,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.FailureDetection;
 
 /// <summary>
 /// Background service that monitors active print jobs for failures using AI-powered detection.
 /// Periodically fetches camera snapshots from printers with active jobs and analyzes them
-/// for print failures. Optionally pauses jobs when failures are detected.
+/// for print failures and reports detections for operator review.
 /// </summary>
 public sealed class PrintFailureMonitorService : BackgroundService
 {
@@ -58,12 +60,12 @@ public sealed class PrintFailureMonitorService : BackgroundService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         ObicoSettings currentSettings = GetCurrentSettings();
+        PrintGuardShadowSettings printGuardSettings = GetCurrentPrintGuardSettings();
         _monitorStatus.UpdateSnapshot(new FailureDetectionMonitorStatusDto
         {
-            MonitoringEnabled = currentSettings.Enabled,
+            MonitoringEnabled = currentSettings.Enabled || printGuardSettings.Enabled,
             ConfidenceThreshold = currentSettings.ConfidenceThreshold,
             ScanIntervalSeconds = currentSettings.ScanIntervalSeconds,
-            AutoPauseOnFailure = currentSettings.AutoPauseOnFailure,
         });
     }
 
@@ -153,7 +155,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
     }
 
     /// <summary>
-    /// Loads Obico-enabled printers with their camera links (and linked cameras) so camera
+    /// Loads provider-enabled printers with their camera links (and linked cameras) so camera
     /// selection reads the <see cref="CameraPrinter"/> join rather than a possibly unloaded collection.
     /// </summary>
     internal static Task<List<Printer>> LoadMonitoredPrintersAsync(AppDbContext dbContext, CancellationToken cancellationToken)
@@ -161,7 +163,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         return dbContext.Printers
             .Include(p => p.CameraLinks)
                 .ThenInclude(l => l.Camera)
-            .Where(p => p.ObicoEnabled)
+            .Where(p => p.ObicoEnabled || p.PrintGuardEnabled)
             .OrderBy(p => p.Name)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
@@ -214,10 +216,20 @@ public sealed class PrintFailureMonitorService : BackgroundService
         {
             using IServiceScope scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var failureDetectionService = scope.ServiceProvider.GetRequiredService<IObicoFailureDetectionService>();
             var incidentHistoryService = scope.ServiceProvider.GetRequiredService<IFailureDetectionIncidentHistoryService>();
-            var printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
             var settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            PrintGuardShadowSettings printGuardSettings = scope.ServiceProvider
+                .GetRequiredService<IOptionsMonitor<PrintGuardShadowSettings>>()
+                .CurrentValue;
+            Uri? printGuardEndpoint = null;
+            bool printGuardEnabled = printGuardSettings.Enabled
+                && printGuardSettings.TryGetClassificationEndpoint(out printGuardEndpoint);
+
+            if (printGuardSettings.Enabled && !printGuardEnabled)
+            {
+                _logger.LogWarning(
+                    "[PrintFailureMonitor] PrintGuard is enabled but its endpoint or timeout configuration is invalid");
+            }
 
             ObicoSettings currentSettings = settingsService.Get<ObicoSettings>();
             Dictionary<Guid, ObicoServer> obicoServers = currentSettings.Enabled
@@ -275,7 +287,51 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         currentSettings.WarmupGracePeriodSeconds);
                     bool isPrinting = monitoringWindow.ShouldMonitor;
                     var jobContext = ResolveJobContext(cachedPrinterStatus, activeJob?.JobName);
-                    var (detectionSource, detectionTarget, obicoServerUrl, obicoApiKey) = ResolveDetectionTarget(printer, obicoServers, currentSettings);
+                    bool obicoSelected = printer.ObicoEnabled;
+                    bool printGuardSelected = printer.PrintGuardEnabled;
+                    var (obicoDetectionSource, obicoDetectionTarget, obicoServerUrl, obicoApiKey) =
+                        ResolveDetectionTarget(printer, obicoServers, currentSettings);
+                    (string detectionSource, string? detectionTarget) = ResolveProviderTargets(
+                        obicoSelected,
+                        printGuardSelected,
+                        obicoDetectionSource,
+                        obicoDetectionTarget);
+                    var providerStatuses = new List<FailureDetectionProviderStatusDto>(2);
+
+                    if (obicoSelected)
+                    {
+                        bool obicoConfigured = !string.IsNullOrWhiteSpace(obicoServerUrl);
+                        string obicoReason = !currentSettings.Enabled
+                            ? "Obico is disabled in Settings."
+                            : obicoConfigured ? string.Empty : "No Obico server configured.";
+                        providerStatuses.Add(CreateInitialProviderStatus(
+                            "Obico",
+                            currentSettings.Enabled && obicoConfigured,
+                            obicoReason,
+                            previousStatus,
+                            AnalysisOutcomeNone));
+                    }
+
+                    if (printGuardSelected)
+                    {
+                        string printGuardReason = !printGuardSettings.Enabled
+                            ? "PrintGuard is disabled in Settings."
+                            : printGuardEnabled
+                                ? string.Empty
+                                : "PrintGuard endpoint or timeout configuration is invalid.";
+                        providerStatuses.Add(CreateInitialProviderStatus(
+                            "PrintGuard",
+                            printGuardEnabled,
+                            printGuardReason,
+                            previousStatus,
+                            AnalysisOutcomeNone));
+                    }
+
+                    bool obicoReady = obicoSelected
+                        && currentSettings.Enabled
+                        && !string.IsNullOrWhiteSpace(obicoServerUrl);
+                    bool printGuardReady = printGuardSelected && printGuardEnabled;
+                    int readyProviderCount = (obicoReady ? 1 : 0) + (printGuardReady ? 1 : 0);
 
                     var baseStatus = new FailureDetectionPrinterStatusDto
                     {
@@ -290,8 +346,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         LastAnalyzedAt = previousStatus?.LastAnalyzedAt,
                         LastOutcome = previousStatus?.LastOutcome ?? AnalysisOutcomeNone,
                         LastConfidence = previousStatus?.LastConfidence,
-                        LastAutoPaused = previousStatus?.LastAutoPaused,
                         LastFailureDetectedAt = previousStatus?.LastFailureDetectedAt,
+                        Providers = providerStatuses.ToArray(),
                     };
                     fallbackStatus = baseStatus with
                     {
@@ -300,12 +356,12 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         LastOutcome = AnalysisOutcomeError,
                     };
 
-                    if (!currentSettings.Enabled)
+                    if (readyProviderCount == 0)
                     {
                         printerStatuses.Add(baseStatus with
                         {
                             State = PrinterStateDisabled,
-                            Reason = "Failure detection is disabled in Settings.",
+                            Reason = "No selected failure-detection provider is enabled and configured.",
                         });
                         continue;
                     }
@@ -332,87 +388,163 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         continue;
                     }
 
-                    if (string.IsNullOrWhiteSpace(obicoServerUrl))
-                    {
-                        printerStatuses.Add(baseStatus with
-                        {
-                            State = PrinterStateError,
-                            Reason = "No Obico server configured. Contact your administrator to configure Obico integration.",
-                        });
-                        continue;
-                    }
-
                     activeCount++;
-                    var monitoringStatus = baseStatus with
-                    {
-                        State = PrinterStateMonitoring,
-                        Reason = detectionSource == DetectionSourcePooled
-                            ? $"Monitoring via pooled server '{detectionTarget}'."
-                            : "Monitoring via global Obico ML settings.",
-                    };
-
-                    var analysisStopwatch = Stopwatch.StartNew();
-                    FailureDetectionResult result = await failureDetectionService.AnalyzeImageFromUrlAsync(
-                        snapshotUrl,
-                        obicoServerUrl,
-                        obicoApiKey,
-                        cancellationToken);
-                    analysisStopwatch.Stop();
-
                     checkedCount++;
-
-                    if (result.ErrorMessage != null)
+                    byte[]? imageData = null;
+                    string? captureError = null;
+                    if (printGuardReady)
                     {
-                        _metrics.RecordError();
-                        _logger.LogWarning(
-                            "[PrintFailureMonitor] Analysis failed for printer {PrinterId} ({PrinterName}): {Error}",
-                            printer.Id,
-                            printer.Name,
-                            result.ErrorMessage);
-                        printerStatuses.Add(monitoringStatus with
+                        int captureTimeoutSeconds = readyProviderCount == 2
+                            ? Math.Min(currentSettings.AnalysisTimeoutSeconds, printGuardSettings.CaptureTimeoutSeconds)
+                            : printGuardSettings.CaptureTimeoutSeconds;
+                        ICameraSnapshotCaptureService snapshotCapture = scope.ServiceProvider
+                            .GetRequiredService<ICameraSnapshotCaptureService>();
+                        CameraSnapshotCaptureResult capture = await snapshotCapture.CaptureAsync(
+                            snapshotUrl,
+                            captureTimeoutSeconds,
+                            cancellationToken);
+
+                        if (capture.ErrorMessage is not null || capture.ImageData is null)
                         {
-                            State = PrinterStateError,
-                            Reason = result.ErrorMessage,
-                            LastAnalyzedAt = result.AnalyzedAt,
-                            LastOutcome = AnalysisOutcomeError,
-                        });
-                        continue;
+                            _metrics.RecordError();
+                            captureError = capture.ErrorMessage ?? "Camera snapshot capture failed.";
+                            _logger.LogWarning("[PrintFailureMonitor] Snapshot capture failed for printer {PrinterId} ({PrinterName}): {Error}", printer.Id, printer.Name, captureError);
+                            imageData = null;
+                        }
+                        else if (!FailureDetectionImageValidator.IsJpeg(capture.ImageData))
+                        {
+                            captureError = "Captured camera image is not a JPEG.";
+                            _metrics.RecordError();
+                            imageData = null;
+                        }
+                        else
+                        {
+                            imageData = capture.ImageData;
+                        }
+
+                        if (captureError is not null)
+                        {
+                            providerStatuses = providerStatuses
+                                .Select(status => status.Provider == "PrintGuard"
+                                    ? status with
+                                    {
+                                        State = PrinterStateError,
+                                        Reason = captureError,
+                                        LastOutcome = AnalysisOutcomeError,
+                                    }
+                                    : status)
+                                .ToList();
+                        }
                     }
 
-                    _metrics.RecordAnalysis(analysisStopwatch.Elapsed.TotalMilliseconds, (double)result.Confidence, result.IsFailureDetected);
-
-                    if (result.IsFailureDetected)
+                    var analyzedProviders = new List<FailureDetectionProviderStatusDto>(readyProviderCount);
+                    string pairedAnalysisMode = readyProviderCount == 2 && imageData is not null
+                        ? "paired-frame"
+                        : "unpaired";
+                    if (obicoReady)
                     {
-                        failuresDetected++;
-                        bool autoPaused = await HandleFailureDetectedAsync(
-                            printer,
+                        FailureDetectionProviderStatusDto status = await AnalyzeAndHandleProviderAsync(
+                            scope.ServiceProvider,
+                            "Obico",
+                            new FailureDetectionProviderRequest(
+                                imageData,
+                                obicoServerUrl!,
+                                obicoApiKey,
+                                SnapshotUrl: snapshotUrl),
+                            currentSettings.AnalysisTimeoutSeconds,
                             snapshotUrl,
-                            result,
-                            currentSettings,
+                            currentSettings.ConfidenceThreshold,
+                            pairedAnalysisMode,
+                            printer,
                             dbContext,
                             incidentHistoryService,
-                            printersService,
                             cancellationToken);
-                        printerStatuses.Add(monitoringStatus with
+                        analyzedProviders.Add(status);
+                        if (status.AnalysisMode != "paired-frame")
                         {
-                            LastAnalyzedAt = result.AnalyzedAt,
-                            LastOutcome = AnalysisOutcomeFailure,
-                            LastConfidence = result.Confidence,
-                            LastAutoPaused = autoPaused,
-                            LastFailureDetectedAt = result.AnalyzedAt,
-                            Reason = autoPaused
-                                ? "Failure detected and print auto-paused."
-                                : "Failure detected.",
-                        });
-                        continue;
+                            pairedAnalysisMode = "unpaired";
+                        }
+
+                        if (status.LastOutcome == AnalysisOutcomeFailure)
+                        {
+                            failuresDetected++;
+                        }
                     }
 
-                    printerStatuses.Add(monitoringStatus with
+                    if (printGuardReady && imageData is not null && printGuardEndpoint is not null)
                     {
-                        LastAnalyzedAt = result.AnalyzedAt,
-                        LastOutcome = AnalysisOutcomeHealthy,
-                        LastConfidence = result.Confidence,
+                        FailureDetectionProviderStatusDto status = await AnalyzeAndHandleProviderAsync(
+                            scope.ServiceProvider,
+                            "PrintGuard",
+                            new FailureDetectionProviderRequest(imageData, printGuardEndpoint.AbsoluteUri, printGuardSettings.ApiToken),
+                            printGuardSettings.RequestTimeoutSeconds,
+                            snapshotUrl,
+                            currentSettings.ConfidenceThreshold,
+                            pairedAnalysisMode,
+                            printer,
+                            dbContext,
+                            incidentHistoryService,
+                            cancellationToken);
+                        analyzedProviders.Add(status);
+                        if (status.LastOutcome == AnalysisOutcomeFailure)
+                        {
+                            failuresDetected++;
+                        }
+                    }
+
+                    providerStatuses = providerStatuses
+                        .Select(configured =>
+                        {
+                            FailureDetectionProviderStatusDto? analyzed = analyzedProviders.FirstOrDefault(candidate =>
+                                string.Equals(configured.Provider, candidate.Provider, StringComparison.OrdinalIgnoreCase));
+                            return analyzed is null
+                                ? configured
+                                : analyzed with
+                                {
+                                    LastConfidence = analyzed.LastConfidence ?? configured.LastConfidence,
+                                    LastFailureDetectedAt = analyzed.LastFailureDetectedAt ?? configured.LastFailureDetectedAt,
+                                };
+                        })
+                        .ToList();
+                    FailureDetectionProviderStatusDto[] finalProviderStatuses = providerStatuses.ToArray();
+                    bool anyFailure = analyzedProviders.Any(status => status.LastOutcome == AnalysisOutcomeFailure);
+                    bool anyError = analyzedProviders.Any(status => status.LastOutcome == AnalysisOutcomeError)
+                        || finalProviderStatuses.Any(status => status.State == PrinterStateError);
+                    bool analyzedSameFrame = analyzedProviders.Count == 2
+                        && analyzedProviders.All(status => status.AnalysisMode == "paired-frame");
+                    FailureDetectionProviderStatusDto? lastAnalysis = analyzedProviders
+                        .Where(status => status.LastAnalyzedAt.HasValue)
+                        .OrderByDescending(status => status.LastAnalyzedAt)
+                        .FirstOrDefault();
+                    printerStatuses.Add(baseStatus with
+                    {
+                        State = anyError ? PrinterStateError : PrinterStateMonitoring,
+                        Reason = anyFailure
+                            ? "A provider detected a possible print failure; inspect the print."
+                            : anyError
+                                ? "One or more provider analyses failed; see provider details."
+                                : analyzedSameFrame
+                                    ? "Obico and PrintGuard analyzed the same captured frame."
+                                    : analyzedProviders.Count > 0
+                                        ? $"Monitoring via {string.Join(" and ", analyzedProviders.Select(status => status.Provider))}."
+                                        : "No provider analysis completed.",
+                        LastAnalyzedAt = lastAnalysis?.LastAnalyzedAt,
+                        LastOutcome = anyFailure
+                            ? AnalysisOutcomeFailure
+                            : anyError
+                                ? AnalysisOutcomeError
+                                : lastAnalysis?.LastOutcome ?? AnalysisOutcomeNone,
+                        LastConfidence = lastAnalysis?.LastConfidence,
+                        LastFailureDetectedAt = finalProviderStatuses
+                            .Where(status => status.LastFailureDetectedAt.HasValue)
+                            .Select(status => status.LastFailureDetectedAt)
+                            .Max(),
+                        Providers = finalProviderStatuses,
                     });
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -421,15 +553,21 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         "[PrintFailureMonitor] Error analyzing printer {PrinterId} ({PrinterName})",
                         printer.Id,
                         printer.Name);
-                    printerStatuses.Add((fallbackStatus ?? new FailureDetectionPrinterStatusDto
+                    FailureDetectionPrinterStatusDto failedStatus = fallbackStatus ?? new FailureDetectionPrinterStatusDto
                     {
                         PrinterId = printer.Id,
                         PrinterName = printer.Name,
-                    }) with
+                    };
+                    printerStatuses.Add(failedStatus with
                     {
                         State = PrinterStateError,
                         Reason = "Monitoring request failed.",
                         LastOutcome = AnalysisOutcomeError,
+                        Providers = failedStatus.Providers
+                            .Select(provider => provider.State == "ready"
+                                ? provider with { State = PrinterStateError, Reason = "Monitoring request failed.", LastOutcome = AnalysisOutcomeError }
+                                : provider)
+                            .ToArray(),
                     });
                 }
             }
@@ -438,6 +576,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
             _metrics.RecordCycle(stopwatch.Elapsed.TotalMilliseconds, activeCount, configuredPrinters.Count);
             _monitorStatus.UpdateSnapshot(CreateSnapshot(
                 currentSettings,
+                currentSettings.Enabled || printGuardSettings.Enabled,
                 configuredPrinters.Count,
                 activeCount,
                 checkedCount,
@@ -460,10 +599,9 @@ public sealed class PrintFailureMonitorService : BackgroundService
             ObicoSettings currentSettings = GetCurrentSettings();
             _monitorStatus.UpdateSnapshot(new FailureDetectionMonitorStatusDto
             {
-                MonitoringEnabled = currentSettings.Enabled,
+                MonitoringEnabled = currentSettings.Enabled || GetCurrentPrintGuardSettings().Enabled,
                 ConfidenceThreshold = currentSettings.ConfidenceThreshold,
                 ScanIntervalSeconds = currentSettings.ScanIntervalSeconds,
-                AutoPauseOnFailure = currentSettings.AutoPauseOnFailure,
                 ConfiguredPrinterCount = previousSnapshot.ConfiguredPrinterCount,
                 ActivelyMonitoredPrinterCount = previousSnapshot.ActivelyMonitoredPrinterCount,
                 LastAnalyzedPrinterCount = previousSnapshot.LastAnalyzedPrinterCount,
@@ -474,10 +612,185 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 Printers = previousSnapshot.Printers.Select(status => status with { }).ToArray(),
             });
         }
+
+        static FailureDetectionProviderStatusDto CreateInitialProviderStatus(
+            string provider,
+            bool ready,
+            string reason,
+            FailureDetectionPrinterStatusDto? previousStatus,
+            string defaultOutcome)
+        {
+            FailureDetectionProviderStatusDto? previousProviderStatus = previousStatus?.Providers
+                .FirstOrDefault(status => string.Equals(status.Provider, provider, StringComparison.OrdinalIgnoreCase));
+            return new FailureDetectionProviderStatusDto
+            {
+                Provider = provider,
+                State = ready ? "ready" : PrinterStateDisabled,
+                Reason = reason,
+                LastAnalyzedAt = previousProviderStatus?.LastAnalyzedAt,
+                LastOutcome = previousProviderStatus?.LastOutcome ?? defaultOutcome,
+                LastConfidence = previousProviderStatus?.LastConfidence,
+                LastFailureDetectedAt = previousProviderStatus?.LastFailureDetectedAt,
+                AnalysisMode = previousProviderStatus?.AnalysisMode ?? "unpaired",
+            };
+        }
+
+        async Task<FailureDetectionProviderResult> AnalyzeProviderAsync(
+            IFailureDetectionProvider provider,
+            FailureDetectionProviderRequest request,
+            int timeoutSeconds,
+            CancellationToken cancellationToken)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            try
+            {
+                return await provider.AnalyzeAsync(request, timeout.Token);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                return new FailureDetectionProviderResult(0m, null, DateTime.UtcNow, $"{provider.ProviderName} analysis timed out.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintFailureMonitor] {Provider} analysis failed", provider.ProviderName);
+                return new FailureDetectionProviderResult(0m, null, DateTime.UtcNow, $"{provider.ProviderName} analysis failed.");
+            }
+        }
+
+        async Task<FailureDetectionProviderStatusDto> AnalyzeAndHandleProviderAsync(
+            IServiceProvider providerServices,
+            string providerName,
+            FailureDetectionProviderRequest request,
+            int timeoutSeconds,
+            string snapshotUrl,
+            decimal confidenceThreshold,
+            string analysisMode,
+            Printer printer,
+            AppDbContext dbContext,
+            IFailureDetectionIncidentHistoryService incidentHistoryService,
+            CancellationToken providerCancellationToken)
+        {
+            var analysisStopwatch = Stopwatch.StartNew();
+            try
+            {
+                IFailureDetectionProvider provider = providerServices
+                    .GetRequiredKeyedService<IFailureDetectionProvider>(providerName);
+                FailureDetectionProviderResult result = await AnalyzeProviderAsync(
+                    provider,
+                    request,
+                    timeoutSeconds,
+                    providerCancellationToken);
+                if (result.UsedCapturedImage == false)
+                {
+                    analysisMode = "unpaired";
+                }
+
+                analysisStopwatch.Stop();
+                return await HandleProviderResultAsync(
+                    printer,
+                    provider.ProviderName,
+                    result,
+                    snapshotUrl,
+                    confidenceThreshold,
+                    analysisMode,
+                    analysisStopwatch.Elapsed.TotalMilliseconds,
+                    dbContext,
+                    incidentHistoryService,
+                    providerCancellationToken);
+            }
+            catch (OperationCanceledException) when (providerCancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                analysisStopwatch.Stop();
+                _metrics.RecordError();
+                _logger.LogWarning(
+                    ex,
+                    "[PrintFailureMonitor] {Provider} result handling failed for printer {PrinterId}",
+                    providerName,
+                    printer.Id);
+                return new FailureDetectionProviderStatusDto
+                {
+                    Provider = providerName,
+                    State = PrinterStateError,
+                    Reason = $"{providerName} result handling failed.",
+                    LastAnalyzedAt = DateTime.UtcNow,
+                    LastOutcome = AnalysisOutcomeError,
+                    AnalysisMode = analysisMode,
+                };
+            }
+        }
+
+        async Task<FailureDetectionProviderStatusDto> HandleProviderResultAsync(
+            Printer printer,
+            string provider,
+            FailureDetectionProviderResult result,
+            string snapshotUrl,
+            decimal confidenceThreshold,
+            string analysisMode,
+            double durationMs,
+            AppDbContext dbContext,
+            IFailureDetectionIncidentHistoryService incidentHistoryService,
+            CancellationToken cancellationToken)
+        {
+            if (result.ErrorMessage is not null)
+            {
+                _metrics.RecordError();
+                return new FailureDetectionProviderStatusDto
+                {
+                    Provider = provider,
+                    State = PrinterStateError,
+                    Reason = result.ErrorMessage,
+                    LastAnalyzedAt = result.AnalyzedAt,
+                    LastOutcome = AnalysisOutcomeError,
+                    AnalysisMode = "unpaired",
+                };
+            }
+
+            bool failureDetected = result.IsFailureDetected ?? result.Score >= confidenceThreshold;
+            _metrics.RecordAnalysis(durationMs, (double)result.Score, failureDetected);
+            if (failureDetected)
+            {
+                FailureDetectionResult failureResult = new()
+                {
+                    IsFailureDetected = true,
+                    Confidence = result.Score,
+                    AnalyzedAt = result.AnalyzedAt,
+                };
+                await HandleFailureDetectedAsync(
+                    printer,
+                    provider,
+                    snapshotUrl,
+                    failureResult,
+                    dbContext,
+                    incidentHistoryService,
+                    cancellationToken);
+            }
+
+            return new FailureDetectionProviderStatusDto
+            {
+                Provider = provider,
+                State = PrinterStateMonitoring,
+                Reason = failureDetected ? "Failure detected; inspect the print." : string.Empty,
+                LastAnalyzedAt = result.AnalyzedAt,
+                LastOutcome = failureDetected ? AnalysisOutcomeFailure : AnalysisOutcomeHealthy,
+                LastConfidence = result.Score,
+                LastFailureDetectedAt = failureDetected ? result.AnalyzedAt : null,
+                AnalysisMode = analysisMode,
+            };
+        }
     }
 
     private FailureDetectionMonitorStatusDto CreateSnapshot(
         ObicoSettings currentSettings,
+        bool monitoringEnabled,
         int configuredPrinterCount,
         int activelyMonitoredPrinterCount,
         int lastAnalyzedPrinterCount,
@@ -488,10 +801,9 @@ public sealed class PrintFailureMonitorService : BackgroundService
         FailureDetectionPrinterStatusDto[] printers) =>
         new()
         {
-            MonitoringEnabled = currentSettings.Enabled,
+            MonitoringEnabled = monitoringEnabled,
             ConfidenceThreshold = currentSettings.ConfidenceThreshold,
             ScanIntervalSeconds = currentSettings.ScanIntervalSeconds,
-            AutoPauseOnFailure = currentSettings.AutoPauseOnFailure,
             ConfiguredPrinterCount = configuredPrinterCount,
             ActivelyMonitoredPrinterCount = activelyMonitoredPrinterCount,
             LastAnalyzedPrinterCount = lastAnalyzedPrinterCount,
@@ -521,14 +833,35 @@ public sealed class PrintFailureMonitorService : BackgroundService
         return (DetectionSourceNone, null, null, null);
     }
 
-    private async Task<bool> HandleFailureDetectedAsync(
+    private static (string DetectionSource, string? DetectionTarget) ResolveProviderTargets(
+        bool obicoSelected,
+        bool printGuardSelected,
+        string obicoDetectionSource,
+        string? obicoDetectionTarget)
+    {
+        if (obicoSelected && printGuardSelected)
+        {
+            string obicoTarget = obicoDetectionTarget ?? "Obico (not configured)";
+            return ("multiple", $"{obicoTarget} + PrintGuard");
+        }
+
+        if (printGuardSelected)
+        {
+            return ("printguard", "PrintGuard");
+        }
+
+        return obicoSelected
+            ? (obicoDetectionSource, obicoDetectionTarget)
+            : (DetectionSourceNone, null);
+    }
+
+    private async Task HandleFailureDetectedAsync(
         Printer printer,
+        string provider,
         string? snapshotUrl,
         FailureDetectionResult result,
-        ObicoSettings currentSettings,
         AppDbContext dbContext,
         IFailureDetectionIncidentHistoryService incidentHistoryService,
-        IPrintersService printersService,
         CancellationToken cancellationToken)
     {
         _logger.LogWarning(
@@ -537,8 +870,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
             printer.Name,
             result.Confidence);
 
-        // Paused jobs occupy the bed but are not eligible for another automatic pause.
-        PrintJob? currentJob = await FindAutoPausableJobAsync(
+        PrintJob? currentJob = await FindActiveJobAsync(
             dbContext,
             printer.Id,
             cancellationToken);
@@ -548,6 +880,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         var failureEvent = new FailureDetectionDto
         {
             PrinterId = printer.Id,
+            Provider = provider,
             PrinterName = printer.Name,
             JobId = currentJob?.Id,
             JobName = jobContext.JobName,
@@ -557,38 +890,6 @@ public sealed class PrintFailureMonitorService : BackgroundService
             SnapshotUrl = snapshotUrl,
             AutoPaused = false
         };
-
-        // Auto-pause the job if enabled and a job exists
-        if (currentSettings.AutoPauseOnFailure && currentJob != null)
-        {
-            try
-            {
-                failureEvent.AutoPaused = await printersService.PauseAsync(printer.Id, cancellationToken);
-                if (failureEvent.AutoPaused)
-                {
-                    _metrics.RecordAutoPause();
-                    _logger.LogWarning(
-                        "[PrintFailureMonitor] Auto-paused printer {PrinterId} after failure detection for job {JobId}",
-                        printer.Id,
-                        currentJob.Id);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "[PrintFailureMonitor] Auto-pause failed for printer {PrinterId} after failure detection for job {JobId}",
-                        printer.Id,
-                        currentJob.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(
-                    ex,
-                    "[PrintFailureMonitor] Failed to pause job {JobId} on printer {PrinterId}",
-                    currentJob.Id,
-                    printer.Id);
-            }
-        }
 
         try
         {
@@ -600,6 +901,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 result.Confidence,
                 result.AnalyzedAt,
                 snapshotUrl,
+                provider,
                 failureEvent.AutoPaused,
                 cancellationToken);
             failureEvent.Id = recordedIncident.Id;
@@ -621,11 +923,9 @@ public sealed class PrintFailureMonitorService : BackgroundService
             "[PrintFailureMonitor] Failure event broadcast for printer {PrinterId}, job {JobId}",
             printer.Id,
             currentJob?.Id);
-
-        return failureEvent.AutoPaused;
     }
 
-    internal static Task<PrintJob?> FindAutoPausableJobAsync(
+    internal static Task<PrintJob?> FindActiveJobAsync(
         AppDbContext dbContext,
         Guid printerId,
         CancellationToken cancellationToken = default) =>
@@ -642,5 +942,11 @@ public sealed class PrintFailureMonitorService : BackgroundService
         using IServiceScope scope = _scopeFactory.CreateScope();
         ISettingsService settingsService = scope.ServiceProvider.GetRequiredService<ISettingsService>();
         return settingsService.Get<ObicoSettings>();
+    }
+
+    private PrintGuardShadowSettings GetCurrentPrintGuardSettings()
+    {
+        using IServiceScope scope = _scopeFactory.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<IOptionsMonitor<PrintGuardShadowSettings>>().CurrentValue;
     }
 }

@@ -229,6 +229,120 @@ EOF
     pass_test
 }
 
+test_provider_selection_persistence_and_overrides() {
+    start_test "provider selections default off, persist, and honor CLI/env overrides"
+
+    local failures_before=$TESTS_FAILED
+    local default_dir="$TEST_TEMP_DIR/provider-default"
+    local cli_dir="$TEST_TEMP_DIR/provider-cli"
+    local env_dir="$TEST_TEMP_DIR/provider-env"
+    mkdir -p "$default_dir" "$cli_dir" "$env_dir"
+
+    cd "$default_dir"
+    write_base_config ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Default provider configuration should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=no" "Obico should persist disabled by default" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "PrintGuard should persist disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Obico application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "PrintGuard application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=2.0" "PrintGuard CPU limit should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=2gb" "PrintGuard memory limit should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=0.5" "PrintGuard CPU request should use its default" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_REQUEST=512m" "PrintGuard memory request should use its default" || true
+
+    cd "$cli_dir"
+    write_base_config ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "CLI provider selections should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=yes" "CLI should enable and persist Obico" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=yes" "CLI should enable and persist PrintGuard" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "CLI Obico selection should reach the application" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "CLI PrintGuard selection should reach the application" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "Selected Obico sidecar should use its internal endpoint" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=http://printguard:8000" "Selected PrintGuard sidecar should use its internal endpoint" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --exclude-obico-ml --exclude-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be changeable on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Redeploy should disable Obico despite its previous generated .env value" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "Redeploy should disable PrintGuard despite its previous generated .env value" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be re-enabled on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Redeploy should re-enable Obico over its previous generated .env value" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "Redeploy should re-enable PrintGuard over its previous generated .env value" || true
+
+    cd "$env_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+EOF
+    capture_output "DEPLOY_OBICO_ML=no timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --exclude-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Explicit provider overrides should complete" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_OBICO_ML=no" "Environment override should beat persisted Obico selection" || true
+    assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "CLI override should beat persisted PrintGuard selection" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Environment override should disable Obico in the application" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "CLI override should disable PrintGuard in the application" || true
+
+    local external_dir="$TEST_TEMP_DIR/provider-external-config"
+    mkdir -p "$external_dir"
+    cd "$external_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+EOF
+    cat > ".env" << 'EOF'
+PFARM__Obico__Enabled=true
+PFARM__Obico__ObicoApiUrl=https://obico.example.test
+PFARM__PrintGuardShadow__Enabled=true
+PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test
+PRINTGUARD_CPU_LIMIT=3.0
+PRINTGUARD_MEMORY_LIMIT=3gb
+PRINTGUARD_CPU_REQUEST=1.0
+PRINTGUARD_MEMORY_REQUEST=1gb
+EOF
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider settings should survive config regeneration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Regeneration should derive Obico enablement from provider deployment selection" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=https://obico.example.test" "Regeneration should preserve external Obico URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "Regeneration should derive PrintGuard enablement from provider deployment selection" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test" "Regeneration should preserve external PrintGuard URL" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=3.0" "Regeneration should preserve the PrintGuard CPU limit" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=3gb" "Regeneration should preserve the PrintGuard memory limit" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=1.0" "Regeneration should preserve the PrintGuard CPU request" || true
+    assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_REQUEST=1gb" "Regeneration should preserve the PrintGuard memory request" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Provider selections should be enabled with existing external URLs" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Provider selection should enable Obico without replacing its external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=https://obico.example.test" "Enabling Obico should preserve its existing external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=true" "Provider selection should enable PrintGuard without replacing its external URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test" "Enabling PrintGuard should preserve its existing external URL" || true
+
+    capture_output "PFARM__Obico__Enabled=true timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Explicit provider environment overrides should survive regeneration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Explicit PFARM environment variable should override provider deployment selection" || true
+
+    local legacy_dir="$TEST_TEMP_DIR/provider-legacy-config"
+    mkdir -p "$legacy_dir"
+    cd "$legacy_dir"
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=no
+EOF
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Legacy provider configuration without a saved URL should regenerate" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=true" "Legacy Obico deployment selection should enable the app integration" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "Legacy Obico configuration should retain the bundled service URL default" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Test configuration loading displays monitoring settings
 test_config_loading_display() {
     start_test "configuration loading displays monitoring settings"
@@ -861,6 +975,7 @@ run_all_tests() {
     test_worker_normalization_is_bash_3_2_compatible
     test_monitoring_config_persistence
     test_cli_flag_override
+    test_provider_selection_persistence_and_overrides
     test_config_loading_display
     test_go2rtc_interactive_default_uses_persisted_value
     test_legacy_distributed_slicing_config_migrates_worker_defaults
