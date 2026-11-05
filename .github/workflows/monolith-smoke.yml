@@ -244,6 +244,7 @@ jobs:
           PY
           echo "PROVIDER_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_SNAPSHOT_URL=http://host.docker.internal:8765/frame.jpg" >> "$GITHUB_ENV"
+          echo "PROVIDER_PROBE_SNAPSHOT_LOCAL_URL=http://127.0.0.1:8765/frame.jpg" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_COMPOSE=$probe_dir/compose/docker-compose.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_OVERRIDE=$probe_dir/ports.override.yml" >> "$GITHUB_ENV"
           echo "PROVIDER_PROBE_IMAGE=$probe_dir/frame.jpg" >> "$GITHUB_ENV"
@@ -336,7 +337,7 @@ jobs:
             > "$PROVIDER_PROBE_DIR/snapshot-fixture.log" 2>&1 &
           echo "$!" > "$PROVIDER_PROBE_DIR/snapshot-fixture.pid"
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error "$PROVIDER_PROBE_SNAPSHOT_URL" \
+            if curl --fail --silent --show-error "$PROVIDER_PROBE_SNAPSHOT_LOCAL_URL" \
               --output "$PROVIDER_PROBE_DIR/snapshot-served.jpg"; then
               cmp "$PROVIDER_PROBE_IMAGE" "$PROVIDER_PROBE_DIR/snapshot-served.jpg"
               exit 0
