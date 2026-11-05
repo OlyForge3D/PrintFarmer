@@ -183,3 +183,213 @@ jobs:
             # so the dotnet launcher and its Farm.Web.Api child both stop.
             kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
           fi
+
+  provider-inference:
+    name: Hosted failure-detection provider inference
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/copilot/provider-inference-3687'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install compose-generator dependencies
+        run: python -m pip install Pillow ruamel.yaml
+
+      - name: Generate compose and JPEG fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_dir="${{ runner.temp }}/provider-inference"
+          mkdir -p "$probe_dir"
+          bash scripts/docker/compose-generator.sh \
+            --output-dir "$probe_dir/compose" \
+            --include-obico-ml \
+            --include-printguard
+          cat > "$probe_dir/ports.override.yml" <<'YAML'
+          services:
+            obico-ml-api:
+              ports:
+                - "127.0.0.1:3333:3333"
+            printguard:
+              ports:
+                - "127.0.0.1:8000:8000"
+          YAML
+          python - "$probe_dir/frame.jpg" <<'PY'
+          from PIL import Image
+          import sys
+
+          Image.new("RGB", (64, 64), (128, 128, 128)).save(sys.argv[1], format="JPEG", quality=90)
+          PY
+          echo "PROVIDER_PROBE_DIR=$probe_dir" >> "$GITHUB_ENV"
+          echo "PROVIDER_PROBE_COMPOSE=$probe_dir/compose/docker-compose.yml" >> "$GITHUB_ENV"
+          echo "PROVIDER_PROBE_OVERRIDE=$probe_dir/ports.override.yml" >> "$GITHUB_ENV"
+          echo "PROVIDER_PROBE_IMAGE=$probe_dir/frame.jpg" >> "$GITHUB_ENV"
+
+      - name: Pull provider images and record immutable image identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose \
+            -f "$PROVIDER_PROBE_COMPOSE" \
+            -f "$PROVIDER_PROBE_OVERRIDE" \
+            pull obico-ml-api printguard
+          {
+            echo "Compose version: $(docker compose version --short)"
+            docker image inspect --format='{{.RepoTags}} {{.Id}} {{.RepoDigests}}' \
+              thespaghettidetective/ml_api:base-1.4
+            docker image inspect --format='{{.RepoTags}} {{.Id}} {{.RepoDigests}}' \
+              ghcr.io/oliverbravery/printguard:2.6.5
+          } | tee "$PROVIDER_PROBE_DIR/image-identities.txt"
+
+      - name: Start provider containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose \
+            -f "$PROVIDER_PROBE_COMPOSE" \
+            -f "$PROVIDER_PROBE_OVERRIDE" \
+            up -d obico-ml-api printguard
+          for container in printfarmer-obico-ml-api printfarmer-printguard; do
+            ready=false
+            for attempt in $(seq 1 180); do
+              status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || true)"
+              if [ "$status" = healthy ]; then
+                ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ready" != true ]; then
+              echo "::error::Provider container $container did not become healthy (last status: ${status:-unknown})."
+              docker compose -f "$PROVIDER_PROBE_COMPOSE" -f "$PROVIDER_PROBE_OVERRIDE" ps
+              docker compose -f "$PROVIDER_PROBE_COMPOSE" -f "$PROVIDER_PROBE_OVERRIDE" logs --no-color
+              exit 1
+            fi
+          done
+
+      - name: Add temporary live-inference test
+        shell: bash
+        run: |
+          cat > src/tests/Farm.Infrastructure.Tests/HostedProviderInferenceTests.cs <<'CS'
+          using System.Text.Json;
+          using Farm.Infrastructure.Services.Cameras;
+          using Farm.Infrastructure.Services.FailureDetection;
+          using Farm.Infrastructure.Settings;
+          using FluentAssertions;
+          using Microsoft.Extensions.DependencyInjection;
+          using Microsoft.Extensions.Logging;
+          using Microsoft.Extensions.Logging.Abstractions;
+          using Moq;
+          using Xunit;
+          using Xunit.Abstractions;
+
+          namespace Farm.Infrastructure.Tests;
+
+          public sealed class HostedProviderInferenceTests(ITestOutputHelper output)
+          {
+              [Fact]
+              public async Task HostedProviders_ReturnLiveInferenceForEachProviderAndCombinedMode()
+              {
+                  byte[] image = await File.ReadAllBytesAsync(
+                      Environment.GetEnvironmentVariable("PROVIDER_PROBE_IMAGE")
+                      ?? throw new InvalidOperationException("PROVIDER_PROBE_IMAGE is not set."));
+                  using ServiceProvider services = new ServiceCollection()
+                      .AddHttpClient()
+                      .BuildServiceProvider();
+                  IHttpClientFactory clients = services.GetRequiredService<IHttpClientFactory>();
+
+                  Mock<ISettingsService> settings = new(MockBehavior.Strict);
+                  settings.Setup(item => item.Get<ObicoSettings>())
+                      .Returns(new ObicoSettings
+                      {
+                          ObicoApiUrl = "http://127.0.0.1:3333",
+                          ConfidenceThreshold = 0.7m,
+                          AnalysisTimeoutSeconds = 60,
+                      });
+                  Mock<ICameraSnapshotCaptureService> snapshots = new(MockBehavior.Strict);
+                  ObicoFailureDetectionService obico = new(
+                      clients,
+                      settings.Object,
+                      NullLogger<ObicoFailureDetectionService>.Instance,
+                      snapshots.Object);
+                  PrintGuardFailureDetectionProvider printGuard = new(
+                      clients,
+                      NullLogger<PrintGuardFailureDetectionProvider>.Instance);
+
+                  FailureDetectionProviderResult obicoResult = await obico.AnalyzeAsync(
+                      new FailureDetectionProviderRequest(image, "http://127.0.0.1:3333"));
+                  FailureDetectionProviderResult printGuardResult = await printGuard.AnalyzeAsync(
+                      new FailureDetectionProviderRequest(image, "http://127.0.0.1:8000/api/v1/classify"));
+
+                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new { mode = "obico", result = obicoResult }));
+                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new { mode = "printguard", result = printGuardResult }));
+                  output.WriteLine("PROVIDER_RESULT " + JsonSerializer.Serialize(new
+                  {
+                      mode = "combined",
+                      obico = obicoResult,
+                      printguard = printGuardResult,
+                  }));
+
+                  obicoResult.ErrorMessage.Should().BeNull();
+                  obicoResult.Score.Should().BeInRange(0m, 1m);
+                  printGuardResult.ErrorMessage.Should().BeNull();
+                  printGuardResult.Score.Should().BeInRange(0m, 1m);
+              }
+          }
+          CS
+
+      - name: Restore and run live inference
+        working-directory: src
+        env:
+          PROVIDER_PROBE_IMAGE: ${{ runner.temp }}/provider-inference/frame.jpg
+        run: |
+          dotnet restore ./tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj
+          dotnet test ./tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj \
+            -c Debug \
+            --no-restore \
+            --filter FullyQualifiedName~HostedProviderInferenceTests \
+            --logger "console;verbosity=detailed"
+
+      - name: Capture provider logs
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$PROVIDER_PROBE_COMPOSE" ]; then
+            docker compose \
+              -f "$PROVIDER_PROBE_COMPOSE" \
+              -f "$PROVIDER_PROBE_OVERRIDE" \
+              logs --no-color > "$PROVIDER_PROBE_DIR/provider-logs.txt" 2>&1 || true
+          fi
+
+      - name: Upload provider inference evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: provider-inference-evidence
+          path: ${{ runner.temp }}/provider-inference/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop provider containers
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$PROVIDER_PROBE_COMPOSE" ]; then
+            docker compose \
+              -f "$PROVIDER_PROBE_COMPOSE" \
+              -f "$PROVIDER_PROBE_OVERRIDE" \
+              down --volumes --remove-orphans || true
+          fi
