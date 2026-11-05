@@ -5120,6 +5120,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         socket.completeReceive(
             with: try makeSignalRServerInvocation(target: "queueresourceschanged")
         )
+        nextReceiveEnrollment += 1
 
         let membershipTargets = [
             ("UnsubscribeFromQueueJobAsync", firstJobId.uuidString),
