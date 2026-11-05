@@ -463,7 +463,8 @@ export -f bash
                  "load_previous_config",
                  "detect_webauthn_configuration_source",
                  "validate_deployment_network", "apply_discovery_override",
-                 "configure_networking", "configure_additional")
+                 "configure_networking", "normalize_boolean_value",
+                 "normalize_provider_deploy_setting", "configure_additional")
         functions = []
         for name in names:
             match = re.search(rf"^{name}\(\) \{{\n.*?^\}}", deploy, re.MULTILINE | re.DOTALL)
@@ -487,6 +488,7 @@ print_info() { :; }
 print_success() { :; }
 print_header() { :; }
 print_error() { echo "$*" >&2; }
+print_warning() { :; }
 capture_config_overrides() { :; }
 restore_config_overrides() { :; }
 enforce_supported_orcaslicer_release() { :; }
