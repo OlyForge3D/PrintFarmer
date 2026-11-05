@@ -315,7 +315,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     if (printGuardSelected)
                     {
                         string printGuardReason = !printGuardSettings.Enabled
-                            ? "PrintGuard is disabled in Settings."
+                            ? "PrintGuard is disabled in deployment configuration. Set PFARM__PrintGuardShadow__Enabled=true and configure PFARM__PrintGuardShadow__ApiUrl."
                             : printGuardEnabled
                                 ? string.Empty
                                 : "PrintGuard endpoint or timeout configuration is invalid.";
@@ -516,6 +516,10 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         .Where(status => status.LastAnalyzedAt.HasValue)
                         .OrderByDescending(status => status.LastAnalyzedAt)
                         .FirstOrDefault();
+                    FailureDetectionProviderStatusDto? lastFailure = analyzedProviders
+                        .Where(status => status.LastOutcome == AnalysisOutcomeFailure)
+                        .OrderByDescending(status => status.LastAnalyzedAt)
+                        .FirstOrDefault();
                     printerStatuses.Add(baseStatus with
                     {
                         State = anyError ? PrinterStateError : PrinterStateMonitoring,
@@ -534,7 +538,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                             : anyError
                                 ? AnalysisOutcomeError
                                 : lastAnalysis?.LastOutcome ?? AnalysisOutcomeNone,
-                        LastConfidence = lastAnalysis?.LastConfidence,
+                        LastConfidence = anyFailure ? lastFailure?.LastConfidence : lastAnalysis?.LastConfidence,
                         LastFailureDetectedAt = finalProviderStatuses
                             .Where(status => status.LastFailureDetectedAt.HasValue)
                             .Select(status => status.LastFailureDetectedAt)

@@ -4,6 +4,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -116,7 +117,51 @@ public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime, I
         invalidator.Verify(i => i.Invalidate(It.IsAny<Guid>()), Times.Never);
     }
 
-    private async Task<Guid> SeedPrinterAsync()
+    [Theory]
+    [InlineData(false, "http://printguard.local", 5)]
+    [InlineData(true, "file:///printguard", 5)]
+    [InlineData(true, "http://printguard.local", 0)]
+    public async Task UpdatePrinter_PrintGuardOptInRequiresValidGlobalProviderConfiguration(
+        bool enabled,
+        string apiUrl,
+        int requestTimeoutSeconds)
+    {
+        Guid printerId = await SeedPrinterAsync(withCamera: true);
+
+        await using WebApplicationFactory<Program> host = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+                services.Configure<PrintGuardShadowSettings>(settings =>
+                {
+                    settings.Enabled = enabled;
+                    settings.ApiUrl = apiUrl;
+                    settings.RequestTimeoutSeconds = requestTimeoutSeconds;
+                    settings.CaptureTimeoutSeconds = 5;
+                }));
+        });
+        using HttpClient client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
+
+        HttpResponseMessage getResponse = await client.GetAsync($"/api/printers/{printerId}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        string? etag = getResponse.Headers.ETag?.Tag;
+        etag.Should().NotBeNullOrEmpty();
+
+        var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/printers/{printerId}")
+        {
+            Content = JsonContent.Create(new UpdatePrinterDto(PrintGuardEnabled: true))
+        };
+        putRequest.Headers.IfMatch.ParseAdd(etag!);
+        HttpResponseMessage response = await client.SendAsync(putRequest);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = await db.Printers.SingleAsync(candidate => candidate.Id == printerId);
+        printer.PrintGuardEnabled.Should().BeFalse();
+    }
+
+    private async Task<Guid> SeedPrinterAsync(bool withCamera = false)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -142,6 +187,28 @@ public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime, I
             Backend = (int)PrinterBackend.PrusaLink,
             IsEnabled = false
         };
+        if (withCamera)
+        {
+            Camera camera = new()
+            {
+                Id = Guid.NewGuid(),
+                Name = $"Cache-Invalidation-Camera-{suffix}",
+                SnapshotUrl = "http://camera.local/snapshot.jpg",
+                PrinterLinks =
+                {
+                    new CameraPrinter
+                    {
+                        CameraId = Guid.Empty,
+                        PrinterId = printer.Id,
+                        Printer = printer,
+                        IsPrimary = true,
+                    }
+                },
+            };
+            camera.PrinterLinks.Single().CameraId = camera.Id;
+            printer.CameraLinks.Add(camera.PrinterLinks.Single());
+            db.Cameras.Add(camera);
+        }
 
         db.Manufacturers.Add(manufacturer);
         db.PrinterModels.Add(model);

@@ -246,6 +246,9 @@ test_provider_selection_persistence_and_overrides() {
     assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "PrintGuard should persist disabled by default" || true
     assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Obico application integration should be disabled by default" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "PrintGuard application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiToken=" "PrintGuard API token should default to empty" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__RequestTimeoutSeconds=5" "PrintGuard request timeout should default to five seconds" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds=5" "PrintGuard capture timeout should default to five seconds" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=2.0" "PrintGuard CPU limit should use its default" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=2gb" "PrintGuard memory limit should use its default" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=0.5" "PrintGuard CPU request should use its default" || true
@@ -298,6 +301,9 @@ PFARM__Obico__Enabled=true
 PFARM__Obico__ObicoApiUrl=https://obico.example.test
 PFARM__PrintGuardShadow__Enabled=true
 PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test
+PFARM__PrintGuardShadow__ApiToken=printguard-secret-test-token
+PFARM__PrintGuardShadow__RequestTimeoutSeconds=17
+PFARM__PrintGuardShadow__CaptureTimeoutSeconds=19
 PRINTGUARD_CPU_LIMIT=3.0
 PRINTGUARD_MEMORY_LIMIT=3gb
 PRINTGUARD_CPU_REQUEST=1.0
@@ -309,6 +315,10 @@ EOF
     assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=https://obico.example.test" "Regeneration should preserve external Obico URL" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "Regeneration should derive PrintGuard enablement from provider deployment selection" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test" "Regeneration should preserve external PrintGuard URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiToken=printguard-secret-test-token" "Regeneration should preserve the PrintGuard API token" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__RequestTimeoutSeconds=17" "Regeneration should preserve the PrintGuard request timeout" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds=19" "Regeneration should preserve the PrintGuard capture timeout" || true
+    assert_not_contains "$(get_output)" "printguard-secret-test-token" "Deployment output should not expose the PrintGuard API token" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_CPU_LIMIT=3.0" "Regeneration should preserve the PrintGuard CPU limit" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=3gb" "Regeneration should preserve the PrintGuard memory limit" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=1.0" "Regeneration should preserve the PrintGuard CPU request" || true

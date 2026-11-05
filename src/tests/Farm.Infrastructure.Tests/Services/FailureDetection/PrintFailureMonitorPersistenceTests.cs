@@ -236,10 +236,11 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         Mock<ISettingsService> settingsService = new();
         settingsService.Setup(service => service.Get<ObicoSettings>()).Returns(obicoSettings);
 
+        DateTime obicoAnalyzedAt = DateTime.UtcNow;
         FailureDetectionProviderResult obicoResult = new(
             obicoDetectsFailure ? 0.9421m : 0.1m,
             obicoDetectsFailure,
-            DateTime.UtcNow,
+            obicoAnalyzedAt,
             UsedCapturedImage: obicoUsesCapturedImage);
         FailureDetectionProviderResult healthyObicoResult = new(0.1m, false, DateTime.UtcNow);
         List<FailureDetectionProviderRequest> obicoRequests = [];
@@ -261,7 +262,7 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
                 return Task.FromResult(request.ImageData is null ? healthyObicoResult : obicoResult);
             });
 
-        FailureDetectionProviderResult printGuardResult = new(0.1m, false, DateTime.UtcNow, UsedCapturedImage: true);
+        FailureDetectionProviderResult printGuardResult = new(0.1m, false, obicoAnalyzedAt.AddSeconds(1), UsedCapturedImage: true);
         Mock<IFailureDetectionProvider> printGuardProvider = new();
         printGuardProvider.SetupGet(provider => provider.ProviderName).Returns("PrintGuard");
         printGuardProvider
@@ -395,6 +396,7 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         printerStatus.LastOutcome.Should().Be(captureHasValidImage
             ? obicoDetectsFailure ? "failure" : "healthy"
             : "error");
+        printerStatus.LastConfidence.Should().Be(captureHasValidImage && obicoDetectsFailure ? 0.9421m : 0.1m);
         printerStatus.DetectionSource.Should().Be("multiple");
         printerStatus.DetectionTarget.Should().Be("http://obico.local + PrintGuard");
         printerStatus.Providers.Should().HaveCount(2);
@@ -434,7 +436,8 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         printerStatus.Providers.Should().ContainSingle(provider =>
             provider.Provider == "PrintGuard"
             && provider.State == "disabled"
-            && provider.LastOutcome == (captureHasValidImage ? "healthy" : "error"));
+            && provider.LastOutcome == (captureHasValidImage ? "healthy" : "error")
+            && provider.Reason == "PrintGuard is disabled in deployment configuration. Set PFARM__PrintGuardShadow__Enabled=true and configure PFARM__PrintGuardShadow__ApiUrl.");
         snapshotCapture.Verify(
             service => service.CaptureAsync(
                 "http://camera.local/snapshot.jpg",

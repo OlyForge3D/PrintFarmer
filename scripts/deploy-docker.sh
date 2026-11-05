@@ -3112,7 +3112,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS DEPLOY_OBICO_ML DEPLOY_PRINTGUARD PFARM__Obico__Enabled PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__Enabled PFARM__PrintGuardShadow__ApiUrl WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS DEPLOY_OBICO_ML DEPLOY_PRINTGUARD PFARM__Obico__Enabled PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__Enabled PFARM__PrintGuardShadow__ApiUrl PFARM__PrintGuardShadow__ApiToken PFARM__PrintGuardShadow__RequestTimeoutSeconds PFARM__PrintGuardShadow__CaptureTimeoutSeconds WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -4982,6 +4982,7 @@ generate_env_file() {
     resolve_webauthn_configuration || return 1
 
     local obico_enabled obico_api_url printguard_enabled printguard_api_url
+    local printguard_api_token printguard_request_timeout_seconds printguard_capture_timeout_seconds
     local printguard_cpu_limit printguard_memory_limit printguard_cpu_request printguard_memory_request
     if [ "${PFARM__Obico__Enabled+x}" = "x" ]; then
         obico_enabled="$PFARM__Obico__Enabled"
@@ -5010,6 +5011,27 @@ generate_env_file() {
         printguard_api_url="http://printguard:8000"
     else
         printguard_api_url=""
+    fi
+    if [ "${PFARM__PrintGuardShadow__ApiToken+x}" = "x" ]; then
+        printguard_api_token="$PFARM__PrintGuardShadow__ApiToken"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__ApiToken=' "$ENV_FILE"; then
+        printguard_api_token=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__ApiToken")
+    else
+        printguard_api_token=""
+    fi
+    if [ "${PFARM__PrintGuardShadow__RequestTimeoutSeconds+x}" = "x" ]; then
+        printguard_request_timeout_seconds="$PFARM__PrintGuardShadow__RequestTimeoutSeconds"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__RequestTimeoutSeconds=' "$ENV_FILE"; then
+        printguard_request_timeout_seconds=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__RequestTimeoutSeconds")
+    else
+        printguard_request_timeout_seconds="5"
+    fi
+    if [ "${PFARM__PrintGuardShadow__CaptureTimeoutSeconds+x}" = "x" ]; then
+        printguard_capture_timeout_seconds="$PFARM__PrintGuardShadow__CaptureTimeoutSeconds"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__CaptureTimeoutSeconds=' "$ENV_FILE"; then
+        printguard_capture_timeout_seconds=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds")
+    else
+        printguard_capture_timeout_seconds="5"
     fi
     if [ "${PRINTGUARD_CPU_LIMIT+x}" = "x" ]; then
         printguard_cpu_limit="$PRINTGUARD_CPU_LIMIT"
@@ -5287,6 +5309,9 @@ PFARM__Obico__Enabled=$obico_enabled
 PFARM__Obico__ObicoApiUrl=$obico_api_url
 PFARM__PrintGuardShadow__Enabled=$printguard_enabled
 PFARM__PrintGuardShadow__ApiUrl=$printguard_api_url
+PFARM__PrintGuardShadow__ApiToken=$printguard_api_token
+PFARM__PrintGuardShadow__RequestTimeoutSeconds=$printguard_request_timeout_seconds
+PFARM__PrintGuardShadow__CaptureTimeoutSeconds=$printguard_capture_timeout_seconds
 PRINTGUARD_CPU_LIMIT=$printguard_cpu_limit
 PRINTGUARD_MEMORY_LIMIT=$printguard_memory_limit
 PRINTGUARD_CPU_REQUEST=$printguard_cpu_request
