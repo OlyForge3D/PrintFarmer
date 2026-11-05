@@ -189,6 +189,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/copilot/provider-inference-3687'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # The generated Compose file includes the monitoring overlay, which
+      # requires this value during parsing even though the probe never starts Grafana.
+      GRAFANA_ADMIN_PASSWORD: provider-probe-unused
     steps:
       - name: Checkout
         uses: actions/checkout@v7
