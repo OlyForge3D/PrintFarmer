@@ -186,14 +186,14 @@ jobs:
 
   provider-inference:
     name: Hosted failure-detection provider inference
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/copilot/provider-inference-3687'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/copilot/provider-inference-3681'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       # The generated Compose file includes the monitoring overlay, which
       # requires this value during parsing even though the probe never starts Grafana.
       GRAFANA_ADMIN_PASSWORD: provider-probe-unused
-      OBICO_ML_IMAGE: thespaghettidetective/ml_api@sha256:1b3d07c5d9c6fddbcd207024830accdef964aff626654cbb7a5f38af7024cdf9
+      OBICO_ML_IMAGE: ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
       PRINTGUARD_IMAGE: ghcr.io/oliverbravery/printguard:2.6.5
     steps:
       - name: Checkout
@@ -360,6 +360,8 @@ jobs:
             if [ "$ready" != true ]; then
               echo "::error::Provider container $container did not become healthy (last status: ${status:-unknown})."
               docker compose -f "$PROVIDER_PROBE_COMPOSE" -f "$PROVIDER_PROBE_OVERRIDE" ps
+              docker inspect --format='{{json .State.Health}}' "$container" \
+                | tee "$PROVIDER_PROBE_DIR/${container}-health.json" || true
               docker compose -f "$PROVIDER_PROBE_COMPOSE" -f "$PROVIDER_PROBE_OVERRIDE" logs --no-color
               exit 1
             fi
@@ -457,6 +459,10 @@ jobs:
               -f "$PROVIDER_PROBE_COMPOSE" \
               -f "$PROVIDER_PROBE_OVERRIDE" \
               logs --no-color > "$PROVIDER_PROBE_DIR/provider-logs.txt" 2>&1 || true
+            for container in printfarmer-obico-ml-api printfarmer-printguard; do
+              docker inspect --format='{{json .State.Health}}' "$container" \
+                >> "$PROVIDER_PROBE_DIR/container-health.json" 2>&1 || true
+            done
           fi
 
       - name: Upload provider inference evidence
