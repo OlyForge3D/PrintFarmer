@@ -37,10 +37,11 @@ During Docker Compose generation, select either or both optional services:
 Omit either `--include-*` flag to leave that service out. The interactive
 generator and deploy script also support independent selection; saved deployment
 configuration retains those choices for later regeneration. PrintGuard uses
-the publisher's `ghcr.io/oliverbravery/printguard:2.6.5` image. The service is
-available only on the internal Docker network and does not publish a host port.
-Do not expose it directly: the publisher documents that the service has no
-built-in authentication of its own.
+the publisher's
+`ghcr.io/oliverbravery/printguard@sha256:f69c6bafb5673e94be26ca55b431f1bf42a9ae19a95be9fa34198f0c27a9d43e`
+image. The service is available only on the internal Docker network and does
+not publish a host port. Do not expose it directly: the publisher documents
+that the service has no built-in authentication of its own.
 
 ### Configure Obico ML API
 
@@ -61,8 +62,8 @@ curl http://localhost:3333/hc/
 
 **Docker Compose (`.env` file):**
 ```bash
-# Image and version
-OBICO_ML_IMAGE=thespaghettidetective/ml_api:base-1.4
+# Pinned publisher image
+OBICO_ML_IMAGE=ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
 
 # Resource limits
 OBICO_ML_CPU_LIMIT=2.0
@@ -255,7 +256,7 @@ deploy:
 docker compose logs obico-ml-api
 
 # Verify image pull
-docker pull thespaghettidetective/ml_api:base-1.4
+docker pull ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
 
 # Check disk space (models are large)
 df -h
@@ -327,19 +328,19 @@ curl -H "Authorization: Bearer your-secret-token" \
 
 ## Upgrading
 
-**Update to latest model:**
+**Refresh the pinned image:**
 ```bash
-# Pull latest image
+# Pull the configured digest
 docker compose pull obico-ml-api
 
 # Restart service
 docker compose up -d obico-ml-api
 ```
 
-**Pin to specific version:**
+**Pin to the verified publisher image:**
 ```bash
 # In .env or compose file
-OBICO_ML_IMAGE=thespaghettidetective/ml_api:base-1.4
+OBICO_ML_IMAGE=ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
 ```
 
 ## References

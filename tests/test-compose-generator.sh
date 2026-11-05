@@ -996,6 +996,13 @@ test_provider_addon_selection() {
     assert_command_success "$COMPOSE_GENERATOR --include-obico-ml --output-dir $obico_dir"
     local obico_content
     obico_content="$(cat "$obico_dir/docker-compose.yml")"
+    local expected_obico_image
+    expected_obico_image="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$OBICO_ML_IMAGE"
+    )"
+    assert_equals "ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee" "$expected_obico_image" "Container versions should pin the verified Obico publisher image digest"
+    assert_contains "$obico_content" "$expected_obico_image" "Obico should use the image from container-versions.conf"
     assert_contains "$obico_content" "  obico-ml-api:" "Obico should be independently selectable"
     assert_not_contains "$obico_content" "ghcr.io/oliverbravery/printguard:" "PrintGuard should remain off when only Obico is selected"
 
@@ -1007,7 +1014,7 @@ test_provider_addon_selection() {
         source "$REPO_ROOT/scripts/docker/container-versions.conf"
         printf '%s' "$PRINTGUARD_IMAGE"
     )"
-    assert_equals "ghcr.io/oliverbravery/printguard:2.6.5" "$expected_printguard_image" "Container versions should pin the verified publisher image and version"
+    assert_equals "ghcr.io/oliverbravery/printguard@sha256:f69c6bafb5673e94be26ca55b431f1bf42a9ae19a95be9fa34198f0c27a9d43e" "$expected_printguard_image" "Container versions should pin the verified PrintGuard publisher image digest"
     assert_contains "$printguard_content" "$expected_printguard_image" "PrintGuard should use the image from container-versions.conf"
     assert_contains "$printguard_content" '- printfarmer-network' "PrintGuard should remain on the internal application network"
     assert_not_contains "$printguard_content" '8000:8000' "PrintGuard must not publish its port to the host"
