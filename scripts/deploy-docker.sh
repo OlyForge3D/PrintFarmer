@@ -4024,7 +4024,7 @@ validate_obico_ml_image_reference() {
     unsafe_characters="${unsafe_characters//\]/}"
 
     if [[ -z "$image" || -n "$unsafe_characters" ]]; then
-        print_error "OBICO_ML_IMAGE must be a single-line Docker image reference without whitespace or shell metacharacters."
+        print_error "OBICO_ML_IMAGE must be a single-line Docker image reference without whitespace or shell metacharacters." >&2
         return 1
     fi
 }

@@ -505,8 +505,11 @@ EOF
     capture_output "'$helper_script' valid-ipv6-registry-port"
     assert_contains "$(get_output)" "[2001:db8::1]:5000/example/obico-ml-api:Custom_Tag" \
         "A custom image with an IPv6 registry and port should remain valid" || true
-    assert_exit_code 0 "'$helper_script' invalid-image-shell-syntax" \
+    capture_output "'$helper_script' invalid-image-shell-syntax"
+    assert_equals "0" "$(get_output_exit_code)" \
         "A custom image containing shell syntax should be rejected" || true
+    assert_contains "$(get_output)" "OBICO_ML_IMAGE must be a single-line Docker image reference" \
+        "The custom image validation error should remain visible to the caller" || true
     assert_exit_code 0 "'$helper_script' invalid-image-newline" \
         "A custom image containing a newline should be rejected" || true
 
