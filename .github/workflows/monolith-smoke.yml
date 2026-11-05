@@ -193,7 +193,7 @@ jobs:
       # The generated Compose file includes the monitoring overlay, which
       # requires this value during parsing even though the probe never starts Grafana.
       GRAFANA_ADMIN_PASSWORD: provider-probe-unused
-      OBICO_ML_IMAGE: thespaghettidetective/ml_api:base-1.2-linux-amd64
+      OBICO_ML_IMAGE: thespaghettidetective/ml_api@sha256:1b3d07c5d9c6fddbcd207024830accdef964aff626654cbb7a5f38af7024cdf9
       PRINTGUARD_IMAGE: ghcr.io/oliverbravery/printguard:2.6.5
     steps:
       - name: Checkout
@@ -227,6 +227,7 @@ jobs:
           cat > "$probe_dir/ports.override.yml" <<'YAML'
           services:
             obico-ml-api:
+              command: ["bash", "-c", "gunicorn --bind 0.0.0.0:3333 --workers 1 --timeout 120 wsgi"]
               ports:
                 - "127.0.0.1:3333:3333"
             printguard:
