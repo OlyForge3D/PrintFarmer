@@ -505,6 +505,7 @@ configure_database() { :; }
 adjust_connection_strings_for_network_mode() { :; }
 configure_slicing() { :; }
 configure_external_storage() { :; }
+validate_obico_runtime_platform() { :; }
 validate_configuration() { :; }
 generate_deployment_config() { echo "GENERATE:$5"; exit 0; }
 """ + "\n# Parse leftover CLI args" + parser + "\nmain\n"
