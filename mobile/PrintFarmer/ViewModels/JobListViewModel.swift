@@ -33,6 +33,7 @@ final class JobListViewModel {
     private var jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
     private var printerService: (any PrinterServiceProtocol)?
     @ObservationIgnored private var queueUpdateSubscription: SignalRSubscription?
+    @ObservationIgnored private var queueEventSubscription: SignalRSubscription?
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var lastSignalRState: SignalRConnectionState?
@@ -188,6 +189,7 @@ final class JobListViewModel {
         let serviceIdentity = ObjectIdentifier(service as AnyObject)
         if signalRServiceIdentity == serviceIdentity,
            queueUpdateSubscription != nil,
+           queueEventSubscription != nil,
            connectionStateSubscription != nil {
             return
         }
@@ -195,6 +197,11 @@ final class JobListViewModel {
         tearDownSignalR()
         signalRServiceIdentity = serviceIdentity
         queueUpdateSubscription = service.onJobQueueUpdated { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.handleQueueInvalidation()
+            }
+        }
+        queueEventSubscription = service.onQueueEvent { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.handleQueueInvalidation()
             }
@@ -232,8 +239,10 @@ final class JobListViewModel {
 
     private func tearDownSignalR() {
         queueUpdateSubscription?.cancel()
+        queueEventSubscription?.cancel()
         connectionStateSubscription?.cancel()
         queueUpdateSubscription = nil
+        queueEventSubscription = nil
         connectionStateSubscription = nil
         signalRServiceIdentity = nil
         lastSignalRState = nil

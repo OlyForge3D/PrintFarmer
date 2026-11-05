@@ -50,6 +50,18 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     @discardableResult
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription
 
+    /// Subscribes to the lowercase `queueevent` queue-outbox envelope
+    /// (#3684). The payload is a refetch hint; handlers reload the canonical
+    /// queue. Undecodable frames are delivered as ``QueueEvent/undecodable``.
+    @discardableResult
+    func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription
+
+    /// Subscribes to the lowercase `camerasupdated` event (#3684) raised when
+    /// a printer's linked cameras change. Handlers reload that printer's
+    /// camera metadata.
+    @discardableResult
+    func onCamerasUpdated(_ handler: @escaping @Sendable (CamerasUpdatedEvent) -> Void) -> SignalRSubscription
+
     /// Subscribes to the lowercase `attentionchanged` invalidation event
     /// (issue #707). The event is a refetch hint, not a source of item
     /// truth — handlers should trigger a `GET /api/attention` fetch and
@@ -105,4 +117,16 @@ extension SignalRServiceProtocol {
     }
 
     func replacePrinterSubscriptions(_ printerIds: [UUID]) async {}
+
+    /// Default for test doubles that never emit queue envelopes.
+    @discardableResult
+    func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription {
+        SignalRSubscription {}
+    }
+
+    /// Default for test doubles that never emit camera invalidations.
+    @discardableResult
+    func onCamerasUpdated(_ handler: @escaping @Sendable (CamerasUpdatedEvent) -> Void) -> SignalRSubscription {
+        SignalRSubscription {}
+    }
 }

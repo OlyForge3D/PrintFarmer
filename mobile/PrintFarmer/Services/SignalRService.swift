@@ -116,6 +116,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// the same coordinator as the other hubs so nested cross-hub
     /// deliveries FIFO through the service-wide guard.
     private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
+    /// Lowercase `queueevent` (queue outbox envelope) and `camerasupdated`
+    /// invalidation hubs (#3684). Both are refetch hints only.
+    private let queueEventHub: SignalREventHub<QueueEvent>
+    private let camerasUpdatedHub: SignalREventHub<CamerasUpdatedEvent>
 
     /// Race-free connection-state read. Delegates to the hub's serial
     /// executor so any pending state update has been applied before the read returns.
@@ -396,6 +400,8 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
         self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
+        self.queueEventHub = SignalREventHub<QueueEvent>(coordinator: coordinator)
+        self.camerasUpdatedHub = SignalREventHub<CamerasUpdatedEvent>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
         // r10 blocker #1: register a per-instance specific value on
@@ -751,6 +757,16 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     @discardableResult
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
         jobQueueUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription {
+        queueEventHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onCamerasUpdated(_ handler: @escaping @Sendable (CamerasUpdatedEvent) -> Void) -> SignalRSubscription {
+        camerasUpdatedHub.subscribe(handler)
     }
 
     @discardableResult
@@ -1559,12 +1575,35 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 logger.warning("Failed to decode printerstatusesreplayed: \(error.localizedDescription)")
             }
 
+        // `jobqueueupdate` and `queueevent` are queue invalidation hints
+        // (#3684). An undecodable frame still means the queue changed, so it
+        // is delivered as an empty, unscoped hint instead of being dropped.
         case "jobqueueupdate":
             do {
                 let update = try decoder.decode(JobQueueUpdate.self, from: argData)
                 jobQueueUpdateHub.deliver(update)
             } catch {
                 logger.warning("Failed to decode jobqueueupdate: \(error.localizedDescription)")
+                jobQueueUpdateHub.deliver(JobQueueUpdate(printerId: nil, jobs: []))
+            }
+
+        case "queueevent":
+            do {
+                let event = try decoder.decode(QueueEvent.self, from: argData)
+                queueEventHub.deliver(event)
+            } catch {
+                logger.warning("Failed to decode queueevent: \(error.localizedDescription)")
+                queueEventHub.deliver(.undecodable)
+            }
+
+        // `camerasupdated` carries `{ printerId, cameraIds }` for the printer
+        // whose linked cameras changed; consumers reload camera metadata.
+        case "camerasupdated":
+            do {
+                let event = try decoder.decode(CamerasUpdatedEvent.self, from: argData)
+                camerasUpdatedHub.deliver(event)
+            } catch {
+                logger.warning("Failed to decode camerasupdated: \(error.localizedDescription)")
             }
 
         // issue #707: `attentionchanged` is a lowercase invalidation event

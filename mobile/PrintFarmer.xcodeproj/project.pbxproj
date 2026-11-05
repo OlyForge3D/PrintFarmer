@@ -217,6 +217,7 @@
 		A78230000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */; };
 		A78230000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift */; };
 		A78230000000000000000004 /* ShiftTaskSignalRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000004 /* ShiftTaskSignalRTests.swift */; };
+		B36840000000000000000002 /* QueueCameraSignalRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36840000000000000000001 /* QueueCameraSignalRTests.swift */; };
 		A78230000000000000000005 /* ShiftTaskViewPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000005 /* ShiftTaskViewPresentationTests.swift */; };
 		A78230000000000000000006 /* ShiftTasksUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000006 /* ShiftTasksUITests.swift */; };
 		A7F6E5D4C3B2A1F2E1D0C9B8 /* MockQRSpoolScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */; };
@@ -746,6 +747,7 @@
 		A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksViewModelAuthorityTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksCoalescerHardeningTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000004 /* ShiftTaskSignalRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskSignalRTests.swift; sourceTree = "<group>"; };
+		B36840000000000000000001 /* QueueCameraSignalRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueCameraSignalRTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000005 /* ShiftTaskViewPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskViewPresentationTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000006 /* ShiftTasksUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksUITests.swift; sourceTree = "<group>"; };
 		A7B8C9D0E1F2A3B4C5D6E7F8 /* MockNFCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockNFCService.swift; sourceTree = "<group>"; };
@@ -1520,6 +1522,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				241500000000000000000005 /* FarmShapeServiceTests.swift */,
 				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
 				A78220000000000000000004 /* ShiftTaskSignalRTests.swift */,
+				B36840000000000000000001 /* QueueCameraSignalRTests.swift */,
 				F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */,
 			);
 			path = Services;
@@ -1902,6 +1905,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				A79910000000000000000004 /* AttentionReconnectGapTests.swift in Sources */,
 				F78010000000000000000001 /* AttentionInteractionTests.swift in Sources */,
 				A78230000000000000000004 /* ShiftTaskSignalRTests.swift in Sources */,
+				B36840000000000000000002 /* QueueCameraSignalRTests.swift in Sources */,
 				A78230000000000000000005 /* ShiftTaskViewPresentationTests.swift in Sources */,
 				F900A0010000000000000001 /* AutoDispatchServiceTests.swift in Sources */,
 				F900A0030000000000000003 /* JobServiceTests.swift in Sources */,

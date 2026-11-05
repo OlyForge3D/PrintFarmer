@@ -6,6 +6,13 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Live queue and camera updates (#3684)** — Reordering the queue no longer
+  breaks live queue updates: `jobqueueupdate` now decodes the reorder payload
+  (`queuedAtUtc` timestamps, null `printerId` for unassigned jobs) as well as
+  the legacy shape. The queue list also refreshes on `queueevent`, and printer
+  detail reloads camera metadata on `camerasupdated` for that printer.
+  Undecodable queue events still trigger a refresh instead of being dropped.
+
 - **Disabled Scan spool pill (#3561, N3552-02)** — A disabled "Scan spool" pill
   now uses the same dimmed, striped disabled chrome as other printer controls,
   with its label still readable and without adding lockout text.
