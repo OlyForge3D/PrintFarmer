@@ -66,4 +66,5 @@ public record PrinterDetailsDto(
     string? RowVersion = null,
 
     // Presentation-only: show the filament box external spool slot.
-    bool ShowExternalSpool = false);
+    bool ShowExternalSpool = false,
+    bool PrintGuardEnabled = false);

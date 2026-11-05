@@ -10,12 +10,12 @@ interface FailureDetectionBadgeProps {
 
 export function FailureDetectionBadge({ event, className }: FailureDetectionBadgeProps) {
   const confidencePercent = Math.round(event.confidence * 100);
-  const variant = event.autoPaused || event.confidence >= 0.8 ? 'error' : 'warning';
+  const variant = event.confidence >= 0.8 ? 'error' : 'warning';
 
   return (
     <Badge variant={variant} size="sm" className={clsx('gap-1 shrink-0', className)}>
       <AlertCircleIcon className="h-3 w-3" ariaLabel="Failure detected" />
-      <span>Failure: {confidencePercent}%</span>
+      <span>{event.provider}: {confidencePercent}%</span>
     </Badge>
   );
 }

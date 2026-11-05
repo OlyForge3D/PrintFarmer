@@ -48,16 +48,16 @@ describe("FailureDetectionMonitoringBadge", () => {
       lastOutcome: "clean",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
     const recentEvents = [
       {
+        provider: "Obico",
         printerId: "printer-1",
         printerName: "Voron 2.4",
         confidence: 0.92,
         detectedAt: "2026-01-15T10:29:45Z",
         snapshotUrl: "http://example.com/failure.jpg",
-        autoPaused: true,
+        autoPaused: false,
       },
     ];
 
@@ -71,7 +71,7 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     // Shield icon should be present
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for voron 2.4/i,
+      name: /open failure detection details for voron 2.4/i,
     });
     expect(button).toBeInTheDocument();
 
@@ -92,13 +92,12 @@ describe("FailureDetectionMonitoringBadge", () => {
       lastOutcome: "error",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for voron 2.4/i,
+      name: /open failure detection details for voron 2.4/i,
     });
 
     // Tooltip should contain the state
@@ -123,13 +122,12 @@ describe("FailureDetectionMonitoringBadge", () => {
       lastOutcome: "clean",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: undefined,
-      lastAutoPaused: false,
     };
 
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for prusa mk4/i,
+      name: /open failure detection details for prusa mk4/i,
     });
 
     expect(button).toHaveAttribute(
@@ -146,6 +144,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     historyMock = [
       {
         id: "incident-1",
+        provider: "Obico",
         printerId: "printer-1",
         printerName: "Voron 2.4",
         jobId: "job-1",
@@ -193,18 +192,18 @@ describe("FailureDetectionMonitoringBadge", () => {
       lastOutcome: "failure",
       lastAnalyzedAt: "2026-01-15T10:30:00Z",
       lastConfidence: 0.92,
-      lastAutoPaused: true,
       lastFailureDetectedAt: "2026-01-15T10:29:45Z",
     };
     const recentEvents: FailureDetectionEvent[] = [
       {
+        provider: "Obico",
         printerId: "printer-1",
         printerName: "Voron 2.4",
         jobId: "job-1",
         confidence: 0.92,
         detectedAt: "2026-01-15T10:29:45Z",
         snapshotUrl: "http://example.com/failure.jpg",
-        autoPaused: true,
+        autoPaused: false,
       },
     ];
 
@@ -218,13 +217,13 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /open spaghetti detection details for voron 2.4/i,
+        name: /open failure detection details for voron 2.4/i,
       }),
     );
 
     // Modal should open with full detail
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Spaghetti detection details")).toBeInTheDocument();
+    expect(screen.getByText("Failure detection details")).toBeInTheDocument();
     // Reason equals the header detail, so it is shown once (no duplicate "Why" section).
     expect(
       screen.getAllByText("Failed to contact Obico ML service."),
@@ -232,25 +231,21 @@ describe("FailureDetectionMonitoringBadge", () => {
     expect(screen.queryByText("Why this is showing")).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "Check the Obico ML service connection and camera reachability before relying on failure detection or auto-pause.",
+        "Check the failure-detection service connection and camera reachability before relying on failure alerts.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("North bay camera")).toBeInTheDocument();
     expect(
       screen.getByText("Failure detected (92% confidence)"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Triggered on the last result"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Last failure detected")).toBeInTheDocument();
     expect(screen.getByText("Recent incidents")).toBeInTheDocument();
     expect(screen.getByText("Print session timeline")).toBeInTheDocument();
     expect(screen.getByText("Job queued")).toBeInTheDocument();
     expect(screen.getAllByText("Print started").length).toBeGreaterThan(0);
     expect(
-      screen.getAllByText("Failure incident detected").length,
+      screen.getAllByText("Obico failure incident detected").length,
     ).toBeGreaterThan(0);
-    expect(screen.getByText("Print auto-paused")).toBeInTheDocument();
-    expect(screen.getByText("Auto-paused")).toBeInTheDocument();
     expect(screen.getByText("Calibration Cube")).toBeInTheDocument();
     expect(screen.getByText("cube.gcode")).toBeInTheDocument();
     expect(
@@ -270,6 +265,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     historyMock = [
       {
         id: "incident-1",
+        provider: "Obico",
         printerId: "printer-1",
         printerName: "Voron 2.4",
         confidence: 0.71,
@@ -298,7 +294,7 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /open spaghetti detection details for voron 2.4/i,
+        name: /open failure detection details for voron 2.4/i,
       }),
     );
 
@@ -413,7 +409,7 @@ describe("FailureDetectionMonitoringBadge", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /qp4-1/i }));
       const dialog = screen.getByRole("dialog");
-      const titleIcon = within(dialog).getByLabelText("Spaghetti detection");
+      const titleIcon = within(dialog).getByLabelText("Failure detection");
       expect(titleIcon.classList.contains(expectedIconClass)).toBe(true);
       if (state !== "error" && state !== "misconfigured") {
         expect(titleIcon.classList.contains("text-pf-warning")).toBe(false);
@@ -453,7 +449,7 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     const badgeIcon = screen.getByRole("button", { name: /qp4-1/i }).querySelector("svg");
     fireEvent.click(screen.getByRole("button", { name: /qp4-1/i }));
-    const titleIcon = within(screen.getByRole("dialog")).getByLabelText("Spaghetti detection");
+    const titleIcon = within(screen.getByRole("dialog")).getByLabelText("Failure detection");
     const toneOf = (el: Element | null | undefined) =>
       [...(el?.classList ?? [])].filter((c) => c.startsWith("text-pf-"));
 
@@ -473,7 +469,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for test printer/i,
+      name: /open failure detection details for test printer/i,
     });
     expect(button).toHaveAttribute("title", expect.stringContaining("Checking"));
     fireEvent.click(button);
@@ -508,7 +504,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details/i,
+      name: /open failure detection details/i,
     });
 
     // Should be clickable
@@ -552,7 +548,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for bambu x1/i,
+      name: /open failure detection details for bambu x1/i,
     });
 
     // The tooltip must NOT claim the printer is idle/off when it's actively printing.
@@ -600,7 +596,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: /open spaghetti detection details for prusa mk4/i,
+      name: /open failure detection details for prusa mk4/i,
     });
     // State is 'monitoring' which displays as 'Guarding' regardless of isPrinting value
     expect(button).toHaveAttribute(

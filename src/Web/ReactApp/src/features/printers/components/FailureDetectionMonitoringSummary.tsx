@@ -42,7 +42,7 @@ function getSummaryTone(
   latestIncident: FailureDetectionEvent | undefined,
   attention: { issue: string; action: string } | null
 ): FailureDetectionMonitoringSummaryTone {
-  if (latestIncident?.autoPaused || status?.state === 'error') return 'critical';
+  if (status?.state === 'error') return 'critical';
   if (latestIncident || attention) return 'attention';
   if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return 'healthy';
   return 'standby';
@@ -61,7 +61,6 @@ function getHeadline(
   latestIncident: FailureDetectionEvent | undefined,
   attention: { issue: string; action: string } | null
 ): string {
-  if (latestIncident?.autoPaused) return 'Print auto-paused';
   if (latestIncident) return 'Review required';
   if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return getFailureDetectionStateLabel('monitoring');
   if (status?.state === 'monitoring' && status.lastOutcome === 'failure') return 'Failure detected';
@@ -79,7 +78,9 @@ function getSubline(
   if (latestIncident) {
     const confidence = Math.round(latestIncident.confidence * 100);
     const time = formatEventTime(latestIncident.detectedAt);
-    return time ? `${confidence}% at ${time}` : `${confidence}% confidence`;
+    return time
+      ? `${latestIncident.provider} · ${confidence}% at ${time}`
+      : `${latestIncident.provider} · ${confidence}% confidence`;
   }
   const lastScan = formatFailureDetectionTimestamp(status?.lastAnalyzedAt);
   if (lastScan) return `Last scan ${lastScan}`;
@@ -90,7 +91,6 @@ function getOperatorAction(
   latestIncident: FailureDetectionEvent | undefined,
   attention: { issue: string; action: string } | null
 ): string | null {
-  if (latestIncident?.autoPaused) return 'Inspect print and verify machine state before resuming.';
   if (latestIncident) return 'Check the live camera — pause or cancel if failure is confirmed.';
   if (attention) return attention.action;
   return null;
@@ -99,16 +99,13 @@ function getOperatorAction(
 function getDetailedSummary(
   enabled: boolean,
   status: FailureDetectionPrinterStatusDto | undefined,
-  latestIncident: FailureDetectionEvent | undefined,
-  printerName: string
+  latestIncident: FailureDetectionEvent | undefined
 ): string {
   if (latestIncident) {
     const confidence = Math.round(latestIncident.confidence * 100);
     const time = formatEventTime(latestIncident.detectedAt);
     const timeLabel = time ? ` at ${time}` : '';
-    return latestIncident.autoPaused
-      ? `${printerName} paused after ${confidence}% confidence detection${timeLabel}.`
-      : `${confidence}% confidence detection${timeLabel}. Review before damage spreads.`;
+    return `${latestIncident.provider} reported a ${confidence}% confidence detection${timeLabel}. Review the live camera before taking action.`;
   }
   if (!status) {
     return enabled ? 'Waiting for runtime confirmation.' : 'Failure detection is off.';
@@ -215,7 +212,7 @@ export function FailureDetectionMonitoringSummary({
   }
 
   // Detailed: proportional section — headline + summary + operator action when needed
-  const summary = getDetailedSummary(enabled, status, latestIncident, resolvedPrinterName);
+  const summary = getDetailedSummary(enabled, status, latestIncident);
 
   return (
     <section

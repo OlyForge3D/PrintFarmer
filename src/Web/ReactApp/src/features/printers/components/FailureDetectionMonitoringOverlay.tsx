@@ -104,11 +104,11 @@ export function FailureDetectionMonitoringOverlay({
           styles.glow,
           className
         )}
-        aria-label={`Open spaghetti detection details${resolvedPrinterName ? ` for ${resolvedPrinterName}` : ''}`}
+        aria-label={`Open failure detection details${resolvedPrinterName ? ` for ${resolvedPrinterName}` : ''}`}
         aria-haspopup="dialog"
         aria-expanded={isDetailsOpen}
-        title={`${label} • open spaghetti detection details`}
-        iconLeft={<ShieldIcon className={clsx('h-3.5 w-3.5', styles.icon)} ariaLabel="Spaghetti detection" />}
+        title={`${label} • open failure detection details`}
+        iconLeft={<ShieldIcon className={clsx('h-3.5 w-3.5', styles.icon)} ariaLabel="Failure detection" />}
       >
         {label}
       </Button>

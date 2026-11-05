@@ -68,7 +68,7 @@ export function FailureDetectionStatusCard() {
   if (error && !data) {
     return (
       <Alert type="warning" title="Failure detection status unavailable">
-        Could not load the live spaghetti-detection runtime status.
+        Could not load the live failure-detection runtime status.
       </Alert>
     );
   }
@@ -94,9 +94,6 @@ export function FailureDetectionStatusCard() {
             <Badge variant={data.monitoringEnabled ? 'success' : 'default'} size="sm">
               Global {data.monitoringEnabled ? 'On' : 'Off'}
             </Badge>
-            <Badge variant={data.autoPauseOnFailure ? 'error' : 'warning'} size="sm">
-              Auto-pause {data.autoPauseOnFailure ? 'On' : 'Off'}
-            </Badge>
           </div>
         </div>
       </Card.Header>
@@ -121,7 +118,7 @@ export function FailureDetectionStatusCard() {
 
         {data.printers.length === 0 ? (
           <div className="rounded-lg border border-dashed border-pf-border px-4 py-3 text-sm text-pf-text-secondary">
-            No printers have Obico monitoring enabled yet.
+            No printers have failure detection enabled yet.
           </div>
         ) : (
           // Equal `1fr` tracks, not the old 1.2fr/1fr viewport breakpoint. This

@@ -5,7 +5,6 @@ const mockStatus = {
   monitoringEnabled: true,
   confidenceThreshold: 0.7,
   scanIntervalSeconds: 30,
-  autoPauseOnFailure: true,
   configuredPrinterCount: 3,
   activelyMonitoredPrinterCount: 2,
   lastAnalyzedPrinterCount: 2,

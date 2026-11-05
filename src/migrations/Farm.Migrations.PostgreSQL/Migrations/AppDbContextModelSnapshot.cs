@@ -2165,6 +2165,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime?>("ResolvedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -6188,6 +6193,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("Password")
                         .HasColumnType("text");
+
+                    b.Property<bool>("PrintGuardEnabled")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("text");

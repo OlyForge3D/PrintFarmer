@@ -2168,6 +2168,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime?>("ResolvedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -6211,6 +6216,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("PrintGuardEnabled")
+                        .HasColumnType("bit");
 
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("nvarchar(max)");

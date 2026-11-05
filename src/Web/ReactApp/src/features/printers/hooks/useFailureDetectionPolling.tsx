@@ -22,7 +22,14 @@ const FailureDetectionPollingContext = createContext(false);
 
 export const FailureDetectionPollingProvider = FailureDetectionPollingContext.Provider;
 
-/** Whether the fleet currently has at least one Obico/failure-detection-enabled printer. */
+/** Whether the fleet has at least one printer opted into any failure-detection provider. */
+export function hasFailureDetectionEnabledPrinter(
+  printers: readonly Pick<import('@/types/api').Printer, 'obicoEnabled' | 'printGuardEnabled'>[]
+): boolean {
+  return printers.some((printer) => !!printer.obicoEnabled || !!printer.printGuardEnabled);
+}
+
+/** Whether the fleet currently has at least one failure-detection-enabled printer. */
 export function useFailureDetectionPollingEnabled(): boolean {
   return useContext(FailureDetectionPollingContext);
 }

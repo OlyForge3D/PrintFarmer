@@ -43,7 +43,10 @@ import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
 import { useFleetPrinterTags } from '@/features/printers/hooks/usePrinterTagsFleet';
 import { useFleetQueueSummaries } from '@/features/printers/hooks/useQueueSummariesFleet';
 import { useDiscoveryAvailable } from '@/features/printers/hooks/useDiscoveryAvailability';
-import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFailureDetectionPolling';
+import {
+  FailureDetectionPollingProvider,
+  hasFailureDetectionEnabledPrinter,
+} from '@/features/printers/hooks/useFailureDetectionPolling';
 import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
 import type { EditPrinterModalProps } from '@/features/printers/components/EditPrinterModal';
 import type { PrinterDiscoveryModalProps } from '@/features/printers/components/PrinterDiscoveryModal';
@@ -137,12 +140,12 @@ export function PrintersPage() {
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printersWithCameraUrls);
 
-  // Whether ANY printer in the fleet has Obico/failure detection enabled,
+  // Whether ANY printer in the fleet has a failure-detection provider enabled,
   // computed once here (not per-card) and shared via context so the
   // failure-detection status poll is controlled at the page level instead of
   // depending on which mix of cards happens to be mounted (#1146 item 3).
-  const anyObicoEnabled = useMemo(
-    () => displayPrinters.some((printer) => !!printer.obicoEnabled),
+  const anyFailureDetectionEnabled = useMemo(
+    () => hasFailureDetectionEnabledPrinter(displayPrinters),
     [displayPrinters]
   );
 
@@ -574,7 +577,7 @@ export function PrintersPage() {
         </HeaderActions>
       }
     >
-      <FailureDetectionPollingProvider value={anyObicoEnabled}>
+      <FailureDetectionPollingProvider value={anyFailureDetectionEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Actions, sort and view remain available while filters are collapsed.

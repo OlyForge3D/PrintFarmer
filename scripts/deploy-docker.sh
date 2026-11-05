@@ -281,6 +281,7 @@ resolve_image_tag() {
     else
         echo "$base_tag"
     fi
+
 }
 
 # Resolve ORCASLICER_CONTAINER_DIGEST from the local OrcaSlicer worker image's
@@ -733,10 +734,15 @@ get_kv_from_file() {
 
 load_env_file() {
     if [ -f "$ENV_FILE" ]; then
+        local obico_ml_image_override="${OBICO_ML_IMAGE:-}"
         set -a
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
+        if [ -n "$obico_ml_image_override" ] && [ "$obico_ml_image_override" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+            OBICO_ML_IMAGE="$obico_ml_image_override"
+            export OBICO_ML_IMAGE
+        fi
     fi
 }
 
@@ -1160,6 +1166,13 @@ generate_deployment_config() {
     # Add go2rtc sidecar if user chose to deploy it
     if [ "${DEPLOY_GO2RTC:-no}" = "yes" ]; then
         generator_args+=("--include-go2rtc")
+    fi
+
+    if [ "${DEPLOY_OBICO_ML:-no}" = "yes" ]; then
+        generator_args+=("--include-obico-ml")
+    fi
+    if [ "${DEPLOY_PRINTGUARD:-no}" = "yes" ]; then
+        generator_args+=("--include-printguard")
     fi
 
     # Add worker configuration. When scaling to more than one worker, pass the
@@ -2898,6 +2911,10 @@ COMPOSE GENERATOR OPTIONS:
         --include-registry  Include local Docker registry
         --include-discovery Include network printer discovery service
         --include-go2rtc    Include go2rtc RTSP-to-WebRTC bridge for camera streams
+        --include-obico-ml  Deploy Obico ML for advisory print-failure analysis
+        --exclude-obico-ml  Do not deploy Obico ML
+        --include-printguard Deploy PrintGuard for advisory print-failure analysis
+        --exclude-printguard Do not deploy PrintGuard
         --enable-pgadmin    Deploy pgAdmin 4 for PostgreSQL database debugging (PostgreSQL only)
         --output-dir DIR    Output directory for generated files (default: repository root)
 
@@ -3100,7 +3117,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT BIND_ADDRESS DEPLOY_OBICO_ML DEPLOY_PRINTGUARD PFARM__Obico__Enabled PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__Enabled PFARM__PrintGuardShadow__ApiUrl PFARM__PrintGuardShadow__ApiToken PFARM__PrintGuardShadow__RequestTimeoutSeconds PFARM__PrintGuardShadow__CaptureTimeoutSeconds WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -3531,6 +3548,13 @@ EOF
         echo -e "\n# go2rtc Camera Streaming\nDEPLOY_GO2RTC=no" >> "$CONFIG_FILE"
     fi
 
+    cat >> "$CONFIG_FILE" << EOF
+
+# Advisory print-failure analysis providers (optional, independently selectable)
+DEPLOY_OBICO_ML=${DEPLOY_OBICO_ML:-no}
+DEPLOY_PRINTGUARD=${DEPLOY_PRINTGUARD:-no}
+EOF
+
     # Save external storage configuration (P0 Data Persistence)
     cat >> "$CONFIG_FILE" << EOF
 
@@ -3786,6 +3810,33 @@ normalize_boolean_value() {
     esac
 }
 
+provider_deploy_prompt_default() {
+    local variable_name="$1"
+    local raw_value
+    eval "raw_value=\${${variable_name}:-no}"
+
+    if ! normalize_boolean_value "$variable_name" "$raw_value" "yes" "no" >&2; then
+        print_warning "Ignoring malformed persisted $variable_name value; defaulting to no" >&2
+        printf '%s' "no"
+        return 0
+    fi
+
+    printf '%s' "$NORMALIZED_BOOLEAN_VALUE"
+}
+
+normalize_provider_deploy_setting() {
+    local variable_name="$1"
+    local raw_value
+    eval "raw_value=\${${variable_name}:-no}"
+
+    if normalize_boolean_value "$variable_name" "$raw_value" "yes" "no"; then
+        eval "$variable_name=\$NORMALIZED_BOOLEAN_VALUE"
+    else
+        print_warning "Ignoring malformed persisted $variable_name value; defaulting to no"
+        eval "$variable_name=no"
+    fi
+}
+
 go2rtc_prompt_default() {
     if ! normalize_boolean_value \
         "DEPLOY_GO2RTC" \
@@ -3947,10 +3998,102 @@ find_next_free_port() {
     return 1
 }
 
+effective_docker_runtime_architecture() {
+    local platform="${DOCKER_DEFAULT_PLATFORM:-}"
+    if [ -z "$platform" ]; then
+        platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null) || return 1
+    fi
+    [ -n "$platform" ] || return 1
+
+    local architecture="$platform"
+    if [[ "$architecture" == */* ]]; then
+        architecture="${architecture#*/}"
+        architecture="${architecture%%/*}"
+    fi
+    printf '%s' "$architecture" | tr '[:upper:]' '[:lower:]'
+}
+
+validate_obico_ml_image_reference() {
+    local image="$1"
+    local unsafe_characters="$image"
+    local LC_ALL=C
+
+    unsafe_characters="${unsafe_characters//[[:alnum:]._:@+-]/}"
+    unsafe_characters="${unsafe_characters//\//}"
+    unsafe_characters="${unsafe_characters//\[/}"
+    unsafe_characters="${unsafe_characters//\]/}"
+
+    if [[ -z "$image" || -n "$unsafe_characters" ]]; then
+        print_error "OBICO_ML_IMAGE must be a single-line Docker image reference without whitespace or shell metacharacters." >&2
+        return 1
+    fi
+}
+
+effective_obico_ml_image() {
+    local env_file="${ENV_FILE:-.env}"
+    local shell_image="${OBICO_ML_IMAGE:-}"
+    local image="${OBICO_ML_IMAGE_DEFAULT:-$shell_image}"
+    if [ -n "$shell_image" ] && [ "$shell_image" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        image="$shell_image"
+    elif [ -f "$env_file" ] && grep -q '^OBICO_ML_IMAGE=' "$env_file"; then
+        image=$(get_kv_from_file "$env_file" "OBICO_ML_IMAGE")
+        if [ -z "$image" ]; then
+            image="${OBICO_ML_IMAGE_DEFAULT:-$OBICO_ML_IMAGE}"
+        fi
+    fi
+
+    case "$image" in
+        \"*\") image="${image:1:${#image}-2}" ;;
+        \'*\') image="${image:1:${#image}-2}" ;;
+    esac
+
+    if [ -n "$image" ] && ! validate_obico_ml_image_reference "$image"; then
+        return 1
+    fi
+
+    printf '%s' "$image"
+}
+
+validate_obico_runtime_platform() {
+    [ "${DEPLOY_OBICO_ML:-no}" = "yes" ] || return 0
+
+    local image
+    if ! image=$(effective_obico_ml_image); then
+        return 1
+    fi
+
+    if [ "$image" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        return 0
+    fi
+
+    local require_known="${1:-false}"
+    local architecture
+    if ! architecture=$(effective_docker_runtime_architecture); then
+        if [ "$require_known" = "true" ]; then
+            print_error "Cannot determine the effective Docker runtime platform for the bundled Obico ML API."
+            print_info "Check Docker connectivity or disable the bundled Obico service with --exclude-obico-ml."
+            return 1
+        fi
+        print_warning "Could not determine the Docker runtime platform; verify the bundled Obico image supports the target before deployment."
+        return 0
+    fi
+
+    case "$architecture" in
+        amd64|x86_64|x64)
+            ;;
+        *)
+            print_error "The pinned bundled Obico ML API image supports AMD64 runtime targets only; detected '$architecture'."
+            print_info "Use an AMD64 Docker runtime target (with emulation if needed), configure a compatible image with OBICO_ML_IMAGE, or disable the bundled service with --exclude-obico-ml and configure an external Obico API."
+            return 1
+            ;;
+    esac
+}
+
 # Validate configuration & enforce safe constraints (ports, scaling, numeric values)
 validate_configuration() {
     print_header "🧪 Validating Configuration"
     validate_http_bind_address || return 1
+    validate_obico_runtime_platform || return 1
 
     : "${ENABLE_DISTRIBUTED_SLICING:=false}"
     : "${ENABLE_ORCA_WORKER:=no}"
@@ -4543,6 +4686,17 @@ configure_additional() {
         fi
         NETWORK_RANGES=${NETWORK_RANGES:-}
 
+        normalize_provider_deploy_setting DEPLOY_OBICO_ML
+        normalize_provider_deploy_setting DEPLOY_PRINTGUARD
+        if [ -n "${CLI_DEPLOY_OBICO_ML:-}" ]; then
+            DEPLOY_OBICO_ML="$CLI_DEPLOY_OBICO_ML"
+            print_info "Obico ML service selection set via CLI flag"
+        fi
+        if [ -n "${CLI_DEPLOY_PRINTGUARD:-}" ]; then
+            DEPLOY_PRINTGUARD="$CLI_DEPLOY_PRINTGUARD"
+            print_info "PrintGuard service selection set via CLI flag"
+        fi
+
         # ENABLE_SWAGGER/ENABLE_DETAILED_LOGGING are only assigned by the
         # interactive Development/Production branch below. Mirror that same
         # environment-based default here so the non-interactive path never
@@ -4870,6 +5024,26 @@ configure_additional() {
             DEPLOY_GO2RTC=no
         fi
     fi
+
+    # Advisory print-failure analysis providers are independent and disabled
+    # unless selected. CLI choices take precedence over persisted defaults.
+    local provider_default
+    if [ -n "${CLI_DEPLOY_OBICO_ML:-}" ]; then
+        DEPLOY_OBICO_ML="$CLI_DEPLOY_OBICO_ML"
+        print_info "Obico ML service selection set via CLI flag"
+    else
+        provider_default=$(provider_deploy_prompt_default DEPLOY_OBICO_ML) || return 1
+        prompt_yes_no "Deploy Obico ML service for advisory print-failure analysis?" "$provider_default" "DEPLOY_OBICO_ML_ANSWER"
+        DEPLOY_OBICO_ML="$DEPLOY_OBICO_ML_ANSWER"
+    fi
+    if [ -n "${CLI_DEPLOY_PRINTGUARD:-}" ]; then
+        DEPLOY_PRINTGUARD="$CLI_DEPLOY_PRINTGUARD"
+        print_info "PrintGuard service selection set via CLI flag"
+    else
+        provider_default=$(provider_deploy_prompt_default DEPLOY_PRINTGUARD) || return 1
+        prompt_yes_no "Deploy PrintGuard for advisory print-failure analysis?" "$provider_default" "DEPLOY_PRINTGUARD_ANSWER"
+        DEPLOY_PRINTGUARD="$DEPLOY_PRINTGUARD_ANSWER"
+    fi
 }
 
 # Export the shared credential used only for printer-discovery event ingestion.
@@ -4903,6 +5077,95 @@ generate_env_file() {
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
     resolve_webauthn_configuration || return 1
+
+    local obico_enabled obico_api_url printguard_enabled printguard_api_url
+    local obico_ml_image
+    local printguard_api_token printguard_request_timeout_seconds printguard_capture_timeout_seconds
+    local printguard_cpu_limit printguard_memory_limit printguard_cpu_request printguard_memory_request
+    if ! obico_ml_image=$(effective_obico_ml_image); then
+        return 1
+    fi
+
+    if [ "$obico_ml_image" = "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        obico_ml_image=""
+    fi
+    if [ "${PFARM__Obico__Enabled+x}" = "x" ]; then
+        obico_enabled="$PFARM__Obico__Enabled"
+    else
+        obico_enabled=$([ "${DEPLOY_OBICO_ML:-no}" = "yes" ] && printf true || printf false)
+    fi
+    if [ "${PFARM__Obico__ObicoApiUrl+x}" = "x" ]; then
+        obico_api_url="$PFARM__Obico__ObicoApiUrl"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__Obico__ObicoApiUrl=' "$ENV_FILE"; then
+        obico_api_url=$(get_kv_from_file "$ENV_FILE" "PFARM__Obico__ObicoApiUrl")
+    elif [ "${DEPLOY_OBICO_ML:-no}" = "yes" ]; then
+        obico_api_url="http://obico-ml-api:3333"
+    else
+        obico_api_url=""
+    fi
+    if [ "${PFARM__PrintGuardShadow__Enabled+x}" = "x" ]; then
+        printguard_enabled="$PFARM__PrintGuardShadow__Enabled"
+    else
+        printguard_enabled=$([ "${DEPLOY_PRINTGUARD:-no}" = "yes" ] && printf true || printf false)
+    fi
+    if [ "${PFARM__PrintGuardShadow__ApiUrl+x}" = "x" ]; then
+        printguard_api_url="$PFARM__PrintGuardShadow__ApiUrl"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__ApiUrl=' "$ENV_FILE"; then
+        printguard_api_url=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__ApiUrl")
+    elif [ "${DEPLOY_PRINTGUARD:-no}" = "yes" ]; then
+        printguard_api_url="http://printguard:8000"
+    else
+        printguard_api_url=""
+    fi
+    if [ "${PFARM__PrintGuardShadow__ApiToken+x}" = "x" ]; then
+        printguard_api_token="$PFARM__PrintGuardShadow__ApiToken"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__ApiToken=' "$ENV_FILE"; then
+        printguard_api_token=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__ApiToken")
+    else
+        printguard_api_token=""
+    fi
+    if [ "${PFARM__PrintGuardShadow__RequestTimeoutSeconds+x}" = "x" ]; then
+        printguard_request_timeout_seconds="$PFARM__PrintGuardShadow__RequestTimeoutSeconds"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__RequestTimeoutSeconds=' "$ENV_FILE"; then
+        printguard_request_timeout_seconds=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__RequestTimeoutSeconds")
+    else
+        printguard_request_timeout_seconds="5"
+    fi
+    if [ "${PFARM__PrintGuardShadow__CaptureTimeoutSeconds+x}" = "x" ]; then
+        printguard_capture_timeout_seconds="$PFARM__PrintGuardShadow__CaptureTimeoutSeconds"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__CaptureTimeoutSeconds=' "$ENV_FILE"; then
+        printguard_capture_timeout_seconds=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds")
+    else
+        printguard_capture_timeout_seconds="5"
+    fi
+    if [ "${PRINTGUARD_CPU_LIMIT+x}" = "x" ]; then
+        printguard_cpu_limit="$PRINTGUARD_CPU_LIMIT"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PRINTGUARD_CPU_LIMIT=' "$ENV_FILE"; then
+        printguard_cpu_limit=$(get_kv_from_file "$ENV_FILE" "PRINTGUARD_CPU_LIMIT")
+    else
+        printguard_cpu_limit="2.0"
+    fi
+    if [ "${PRINTGUARD_MEMORY_LIMIT+x}" = "x" ]; then
+        printguard_memory_limit="$PRINTGUARD_MEMORY_LIMIT"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PRINTGUARD_MEMORY_LIMIT=' "$ENV_FILE"; then
+        printguard_memory_limit=$(get_kv_from_file "$ENV_FILE" "PRINTGUARD_MEMORY_LIMIT")
+    else
+        printguard_memory_limit="2gb"
+    fi
+    if [ "${PRINTGUARD_CPU_REQUEST+x}" = "x" ]; then
+        printguard_cpu_request="$PRINTGUARD_CPU_REQUEST"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PRINTGUARD_CPU_REQUEST=' "$ENV_FILE"; then
+        printguard_cpu_request=$(get_kv_from_file "$ENV_FILE" "PRINTGUARD_CPU_REQUEST")
+    else
+        printguard_cpu_request="0.5"
+    fi
+    if [ "${PRINTGUARD_MEMORY_REQUEST+x}" = "x" ]; then
+        printguard_memory_request="$PRINTGUARD_MEMORY_REQUEST"
+    elif [ -f "$ENV_FILE" ] && grep -q '^PRINTGUARD_MEMORY_REQUEST=' "$ENV_FILE"; then
+        printguard_memory_request=$(get_kv_from_file "$ENV_FILE" "PRINTGUARD_MEMORY_REQUEST")
+    else
+        printguard_memory_request="512m"
+    fi
 
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
@@ -4959,6 +5222,10 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 DB_PROVIDER=$DB_PROVIDER
 EOF
     chmod 600 "$ENV_FILE" || return 1
+    if [ -n "$obico_ml_image" ]; then
+        echo "OBICO_ML_IMAGE=$obico_ml_image" >> "$ENV_FILE"
+        set_exported_env_var "OBICO_ML_IMAGE" "$obico_ml_image"
+    fi
 
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}
@@ -5147,6 +5414,17 @@ GO2RTC_IMAGE=${GO2RTC_IMAGE:-alexxit/go2rtc:1.9.8}
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_BASE_URL:-}
 PFARM__NetworkDiscovery__EnableDiscovery=$ENABLE_DISCOVERY
 PFARM__NetworkDiscovery__DiscoverySubnets=$NETWORK_RANGES
+PFARM__Obico__Enabled=$obico_enabled
+PFARM__Obico__ObicoApiUrl=$obico_api_url
+PFARM__PrintGuardShadow__Enabled=$printguard_enabled
+PFARM__PrintGuardShadow__ApiUrl=$printguard_api_url
+PFARM__PrintGuardShadow__ApiToken=$printguard_api_token
+PFARM__PrintGuardShadow__RequestTimeoutSeconds=$printguard_request_timeout_seconds
+PFARM__PrintGuardShadow__CaptureTimeoutSeconds=$printguard_capture_timeout_seconds
+PRINTGUARD_CPU_LIMIT=$printguard_cpu_limit
+PRINTGUARD_MEMORY_LIMIT=$printguard_memory_limit
+PRINTGUARD_CPU_REQUEST=$printguard_cpu_request
+PRINTGUARD_MEMORY_REQUEST=$printguard_memory_request
 
 # Port Configuration
 HTTP_PORT=$HTTP_PORT
@@ -5558,6 +5836,12 @@ run_compose_build_with_snapshot_repair() {
 # Build and deploy
 deploy_containers() {
     print_header "🚀 Building and Deploying Containers"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        validate_obico_runtime_platform || return 1
+    else
+        validate_obico_runtime_platform true || return 1
+    fi
 
     # Source the .env file into the current shell so that environment variables
     # are available to the script and are properly passed to docker compose.
@@ -5977,6 +6261,10 @@ EOF
     resolve_orcaslicer_container_digest
     if [ -f "$ENV_FILE" ]; then
         update_kv_file "$ENV_FILE" "ORCASLICER_CONTAINER_DIGEST" "$ORCASLICER_CONTAINER_DIGEST"
+    fi
+
+    if [ "$DRY_RUN" != "true" ]; then
+        validate_obico_runtime_platform true || return 1
     fi
 
     print_info "Step 2/3: Starting containers..."
@@ -7793,6 +8081,11 @@ main() {
             exit 1
         fi
 
+        if ! validate_obico_runtime_platform; then
+            print_error "Deployment configuration is invalid."
+            exit 1
+        fi
+
         # Establish POSTGRES_PASSWORD as the single source of truth before
         # regenerating .env (issue #1392).
         migrate_legacy_db_credentials
@@ -8224,6 +8517,26 @@ while [ $# -gt 0 ]; do
         --include-go2rtc)
             CLI_INCLUDE_GO2RTC=true
             DEPLOY_GO2RTC=yes
+            shift
+            ;;
+        --include-obico-ml)
+            CLI_DEPLOY_OBICO_ML=yes
+            DEPLOY_OBICO_ML=yes
+            shift
+            ;;
+        --exclude-obico-ml)
+            CLI_DEPLOY_OBICO_ML=no
+            DEPLOY_OBICO_ML=no
+            shift
+            ;;
+        --include-printguard)
+            CLI_DEPLOY_PRINTGUARD=yes
+            DEPLOY_PRINTGUARD=yes
+            shift
+            ;;
+        --exclude-printguard)
+            CLI_DEPLOY_PRINTGUARD=no
+            DEPLOY_PRINTGUARD=no
             shift
             ;;
         --use-registry)
