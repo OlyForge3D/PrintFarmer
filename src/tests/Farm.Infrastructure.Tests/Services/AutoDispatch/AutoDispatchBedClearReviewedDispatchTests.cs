@@ -8,12 +8,15 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Services.StorageManagement;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -96,6 +99,52 @@ public sealed class AutoDispatchBedClearReviewedDispatchTests : IDisposable
         sample.Verdict.Should().Be(BedClearDetectorVerdict.Unknown);
         sample.Score.Should().BeNull();
         sample.IsActiveReference.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MarkReady_DispatchedJobStartingBeforeEvidenceProcessing_CompletesUnknownWithProvenance()
+    {
+        (Printer printer, PrintJob job) = await SeedPendingReadyAsync(remainingGrams: 900);
+        SetupAcceptedDispatch(job, printer, expectOverride: false);
+
+        AutoDispatchReadyResult result = await CreateService().MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState!.RowVersion!.ToArray());
+
+        result.DispatchInitiated.Should().BeTrue();
+        VerifyDispatchedOnce(job);
+        BedClearEvaluation sample = await _db.BedClearEvaluations.SingleAsync();
+        sample.State.Should().Be(BedClearEvaluationState.Pending);
+
+        job.Status = PrintJobStatus.Starting;
+        await _db.SaveChangesAsync();
+
+        DateTime observedAt = DateTime.UtcNow;
+        Mock<IPrinterStatusSnapshotReader> status = new(MockBehavior.Strict);
+        status.Setup(reader => reader.GetStatusSnapshot(printer.Id))
+            .Returns(new PrinterStatusSnapshot(
+                new PrinterStatusDto(printer.Id, true, "Idle", X: 10, Y: 20, Z: 30),
+                observedAt,
+                observedAt,
+                "test"));
+        Mock<IHttpClientFactory> httpClientFactory = new(MockBehavior.Strict);
+        BedClearEvaluationProcessor processor = new(
+            _db,
+            httpClientFactory.Object,
+            Mock.Of<IStoragePathService>(),
+            status.Object,
+            Mock.Of<IBedClearImageHashService>(),
+            NullLogger<BedClearEvaluationProcessor>.Instance);
+
+        await processor.ProcessPendingAsync(CancellationToken.None);
+        await _db.Entry(sample).ReloadAsync();
+
+        sample.State.Should().Be(BedClearEvaluationState.Complete);
+        sample.Verdict.Should().Be(BedClearDetectorVerdict.Unknown);
+        sample.ReasonCode.Should().Be("printer_moved_to_dispatch");
+        sample.ImageFilePath.Should().BeNull();
+        httpClientFactory.VerifyNoOtherCalls();
+        VerifyDispatchedOnce(job);
     }
 
     [Theory]
