@@ -363,7 +363,7 @@ test_obico_runtime_platform_guard() {
 set -euo pipefail
 source "$DEPLOY_SCRIPT"
 unset DOCKER_DEFAULT_PLATFORM
-print_error() { printf '%s\n' "\$*" >&2; }
+print_error() { printf '%s\n' "\$*"; }
 print_info() { printf '%s\n' "\$*"; }
 print_warning() { printf '%s\n' "\$*"; }
 print_success() { :; }
