@@ -4008,8 +4008,31 @@ effective_docker_runtime_architecture() {
     printf '%s' "$architecture" | tr '[:upper:]' '[:lower:]'
 }
 
+effective_obico_ml_image() {
+    local env_file="${ENV_FILE:-.env}"
+    local image="${OBICO_ML_IMAGE:-${OBICO_ML_IMAGE_DEFAULT:-}}"
+    if [ -f "$env_file" ] && grep -q '^OBICO_ML_IMAGE=' "$env_file"; then
+        image=$(get_kv_from_file "$env_file" "OBICO_ML_IMAGE")
+        if [ -z "$image" ]; then
+            image="${OBICO_ML_IMAGE_DEFAULT:-$OBICO_ML_IMAGE}"
+        fi
+    fi
+
+    case "$image" in
+        \"*\") image="${image:1:${#image}-2}" ;;
+        \'*\') image="${image:1:${#image}-2}" ;;
+    esac
+    printf '%s' "$image"
+}
+
 validate_obico_runtime_platform() {
     [ "${DEPLOY_OBICO_ML:-no}" = "yes" ] || return 0
+
+    local image
+    image=$(effective_obico_ml_image)
+    if [ "$image" != "${OBICO_ML_IMAGE_DEFAULT:-}" ]; then
+        return 0
+    fi
 
     local require_known="${1:-false}"
     local architecture
@@ -4024,9 +4047,11 @@ validate_obico_runtime_platform() {
     fi
 
     case "$architecture" in
-        arm64|aarch64)
-            print_error "The bundled Obico ML API image does not support ARM64 runtime targets."
-            print_info "Use an AMD64 Docker runtime target (with emulation if needed), or disable the bundled service with --exclude-obico-ml and configure an external Obico API."
+        amd64|x86_64|x64)
+            ;;
+        *)
+            print_error "The pinned bundled Obico ML API image supports AMD64 runtime targets only; detected '$architecture'."
+            print_info "Use an AMD64 Docker runtime target (with emulation if needed), configure a compatible image with OBICO_ML_IMAGE, or disable the bundled service with --exclude-obico-ml and configure an external Obico API."
             return 1
             ;;
     esac
@@ -5022,8 +5047,10 @@ generate_env_file() {
     resolve_webauthn_configuration || return 1
 
     local obico_enabled obico_api_url printguard_enabled printguard_api_url
+    local obico_ml_image
     local printguard_api_token printguard_request_timeout_seconds printguard_capture_timeout_seconds
     local printguard_cpu_limit printguard_memory_limit printguard_cpu_request printguard_memory_request
+    obico_ml_image=$(effective_obico_ml_image)
     if [ "${PFARM__Obico__Enabled+x}" = "x" ]; then
         obico_enabled="$PFARM__Obico__Enabled"
     else
@@ -5157,6 +5184,10 @@ ASPNETCORE_URLS=http://0.0.0.0:8080
 DB_PROVIDER=$DB_PROVIDER
 EOF
     chmod 600 "$ENV_FILE" || return 1
+    if [ -n "$obico_ml_image" ]; then
+        echo "OBICO_ML_IMAGE=$obico_ml_image" >> "$ENV_FILE"
+        set_exported_env_var "OBICO_ML_IMAGE" "$obico_ml_image"
+    fi
 
     # Clear provider include flags to avoid accidental emission of other DB secrets
     INCLUDE_POSTGRES=${INCLUDE_POSTGRES:-no}

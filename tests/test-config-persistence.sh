@@ -391,6 +391,18 @@ case "\$1" in
         DOCKER_DEFAULT_PLATFORM=linux/amd64
         validate_obico_runtime_platform
         ;;
+    explicit-x86_64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/x86_64
+        validate_obico_runtime_platform
+        ;;
+    explicit-arm)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm/v7
+        if validate_obico_runtime_platform; then
+            exit 1
+        fi
+        ;;
     docker-info-arm64)
         DEPLOY_OBICO_ML=yes
         MOCK_DOCKER_INFO=linux/arm64
@@ -415,6 +427,14 @@ case "\$1" in
             exit 1
         fi
         ;;
+    custom-image-arm64)
+        DEPLOY_OBICO_ML=yes
+        DOCKER_DEFAULT_PLATFORM=linux/arm64
+        ENV_FILE=\$(mktemp)
+        printf 'OBICO_ML_IMAGE=example/obico-ml-api:arm64\n' > "\$ENV_FILE"
+        validate_obico_runtime_platform true
+        rm -f "\$ENV_FILE"
+        ;;
     *)
         exit 2
         ;;
@@ -426,6 +446,10 @@ EOF
         "An explicit ARM64 runtime target should reject bundled Obico" || true
     assert_exit_code 0 "'$helper_script' explicit-amd64" \
         "An explicit AMD64 runtime target should allow bundled Obico" || true
+    assert_exit_code 0 "'$helper_script' explicit-x86_64" \
+        "Docker's x86_64 architecture name should allow the AMD64-only image" || true
+    assert_exit_code 0 "'$helper_script' explicit-arm" \
+        "A non-AMD64 runtime target should reject the pinned Obico image" || true
     assert_exit_code 0 "'$helper_script' docker-info-arm64" \
         "Docker engine architecture should detect ARM64 when no override is set" || true
     assert_exit_code 0 "'$helper_script' disabled-provider" \
@@ -434,6 +458,8 @@ EOF
         "Unknown runtime platform should warn but allow config-only validation" || true
     assert_exit_code 0 "'$helper_script' unknown-strict" \
         "Unknown runtime platform should fail strict deployment validation" || true
+    assert_exit_code 0 "'$helper_script' custom-image-arm64" \
+        "An explicitly selected custom image should not inherit the pinned image's platform restriction" || true
 
     local regen_dir="$TEST_TEMP_DIR/obico-arm64-regenerate"
     mkdir -p "$regen_dir"
@@ -456,6 +482,13 @@ EOF
     if ! cmp -s ".env" "$TEST_TEMP_DIR/obico-arm64-env.before"; then
         fail_test "Rejected ARM64 regeneration must not modify .env"
     fi
+
+    printf 'OBICO_ML_IMAGE=example/obico-ml-api:arm64\n' > ".env"
+    capture_output "DOCKER_DEFAULT_PLATFORM=linux/arm64 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --regenerate-config 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" \
+        "Regeneration should allow a custom Obico image on an ARM64 runtime target" || true
+    assert_file_has_exact_line ".env" "OBICO_ML_IMAGE=example/obico-ml-api:arm64" \
+        "Regeneration should preserve the custom Obico image override" || true
 
     if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
         pass_test
