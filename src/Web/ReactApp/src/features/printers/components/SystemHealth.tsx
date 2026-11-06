@@ -125,10 +125,13 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
 
         {/* Additional health checks */}
         {detailedHealth?.results && Object.entries(detailedHealth.results)
-          .filter(([key]) => !['Database', 'SignalRHub'].includes(key))
+          .filter(([key, value]) => !['Database', 'SignalRHub'].includes(key) && value.data?.enabled !== false)
           .map(([key, value]) => (
             <div key={key}>
-              {renderHealthStatus(value.status ?? 'Unknown', key)}
+              {renderHealthStatus(value.status ?? 'Unknown', key === 'printguard' ? 'PrintGuard Failure Detection' : key)}
+              {key === 'printguard' && value.description && (
+                <p className="mt-1 text-xs text-pf-text-secondary">{value.description}</p>
+              )}
             </div>
           ))}
       </div>

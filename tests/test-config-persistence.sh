@@ -229,6 +229,89 @@ EOF
     pass_test
 }
 
+test_provider_endpoint_defaults_without_docker() {
+    start_test "provider URL regeneration distinguishes persisted empty values from explicit overrides"
+
+    local fixture_dir="$TEST_TEMP_DIR/provider-endpoint-fixture"
+    mkdir -p "$fixture_dir"
+    local helper_script="$TEST_TEMP_DIR/provider-endpoint-helper.sh"
+    write_base_config "$TEST_TEMP_DIR/provider-endpoint.config"
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+docker() { return 1; }
+source "$DEPLOY_SCRIPT"
+CONFIG_FILE="$TEST_TEMP_DIR/provider-endpoint.config"
+ENV_FILE="$TEST_TEMP_DIR/provider-endpoint.env"
+source "\$CONFIG_FILE"
+OS=linux
+NON_INTERACTIVE=true
+ORCA_HOST_PORT=8081
+ORCA_WORKER_INSTANCE_ID=
+ORCASLICER_CONTAINER_DIGEST=
+Jwt__Key=provider-endpoint-test-jwt-key-32-bytes
+WebAuthn__RelyingPartyId=localhost
+WebAuthn__RelyingPartyName=PrintFarmerTest
+WebAuthn__Origin=http://localhost:8080
+POSTGRES_PASSWORD=provider-endpoint-test-value
+GRAFANA_ADMIN_PASSWORD=provider-endpoint-test-value
+AUTO_ADMIN_PASSWORD=provider-endpoint-test-value
+PFARM__Setup__BootstrapSecret=provider-endpoint-test-value
+resolve_orcaslicer_container_digest() { :; }
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+
+assert_endpoints() {
+    grep -Fxq "PFARM__Obico__ObicoApiUrl=\$1" "\$ENV_FILE"
+    grep -Fxq "PFARM__PrintGuardShadow__ApiUrl=\$2" "\$ENV_FILE"
+}
+
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+generate_env_file
+assert_endpoints "" ""
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+generate_env_file
+assert_endpoints "http://obico-ml-api:3333" "http://printguard:8000"
+
+PFARM__Obico__ObicoApiUrl=
+PFARM__PrintGuardShadow__ApiUrl=
+generate_env_file
+assert_endpoints "" ""
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+DEPLOY_OBICO_ML=no
+DEPLOY_PRINTGUARD=no
+generate_env_file
+assert_endpoints "" ""
+
+PFARM__Obico__ObicoApiUrl=https://obico.example.test
+PFARM__PrintGuardShadow__ApiUrl=https://printguard.example.test
+generate_env_file
+assert_endpoints "https://obico.example.test" "https://printguard.example.test"
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+DEPLOY_OBICO_ML=yes
+DEPLOY_PRINTGUARD=yes
+generate_env_file
+assert_endpoints "https://obico.example.test" "https://printguard.example.test"
+
+PFARM__Obico__ObicoApiUrl=malformed
+PFARM__PrintGuardShadow__ApiUrl=malformed
+generate_env_file
+assert_endpoints "malformed" "malformed"
+unset PFARM__Obico__ObicoApiUrl PFARM__PrintGuardShadow__ApiUrl
+generate_env_file
+assert_endpoints "malformed" "malformed"
+EOF
+    chmod +x "$helper_script"
+    capture_output "cd '$fixture_dir' && bash '$helper_script' 2>&1"
+    if [[ "$(get_output_exit_code)" != 0 ]]; then
+        test_info "Provider endpoint generation failed: $(get_output)"
+        fail_test "Provider endpoint regeneration must preserve overrides and default only selected empty URLs"
+        return 1
+    fi
+    pass_test
+}
+
 test_provider_selection_persistence_and_overrides() {
     start_test "provider selections default off, persist, and honor CLI/env overrides"
 
@@ -246,6 +329,8 @@ test_provider_selection_persistence_and_overrides() {
     assert_file_has_exact_line ".deploy-config" "DEPLOY_PRINTGUARD=no" "PrintGuard should persist disabled by default" || true
     assert_file_has_exact_line ".env" "PFARM__Obico__Enabled=false" "Obico application integration should be disabled by default" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__Enabled=false" "PrintGuard application integration should be disabled by default" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=" "Initially disabled Obico should have an empty saved URL" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=" "Initially disabled PrintGuard should have an empty saved URL" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiToken=" "PrintGuard API token should default to empty" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__RequestTimeoutSeconds=5" "PrintGuard request timeout should default to five seconds" || true
     assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__CaptureTimeoutSeconds=5" "PrintGuard capture timeout should default to five seconds" || true
@@ -253,6 +338,11 @@ test_provider_selection_persistence_and_overrides() {
     assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_LIMIT=2gb" "PrintGuard memory limit should use its default" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_CPU_REQUEST=0.5" "PrintGuard CPU request should use its default" || true
     assert_file_has_exact_line ".env" "PRINTGUARD_MEMORY_REQUEST=512m" "PrintGuard memory request should use its default" || true
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --include-obico-ml --include-printguard 2>&1"
+    assert_equals "0" "$(get_output_exit_code)" "Initially disabled providers should be enabled on redeploy" || true
+    assert_file_has_exact_line ".env" "PFARM__Obico__ObicoApiUrl=http://obico-ml-api:3333" "An existing empty Obico URL must become the selected bundled endpoint" || true
+    assert_file_has_exact_line ".env" "PFARM__PrintGuardShadow__ApiUrl=http://printguard:8000" "An existing empty PrintGuard URL must become the selected bundled endpoint" || true
 
     cd "$cli_dir"
     write_base_config ".deploy-config"
@@ -1204,6 +1294,7 @@ run_all_tests() {
     setup
 
     test_worker_normalization_is_bash_3_2_compatible
+    test_provider_endpoint_defaults_without_docker
     test_monitoring_config_persistence
     test_cli_flag_override
     test_provider_selection_persistence_and_overrides

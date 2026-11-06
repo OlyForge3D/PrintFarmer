@@ -5098,6 +5098,9 @@ generate_env_file() {
         obico_api_url="$PFARM__Obico__ObicoApiUrl"
     elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__Obico__ObicoApiUrl=' "$ENV_FILE"; then
         obico_api_url=$(get_kv_from_file "$ENV_FILE" "PFARM__Obico__ObicoApiUrl")
+        if [ -z "$obico_api_url" ] && [ "${DEPLOY_OBICO_ML:-no}" = "yes" ]; then
+            obico_api_url="http://obico-ml-api:3333"
+        fi
     elif [ "${DEPLOY_OBICO_ML:-no}" = "yes" ]; then
         obico_api_url="http://obico-ml-api:3333"
     else
@@ -5112,6 +5115,9 @@ generate_env_file() {
         printguard_api_url="$PFARM__PrintGuardShadow__ApiUrl"
     elif [ -f "$ENV_FILE" ] && grep -q '^PFARM__PrintGuardShadow__ApiUrl=' "$ENV_FILE"; then
         printguard_api_url=$(get_kv_from_file "$ENV_FILE" "PFARM__PrintGuardShadow__ApiUrl")
+        if [ -z "$printguard_api_url" ] && [ "${DEPLOY_PRINTGUARD:-no}" = "yes" ]; then
+            printguard_api_url="http://printguard:8000"
+        fi
     elif [ "${DEPLOY_PRINTGUARD:-no}" = "yes" ]; then
         printguard_api_url="http://printguard:8000"
     else
