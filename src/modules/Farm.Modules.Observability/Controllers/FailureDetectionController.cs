@@ -3,6 +3,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FailureDetection;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Startup;
+using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,8 @@ public class FailureDetectionController : ControllerBase
     private readonly IStartupStatus _startupStatus;
     private readonly ILogger<FailureDetectionController> _logger;
     private readonly IQueueResourceAuthorizationService _resourceAuthorization;
+    private readonly IObicoServerAssignmentService _routing;
+    private readonly ISettingsService _settings;
 
     public FailureDetectionController(
         IObicoFailureDetectionService failureDetectionService,
@@ -31,7 +34,9 @@ public class FailureDetectionController : ControllerBase
         IFailureDetectionMonitorStatus monitorStatus,
         IStartupStatus startupStatus,
         ILogger<FailureDetectionController> logger,
-        IQueueResourceAuthorizationService resourceAuthorization)
+        IQueueResourceAuthorizationService resourceAuthorization,
+        IObicoServerAssignmentService routing,
+        ISettingsService settings)
     {
         _failureDetectionService = failureDetectionService ?? throw new ArgumentNullException(nameof(failureDetectionService));
         _incidentHistoryService = incidentHistoryService ?? throw new ArgumentNullException(nameof(incidentHistoryService));
@@ -39,6 +44,8 @@ public class FailureDetectionController : ControllerBase
         _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _resourceAuthorization = resourceAuthorization ?? throw new ArgumentNullException(nameof(resourceAuthorization));
+        _routing = routing ?? throw new ArgumentNullException(nameof(routing));
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
     /// <summary>
@@ -77,10 +84,12 @@ public class FailureDetectionController : ControllerBase
     /// <returns>Failure detection result</returns>
     /// <response code="200">Returns the analysis result</response>
     /// <response code="400">If the printer has no camera configured</response>
+    /// <response code="404">If the printer is not visible to the caller</response>
     /// <response code="503">If the system is still initializing</response>
     [HttpPost("analyze/{printerId:guid}")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
     [ProducesResponseType(503)]
     public async Task<ActionResult<object>> AnalyzePrinterAsync(
         Guid printerId,
@@ -99,11 +108,25 @@ public class FailureDetectionController : ControllerBase
                 return BadRequest(new { error = "snapshotUrl query parameter is required for manual analysis." });
             }
 
+            if (!await _resourceAuthorization.CanAccessPrinterAsync(User, printerId, PrinterGroupAccessLevel.View, ct))
+            {
+                return NotFound($"Printer with ID {printerId} not found");
+            }
+
+            ObicoPrintRoute route = await _routing.GetRouteAsync(printerId, _settings.Get<ObicoSettings>(), ct);
+            if (route.Url is null)
+            {
+                _logger.LogWarning(
+                    "[FailureDetectionController] Manual monitoring unavailable for printer {PrinterId}: {Reason}",
+                    printerId, route.UnavailableReason);
+                return StatusCode(503, new { error = route.UnavailableReason });
+            }
+
             _logger.LogInformation(
                 "[FailureDetectionController] Manual analysis requested for printer {PrinterId}",
                 printerId);
 
-            FailureDetectionResult result = await _failureDetectionService.AnalyzeImageFromUrlAsync(snapshotUrl, ct);
+            FailureDetectionResult result = await _failureDetectionService.AnalyzeImageFromUrlAsync(snapshotUrl, route.Url, route.ApiKey, ct);
 
             if (result.ErrorMessage != null)
             {

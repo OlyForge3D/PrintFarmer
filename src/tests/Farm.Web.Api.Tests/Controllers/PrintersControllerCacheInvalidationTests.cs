@@ -47,6 +47,28 @@ public sealed class PrintersControllerCacheInvalidationTests : IAsyncLifetime, I
     }
 
     [Fact]
+    public async Task UpdatePrinter_ObicoOptInWithoutAvailableServer_SavesPreferenceWithoutPinningPrinter()
+    {
+        Guid printerId = await SeedPrinterAsync(withCamera: true);
+        HttpResponseMessage getResponse = await _client!.GetAsync($"/api/printers/{printerId}");
+        getResponse.EnsureSuccessStatusCode();
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/printers/{printerId}")
+        {
+            Content = JsonContent.Create(new UpdatePrinterDto(ObicoEnabled: true))
+        };
+        request.Headers.IfMatch.ParseAdd(getResponse.Headers.ETag!.Tag);
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.Printers.SingleAsync(printer => printer.Id == printerId)).ObicoEnabled.Should().BeTrue();
+        PrinterServiceState? state = await db.PrinterServiceStates.SingleOrDefaultAsync(candidate => candidate.PrinterId == printerId);
+        (state?.ObicoServerId).Should().BeNull();
+    }
+
+    [Fact]
     public async Task UpdatePrinter_SuccessfulSave_InvalidatesCacheForEditedPrinter()
     {
         Guid printerId = await SeedPrinterAsync();

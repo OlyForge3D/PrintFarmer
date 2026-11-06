@@ -5051,6 +5051,7 @@ export interface ObicoServer {
   isEnabled: boolean;
   hasApiKey: boolean;
   maxConcurrentAnalyses: number;
+  activePrintCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -5089,6 +5090,7 @@ export interface ObicoServerDto {
   isEnabled: boolean;
   hasApiKey: boolean;
   maxConcurrentAnalyses: number;
+  activePrintCount?: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -77,8 +77,6 @@ public partial class PrintersController(
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
     IEgressGuard egressGuard,
-    Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
-    ISettingsService settingsService,
     IPrintFarmerTelemetryService telemetryService,
     Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
@@ -114,8 +112,6 @@ public partial class PrintersController(
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
-    private readonly Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService _obicoServerAssignment = obicoServerAssignment;
-    private readonly ISettingsService _settingsService = settingsService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
     private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
 
@@ -1883,8 +1879,7 @@ public partial class PrintersController(
             return BadRequest(metrologyProblem);
         }
 
-        // Validate PrintGuard opt-in before provider updates that may persist through a separate
-        // DbContext, such as Obico server assignment.
+        // Validate provider opt-in before mutating tracked printer preferences.
         if (dto.PrintGuardEnabled == true && !p.PrintGuardEnabled)
         {
             PrintGuardShadowSettings? settings = _printGuardSettings?.CurrentValue;
@@ -2052,7 +2047,7 @@ public partial class PrintersController(
             p.IsEnabled = dto.IsEnabled.Value;
         }
 
-        // Update Obico monitoring opt-in (requires camera, auto-assigns server)
+        // Opt-in is independent of current monitoring capacity. Routes belong to prints.
         if (dto.ObicoEnabled.HasValue && dto.ObicoEnabled.Value != p.ObicoEnabled)
         {
             if (dto.ObicoEnabled.Value)
@@ -2065,30 +2060,10 @@ public partial class PrintersController(
                 }
 
                 p.ObicoEnabled = true;
-
-                // Auto-assign to best available server
-                ObicoServer? assigned = await _obicoServerAssignment.AssignServerAsync(p.Id, ct);
-                if (assigned is null)
-                {
-                    ObicoSettings currentObicoSettings = _settingsService.Get<ObicoSettings>();
-                    if (!currentObicoSettings.Enabled || string.IsNullOrWhiteSpace(currentObicoSettings.ObicoApiUrl))
-                    {
-                        return BadRequest(new
-                        {
-                            error = "No available Obico ML configuration. Open Settings > Obico Failure Detection to add a pooled Obico ML server or configure the global fallback."
-                        });
-                    }
-
-                    _logger.LogInformation(
-                        "[PRINTERS] No pooled Obico server available for printer {PrinterName}; using global Obico Failure Detection settings fallback",
-                        LogSanitizer.Sanitize(p.Name));
-                }
             }
             else
             {
-                // Disabling: unassign server
                 p.ObicoEnabled = false;
-                await _obicoServerAssignment.UnassignServerAsync(p.Id, ct);
             }
         }
 

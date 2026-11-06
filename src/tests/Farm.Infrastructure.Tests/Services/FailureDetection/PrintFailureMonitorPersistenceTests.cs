@@ -66,6 +66,109 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunMonitoringCycleAsync_StartPauseOfflineAndEnd_ReconcilesDurableRoutesWithoutCameraOrActuation()
+    {
+        Printer printer;
+        Guid jobId = Guid.NewGuid();
+        Guid serverId = Guid.NewGuid();
+        using (AppDbContext db = CreateDbContext())
+        {
+            printer = await SeedPrinterAsync(db, "Routing Lifecycle Printer");
+            printer.ObicoEnabled = true;
+            db.ObicoServers.Add(new ObicoServer
+            {
+                Id = serverId,
+                Name = "Pool",
+                Url = "http://pool.invalid",
+                MaxConcurrentAnalyses = 1
+            });
+            db.PrintJobs.Add(new PrintJob
+            {
+                Id = jobId,
+                Name = "routing.gcode",
+                AssignedPrinterId = printer.Id,
+                Status = PrintJobStatus.Starting,
+                ActualStartTime = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        ObicoSettings settings = new() { Enabled = true };
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(service => service.Get<ObicoSettings>()).Returns(settings);
+        Mock<IOptionsMonitor<PrintGuardShadowSettings>> options = new();
+        options.SetupGet(value => value.CurrentValue).Returns(new PrintGuardShadowSettings());
+        Mock<IDbContextFactory<AppDbContext>> factory = new();
+        factory.Setup(value => value.CreateDbContextAsync(It.IsAny<CancellationToken>())).ReturnsAsync(CreateDbContext);
+        Mock<IObicoConnectivityProbe> probe = new();
+        probe.Setup(value => value.ProbeAsync("http://pool.invalid", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(true, 1, null));
+        Mock<IPrinterStatusCacheReader> statusCache = new();
+        PrinterStatusDto live = new(printer.Id, true, "Idle");
+        statusCache.Setup(value => value.GetStatus(printer.Id)).Returns(() => live);
+        ServiceCollection services = new();
+        services.AddScoped(_ => CreateDbContext());
+        services.AddScoped<IFailureDetectionIncidentHistoryService, FailureDetectionIncidentHistoryService>();
+        services.AddSingleton(settingsService.Object);
+        services.AddSingleton(options.Object);
+        services.AddSingleton<IObicoServerAssignmentService>(new ObicoServerAssignmentService(
+            factory.Object, probe.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<ObicoServerAssignmentService>.Instance));
+        using ServiceProvider provider = services.BuildServiceProvider();
+        FailureDetectionMonitorStatusStore status = new();
+        PrintFailureMonitorService monitor = new(
+            provider.GetRequiredService<IServiceScopeFactory>(), status, statusCache.Object,
+            Mock.Of<IHubContext<PrinterHub>>(), new FailureDetectionMetrics(), Mock.Of<ILogger<PrintFailureMonitorService>>());
+        MethodInfo cycle = typeof(PrintFailureMonitorService).GetMethod("RunMonitoringCycleAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        await RunCycleAsync();
+        await AssertRouteAsync(serverId);
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.PrintJobs.SingleAsync()).Status = PrintJobStatus.Paused;
+            await db.SaveChangesAsync();
+        }
+
+        live = live with { State = "Paused" };
+        await RunCycleAsync();
+        await AssertRouteAsync(serverId);
+        probe.Setup(value => value.ProbeAsync("http://pool.invalid", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(false, 0, "offline"));
+        await RunCycleAsync();
+        await AssertRouteAsync(serverId);
+        FailureDetectionPrinterStatusDto degraded = status.GetSnapshot().Printers.Single();
+        degraded.State.Should().Be("error");
+        degraded.Reason.Should().Contain("Selected Obico server is unavailable");
+        degraded.Providers.Should().ContainSingle().Which.State.Should().Be("error");
+        live = live with { IsOnline = false };
+        await RunCycleAsync();
+        await AssertRouteAsync(serverId);
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.PrintJobs.SingleAsync()).Status = PrintJobStatus.Completed;
+            await db.SaveChangesAsync();
+        }
+
+        live = live with { IsOnline = true, State = "Idle" };
+        await RunCycleAsync();
+        await AssertRouteAsync(null);
+
+        async Task RunCycleAsync()
+        {
+            await (Task)cycle.Invoke(monitor, [CancellationToken.None])!;
+            status.GetSnapshot().LastError.Should().BeNull();
+        }
+
+        async Task AssertRouteAsync(Guid? expected)
+        {
+            using AppDbContext db = CreateDbContext();
+            PrinterServiceState saved = await db.PrinterServiceStates.SingleAsync(state => state.PrinterId == printer.Id);
+            saved.ObicoServerId.Should().Be(expected);
+            saved.ObicoPrintKey.Should().Be(expected.HasValue ? $"job:{jobId:N}" : null);
+            (await db.FailureDetectionIncidents.CountAsync()).Should().Be(0);
+        }
+    }
+
+    [Fact]
     public async Task HandleFailureDetectedAsync_PersistsIncidentAndBroadcastsEnrichedEvent()
     {
         using AppDbContext dbContext = CreateDbContext();
@@ -328,6 +431,16 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         _ = services.AddScoped(_ => CreateDbContext());
         _ = services.AddScoped<IFailureDetectionIncidentHistoryService, FailureDetectionIncidentHistoryService>();
         _ = services.AddSingleton<ISettingsService>(settingsService.Object);
+        Mock<IObicoServerAssignmentService> routing = new();
+        routing.Setup(service => service.ReconcileAsync(
+                It.IsAny<IReadOnlyCollection<ObicoPrintActivity>>(),
+                It.IsAny<ObicoSettings>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, ObicoPrintRoute>
+            {
+                [printer.Id] = new("global", "http://obico.local", "http://obico.local", null)
+            });
+        _ = services.AddSingleton<IObicoServerAssignmentService>(routing.Object);
         _ = services.AddSingleton<IOptionsMonitor<PrintGuardShadowSettings>>(optionsMonitor.Object);
         _ = services.AddSingleton<ICameraSnapshotCaptureService>(snapshotCapture.Object);
         _ = services.AddKeyedSingleton<IFailureDetectionProvider>("Obico", obicoProvider.Object);
