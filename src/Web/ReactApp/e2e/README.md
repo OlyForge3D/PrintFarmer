@@ -11,6 +11,116 @@ npm run test:e2e:chromium            # Chromium only
 npm run test:e2e -- --project=firefox  # Firefox only
 ```
 
+## Settings Editor to Real Orca G-code
+
+The opt-in `slicer-settings` suite inventories **all** process and filament
+registry keys. It edits individual settings through the process Apply or
+filament save/select UI, submits new jobs to a real worker, and compares each
+requested value with the newly generated Orca 2.4.2 `CONFIG_BLOCK`. A saved
+profile alone is not a pass. Unresolved keys fail the suite; explicit exclusions
+remain in the report and are never counted as verified.
+
+The filament editor adapts native vector settings to its controls and restores
+their string-array wire format on save. Unedited fields and hidden extruder
+entries are preserved; edited percentages retain their percent suffix.
+
+Use .NET SDK 10, the normal frontend dependencies, Playwright Chromium and a
+clean, committed worktree. Run:
+
+```powershell
+cd <repo-root>\src\Web\ReactApp
+$env:ORCA_TEST_ROOT = '<private upstream OrcaSlicer 2.4.2 portable directory>'
+npm run test:e2e -- --config playwright.slicer-settings.config.ts
+```
+
+`ORCA_TEST_ROOT` must contain the executable and `resources\profiles`; do not
+point it at a shared worker's writable profile/cache directory. The dedicated
+config starts its own loopback API (15245), worker (15246), UI (13000), and
+Moonraker emulator (17125), refuses occupied ports, and creates fresh SQLite
+databases, model/artifact storage and profile caches on every invocation.
+Before starting any application host, a .NET file-based preflight builds the
+existing API, worker and emulator projects and resolves the API's actual
+configuration ordering and production storage/temp/DataProtection providers.
+Missing or external effective destinations fail before host startup. Every
+host runs with a private working/temp directory; the worker also receives
+private per-user engine configuration/cache paths.
+The private A1 mini machine-profile copy places the wipe tower at (15, 140),
+inside its 180 mm bed, and supplies a small clumping-detection exclusion area.
+For prime-tower coverage, both per-key jobs enable clumping detection through
+the process editor; without that dependency Orca 2.4.2 disables single-filament
+towers. The report records and verifies that dependency in both artifacts before
+requiring the distinct prime-tower value. Stock portable profiles are unchanged;
+this fixture setup is not machine-editor or physical clumping-detection coverage.
+Stock filament profiles can contain the legacy `chamber_temperatures` alias.
+The filament editor displays it as `chamber_temperature` and removes the alias
+only when that setting is edited or reset, so Orca cannot overwrite the edit
+with a stale legacy value. Unrelated edits preserve the original wire values.
+The build CLI uses the established NuGet package cache only as a **read-only
+local feed**. Restore/extraction, HTTP caches, lock state and CLI metadata have
+explicit private destinations; the subsequent build uses `--no-restore`.
+Missing packages may be downloaded from NuGet.org into that private cache;
+there is no fallback to restoring into a shared destination. SDK certificate
+generation, telemetry, global-tool PATH changes and workload advertising
+downloads are explicitly disabled.
+No Docker or physical printer is needed. Browser print/queue dispatch is
+blocked; generated files are **never** sent to a printer.
+
+Each run prints its scratch directory and writes `coverage.json`, baseline and
+per-setting G-code plus submitted profile snapshots there. Set
+`PF_SETTINGS_TEST_ROOT` to choose the parent evidence directory. Keep it short
+on Windows (the default temp directory works): MSBuild reference resolution can
+reject extracted dependency paths over 260 characters even when normal file
+reads support them. Retain evidence for diagnosis and remove only that run's
+directory when finished. Do not set
+the internal `PF_SETTINGS_RUN_ROOT`: Playwright passes it to its own test worker.
+The portable Windows binary rejects `--version`, so the harness disables that
+startup probe only for its private worker and instead requires the actual
+G-code header to identify 2.4.2.
+The report distinguishes UI attempts, accepted submissions, and `executed`
+settings with newly generated, downloaded G-code; only matching distinct values
+count as `configVerified`.
+An option absent from the shared baseline gets an explicit UI-saved per-key
+baseline before the second distinct edit. Both artifacts and the baseline job
+ID remain in the report; a key still absent remains unresolved.
+The two filament compatibility-condition scalars use Orca 2.4.2's audited CLI
+mapping: `compatible_prints_condition` becomes slot 0 of
+`compatible_process_expression_group` (one entry), and
+`compatible_printers_condition` becomes slot 1 of
+`compatible_machine_expression_group` (three entries). Both require exact
+single-filament cardinality and the correct slot; a same-named scalar from
+another profile is not evidence. The report retains the emitted vector.
+`run.json` and every coverage report identify the full source commit and tree, normalized
+SHA-256 identities of harness/registry inputs, a unique run ID and the engine
+binary hash. Uncommitted inputs, source changes during execution and stale
+worker handoffs fail. Every boundary checks the entire tracked worktree, not only
+the selected harness hashes. A separate source monitor watches tracked parent
+directories before the blocking build and latches tracked-file changes,
+atomic replacements and directory renames, including changes restored before
+the next boundary. Windows uses PowerShell's native `FileSystemWatcher` with
+nonrecursive notifications and a 64 KiB buffer to tolerate nested build-output
+traffic. A missing, failed, overflowing or terminated monitor invalidates the
+run; untracked build outputs are not source changes.
+`PF_SETTINGS_RUN_ROOT` and `PF_SETTINGS_RUN_ID` are private
+launcher-to-worker handoffs, not user-selectable reuse options.
+For focused diagnosis only, `PF_SETTINGS_KEYS` accepts comma-separated qualified
+keys such as `process.brim_width,filament.nozzle_temperature`. Every unselected
+registry row remains unresolved and the command **fails**; this mode cannot
+produce exhaustive acceptance. Clear that variable for the full run.
+
+Configuration retention is not physical behavior proof. Limited independent
+heater-command and extrusion-plane checks are recorded separately. A negative
+control must reject replacement of a changed emitted value with its baseline.
+Every registry key remains visible in the report, including non-emitted keys,
+unsupported controls, intentional submission-policy exclusions and failures;
+an incomplete run is not exhaustive coverage.
+
+For post-processing, the suite uses only its checked-in proof script: it refuses
+files outside the private run and appends a comment to complete Orca G-code.
+It never invokes a user-configured post-processing program. Orca 2.4.2's CLI
+disables `run_post_process_scripts`; configuration retention is not evidence that
+the program ran. Heater evidence requires a target absent from every baseline
+heater command so an unchanged unrelated phase cannot produce a false pass.
+
 ## Monolith Smoke Journeys (Wire-Contract Corpus)
 
 `e2e/monolith-smoke/` (issue #2286) is a small, bounded set of authenticated

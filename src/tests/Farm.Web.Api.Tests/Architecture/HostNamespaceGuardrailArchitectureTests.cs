@@ -59,6 +59,9 @@ public sealed class HostNamespaceGuardrailArchitectureTests
         "Farm.Web.Api.Controllers.SystemSourceController",
         "Farm.Web.Api.Controllers.Requests.UploadGcodeRequest",
 
+        // Host-owned ImageSharp adapter; detector policy remains in infrastructure without this dependency.
+        "Farm.Web.Api.Services.Cameras.ImageSharpBedClearImageHashService",
+
         // Services/Startup/**, Services/StorageManagement/**, Services/SlicerHost/**
         "Farm.Web.Api.Services.SlicerHost.SlicerHostPromotionArtifactContentSource",
         "Farm.Web.Api.Services.SlicerHost.SlicerHostPromotionOptions",

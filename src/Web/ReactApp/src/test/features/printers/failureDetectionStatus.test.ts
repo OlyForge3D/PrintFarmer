@@ -28,7 +28,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionDisplayState(status)).toBeUndefined();
@@ -45,7 +44,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionDisplayState(status)).toBe("error");
@@ -138,6 +136,14 @@ describe("failureDetectionStatus utilities", () => {
       expect(getFailureDetectionSourceLabel("global")).toBe("Global");
     });
 
+    it('returns "PrintGuard" for PrintGuard source', () => {
+      expect(getFailureDetectionSourceLabel("printguard")).toBe("PrintGuard");
+    });
+
+    it('returns "Multiple" for multiple provider sources', () => {
+      expect(getFailureDetectionSourceLabel("multiple")).toBe("Multiple");
+    });
+
     it("returns null for none source", () => {
       expect(getFailureDetectionSourceLabel("none")).toBeNull();
     });
@@ -198,7 +204,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "none",
           lastAnalyzedAt: undefined,
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -217,7 +222,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "none",
           lastAnalyzedAt: undefined,
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -236,7 +240,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "error",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -255,7 +258,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "error",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -276,7 +278,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "none",
           lastAnalyzedAt: undefined,
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -295,7 +296,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "healthy",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -313,7 +313,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "failure",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: 0.87,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -322,7 +321,7 @@ describe("failureDetectionStatus utilities", () => {
         );
       });
 
-      it("includes auto-pause indicator when printer was paused", () => {
+      it("does not claim that failure detection paused the printer", () => {
         const status: FailureDetectionPrinterStatusDto = {
           printerId: "printer-1",
           printerName: "Voron 2.4",
@@ -333,13 +332,11 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "failure",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: 0.92,
-          lastAutoPaused: true,
         };
 
         const detail = getFailureDetectionDetail(status, true);
-        expect(detail).toMatch(
-          /Last scan .* • failure detected • 92% confidence • auto-paused/,
-        );
+        expect(detail).toMatch(/Last scan .* • failure detected • 92% confidence/);
+        expect(detail).not.toContain("auto-paus");
       });
 
       it("omits confidence when null for failure outcome", () => {
@@ -353,7 +350,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "failure",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -372,12 +368,11 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "error",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
         expect(detail).toMatch(
-          /Last scan .* • scan failed — check the camera feed or ML service/,
+          /Last scan .* • scan failed — check the camera feed or detection provider/,
         );
       });
 
@@ -392,7 +387,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "unknown",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -410,7 +404,6 @@ describe("failureDetectionStatus utilities", () => {
           lastOutcome: "none",
           lastAnalyzedAt: "2026-01-15T10:30:00Z",
           lastConfidence: undefined,
-          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -431,7 +424,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "none",
         lastAnalyzedAt: undefined,
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionAttentionContent(status)).toEqual({
@@ -451,7 +443,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionAttentionContent(status)).toEqual({
@@ -473,14 +464,13 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionAttentionContent(status)).toEqual({
         issue:
           "Obico rejected the snapshot URL request (HTTP 400). Check whether the saved snapshot URL is reachable from the Obico server network and still returns an image.",
         action:
-          "Make the saved snapshot URL reachable from the Obico server network, or switch to a camera feed that PrintFarmer can fetch locally.",
+          "Make the saved snapshot URL reachable from the configured detection provider, or switch to a camera feed that PrintFarmer can fetch locally.",
       });
     });
 
@@ -496,7 +486,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionAttentionContent(status)).toEqual({
@@ -518,7 +507,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "error",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       const attention = getFailureDetectionAttentionContent(status);
@@ -527,7 +515,7 @@ describe("failureDetectionStatus utilities", () => {
         /The last failure-detection scan failed at/,
       );
       expect(attention?.action).toBe(
-        "Check the camera feed or monitoring service before relying on automatic pause.",
+        "Check the camera feed or monitoring service before relying on failure alerts.",
       );
     });
 
@@ -542,7 +530,6 @@ describe("failureDetectionStatus utilities", () => {
         lastOutcome: "healthy",
         lastAnalyzedAt: "2026-01-15T10:30:00Z",
         lastConfidence: undefined,
-        lastAutoPaused: false,
       };
 
       expect(getFailureDetectionAttentionContent(status)).toBeNull();

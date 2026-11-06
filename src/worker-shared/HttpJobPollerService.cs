@@ -172,14 +172,17 @@ public abstract class HttpJobPollerService(
                         jobStatus.FilamentProfileJson,
                         jobStatus.MachineProfileSha256,
                         jobStatus.ProcessProfileSha256,
-                        jobStatus.FilamentProfileSha256),
+                        jobStatus.FilamentProfileSha256,
+                        jobStatus.ExtruderFilamentProfilesJson),
                     MachineProfileSha256 = jobStatus.MachineProfileSha256,
                     ProcessProfileSha256 = jobStatus.ProcessProfileSha256,
                     FilamentProfileSha256 = jobStatus.FilamentProfileSha256,
                 };
 
-                // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
-                job.Profile = await ResolveProfileFromJsonAsync(job.SlicerProfileJson, stoppingToken);
+                // Explicit snapshots must never be re-resolved by their ambiguous display names.
+                job.Profile = job.NativeProfiles?.ExtruderFilaments is null
+                    ? await ResolveProfileFromJsonAsync(job.SlicerProfileJson, stoppingToken)
+                    : null;
 
                 // The lease this job was claimed under is registered inside HandleJobAsync and
                 // released there, so it is never ambient on the client's default headers.

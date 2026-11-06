@@ -16,13 +16,17 @@
  * a provider (e.g. isolated tests/stories) get the default of `false`,
  * matching the previous "no explicit opt-in" behavior.
  */
-import { createContext, useContext } from 'react';
+import { useContext } from 'react';
+import { FailureDetectionPollingContext } from '@/features/printers/hooks/FailureDetectionPollingContext';
 
-const FailureDetectionPollingContext = createContext(false);
+/** Whether the fleet has at least one printer opted into any failure-detection provider. */
+export function hasFailureDetectionEnabledPrinter(
+  printers: readonly Pick<import('@/types/api').Printer, 'obicoEnabled' | 'printGuardEnabled'>[]
+): boolean {
+  return printers.some((printer) => !!printer.obicoEnabled || !!printer.printGuardEnabled);
+}
 
-export const FailureDetectionPollingProvider = FailureDetectionPollingContext.Provider;
-
-/** Whether the fleet currently has at least one Obico/failure-detection-enabled printer. */
+/** Whether the fleet currently has at least one failure-detection-enabled printer. */
 export function useFailureDetectionPollingEnabled(): boolean {
   return useContext(FailureDetectionPollingContext);
 }

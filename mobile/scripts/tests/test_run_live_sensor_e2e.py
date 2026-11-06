@@ -1,10 +1,12 @@
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 from xml.etree import ElementTree
 
 
@@ -22,6 +24,85 @@ EXPECTED_RETAINED_STATE = (
     "testProductionPrinterStateReceivesHumidityAndAvailabilityAcrossSignalRReconnect()"
 )
 MOBILE = SCRIPT.parents[1]
+
+
+class SimulatorPreflightTests(unittest.TestCase):
+    @contextmanager
+    def stubbed_main(self, responses):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            mobile = root / "mobile"
+            developer = root / "Xcode"
+            mobile.mkdir()
+            developer.mkdir()
+            with (
+                patch.object(harness, "MOBILE", mobile),
+                patch.object(harness, "DEVELOPER_DIR", developer),
+                patch.object(harness, "API_URL", "http://localhost:5245"),
+                patch.object(harness, "MOONRAKER_URL", "http://127.0.0.1:7125"),
+                patch.object(harness, "ensure_port_free"),
+                patch.object(harness, "run_logged", side_effect=RuntimeError("preflight complete")),
+                patch.object(harness.subprocess, "run", side_effect=responses) as run,
+                patch.dict(harness.os.environ, {}, clear=True),
+                redirect_stdout(StringIO()),
+            ):
+                yield mobile, run
+
+    def test_resolver_failure_is_reported_before_simulator_inventory(self):
+        diagnostic = "Xcode 26.6 is unsupported on macOS 27.2.\n"
+        responses = [
+            subprocess.CompletedProcess([], 0, stdout="Xcode 26.6\nBuild version 17F113\n"),
+            subprocess.CompletedProcess([], 1, stdout="", stderr=diagnostic),
+        ]
+        with self.stubbed_main(responses) as (mobile, run):
+            with self.assertRaisesRegex(RuntimeError, "unsupported on macOS 27.2"):
+                harness.main([])
+            commands = [entry.args[0] for entry in run.call_args_list]
+            self.assertEqual(commands, [
+                ["xcodebuild", "-version"],
+                [str(harness.REPO / "scripts/ci/resolve-ios-simulator.sh"), "--udid"],
+            ])
+            run_dir = next((mobile / "build").iterdir())
+            self.assertEqual((run_dir / "destination.log").read_text(), diagnostic)
+            self.assertFalse((run_dir / "runtimes.json").exists())
+            self.assertFalse((run_dir / "devices.json").exists())
+
+    def test_missing_resolver_udid_fails_before_simulator_inventory(self):
+        responses = [
+            subprocess.CompletedProcess([], 0, stdout="Xcode 26.6\nBuild version 17F113\n"),
+            subprocess.CompletedProcess([], 0, stdout="", stderr="no destination\n"),
+        ]
+        with self.stubbed_main(responses) as (mobile, run):
+            with self.assertRaisesRegex(RuntimeError, "returned no UDID"):
+                harness.main([])
+            self.assertEqual(len(run.call_args_list), 2)
+            run_dir = next((mobile / "build").iterdir())
+            self.assertEqual((run_dir / "destination.log").read_text(), "no destination\n")
+
+    def test_successful_resolver_precedes_inventory_and_preserves_evidence(self):
+        responses = [
+            subprocess.CompletedProcess([], 0, stdout="Xcode 26.6\nBuild version 17F113\n"),
+            subprocess.CompletedProcess([], 0, stdout="SIMULATOR-UDID\n", stderr="approved\n"),
+            subprocess.CompletedProcess([], 0, stdout=b'{"runtimes": []}'),
+            subprocess.CompletedProcess([], 0, stdout=b'{"devices": {}}'),
+        ]
+        with self.stubbed_main(responses) as (mobile, run):
+            with self.assertRaisesRegex(RuntimeError, "preflight complete"):
+                harness.main([])
+            commands = [entry.args[0] for entry in run.call_args_list]
+            self.assertEqual(commands, [
+                ["xcodebuild", "-version"],
+                [str(harness.REPO / "scripts/ci/resolve-ios-simulator.sh"), "--udid"],
+                ["xcrun", "simctl", "list", "runtimes", "-j"],
+                ["xcrun", "simctl", "list", "devices", "available", "-j"],
+            ])
+            run_dir = next((mobile / "build").iterdir())
+            self.assertEqual(
+                (run_dir / "destination.log").read_text(),
+                "approved\nUDID: SIMULATOR-UDID\n",
+            )
+            self.assertEqual((run_dir / "runtimes.json").read_bytes(), b'{"runtimes": []}')
+            self.assertEqual((run_dir / "devices.json").read_bytes(), b'{"devices": {}}')
 
 
 class VerifyNamedTestSucceededTests(unittest.TestCase):

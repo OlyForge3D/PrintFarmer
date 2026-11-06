@@ -38,12 +38,14 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
     isOpen,
     jobId,
     artifactId,
+    defaultPrinterId,
   }: {
     isOpen: boolean;
     jobId: string;
     artifactId: string;
+    defaultPrinterId?: string | null;
   }) => isOpen
-    ? <div data-testid="print-modal">{jobId}:{artifactId}</div>
+    ? <div data-testid="print-modal" data-printer-id={defaultPrinterId}>{jobId}:{artifactId}</div>
     : null,
 }));
 
@@ -75,7 +77,7 @@ describe('SliceProgressOverlay completion actions', () => {
     resolveGcodeArtifactForAction.mockReset();
   });
 
-  it('reveals persistent actions from a live completion and auto-opens preview only once', async () => {
+  it('reveals persistent actions from a live completion without auto-opening preview', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const windowOpen = vi.spyOn(window, 'open');
@@ -105,8 +107,8 @@ describe('SliceProgressOverlay completion actions', () => {
         />,
       );
 
-      expect(await screen.findByText(/Preview modal for/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Preview' })).toBeInTheDocument();
+      expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save to Library' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Print' })).toBeInTheDocument();
       expect(saveGcodeArtifactToLibrary).not.toHaveBeenCalled();
@@ -115,6 +117,10 @@ describe('SliceProgressOverlay completion actions', () => {
       await user.click(downloadButton);
       expect(downloadGcodeArtifact).toHaveBeenCalledWith('/api/artifacts/job/job-1');
       expect(windowOpen).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Preview' }));
+      expect(screen.getByText('Preview modal for /api/artifacts/job/job-1')).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Close preview' }));
       rerender(
@@ -128,6 +134,7 @@ describe('SliceProgressOverlay completion actions', () => {
       expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
 
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Download G-code' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save to Library' })).toBeInTheDocument();
@@ -136,6 +143,117 @@ describe('SliceProgressOverlay completion actions', () => {
       windowOpen.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  it('does not open preview when a completed job remounts or receives repeated completed updates', () => {
+    const completedProgress: SliceJobProgressState = {
+      ...processingProgress,
+      status: 'Completed',
+      progressPercent: 100,
+      artifactsRoute: '/api/artifacts/job/job-1',
+    };
+    const { rerender, unmount } = renderOverlay(
+      <SliceProgressOverlay jobId="job-1" progress={completedProgress} onNewJob={vi.fn()} onRetry={vi.fn()} />,
+    );
+    for (let i = 0; i < 3; i++) {
+      rerender(
+        <SliceProgressOverlay
+          jobId="job-1"
+          progress={{ ...completedProgress, filamentUsedGrams: 10 + i }}
+          onNewJob={vi.fn()}
+          onRetry={vi.fn()}
+        />,
+      );
+    }
+    expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
+    unmount();
+
+    renderOverlay(
+      <SliceProgressOverlay jobId="job-1" progress={completedProgress} onNewJob={vi.fn()} onRetry={vi.fn()} />,
+    );
+    expect(screen.queryByText(/Preview modal for/)).not.toBeInTheDocument();
+  });
+
+  it('offers dismissal only for a completed job, separate from New Job', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    const onNewJob = vi.fn();
+    const completedProgress: SliceJobProgressState = {
+      ...processingProgress,
+      status: 'Completed',
+      progressPercent: 100,
+      artifactsRoute: '/api/artifacts/job/job-1',
+    };
+    const { rerender } = renderOverlay(
+      <SliceProgressOverlay jobId="job-1" progress={processingProgress} onNewJob={onNewJob} onRetry={vi.fn()} onDismiss={onDismiss} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Hide slice results' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hide results' })).not.toBeInTheDocument();
+
+    rerender(
+      <SliceProgressOverlay
+        jobId="job-1"
+        progress={{ ...processingProgress, status: 'Failed', error: 'boom' }}
+        onNewJob={onNewJob}
+        onRetry={vi.fn()}
+        onDismiss={onDismiss}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Hide slice results' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hide results' })).not.toBeInTheDocument();
+
+    rerender(
+      <SliceProgressOverlay jobId="job-1" progress={completedProgress} onNewJob={onNewJob} onRetry={vi.fn()} onDismiss={onDismiss} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Hide slice results' }));
+    await user.click(screen.getByRole('button', { name: 'Hide results' }));
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+    expect(onNewJob).not.toHaveBeenCalled();
+  });
+
+  it('does not dismiss the overlay when Escape is pressed inside the nested preview', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    const onNewJob = vi.fn();
+    renderOverlay(
+      <SliceProgressOverlay
+        jobId="job-1"
+        progress={{ ...processingProgress, status: 'Completed', progressPercent: 100, artifactsRoute: '/api/artifacts/job/job-1' }}
+        onNewJob={onNewJob}
+        onRetry={vi.fn()}
+        onDismiss={onDismiss}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await user.keyboard('{Escape}');
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(onNewJob).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to the dismiss control only when explicitly reopened', () => {
+    const completedProgress: SliceJobProgressState = {
+      ...processingProgress,
+      status: 'Completed',
+      progressPercent: 100,
+      artifactsRoute: '/api/artifacts/job/job-1',
+    };
+    const { unmount } = renderOverlay(
+      <SliceProgressOverlay jobId="job-1" progress={completedProgress} onNewJob={vi.fn()} onRetry={vi.fn()} onDismiss={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: 'Hide slice results' })).not.toHaveFocus();
+    unmount();
+
+    renderOverlay(
+      <SliceProgressOverlay
+        jobId="job-1"
+        progress={completedProgress}
+        onNewJob={vi.fn()}
+        onRetry={vi.fn()}
+        onDismiss={vi.fn()}
+        focusDismissOnMount
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Hide slice results' })).toHaveFocus();
   });
 
   it('saves explicitly with single-flight protection and invalidates a newly created file', async () => {
@@ -226,6 +344,7 @@ describe('SliceProgressOverlay completion actions', () => {
     renderOverlay(
       <SliceProgressOverlay
         jobId="job-1"
+        defaultPrinterId="sliced-for-printer"
         progress={completedProgress}
         onNewJob={vi.fn()}
         onRetry={vi.fn()}
@@ -241,5 +360,6 @@ describe('SliceProgressOverlay completion actions', () => {
       '/api/artifacts/job/job-1',
     );
     expect(screen.getByTestId('print-modal')).not.toHaveTextContent('newest-artifact');
+    expect(screen.getByTestId('print-modal')).toHaveAttribute('data-printer-id', 'sliced-for-printer');
   });
 });

@@ -305,6 +305,7 @@ public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
             ObicoEnabled: printer.ObicoEnabled,
+            PrintGuardEnabled: printer.PrintGuardEnabled,
             ThumbnailCacheIdentity: status.ThumbnailCacheIdentity);
     }
 

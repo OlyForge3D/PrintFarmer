@@ -27,6 +27,7 @@ import {
   parseDetailedLayersCore,
   detailedParseBuffersTransferList,
   type DetailedParseBuffers,
+  type BedBounds,
 } from './gcodeParserCore';
 import { resolveTrustedGcodeArtifactUrl } from './gcode-artifact-url';
 
@@ -99,6 +100,8 @@ export interface DetailedParsedGCode {
   layers: DetailedLayer[];
   layerCount: number;
   tools: number[];
+  /** Printable bed area from the slicer config, or null when the file does not declare one. */
+  bed?: BedBounds | null;
 }
 
 export interface IGcodePreviewService {
@@ -151,7 +154,12 @@ function buffersToDetailedParsedGCode(buffers: DetailedParseBuffers): DetailedPa
     };
   }
 
-  return { layers, layerCount: buffers.layerCount, tools: Array.from(buffers.tools) };
+  return {
+    layers,
+    layerCount: buffers.layerCount,
+    tools: Array.from(buffers.tools),
+    bed: buffers.bed ?? null,
+  };
 }
 
 async function fetchGCodeText(

@@ -250,7 +250,7 @@ public class CameraService : ICameraService
 
             if (dto.Description != null)
             {
-                camera.Description = dto.Description.Trim();
+                camera.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
             }
 
             if (dto.StreamUrl != null)

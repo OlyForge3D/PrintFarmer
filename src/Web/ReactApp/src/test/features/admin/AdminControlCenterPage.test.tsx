@@ -293,12 +293,16 @@ describe('AdminControlCenterPage', () => {
     );
   });
 
-  it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {
+  it.each([
+    ['spoolman', 'Spoolman', 'Healthy', 'Connected'],
+    ['printguard', 'PrintGuard Failure Detection', 'Healthy', 'PrintGuard hub ready and read API accessible; classification not tested'],
+    ['printguard', 'PrintGuard Failure Detection', 'Degraded', 'PrintGuard configuration invalid: configure a service URL'],
+  ] as const)('renders optional %s (%s) with %s status and detail', async (key, name, status, detail) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
         subsystems: [
           { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
-          { key: 'spoolman', name: 'Spoolman', status: 'Healthy', detail: 'Connected' },
+          { key, name, status, detail },
         ],
       }),
     });
@@ -311,8 +315,10 @@ describe('AdminControlCenterPage', () => {
 
     const tiles = screen.getAllByTestId('admin-hub-subsystem');
     expect(tiles).toHaveLength(2);
-    expect(tiles[1].getAttribute('data-subsystem-key')).toBe('spoolman');
-    expect(within(tiles[1]).getByText('Spoolman')).toBeInTheDocument();
+    expect(tiles[1].getAttribute('data-subsystem-key')).toBe(key);
+    expect(tiles[1].getAttribute('data-subsystem-status')).toBe(status);
+    expect(within(tiles[1]).getByText(name)).toBeInTheDocument();
+    expect(within(tiles[1]).getByText(detail)).toBeInTheDocument();
   });
 
   it('degrades unknown subsystem statuses to the Unknown treatment without crashing', async () => {

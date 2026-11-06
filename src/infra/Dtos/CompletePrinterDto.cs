@@ -73,4 +73,5 @@ public record CompletePrinterDto(
     bool ShowExternalSpool = false,
     string? ActiveExtruderId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null,
+    bool PrintGuardEnabled = false);

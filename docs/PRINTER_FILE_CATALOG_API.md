@@ -586,14 +586,12 @@ Existing uploads keep their established accounting.
 
 Copy checks the actual SHA-256, byte count, strict UTF-8 text format and metadata
 before publishing owned content. It does not authorize execution or manufacture
-calibration/promotion lineage. Queue additionally validates the captured program
-against the actual destination's safety envelope and normal compatibility
-requirements. Safety failures cannot be waived by snapshot consent.
-
-Queue accepts explicit standard heater shutdown (`M104 S0` and `M140 S0`)
-as well as `TURN_OFF_HEATERS`, and explicit motor shutdown (`M18` or `M84`).
-Later heating, motor enabling, or movement invalidates the corresponding
-shutdown evidence. Copy alone does not require an executable shutdown sequence.
+calibration/promotion lineage. Queue rejects null/empty decoded text and checks
+normal destination compatibility, but does not inspect command content or impose
+a temperature, motion, geometry, speed, flow, host-command or shutdown policy.
+Snapshot consent cannot waive integrity, authorization or compatibility failures.
+Firmware limits, trusted programs/macros and operator procedures own command
+safety; see [the G-code input-check policy](CALIBRATION_DIVERGENCES.md).
 
 Every catalog Queue stages locally, including Queue to the source printer.
 After validation, an unverified source enters `AwaitingSourceConfirmation`.
@@ -619,7 +617,7 @@ destination compatibility, or Ready/dispatch gates.
 Admission uses the existing queue pipeline inside the same database transaction
 as the durable operation-to-job link. A job pins its local asset, actual digest
 and size. Multiple copies retain the ordinary queue semantics: one job with
-`copies`, not one independent job per copy. Local safety/byte verification and
+`copies`, not one independent job per copy. Local nonempty-input/byte verification and
 authorization run again before admission; no printer network call occurs in
 that transaction. Committed jobs remain independent of later remote changes.
 An admission failure can retain its local asset and valid confirmation for

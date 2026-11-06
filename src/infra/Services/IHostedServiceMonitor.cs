@@ -8,7 +8,7 @@
 public interface IHostedServiceMonitor
 {
     /// <summary>Register a background service with the monitor.</summary>
-    void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null);
+    void Register(string serviceId, string displayName, string? description = null, string? category = null, string? icon = null, int? intervalSeconds = null, Type? implementationType = null);
 
     /// <summary>Report that a service has started running.</summary>
     void ReportStarted(string serviceId);

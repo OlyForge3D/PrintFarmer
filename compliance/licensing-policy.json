@@ -292,6 +292,13 @@
         "reason": "Synthetic credentialed example.test URL tests untrusted API base rejection."
       },
       {
+        "path": "src/tests/Farm.Web.Api.Tests/Health/PrintGuardHealthCheckTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "7f8183fd094a7b10753ce6a5f1a4388aa1afeda990c4134417045c78fcec9a2d",
+        "contentSha256": "f8963b246d7aa643be90d002a25ba5b25e6f73a72d13a272a409f72f172d19ac",
+        "reason": "Synthetic credentialed provider.invalid URL tests invalid PrintGuard configuration rejection before network egress."
+      },
+      {
         "path": "src/tests/Farm.Web.Api.Tests/Integration/PrinterImportFacadeIntegrationTests.cs",
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",

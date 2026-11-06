@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom';
 import { renderHook } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
+import { FailureDetectionPollingProvider } from '@/features/printers/hooks/FailureDetectionPollingProvider';
 import {
-  FailureDetectionPollingProvider,
+  hasFailureDetectionEnabledPrinter,
   useFailureDetectionPollingEnabled,
 } from '../useFailureDetectionPolling';
 
@@ -16,6 +17,19 @@ import {
  * of each card computing that from just its own `printer.obicoEnabled`.
  */
 describe('useFailureDetectionPolling (#1146 item 3)', () => {
+  it('enables fleet polling when only PrintGuard is enabled', () => {
+    expect(hasFailureDetectionEnabledPrinter([
+      { obicoEnabled: false, printGuardEnabled: false },
+      { obicoEnabled: false, printGuardEnabled: true },
+    ])).toBe(true);
+  });
+
+  it('does not enable fleet polling when no provider is enabled', () => {
+    expect(hasFailureDetectionEnabledPrinter([
+      { obicoEnabled: false, printGuardEnabled: false },
+    ])).toBe(false);
+  });
+
   it('defaults to false with no provider in the tree, matching the previous "no explicit opt-in" behavior', () => {
     const { result } = renderHook(() => useFailureDetectionPollingEnabled());
 

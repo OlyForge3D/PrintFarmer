@@ -113,6 +113,8 @@ public sealed class SlicerRegistrationClientTests
             .ToArray();
         _ = advertisedCapabilities.Should().Contain(WorkerConstants.UpstreamDistributionCapability);
         _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2");
+        _ = advertisedCapabilities.Should().Contain("orcaslicer:native-profile-selections-v1");
+        _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2:native-profile-selections-v1");
     }
 
     [Theory]

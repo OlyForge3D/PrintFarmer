@@ -348,7 +348,7 @@ test_slicer_promotion_wiring() {
 
     assert_contains "$compose_content" 'SlicerHost__BaseUrl=${SLICER_HOST_URL:-http://slicer-host:5246}' "API should use the private Docker DNS address for slicer-host"
     assert_equals "2" "$(grep -c 'SlicerPromotion__SharedKey=${PROMOTION_SHARED_API_KEY:-}' "$outdir/docker-compose.yml")" "API and slicer-host should receive the same promotion key"
-    assert_contains "$compose_content" "ArtifactStorage__RootPath=/data/artifacts" "Slicer-host should stage artifacts under its persistent data mount"
+    assert_contains "$compose_content" 'ArtifactStorage__RootPath=${SLICER_ARTIFACT_STORAGE_ROOT_PATH:-/data/artifacts}' "Slicer-host artifact storage should be configurable under its persistent data mount"
     assert_contains "$compose_content" '${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data' "Slicer-host data should use persistent storage"
     assert_contains "$monolith_content" "ArtifactStorage__RootPath=/app/data/artifacts" "Monolith should stage artifacts under persistent application data"
     assert_contains "$monolith_content" "printfarmer-data:/app/data" "Monolith application data should use a persistent volume"
@@ -976,6 +976,63 @@ test_all_addon_stacks() {
         assert_contains "$compose_content" "database:" "Should still have database service with $addon"
     done
     
+    pass_test
+}
+
+test_provider_addon_selection() {
+    start_test "provider addon selection is independently optional"
+
+    local default_dir="$TEST_TEMP_DIR/provider-default"
+    local obico_dir="$TEST_TEMP_DIR/provider-obico"
+    local printguard_dir="$TEST_TEMP_DIR/provider-printguard"
+    local both_dir="$TEST_TEMP_DIR/provider-both"
+
+    assert_command_success "$COMPOSE_GENERATOR --output-dir $default_dir"
+    local default_content
+    default_content="$(cat "$default_dir/docker-compose.yml")"
+    assert_not_contains "$default_content" "  obico-ml-api:" "Obico service should be off by default"
+    assert_not_contains "$default_content" "ghcr.io/oliverbravery/printguard:" "PrintGuard service should be off by default"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-obico-ml --output-dir $obico_dir"
+    local obico_content
+    obico_content="$(cat "$obico_dir/docker-compose.yml")"
+    local expected_obico_image
+    expected_obico_image="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$OBICO_ML_IMAGE"
+    )"
+    assert_equals "ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee" "$expected_obico_image" "Container versions should pin the verified Obico publisher image digest"
+    assert_contains "$obico_content" "$expected_obico_image" "Obico should use the image from container-versions.conf"
+    assert_contains "$obico_content" "  obico-ml-api:" "Obico should be independently selectable"
+    assert_not_contains "$obico_content" "ghcr.io/oliverbravery/printguard:" "PrintGuard should remain off when only Obico is selected"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-printguard --output-dir $printguard_dir"
+    local printguard_content
+    printguard_content="$(cat "$printguard_dir/docker-compose.yml")"
+    local expected_printguard_image
+    expected_printguard_image="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$PRINTGUARD_IMAGE"
+    )"
+    assert_equals "ghcr.io/oliverbravery/printguard@sha256:f69c6bafb5673e94be26ca55b431f1bf42a9ae19a95be9fa34198f0c27a9d43e" "$expected_printguard_image" "Container versions should pin the verified PrintGuard publisher image digest"
+    assert_contains "$printguard_content" "$expected_printguard_image" "PrintGuard should use the image from container-versions.conf"
+    assert_contains "$printguard_content" '- printfarmer-network' "PrintGuard should remain on the internal application network"
+    assert_not_contains "$printguard_content" '8000:8000' "PrintGuard must not publish its port to the host"
+    assert_contains "$printguard_content" "http://127.0.0.1:8000/api/health" "PrintGuard should be health-checked over its local API"
+    assert_contains "$printguard_content" 'cpus: "${PRINTGUARD_CPU_LIMIT:-2.0}"' "PrintGuard CPU limit should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'memory: ${PRINTGUARD_MEMORY_LIMIT:-2gb}' "PrintGuard memory limit should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'cpus: "${PRINTGUARD_CPU_REQUEST:-0.5}"' "PrintGuard CPU request should be configurable with a bounded default"
+    assert_contains "$printguard_content" 'memory: ${PRINTGUARD_MEMORY_REQUEST:-512m}' "PrintGuard memory request should be configurable with a bounded default"
+    assert_contains "$printguard_content" "cap_drop:" "PrintGuard should drop all Linux capabilities"
+    assert_contains "$printguard_content" "no-new-privileges:true" "PrintGuard should prevent privilege escalation"
+    assert_not_contains "$printguard_content" "  obico-ml-api:" "Obico should remain off when only PrintGuard is selected"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-obico-ml --include-printguard --output-dir $both_dir"
+    local both_content
+    both_content="$(cat "$both_dir/docker-compose.yml")"
+    assert_contains "$both_content" "  obico-ml-api:" "Obico should be selectable alongside PrintGuard"
+    assert_contains "$both_content" "$expected_printguard_image" "PrintGuard should be selectable alongside Obico"
+
     pass_test
 }
 
@@ -2372,6 +2429,7 @@ run_all_tests() {
     test_postgres_passwordless_connection_string_fails_fast
     test_monitoring_inclusion
     test_all_addon_stacks
+    test_provider_addon_selection
     test_combined_addon_stacks
     test_dry_run_mode
     test_output_directory_creation
@@ -2680,6 +2738,7 @@ test_addon_templates_yaml_syntax() {
         "docker-compose.telemetry.yml"
         "docker-compose.security.yml"
         "docker-compose.registry.yml"
+        "docker-compose.printguard.yml"
     )
     
     # Each addon template should be valid YAML

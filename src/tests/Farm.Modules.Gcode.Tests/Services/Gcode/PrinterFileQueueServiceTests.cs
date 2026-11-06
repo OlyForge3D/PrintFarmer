@@ -116,20 +116,71 @@ public sealed class PrinterFileQueueServiceTests
     }
 
     [Theory]
-    [InlineData("G28\nG1 X999 Y1\nM104 S0\nM140 S0\nM84\n", "gcode_motion_outside_build_volume")]
-    [InlineData("G28\nRUN_SHELL_COMMAND CMD=bad\nM104 S0\nM140 S0\nM84\n", "gcode_contains_host_command")]
-    [InlineData("G28\nG1 X1 Y1\n", "gcode_missing_final_reset")]
-    public async Task Queue_RejectsUnsafeProgramAgainstActualDestinationAsync(string content, string reason)
+    [InlineData("G28\nG1 X999 Y1\nM104 S999\nM140 S999\nM84\n")]
+    [InlineData("G28\nRUN_SHELL_COMMAND CMD=example\nM104 S0\nM140 S0\nM84\n")]
+    [InlineData("PRINT_START\nG1 Z201\nPRINT_END")]
+    public async Task Queue_NonEmptyCommandContent_DoesNotBlockAdmissionAsync(string content)
     {
         await using Fixture test = await Fixture.CreateAsync(content);
         var service = test.CreateService();
         await service.ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
-        PrinterFileCopyOperation? blocked = await service.AdmitAsync(test.Actor, test.OperationId, default);
-        Assert.Equal(PrinterFileOperationState.Blocked, blocked!.State);
-        Assert.Equal(reason, blocked.ReasonCode);
+        PrinterFileCopyOperation? result = await service.AdmitAsync(test.Actor, test.OperationId, default);
+        Assert.Equal(PrinterFileOperationState.Queued, result!.State);
+        Assert.Single(await test.Db.PrintJobs.ToListAsync());
+        Assert.Single(await test.Db.PrinterFileOperationJobs.ToListAsync());
+        Assert.Equal(test.Bytes, await File.ReadAllBytesAsync(test.Path));
+    }
+
+    [Theory]
+    [InlineData("not-json", "[{\"name\":\"clip\",\"polygon\":null}]")]
+    [InlineData("[{\"x\":0,\"y\":0},{\"x\":10,\"y\":0}]", "not-json")]
+    [InlineData("[{\"x\":1e309,\"y\":0},{\"x\":10,\"y\":0},{\"x\":10,\"y\":10}]", "[]")]
+    public async Task Queue_InvalidPersistedGeometry_DoesNotBlockAdmissionAsync(string polygon, string exclusions)
+    {
+        await using Fixture test = await Fixture.CreateAsync("G1 X999 Y999 Z999");
+        Printer printer = await test.Db.Printers.SingleAsync();
+        printer.PrintablePolygonJson = polygon;
+        printer.ExcludedRegionsJson = exclusions;
+        await test.Db.SaveChangesAsync();
+        var service = test.CreateService();
+        await service.ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
+
+        PrinterFileCopyOperation? result = await service.AdmitAsync(test.Actor, test.OperationId, default);
+
+        Assert.Equal(PrinterFileOperationState.Queued, result!.State);
+        Assert.Single(await test.Db.PrintJobs.ToListAsync());
+        Assert.Equal(test.Bytes, await File.ReadAllBytesAsync(test.Path));
+    }
+
+    [Fact]
+    public async Task Queue_EmptyProgram_StillBlocksAdmissionAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync(string.Empty);
+        var service = test.CreateService();
+        await service.ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
+
+        PrinterFileCopyOperation? result = await service.AdmitAsync(test.Actor, test.OperationId, default);
+
+        Assert.Equal(PrinterFileOperationState.Blocked, result!.State);
+        Assert.Equal("gcode_malformed", result.ReasonCode);
         Assert.Empty(await test.Db.PrintJobs.ToListAsync());
         Assert.Empty(await test.Db.PrinterFileOperationJobs.ToListAsync());
-        Assert.True(File.Exists(test.Path));
+    }
+
+    [Fact]
+    public async Task Queue_OrdinaryMacroProgram_AdmitsWithoutCalibrationSequenceAsync()
+    {
+        await using Fixture test = await Fixture.CreateAsync(
+            "; OrcaSlicer https://example.invalid C:\\profiles\\printer.json api_key\n" +
+            "PRINT_START\nG90\nM83\nG1 X10 Y10 Z0.2 E1 F1500 ; RUN_SHELL_COMMAND metadata\nPRINT_END");
+        var service = test.CreateService();
+        await service.ConfirmAsync(test.Actor, test.OperationId, test.Confirmation(), default);
+
+        PrinterFileCopyOperation? result = await service.AdmitAsync(test.Actor, test.OperationId, default);
+
+        Assert.Equal(PrinterFileOperationState.Queued, result!.State);
+        Assert.Single(await test.Db.PrintJobs.ToListAsync());
+        Assert.Equal(test.Bytes, await File.ReadAllBytesAsync(test.Path));
     }
 
     [Fact]

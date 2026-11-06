@@ -97,6 +97,41 @@ public static class OrcaRawValueParser
         return null;
     }
 
+    /// <summary>
+    /// Parses an OrcaSlicer percent setting such as <c>"15%"</c>, <c>"15"</c>, <c>15</c> or
+    /// <c>["15%"]</c> to a whole percentage. Returns null when the key is missing or unparsable.
+    /// </summary>
+    public static int? ParseOptionalPercentInt(JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out JsonElement elem))
+        {
+            return null;
+        }
+
+        if (elem.ValueKind == JsonValueKind.Array)
+        {
+            if (elem.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            elem = elem[0];
+        }
+
+        double? value = elem.ValueKind switch
+        {
+            JsonValueKind.Number => elem.TryGetDouble(out double number) ? number : null,
+            JsonValueKind.String => double.TryParse(
+                elem.GetString()?.Trim().TrimEnd('%'),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out double parsed) ? parsed : null,
+            _ => null,
+        };
+
+        return value is { } v && double.IsFinite(v) ? (int)Math.Round(v, MidpointRounding.AwayFromZero) : null;
+    }
+
     public static double? ParseOptionalDouble(JsonElement root, string key)
     {
         if (root.TryGetProperty(key, out JsonElement elem))

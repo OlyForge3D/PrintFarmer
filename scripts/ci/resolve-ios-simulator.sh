@@ -1,5 +1,5 @@
 #!/bin/bash
-# Resolve an approved simulator for CI or local use (--udid prints only its UDID).
+# Resolve an approved simulator for pinned or explicitly exploratory local use.
 
 set -euo pipefail
 
@@ -9,21 +9,63 @@ readonly SCRIPT_DIR
 source "$SCRIPT_DIR/../common-utils.sh"
 
 OUTPUT_MODE="${1:-}"
-if [[ $# -gt 1 || ( -n "$OUTPUT_MODE" && "$OUTPUT_MODE" != "--udid" ) ]]; then
-  log_error "Usage: $0 [--udid]" >&2
+if [[ $# -gt 1 || ( -n "$OUTPUT_MODE" && "$OUTPUT_MODE" != "--udid" && "$OUTPUT_MODE" != "--local-exploratory-udid" ) ]]; then
+  log_error "Usage: $0 [--udid|--local-exploratory-udid]" >&2
   exit 2
 fi
 readonly OUTPUT_MODE
 
+if [[ "$OUTPUT_MODE" == "--local-exploratory-udid" ]]; then
+  if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" || -n "${GITHUB_ENV:-}" ]]; then
+    log_error "The local exploratory simulator mode cannot be used in CI or with GITHUB_ENV." >&2
+    exit 1
+  fi
+  EXPECTED_XCODE_VERSION="27.2"
+  EXPECTED_XCODE_BUILD="27B52"
+else
+  EXPECTED_XCODE_VERSION="26.6"
+  EXPECTED_XCODE_BUILD="17F113"
+fi
+readonly EXPECTED_XCODE_VERSION EXPECTED_XCODE_BUILD
+
 XCODE_VERSION_OUTPUT="$(xcodebuild -version)"
 XCODE_VERSION="${XCODE_VERSION_OUTPUT%%$'\n'*}"
 XCODE_BUILD="${XCODE_VERSION_OUTPUT#*$'\n'}"
-if [[ "$XCODE_VERSION" != "Xcode 26.6" || "$XCODE_BUILD" != "Build version 17F113" ]]; then
-  log_error "Xcode 26.6 build 17F113 is required to resolve iOS simulator destinations; found '$XCODE_VERSION_OUTPUT'." >&2
+if [[ "$XCODE_VERSION" != "Xcode $EXPECTED_XCODE_VERSION" || "$XCODE_BUILD" != "Build version $EXPECTED_XCODE_BUILD" ]]; then
+  log_error "Xcode $EXPECTED_XCODE_VERSION build $EXPECTED_XCODE_BUILD is required to resolve iOS simulator destinations; found '$XCODE_VERSION_OUTPUT'." >&2
   exit 1
 fi
 readonly XCODE_VERSION
 readonly XCODE_BUILD
+
+if ! MACOS_VERSION="$(sw_vers -productVersion)"; then
+  log_error "Unable to determine the macOS version with sw_vers; cannot check Xcode $EXPECTED_XCODE_VERSION compatibility." >&2
+  exit 1
+fi
+if [[ ! "$MACOS_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  log_error "Unable to parse the macOS version '$MACOS_VERSION'; cannot check Xcode $EXPECTED_XCODE_VERSION compatibility." >&2
+  exit 1
+fi
+readonly MACOS_VERSION
+MACOS_MAJOR="${MACOS_VERSION%%.*}"
+MACOS_REMAINDER="${MACOS_VERSION#*.}"
+if [[ "$MACOS_REMAINDER" == "$MACOS_VERSION" ]]; then
+  MACOS_MINOR=0
+else
+  MACOS_MINOR="${MACOS_REMAINDER%%.*}"
+fi
+readonly MACOS_MAJOR MACOS_MINOR
+
+if [[ "$OUTPUT_MODE" == "--local-exploratory-udid" ]]; then
+  if (( 10#$MACOS_MAJOR != 27 )); then
+    log_error "The local exploratory Xcode 27.2 workflow requires macOS 27.x; found macOS $MACOS_VERSION." >&2
+    exit 1
+  fi
+  log_warn "LOCAL EXPLORATORY ONLY: Xcode 27.2 on macOS $MACOS_VERSION is not pinned CI, release, or snapshot-acceptance evidence." >&2
+elif (( 10#$MACOS_MAJOR != 26 || 10#$MACOS_MINOR < 2 )); then
+  log_error "Xcode 26.6 build 17F113 is not supported on macOS $MACOS_VERSION. Run the pinned simulator workflow on macOS 26.2-26.x; macOS 27 can reject DTServiceHub before XCTest connects." >&2
+  exit 1
+fi
 
 readonly DEVICE_FAMILY="${IOS_SIMULATOR_DEVICE_FAMILY:-iPhone}"
 case "$DEVICE_FAMILY" in
@@ -178,6 +220,6 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
 fi
 
 log_info "Using iOS simulator: $SIMULATOR_NAME ($SIMULATOR_RUNTIME, $SIMULATOR_RUNTIME_BUILD; $DEVICE_FAMILY) [$SIMULATOR_UDID]" >&2
-if [[ "$OUTPUT_MODE" == "--udid" ]]; then
+if [[ "$OUTPUT_MODE" == "--udid" || "$OUTPUT_MODE" == "--local-exploratory-udid" ]]; then
   printf '%s\n' "$SIMULATOR_UDID"
 fi

@@ -18,7 +18,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("ProductVersion", "10.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -769,6 +769,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtruderFilamentProfilesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FailureReason")

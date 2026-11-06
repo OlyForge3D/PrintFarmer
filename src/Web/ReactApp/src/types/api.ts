@@ -350,6 +350,8 @@ export interface PrinterMetadata {
   notes?: string;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Whether this printer inherits dispatch settings from its model. */
   useModelDispatchDefaults?: boolean;
   /** True when the printer's linked catalog model has been updated since the last template sync. */
@@ -1133,6 +1135,8 @@ export interface UpdatePrinterDto {
   cameraSnapshotUrl?: string;
   /** Optional Obico ML monitoring opt-in. When true, the app auto-assigns a healthy server. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Whether this printer inherits dispatch settings from its model. */
   useModelDispatchDefaults?: boolean;
   // Printer capabilities
@@ -1770,6 +1774,8 @@ export interface PrinterDetails {
   obicoServerName?: string | null;
   /** Whether Obico AI failure detection is enabled for this printer. */
   obicoEnabled?: boolean;
+  /** Whether PrintGuard failure detection is enabled for this printer. */
+  printGuardEnabled?: boolean;
   /** Power consumption in watts. Overrides the model's default wattage. */
   wattage?: number;
   /** Per-printer machine hourly rate override for cost tracking. */
@@ -3383,6 +3389,44 @@ export interface CameraDto {
   lastHealthCheck?: string;
 }
 
+export type BedClearDetectorVerdict = 'Unknown' | 'Clear' | 'Occupied';
+export type BedClearGroundTruth = 'Clear' | 'Occupied';
+export type BedClearEvaluationState = 'Pending' | 'Processing' | 'Complete';
+
+export interface BedClearEvaluationDto {
+  id: string;
+  printerId: string;
+  cameraId?: string | null;
+  printJobId?: string | null;
+  bedTypeId?: string | null;
+  sourceAcknowledgementId?: string | null;
+  acknowledgedBySubject: string;
+  acknowledgedAtUtc: string;
+  capturedAtUtc?: string | null;
+  isReferenceEligible: boolean;
+  toolheadX?: number | null;
+  toolheadY?: number | null;
+  toolheadZ?: number | null;
+  state: BedClearEvaluationState;
+  verdict: BedClearDetectorVerdict;
+  score?: number | null;
+  reasonCode?: string | null;
+  groundTruth?: BedClearGroundTruth | null;
+  groundTruthBySubject?: string | null;
+  groundTruthAtUtc?: string | null;
+  isActiveReference: boolean;
+  hasImage: boolean;
+}
+
+export interface BedClearDetectorMetricsDto {
+  sampleCount: number;
+  independentlyLabeledCount: number;
+  agreementRate?: number | null;
+  independentlyLabeledOccupiedCount: number;
+  falseClearCount: number;
+  falseClearRate?: number | null;
+}
+
 export interface CameraPrinterSummary {
   id: string;
   name: string;
@@ -4094,15 +4138,25 @@ export interface FailureDetectionPrinterStatusDto {
   lastAnalyzedAt?: string;
   lastOutcome: string;
   lastConfidence?: number;
-  lastAutoPaused?: boolean;
   lastFailureDetectedAt?: string;
+  providers?: FailureDetectionProviderStatusDto[];
+}
+
+export interface FailureDetectionProviderStatusDto {
+  provider: string;
+  state: string;
+  reason: string;
+  lastAnalyzedAt?: string;
+  lastOutcome: string;
+  lastConfidence?: number;
+  lastFailureDetectedAt?: string;
+  analysisMode: string;
 }
 
 export interface FailureDetectionMonitorStatusDto {
   monitoringEnabled: boolean;
   confidenceThreshold: number;
   scanIntervalSeconds: number;
-  autoPauseOnFailure: boolean;
   configuredPrinterCount: number;
   activelyMonitoredPrinterCount: number;
   lastAnalyzedPrinterCount: number;
@@ -5077,6 +5131,8 @@ export interface ObicoServerHealthResponse {
 export interface FailureDetectionEvent {
   /** Persisted incident identifier when available */
   id?: string;
+  /** Provider that reported the failure */
+  provider: string;
   /** Printer ID where failure was detected */
   printerId: string;
   /** Printer name for display */

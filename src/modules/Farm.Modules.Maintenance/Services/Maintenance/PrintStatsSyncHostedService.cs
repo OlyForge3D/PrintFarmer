@@ -55,7 +55,8 @@ public class PrintStatsSyncHostedService(
             "Synchronizes printer statistics from backends for maintenance tracking",
             "Maintenance",
             "pf-icon-stats",
-            settings.IntervalSeconds);
+            settings.IntervalSeconds,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         if (!settings.Enabled)

@@ -42,6 +42,74 @@ public class AdminOverviewServiceTests
 
     // ─── Happy path ───────────────────────────────────────────────────────────
 
+    [Theory]
+    [InlineData(false, HealthStatus.Healthy)]
+    [InlineData(true, HealthStatus.Healthy)]
+    [InlineData(true, HealthStatus.Degraded)]
+    public async Task GetOverviewAsync_PrintGuardEntry_ShowsOnlyEnabledTileAndOutageAttention(bool enabled, HealthStatus status)
+    {
+        const string detail = "PrintGuard configuration invalid: configure a service URL";
+        var entry = new HealthReportEntry(status, detail, TimeSpan.Zero, null,
+            new Dictionary<string, object> { ["enabled"] = enabled });
+        var report = new HealthReport(new Dictionary<string, HealthReportEntry>
+        {
+            ["comprehensive"] = new(HealthStatus.Healthy, "Core ready", TimeSpan.Zero, null, null),
+            ["signalr"] = new(HealthStatus.Healthy, "Hub ready", TimeSpan.Zero, null, null),
+            ["spoolman"] = new(HealthStatus.Healthy, "Spoolman not configured", TimeSpan.Zero, null, null),
+            ["printguard"] = entry,
+        }, TimeSpan.Zero);
+        _healthCheckService.Setup(service => service.CheckHealthAsync(
+            It.IsAny<Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(report);
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Count(tile => tile.Key == "printguard").Should().Be(enabled ? 1 : 0);
+        if (enabled)
+        {
+            SubsystemHealthDto tile = result.Subsystems.Single(tile => tile.Key == "printguard");
+            tile.Name.Should().Be("PrintGuard Failure Detection");
+            tile.Detail.Should().Be(detail);
+            tile.Status.Should().Be(status == HealthStatus.Healthy ? SubsystemStatus.Healthy : SubsystemStatus.Degraded);
+        }
+
+        if (status == HealthStatus.Degraded)
+        {
+            result.Attention.Should().ContainSingle(item => item.Key == "health-printguard"
+                && item.Title == "PrintGuard failure detection is not healthy" && item.Detail == detail);
+            result.OverallStatus.Should().Be(SubsystemStatus.Degraded);
+        }
+        else
+        {
+            result.Attention.Should().NotContain(item => item.Key == "health-printguard");
+        }
+    }
+
+    [Theory]
+    [InlineData(false, HealthStatus.Healthy)]
+    [InlineData(true, HealthStatus.Healthy)]
+    [InlineData(true, HealthStatus.Degraded)]
+    public async Task GetOverviewAsync_ObicoEntry_ShowsOnlyEnabledTileAndOutageAttention(bool enabled, HealthStatus status)
+    {
+        var entry = new HealthReportEntry(status, "Generic Obico availability", TimeSpan.Zero, null,
+            new Dictionary<string, object> { ["enabled"] = enabled });
+        var report = new HealthReport(new Dictionary<string, HealthReportEntry> { ["obico"] = entry }, TimeSpan.Zero);
+        _healthCheckService.Setup(service => service.CheckHealthAsync(
+            It.IsAny<Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(report);
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Count(tile => tile.Key == "obico").Should().Be(enabled ? 1 : 0);
+        if (enabled)
+        {
+            SubsystemHealthDto tile = result.Subsystems.Single(tile => tile.Key == "obico");
+            tile.Name.Should().Be("Obico Failure Detection");
+            tile.Detail.Should().Be("Generic Obico availability");
+            tile.Status.Should().Be(status == HealthStatus.Healthy ? SubsystemStatus.Healthy : SubsystemStatus.Degraded);
+        }
+
+        result.Attention.Count(item => item.Key == "health-obico").Should().Be(status == HealthStatus.Degraded ? 1 : 0);
+    }
+
     [Fact]
     public async Task GetOverviewAsync_WhenAllChecksHealthy_ReturnsAllHealthyTiles()
     {

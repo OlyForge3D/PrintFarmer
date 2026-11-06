@@ -1,11 +1,13 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.ReleaseUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Data;
@@ -206,17 +208,22 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     }
 
     [Fact]
-    public async Task GetInfo_Admin_ReleaseCheckFailureRemainsCriticalAndMonitorVersionUnknown()
+    public async Task GetInfo_Admin_ReleaseCheckFailureRemainsCriticalAndReportsImplementationVersion()
     {
+        string expectedVersion = typeof(ApplicationReleaseUpdateCheckService).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion
+            .Split('+', 2)[0];
         IBackgroundServiceMonitor monitor = _factory.Services.GetRequiredService<IBackgroundServiceMonitor>();
-        monitor.Register("ApplicationReleaseUpdateCheckService", "Release Update Check");
+        monitor.Register("ApplicationReleaseUpdateCheckService", "Release Update Check", implementationType: typeof(ApplicationReleaseUpdateCheckService));
         monitor.ReportStarted("ApplicationReleaseUpdateCheckService");
         monitor.ReportEnabled("ApplicationReleaseUpdateCheckService", true);
         monitor.ReportError("ApplicationReleaseUpdateCheckService", "GitHub check failed");
         try
         {
             SystemInfoDto? dto = await _adminClient!.GetFromJsonAsync<SystemInfoDto>("/api/system/info", JsonOptions);
-            dto!.Services.Should().Contain(row => row.Name == "Release Update Check" && row.Health == SystemServiceHealth.Critical && row.Version == "Unknown");
+            expectedVersion.Should().NotBeNullOrWhiteSpace().And.NotBe("Unknown");
+            dto!.Services.Should().Contain(row => row.Name == "Release Update Check" && row.Health == SystemServiceHealth.Critical && row.Version == expectedVersion);
             dto.Services.Should().NotContain(row => row.Name == "Verified Release Discovery");
             dto.Services.Single(row => row.Name == "Backend API").Version.Should().Be(dto.App.Version);
         }
@@ -225,6 +232,38 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             monitor.ReportSuccess("ApplicationReleaseUpdateCheckService");
             monitor.ReportEnabled("ApplicationReleaseUpdateCheckService", false);
         }
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_MonitoredServiceWithoutImplementationType_ReportsUnknownVersion()
+    {
+        const string serviceId = "UntypedSystemInfoTestService";
+        const string displayName = "Untyped System Info Test Service";
+        IBackgroundServiceMonitor monitor = _factory.Services.GetRequiredService<IBackgroundServiceMonitor>();
+        monitor.Register(serviceId, displayName);
+        monitor.ReportStarted(serviceId);
+        monitor.ReportEnabled(serviceId, true);
+        try
+        {
+            SystemInfoDto? dto = await _adminClient!.GetFromJsonAsync<SystemInfoDto>("/api/system/info", JsonOptions);
+            dto!.Services.Should().Contain(row => row.Name == displayName && row.Version == "Unknown");
+        }
+        finally
+        {
+            monitor.ReportEnabled(serviceId, false);
+        }
+    }
+
+    [Fact]
+    public async Task GetServices_BackgroundStatusJson_DoesNotExposeApplicationVersion()
+    {
+        IBackgroundServiceMonitor monitor = _factory.Services.GetRequiredService<IBackgroundServiceMonitor>();
+        monitor.Register("VersionContractTestService", "Version Contract Test Service", implementationType: typeof(ApplicationReleaseUpdateCheckService));
+        monitor.ReportEnabled("VersionContractTestService", false);
+
+        string json = await _adminClient!.GetStringAsync("/api/services/VersionContractTestService");
+
+        json.Should().NotContain("applicationVersion");
     }
 
     [Fact]

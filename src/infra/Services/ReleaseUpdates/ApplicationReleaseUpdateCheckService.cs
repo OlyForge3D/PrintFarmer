@@ -38,7 +38,8 @@ public sealed class ApplicationReleaseUpdateCheckService(
             "Checks GitHub for a newer PrintFarmer release on the installed channel and alerts farm admins",
             "HostUpdates",
             "pf-icon-download",
-            options.IntervalSeconds);
+            options.IntervalSeconds,
+            GetType());
         _serviceMonitor.ReportStarted(ServiceId);
 
         while (!stoppingToken.IsCancellationRequested)
