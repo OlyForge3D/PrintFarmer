@@ -1,10 +1,8 @@
 import '@testing-library/jest-dom';
 import { renderHook } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import {
-  FailureDetectionPollingProvider,
-  useFailureDetectionPollingEnabled,
-} from '../useFailureDetectionPolling';
+import { FailureDetectionPollingProvider } from '@/features/printers/hooks/FailureDetectionPollingProvider';
+import { useFailureDetectionPollingEnabled } from '../useFailureDetectionPolling';
 
 /**
  * Coverage for the fleet-level "is any printer Obico/failure-detection

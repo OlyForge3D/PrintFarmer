@@ -42,7 +42,7 @@ import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
 import { useFleetPrinterTags } from '@/features/printers/hooks/usePrinterTagsFleet';
 import { useFleetQueueSummaries } from '@/features/printers/hooks/useQueueSummariesFleet';
 import { useDiscoveryAvailable } from '@/features/printers/hooks/useDiscoveryAvailability';
-import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFailureDetectionPolling';
+import { FailureDetectionPollingProvider } from '@/features/printers/hooks/FailureDetectionPollingProvider';
 import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
 import type { EditPrinterModalProps } from '@/features/printers/components/EditPrinterModal';
 import type { PrinterDiscoveryModalProps } from '@/features/printers/components/PrinterDiscoveryModal';
