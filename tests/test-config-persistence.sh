@@ -232,6 +232,8 @@ EOF
 test_provider_endpoint_defaults_without_docker() {
     start_test "provider URL regeneration distinguishes persisted empty values from explicit overrides"
 
+    local fixture_dir="$TEST_TEMP_DIR/provider-endpoint-fixture"
+    mkdir -p "$fixture_dir"
     local helper_script="$TEST_TEMP_DIR/provider-endpoint-helper.sh"
     write_base_config "$TEST_TEMP_DIR/provider-endpoint.config"
     cat > "$helper_script" << EOF
@@ -301,7 +303,7 @@ generate_env_file
 assert_endpoints "malformed" "malformed"
 EOF
     chmod +x "$helper_script"
-    capture_output "cd '$TEST_TEMP_DIR' && bash '$helper_script' 2>&1"
+    capture_output "cd '$fixture_dir' && bash '$helper_script' 2>&1"
     if [[ "$(get_output_exit_code)" != 0 ]]; then
         test_info "Provider endpoint generation failed: $(get_output)"
         fail_test "Provider endpoint regeneration must preserve overrides and default only selected empty URLs"
