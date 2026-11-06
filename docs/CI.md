@@ -78,6 +78,14 @@ also reports `macos-26-arm64`, Xcode 26.6 (17F113), and runtime 23F77.
 The OS label does not freeze weekly image updates; exact version/build
 checks remain mandatory and there is no unpinned fallback.
 
+For local simulator testing, Xcode 26.6 is unsupported on macOS 27 or later;
+use macOS 26.2-26.x for pinned evidence. The shared resolver stops before
+simulator discovery in its default mode on macOS 27+, but directly invoking
+`run-tests.py` with a UDID bypasses that preflight. A separate
+[local-only Xcode 27.2 workflow](../mobile/README.md#local-exploration-on-macos-27)
+is available for development; it is not qualified as a replacement for pinned
+CI, release, or snapshot-acceptance evidence.
+
 The simulator jobs use the shared resolver's approved iOS 26.5 (23F77) runtime.
 CI downloads iOS 26.5 with `xcodebuild` when build 23F77 is absent and creates the preferred
 device for that runtime when needed; the resolver then validates the exact

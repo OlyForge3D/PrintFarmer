@@ -19,6 +19,23 @@ script generates and preserves it without logging the value. Do not reuse
 access. Rotate the key by updating both services together; mismatches fail
 closed and remain retryable.
 
+## Printing results from the web slicer
+
+The completed slice's **Print** action defaults to **Add to Queue**, targeting
+the physical printer selected when that slice was submitted. Changing the
+sidebar selection later does not retarget an existing result; slice history
+also retains the original printer.
+
+You can change the target before submitting or explicitly select **Any compatible
+printer (auto-assign)**. Older slices without a saved printer use auto-assignment.
+If the saved printer is offline or unavailable, choose another target or
+auto-assignment explicitly; PrintFarmer does not silently substitute a printer.
+Queue submission uses the normal scheduling, approval, and filament checks.
+
+The secondary **Upload file only** option copies the file to the selected printer
+without creating a PrintFarmer job. **Start printing immediately** is unchecked by
+default. Opening the dialog or switching modes never submits or starts a print.
+
 ## Supported Slicers
 
 - **PrusaSlicer** (2.0+)
@@ -139,8 +156,28 @@ When you upload a file with "Start print after upload" enabled:
 2. PrintFarmer attempts to queue it for a compatible printer
 3. Review the job in the **Print Queue** and follow your farm's approval workflow
 
-If no compatible printer is found, the response can report `UploadedOnly`; the
-file remains in the library for manual queueing.
+OrcaSlicer sends the `print` intent in multipart form data and does not send a
+PrintFarmer printer ID. PrintFarmer matches the G-code's extracted printer model
+to available printers; it does not infer a target from Orca's upload `path`.
+An optional `printerId` query parameter can explicitly target a printer for
+clients that know its PrintFarmer ID.
+
+If queue admission is rejected, the file remains in the library and no print job
+was created. A failure from automatic printer matching always returns the same
+HTTP 409 response (`status: "UploadedOnly"`,
+`reasonCode: "queue_admission_failed"`), whether no compatible printer exists or
+the caller cannot submit to the matched printer. The response includes only the
+uploaded file's `id` and `fileName`; it does not identify a printer or disclose
+the internal rejection reason. When a client explicitly supplies `printerId`, an
+authorization denial remains HTTP 403, with the same generic response body.
+OrcaSlicer reports non-2xx responses as upload failures; use PrintFarmer's
+authorized system logs to diagnose the rejection before retrying. See the API
+reference for version-specific OrcaSlicer retry behavior and retry safety.
+Upload-only requests still return success and do not create queue jobs. The file
+library deduplicates identical source bytes, but each accepted upload-and-print
+request can create a separate print job. If an HTTP 202 response is lost, check
+the queue before retrying because the original request may already have created
+a job.
 
 Without "Start print after upload", files are simply added to the library and can be queued manually later.
 
@@ -209,10 +246,54 @@ Body:
 - `print` (optional form field, default: false) - If true, submits the uploaded file to the queue
 - `printerId` (optional query parameter) - Specific printer GUID to assign the job to
 
-**Response:** Upload-only requests return the saved `file`. Successful queue
-submission returns HTTP 202 with `file`, `jobId`, `status: "Queued"`, and
-`assignedPrinter`. If no compatible printer is available, the file can instead
-be retained with `status: "UploadedOnly"` and an explanatory `message`.
+**Response:** Upload-only requests return HTTP 200 with the saved `file`.
+Successful queue submission returns HTTP 202 with `file`, `jobId`,
+`status: "Queued"`, and `assignedPrinter`. If queue admission fails, the
+uploaded file is retained and no job is created. Automatic matching failures
+return HTTP 409 with `status: "UploadedOnly"`,
+`reasonCode: "queue_admission_failed"`, and a generic message. An authorization
+denial for an explicitly supplied `printerId` remains HTTP 403 with that same
+generic body. The rejection response's `file` object is limited to `id` and
+`fileName`; internal queue, compatibility, and authorization reasons are not
+returned to the client.
+
+Some OrcaSlicer versions may automatically retry an upload error, including a
+409, on Windows when a `.local` name resolves to exactly one IPv4 and one IPv6
+address. This behavior appears in the
+[upstream HTTP error handling](https://github.com/OrcaSlicer/OrcaSlicer/blob/41351efc349bde4d0ed210f5c37d9af3c84b8501/src/slic3r/Utils/Http.cpp)
+and [OctoPrint upload implementation](https://github.com/OrcaSlicer/OrcaSlicer/blob/41351efc349bde4d0ed210f5c37d9af3c84b8501/src/slic3r/Utils/OctoPrint.cpp)
+at that revision and has not been verified for every deployed version. The
+upstream implementation moves the upload body into both attempts, so whether
+the second attempt resends the file is unverified; this does not prove a
+duplicate upload or exactly-once behavior. PrintFarmer deduplicates stored files
+by source bytes, but accepted repeated upload-and-print requests can each create
+a separate job. A 409 means no job was created by that request; after fixing the
+cause, a repeated request reuses the stored file. If an HTTP 202 response is
+lost, check the queue before retrying because the original request may have
+created a job.
+
+### Upload-and-print telemetry
+
+The API records `octoprint.upload_print.queue_admissions` with bounded
+`outcome` only (`queued`, `rejected`, or `indeterminate`); it contains no
+reason, filename, file ID, printer ID, or G-code. An `indeterminate` outcome
+means an exception or cancellation happened after the queue-admission call
+began, so the client must not assume no job exists and should check the queue
+before retrying. HTTP traces include the request route and response status.
+Warning-level admission logs retain the internal reason code without file,
+printer, or G-code details. Correlation IDs use `X-Correlation-Id`, then
+`X-Request-Id`, then the server trace identifier.
+
+System-log writes are asynchronous and best-effort; entries may be dropped if
+the bounded write queue is full or the database write fails. Logging is
+controlled by the `SystemLog` settings section: database logging is enabled by
+default, the default minimum level is `Warning` (allowed values are `Warning`,
+`Error`, and `Critical`), and the default retention is 30 days (configurable
+from 1 to 365 days). Administrators with `system_settings:admin` permission can
+query `GET /api/system-logs` using `correlationId`, `level`, `from`, `to`, and
+`metadata` filters; the query returns at most 500 entries. Prometheus scraping
+is available when API telemetry is enabled; OTLP export depends on deployment
+configuration. Historical 2xx traces cannot prove that a queue job was created.
 
 **Note**: File management (listing, deleting) should be done through the PrintFarmer web interface, not through the OctoPrint API.
 

@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { Button } from '@/common/components/ui';
+import { Button, TableHeaderCell } from '@/common/components/ui';
+import { useTableSort } from '@/common/hooks/useTableSort';
 import { useMaintenanceTrends } from '../hooks/useMaintenanceTrends';
 import { CSVLink } from 'react-csv';
 
@@ -12,6 +13,7 @@ interface MaintenanceReportRow {
 }
 
 export const MaintenanceReport: React.FC = () => {
+  const { sortDataByValues, headerProps } = useTableSort<keyof MaintenanceReportRow>();
   const { data, isLoading, error } = useMaintenanceTrends();
   const rows: MaintenanceReportRow[] = Array.isArray(data) ? data : [];
   const csvLinkRef = useRef<HTMLAnchorElement>(null);
@@ -20,7 +22,7 @@ export const MaintenanceReport: React.FC = () => {
   if (error) return <div>Error loading report.</div>;
   if (!rows.length) return <div>No data available.</div>;
 
-  const headers = [
+  const headers: Array<{ label: string; key: keyof MaintenanceReportRow }> = [
     { label: 'Date', key: 'date' },
     { label: 'Printer', key: 'printer' },
     { label: 'Component', key: 'component' },
@@ -69,12 +71,18 @@ export const MaintenanceReport: React.FC = () => {
           <thead>
             <tr>
               {headers.map(h => (
-                <th key={h.key} className="border px-2 py-1 bg-pf-bg-1 text-left">{h.label}</th>
+                <TableHeaderCell key={h.key} {...headerProps(h.key)} className="border px-2 py-1 bg-pf-bg-1 text-left">{h.label}</TableHeaderCell>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row: MaintenanceReportRow, i: number) => (
+            {sortDataByValues(rows, {
+              date: row => Date.parse(row.date),
+              printer: row => row.printer,
+              component: row => row.component,
+              action: row => row.action,
+              cost: row => typeof row.cost === 'number' ? row.cost : row.cost.trim() ? Number(row.cost) : null,
+            }).map((row: MaintenanceReportRow, i: number) => (
               <tr key={i}>
                 {headers.map(h => (
                   <td key={h.key} className="border px-2 py-1">{row[h.key as keyof MaintenanceReportRow]}</td>

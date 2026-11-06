@@ -11,8 +11,13 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Extract correlationId from header (frontend sends X-Correlation-Id)
+        // Prefer the application correlation header, then the common request-ID header.
         string? correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            correlationId = context.Request.Headers["X-Request-Id"].FirstOrDefault();
+        }
+
         if (string.IsNullOrWhiteSpace(correlationId))
         {
             correlationId = context.TraceIdentifier;

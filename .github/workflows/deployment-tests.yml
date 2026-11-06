@@ -153,6 +153,18 @@ jobs:
           test_postgres_compose_config_resolves_password_for_api_and_slicer_host
           test_postgres_passwordless_connection_string_fails_fast
 
+      # Issues #3681/#3683: exercise provider add-on selection without running
+      # the full compose-generator suite, which remains excluded per #1308.
+      - name: Run provider add-on selection regression test
+        run: |
+          set -euo pipefail
+          source tests/test-framework.sh
+          source tests/test-compose-generator.sh
+          setup
+          trap teardown EXIT
+          test_provider_addon_selection
+          [[ "$TESTS_FAILED" -eq 0 ]]
+
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the
     # generated nginx/compose *text* is correct; it never proves a live

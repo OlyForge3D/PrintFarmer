@@ -121,4 +121,30 @@ describe('printerDisplaySort (#1146 item 5)', () => {
   it('returns an empty array for empty input without throwing', () => {
     expect(sortPrintersForDisplay([], 'state', new Set())).toEqual([]);
   });
+
+  it('reverses the selected primary field without reversing name tie-breaks or mutating input', () => {
+    const printers = [
+      makePrinter({ id: 'idle-z', name: 'Zulu', state: 'Idle', backend: PrinterBackend.Moonraker }),
+      makePrinter({ id: 'idle-a', name: 'Alpha', state: 'Idle', backend: PrinterBackend.Moonraker }),
+      makePrinter({ id: 'printing', name: 'Bravo', state: 'Printing', backend: PrinterBackend.PrusaLink }),
+    ];
+    const snapshot = [...printers];
+    expect(sortPrintersForDisplay(printers, 'name', new Set(), 'desc').map(p => p.id))
+      .toEqual(['idle-z', 'printing', 'idle-a']);
+    expect(sortPrintersForDisplay(printers, 'state', new Set(), 'desc').map(p => p.id))
+      .toEqual(['idle-a', 'idle-z', 'printing']);
+    expect(sortPrintersForDisplay(printers, 'backend', new Set(), 'desc').map(p => p.id))
+      .toEqual(['printing', 'idle-a', 'idle-z']);
+    expect(printers).toEqual(snapshot);
+  });
+
+  it('restores the established attention-first state/name default when sort is cleared', () => {
+    const printers = [
+      makePrinter({ id: 'idle', name: 'Alpha' }),
+      makePrinter({ id: 'pending', name: 'Zulu', isOnline: false }),
+      makePrinter({ id: 'printing', name: 'Bravo', state: 'Printing' }),
+    ];
+    expect(sortPrintersForDisplay(printers, 'name', new Set(['pending']), null).map(p => p.id))
+      .toEqual(['pending', 'printing', 'idle']);
+  });
 });

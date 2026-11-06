@@ -4,6 +4,7 @@ using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.FailureDetection;
 using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
@@ -484,7 +485,9 @@ public class ObicoServerControllerTests
         }
 
         Mock<ILogger<ObicoServerController>> logger = new();
-        ObicoServerController controller = new(dbContext, httpClientFactory.Object, egressGuard, logger.Object);
+        var probe = new ObicoConnectivityProbe(httpClientFactory.Object, egressGuard,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ObicoConnectivityProbe>.Instance);
+        ObicoServerController controller = new(dbContext, probe, logger.Object);
         return (controller, dbContext);
     }
 

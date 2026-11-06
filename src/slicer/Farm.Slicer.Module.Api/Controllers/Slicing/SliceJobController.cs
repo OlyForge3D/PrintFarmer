@@ -56,7 +56,9 @@ public partial class SliceJobController(
     IOptions<JobDispatchRetrySettings>? retryOptions = null,
     IMachineProfileRepository? machineProfileRepository = null,
     IProcessProfileRepository? processProfileRepository = null,
-    IFilamentProfileRepository? filamentProfileRepository = null) : ControllerBase
+    IFilamentProfileRepository? filamentProfileRepository = null,
+    IProfilesService? profilesService = null,
+    IHttpClientFactory? httpClientFactory = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
@@ -76,6 +78,8 @@ public partial class SliceJobController(
     private readonly IMachineProfileRepository? _machineProfileRepository = machineProfileRepository;
     private readonly IProcessProfileRepository? _processProfileRepository = processProfileRepository;
     private readonly IFilamentProfileRepository? _filamentProfileRepository = filamentProfileRepository;
+    private readonly IProfilesService? _profilesService = profilesService;
+    private readonly IHttpClientFactory? _httpClientFactory = httpClientFactory;
     private readonly int _maxClaimRetries = Math.Max(
         0,
         retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
@@ -350,7 +354,9 @@ public partial class SliceJobController(
                 "A model file name is required.");
         }
 
-        IActionResult? profileFailure = await BindResolvedProfilesAsync(job, request, userId, ct);
+        IActionResult? profileFailure = request.ProfileSelections is not null
+            ? await BindExplicitProfilesAsync(job, request, userId, ct)
+            : await BindResolvedProfilesAsync(job, request, userId, ct);
         if (profileFailure is not null)
         {
             return profileFailure;
@@ -361,7 +367,17 @@ public partial class SliceJobController(
         // has no knowledge of database-stored custom/user profiles and fails immediately for any
         // non-stock filament/machine/process name (issue #1768). Snapshot native JSON here when
         // possible so the job is routed onto the same robust path as ID-based submissions.
-        await ResolveNamedProfilesAsync(job, userId, ct);
+        try
+        {
+            await ResolveNamedProfilesAsync(job, userId, ct);
+        }
+        catch (HttpRequestException)
+        {
+            _logger.LogWarning("Named profile snapshot could not reach the OrcaSlicer profile service for job {JobId}", job.Id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "The selected engine's profiles are unavailable. Retry when its worker is online.", code = "slice_profiles_unavailable" });
+        }
 
         try
         {
@@ -1018,6 +1034,7 @@ public partial class SliceJobController(
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/artifacts")]
     [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
+    [WorkerArtifactUploadLimits]
     public async Task<IActionResult> UploadWorkerArtifactAsync(
         Guid id,
         IFormFile file,
@@ -1274,6 +1291,7 @@ public partial class SliceJobController(
         {
             Id = job.Id,
             Status = job.Status,
+            PrinterId = job.PrinterId,
             ProgressPercent = job.ProgressPercent,
             ProgressMessage = job.Status == SliceJobStatus.Processing
                 ? GetPublicProgressMessage(job.ProgressPercent)
@@ -1369,6 +1387,7 @@ public partial class SliceJobController(
             MachineProfileJson = job.MachineProfileJson,
             ProcessProfileJson = job.ProcessProfileJson,
             FilamentProfileJson = job.FilamentProfileJson,
+            ExtruderFilamentProfilesJson = job.ExtruderFilamentProfilesJson,
             MachineProfileSha256 = job.MachineProfileSha256,
             ProcessProfileSha256 = job.ProcessProfileSha256,
             FilamentProfileSha256 = job.FilamentProfileSha256,
@@ -1779,9 +1798,8 @@ public partial class SliceJobController(
     /// the database is available — and snapshotting the result the same way the ID-based path does
     /// routes the job onto the already-robust <c>NativeProfiles</c> path instead.
     ///
-    /// This only engages when all three names are present and all three resolve; a partial match
-    /// is deliberately left alone (rather than partially snapshotted) so the legacy worker-side
-    /// resolution remains the fallback for any name that is not yet mirrored into the database.
+    /// Missing stock profiles in a mixed database/worker selection are fetched from the selected
+    /// engine's worker without importing them. Entirely stock selections retain worker-side lookup.
     /// Multi-extruder submissions (which carry <c>extruderFilamentProfileNames</c>) are also left
     /// alone since <see cref="Models.NativeSlicerProfiles"/> only carries a single filament
     /// document. Process overrides and a single-filament colour override embedded in
@@ -1868,6 +1886,61 @@ public partial class SliceJobController(
             .ToList();
         FilamentProfile? filament = SelectCompatibleProfile(filamentCandidates, machine, f => f.CompatiblePrinters);
 
+        if ((machine is not null || processCandidates.Count > 0 || filamentCandidates.Count > 0) &&
+            (machine is null || process is null || filament is null) &&
+            _profilesService is not null && _httpClientFactory is not null)
+        {
+            using HttpClient client = _httpClientFactory.CreateClient();
+            AllProfilesResponseDto stock = await _profilesService.GetWorkerProfilesHierarchyAsync(
+                client, ct, job.SlicerEngineVersion)
+                ?? throw new HttpRequestException("The selected engine returned no profile library.");
+
+            if (machine is null)
+            {
+                List<MachineProfileDto> stockMachines = stock.MachineProfiles.Values.SelectMany(values => values)
+                    .Where(value => string.Equals(value.Name, machineName, StringComparison.OrdinalIgnoreCase)).ToList();
+                MachineProfileDto? stockMachine = stockMachines.Count == 1 ? stockMachines[0] : null;
+                if (stockMachine is not null)
+                {
+                    machine = new MachineProfile
+                    {
+                        Name = stockMachine.Name,
+                        RawJson = JsonSerializer.Serialize(stockMachine.Settings),
+                    };
+                }
+            }
+
+            // Re-evaluate existing candidates against a newly resolved stock machine before
+            // looking for missing stock rows. Never replace a visible database selection.
+            process = SelectCompatibleProfile(processCandidates, machine, p => p.CompatiblePrinters, p => p.PrinterModelId);
+            filament = SelectCompatibleProfile(filamentCandidates, machine, f => f.CompatiblePrinters);
+            if (processCandidates.Count == 0)
+            {
+                List<ProcessProfile> stockProcesses = stock.ProcessProfiles.Values.SelectMany(values => values)
+                    .Where(value => string.Equals(value.Name, processName, StringComparison.OrdinalIgnoreCase))
+                    .Select(value => new ProcessProfile
+                    {
+                        Name = value.Name,
+                        CompatiblePrinters = string.Join(",", value.CompatiblePrinters),
+                        RawJson = JsonSerializer.Serialize(value.Settings),
+                    }).ToList();
+                process = SelectCompatibleProfile(stockProcesses, machine, p => p.CompatiblePrinters);
+            }
+
+            if (filamentCandidates.Count == 0)
+            {
+                List<FilamentProfile> stockFilaments = stock.FilamentProfiles.Values.SelectMany(values => values)
+                    .Where(value => string.Equals(value.Name, filamentName, StringComparison.OrdinalIgnoreCase))
+                    .Select(value => new FilamentProfile
+                    {
+                        Name = value.Name,
+                        CompatiblePrinters = string.Join(",", value.CompatiblePrinters),
+                        RawJson = JsonSerializer.Serialize(value.Settings),
+                    }).ToList();
+                filament = SelectCompatibleProfile(stockFilaments, machine, f => f.CompatiblePrinters);
+            }
+        }
+
         if (machine is null || process is null || filament is null ||
             string.IsNullOrWhiteSpace(machine.RawJson) ||
             string.IsNullOrWhiteSpace(process.RawJson) ||
@@ -1885,31 +1958,29 @@ public partial class SliceJobController(
             return;
         }
 
-        // System/stock profiles imported by SlicersService store RawJson as a serialized CLR DTO
-        // (MachineProfileDto/ProcessProfileDto/FilamentProfileDto — see their "Settings" bag), not
-        // the flat native OrcaSlicer document NativeSlicerProfiles/WriteNativeProfilesAsync writes
-        // verbatim to disk. Only user-authored custom profiles saved through ProfilesService (which
-        // sanitizes RawJson to a flat native document) are safe to snapshot here. Snapshotting a
-        // DTO-shaped document would produce a machine/process/filament.json OrcaSlicer cannot parse,
-        // regressing stock-name submissions that previously worked via the legacy worker-side
-        // resolution. Bail (defer to the legacy path) rather than risk that.
-        if (!IsFlatNativeProfileJson(machine.RawJson) ||
-            !IsFlatNativeProfileJson(process.RawJson) ||
-            !IsFlatNativeProfileJson(filament.RawJson))
+        // Stock profiles carry the native document in a DTO's Settings bag. Unwrap it just
+        // like ID-based submissions so mixed stock/custom selections keep their saved edits.
+        string? machineJson = ExtractFlatNativeProfileJson(machine.RawJson);
+        string? processJson = ExtractFlatNativeProfileJson(process.RawJson);
+        string? filamentJson = ExtractFlatNativeProfileJson(filament.RawJson);
+        if (machineJson is null || processJson is null || filamentJson is null ||
+            !IsFlatNativeProfileJson(machineJson) ||
+            !IsFlatNativeProfileJson(processJson) ||
+            !IsFlatNativeProfileJson(filamentJson))
         {
             _logger.LogInformation(
-                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles are not flat native JSON (likely a system/stock profile stored as a DTO); deferring to the legacy worker-side resolution",
+                "Named profile snapshot skipped for job {JobId}: one or more resolved profiles do not contain flat native JSON; deferring to the legacy worker-side resolution",
                 job.Id);
             return;
         }
 
-        string processJson = ApplyProcessOverrides(process.RawJson, root);
-        string filamentJson = ApplyFilamentColourOverride(filament.RawJson, root);
+        processJson = ApplyProcessOverrides(processJson, root);
+        filamentJson = ApplyFilamentColourOverride(filamentJson, root);
 
-        job.MachineProfileJson = machine.RawJson;
+        job.MachineProfileJson = machineJson;
         job.ProcessProfileJson = processJson;
         job.FilamentProfileJson = filamentJson;
-        job.MachineProfileSha256 = ComputeSha256(machine.RawJson);
+        job.MachineProfileSha256 = ComputeSha256(machineJson);
         job.ProcessProfileSha256 = ComputeSha256(processJson);
         job.FilamentProfileSha256 = ComputeSha256(filamentJson);
         job.SlicerDistribution = machine.SlicerDistribution ?? job.SlicerDistribution;

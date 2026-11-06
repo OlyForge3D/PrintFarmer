@@ -12,6 +12,8 @@ export {
 export {
   parseLayersCore,
   parseDetailedLayersCore,
+  parseBedBounds,
   detailedParseBuffersTransferList,
   type DetailedParseBuffers,
+  type BedBounds,
 } from './gcodeParserCore';

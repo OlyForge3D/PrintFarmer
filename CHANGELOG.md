@@ -70,6 +70,21 @@
 
 ### Fixes
 
+- Preserve native filament setting types when saving editor changes, including
+  boolean vectors, percent suffixes and unedited extruder entries (#3643).
+
+- Preserve saved filament settings in named stock/custom profile selections by
+  unwrapping stock profile settings before creating native job snapshots.
+  Mixed saved/worker-library selections fetch missing stock settings from the
+  selected engine version without importing presets; an unavailable worker
+  returns a retryable 503 instead of queuing an incomplete snapshot (#3643).
+
+- Keep the slicer filament picker inside the viewport, flipping above low
+  triggers and scrolling profile results so newly saved presets remain selectable.
+
+- Keep the slicer profile editor's Simple/Advanced toggle stable under React
+  StrictMode while preserving synchronization between mounted editors (#3643).
+
 - Align the Prometheus exporter with the OpenTelemetry 1.18 SDK so `/metrics`
   exports samples instead of returning an empty HTTP 200 response after a
   serializer type-load failure (#3571).

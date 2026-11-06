@@ -1,4 +1,6 @@
 ﻿extern alias SlicerHost;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Tasks;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
@@ -15,7 +17,7 @@ namespace Farm.Slicer.Module.Tests.SlicerHost;
 public sealed class SlicerHostServiceProviderScopeTests
 {
     [Fact]
-    public void SlicerHostServiceProvider_WithScopeValidation_BuildsSuccessfully()
+    public async Task SlicerHostServiceProvider_WithScopeValidation_PersistsProfileImportTask()
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -64,5 +66,21 @@ public sealed class SlicerHostServiceProviderScopeTests
         Assert.NotNull(
             scope.ServiceProvider
                 .GetRequiredService<Farm.Slicer.Module.Api.Repositories.IPrinterProfileCheckRepository>());
+
+        Farm.Infrastructure.Data.AppDbContext db =
+            scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Data.AppDbContext>();
+        await db.Database.OpenConnectionAsync();
+        await db.Database.EnsureCreatedAsync();
+        IUserTaskService tasks = scope.ServiceProvider.GetRequiredService<IUserTaskService>();
+        Guid modelId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        CreateProfileImportTaskBatchDto request = new(modelId, "MK4", "Prusa", [printerId]);
+        UserTaskDto first = await tasks.CreateOrUpdateProfileImportTaskAsync(request);
+        UserTaskDto repeated = await tasks.CreateOrUpdateProfileImportTaskAsync(request);
+        Assert.Equal(first.Id, repeated.Id);
+        UserTask stored = await db.UserTasks.AsNoTracking().SingleAsync(task => task.Id == first.Id);
+        Assert.Equal(UserTaskType.ProfileImport, stored.TaskType);
+        Assert.Equal(modelId, stored.EntityId);
+        Assert.Contains(printerId.ToString(), stored.RelatedEntityIdsJson);
     }
 }

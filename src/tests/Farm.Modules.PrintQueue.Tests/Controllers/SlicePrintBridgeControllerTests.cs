@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Gcode.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode.Safety;
 using Farm.Modules.PrintQueue.Controllers;
 using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Modules.PrintQueue.Controllers.Responses;
@@ -45,9 +46,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
     public SlicePrintBridgeControllerTests()
     {
-        // Default to a clean safety report so upload happy-path tests are not coupled to
-        // the general validator's g-code interpretation; dedicated tests below cover both
-        // the accept and reject behavior of the send-to-printer safety gate itself.
+        // Dedicated tests below exercise the real nonempty-input validator.
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
@@ -508,9 +507,11 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     // G-code safety gate: previously skipped, now invoked before send-to-printer
     // =========================================================================
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_SafetyValidatorRejects_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_SafetyValidatorRejects_Returns400AndDoesNotUpload(bool startPrint)
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -524,11 +525,11 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Returns(GcodeSafetyResult.Failure<GcodeSafetyReport>(
-                GcodeSafetyProblemCodes.TemperatureAboveLimit,
-                "M104.S",
-                "Commanded nozzle temperature exceeds the configured ceiling."));
+                GcodeSafetyProblemCodes.Malformed,
+                "gcode",
+                "The g-code program is empty."));
 
-        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint };
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
@@ -547,7 +548,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_SafetyValidatorAccepts_UploadsWithMachineEnvelopeFromPrinter()
+    public async Task SendToPrinter_SafetyValidatorAccepts_RecordsCheckpointWithoutMachineLimits()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -599,25 +600,60 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Checkpoint.Should().Be(GcodeSafetyCheckpoint.BeforeSendToPrinter);
-        capturedRequest.AllowedCommands.Should().BeNull();
-        capturedRequest.Limits.Machine.MaxBedTemperatureCelsius.Should().Be(120);
-        capturedRequest.Limits.Machine.MaxAcceleration.Should().Be(5000);
-
-        // Proves BuildSafetyLimits actually sources the primary toolhead's ceilings (via
-        // FindByIdWithIncludesAsync), not just the printer-level machine envelope above.
-        capturedRequest.Limits.Toolhead.NozzleMaxTemperatureCelsius.Should().Be(280);
-        capturedRequest.Limits.Toolhead.HotendMaxTemperatureCelsius.Should().Be(300);
-        capturedRequest.Limits.Toolhead.IsDirectDrive.Should().BeTrue();
+        capturedRequest.Gcode.Should().Be(await File.ReadAllTextAsync(filePath));
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_ValidPrintablePolygonAndExcludedRegions_UploadsWithParsedGeometry()
+    public async Task SendToPrinter_RealValidatorAcceptsCommandContent_BeforeEitherBackendPath(
+        bool startPrint, bool hostCommand)
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
         Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
         string filePath = CreateTempGcodeFile("model.gcode");
+        string program = "; OrcaSlicer api_key https://example.invalid C:\\profiles\\printer.json\n" +
+            "PRINT_START\nG90\nM83\nG1 X10 Y10 E1 F1500 ; RUN_SHELL_COMMAND metadata\n" +
+            (hostCommand ? "RUN_SHELL_COMMAND CMD=example\nM104 S999\nG1 X999 Y999 Z999 F999999\n" : string.Empty) + "PRINT_END";
+        await File.WriteAllTextAsync(filePath, program);
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupPrinterExists(printerId);
+        SetupArtifactPath(gcode, filePath);
+        _safetyValidatorMock.Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
+            .Returns((GcodeSafetyRequest request) => new GcodeSafetyValidator().Validate(request));
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _printersMock.Setup(p => p.UploadAndStartPrintAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<IProgress<UploadAndPrintStage>?>(),
+            It.IsAny<CancellationToken>())).ReturnsAsync(UploadAndPrintResult.Ok());
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint },
+            CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>();
+
+        _printersMock.Verify(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            !startPrint ? Times.Once() : Times.Never());
+        _printersMock.Verify(p => p.UploadAndStartPrintAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<IProgress<UploadAndPrintStage>?>(), It.IsAny<CancellationToken>()),
+            startPrint ? Times.Once() : Times.Never());
+    }
+
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_ConfiguredGeometry_DoesNotConstrainCommandContent()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = CreateTempGcodeFile("model.gcode");
+        await File.WriteAllTextAsync(filePath, "G90\nG1 X2 Y2\nG1 X999 Y999 Z999\n");
 
         SetupCompletedJobWithGcode(jobId, gcode);
         SetupArtifactPath(gcode, filePath);
@@ -640,8 +676,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _safetyValidatorMock
             .Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
             .Callback<GcodeSafetyRequest>(r => capturedRequest = r)
-            .Returns(GcodeSafetyResult.Success(new GcodeSafetyReport(
-                GcodeSafetyCheckpoint.BeforeSendToPrinter, "test-sha256", 3, DateTime.UtcNow)));
+            .Returns((GcodeSafetyRequest r) => new GcodeSafetyValidator().Validate(r));
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
 
@@ -649,15 +684,47 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         _ = result.Should().BeOfType<OkObjectResult>();
         capturedRequest.Should().NotBeNull();
-        capturedRequest!.Limits.Bed.PrintablePolygon.Should().HaveCount(4);
-        capturedRequest.Limits.Bed.ExcludedRegions.Should().ContainSingle();
-        capturedRequest.Limits.Bed.ExcludedRegions[0].Name.Should().Be("clip");
-        capturedRequest.Limits.Bed.ExcludedRegions[0].Polygon.Should().HaveCount(3);
+        capturedRequest!.Gcode.Should().Be(await File.ReadAllTextAsync(filePath));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_RealValidatorRejectsEmptyContent_WithoutBackendEffect(
+        bool startPrint, bool bomOnly)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
+        string filePath = Path.Join(_tempDir, "model.gcode");
+        await File.WriteAllBytesAsync(filePath, bomOnly ? [0xEF, 0xBB, 0xBF] : []);
+        SetupCompletedJobWithGcode(jobId, gcode);
+        SetupPrinterExists(printerId);
+        SetupArtifactPath(gcode, filePath);
+        _safetyValidatorMock.Setup(v => v.Validate(It.IsAny<GcodeSafetyRequest>()))
+            .Returns((GcodeSafetyRequest r) => new GcodeSafetyValidator().Validate(r));
+
+        IActionResult result = await _controller.SendToPrinterAsync(jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint },
+            CancellationToken.None);
+
+        result.Should().BeOfType<BadRequestObjectResult>();
+        _printersMock.Verify(p => p.UploadGcodeAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _printersMock.Verify(p => p.UploadAndStartPrintAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(),
+            It.IsAny<IProgress<UploadAndPrintStage>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _dispatchClaimMock.Verify(c => c.AcquireAdHocClaimAsync(
+            It.IsAny<AdHocDispatchClaimRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_PrinterWithNonFiniteBuildVolume_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_PrinterWithNonFiniteBuildVolume_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -673,31 +740,27 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             {
                 Id = printerId,
                 Name = "Test Printer",
-                // A build-volume dimension should never be non-finite, but nothing in the domain
-                // model or DTOs prevents it from being persisted (double.PositiveInfinity/NaN
-                // deserialize fine from a numeric literal like 1e309). Casting that straight to
-                // decimal throws an unhandled OverflowException; the safety-limits builder must
-                // fail closed instead.
                 MaxBuildVolumeX = double.PositiveInfinity,
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_MalformedPrintablePolygonJson_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_MalformedPrintablePolygonJson_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -717,22 +780,23 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_PrintablePolygonWithFewerThanThreePoints_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_PrintablePolygonWithFewerThanThreePoints_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -752,22 +816,23 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_ExcludedRegionWithFewerThanThreePoints_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_ExcludedRegionWithFewerThanThreePoints_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -787,22 +852,23 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_ExcludedRegionWithNullPolygon_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_ExcludedRegionWithNullPolygon_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -818,29 +884,27 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             {
                 Id = printerId,
                 Name = "Test Printer",
-                // "polygon" is present (satisfies [JsonRequired]) but its value is a JSON null,
-                // which JsonRequired alone does not reject. Must still fail closed rather than
-                // throwing an unhandled NullReferenceException.
                 ExcludedRegionsJson = "[{\"name\":\"clip\",\"polygon\":null}]",
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_PrintablePolygonWithNonFiniteCoordinate_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_PrintablePolygonWithNonFiniteCoordinate_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -856,29 +920,27 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             {
                 Id = printerId,
                 Name = "Test Printer",
-                // System.Text.Json accepts numeric literals like 1e309 as double.PositiveInfinity.
-                // Casting that straight to decimal throws OverflowException; the parser must catch
-                // this and fail closed (400) rather than let it escape as an unhandled 500.
                 PrintablePolygonJson = "[{\"x\":1e309,\"y\":0},{\"x\":10,\"y\":0},{\"x\":10,\"y\":10}]",
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
     [Trait("Category", "SlicePrintBridge")]
-    public async Task SendToPrinter_ExcludedRegionWithNonFiniteCoordinate_Returns400AndDoesNotUpload()
+    public async Task SendToPrinter_ExcludedRegionWithNonFiniteCoordinate_DoesNotBlockUpload()
     {
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
@@ -899,17 +961,18 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             });
 
         var request = new SendToPrinterRequest { PrinterId = printerId, StartPrint = false };
+        _printersMock.Setup(p => p.UploadGcodeAsync(printerId, gcode.FileName,
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         IActionResult result = await _controller.SendToPrinterAsync(jobId, request, CancellationToken.None);
 
-        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
-        badRequest.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        result.Should().BeOfType<OkObjectResult>();
 
-        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Never);
+        _safetyValidatorMock.Verify(v => v.Validate(It.IsAny<GcodeSafetyRequest>()), Times.Once);
         _printersMock.Verify(
             p => p.UploadGcodeAsync(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]
@@ -921,9 +984,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         Artifact gcode = CreateArtifact(jobId, "gcode", "model.gcode");
         string filePath = Path.Join(_tempDir, "model.gcode");
 
-        // Write the file WITH a leading UTF-8 BOM followed immediately by a command, so that if
-        // the BOM were not stripped before validation, the interpreter would see "\uFEFFG28"
-        // instead of "G28" as the first line.
+        // Validation reads decoded text; upload must retain the original BOM bytes.
         byte[] utf8Bom = [0xEF, 0xBB, 0xBF];
         byte[] body = System.Text.Encoding.UTF8.GetBytes("G28\nG1 X10 Y10 Z0.2 F1500\n");
         File.WriteAllBytes(filePath, [.. utf8Bom, .. body]);
@@ -956,8 +1017,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         _ = result.Should().BeOfType<OkObjectResult>();
 
-        // The text handed to the safety validator must have the BOM stripped so command matching
-        // (e.g. "G28" at position 0) is not corrupted by a leading U+FEFF character.
+        // Preserve the decoded-text contract, including empty detection for BOM-only files.
         capturedGcodeText.Should().NotBeNull();
         capturedGcodeText.Should().NotStartWith("\uFEFF");
         capturedGcodeText.Should().StartWith("G28");

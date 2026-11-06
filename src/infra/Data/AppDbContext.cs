@@ -202,6 +202,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Camera snapshots (captured on print events)
     public DbSet<CameraSnapshot> CameraSnapshots => Set<CameraSnapshot>();
 
+    public DbSet<BedClearEvaluation> BedClearEvaluations => Set<BedClearEvaluation>();
+
     // NFC Devices (ESP32 + PN532 filament spool readers)
     public DbSet<NfcDevice> NfcDevices => Set<NfcDevice>();
 

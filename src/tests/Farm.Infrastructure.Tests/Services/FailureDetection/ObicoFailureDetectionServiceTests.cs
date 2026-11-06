@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.FailureDetection;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
@@ -633,6 +634,133 @@ public partial class ObicoFailureDetectionServiceTests
         HttpStatusCode.OK
     ];
 
+    [Fact]
+    public async Task AnalyzeImageAsync_WhenCallerCancelsMultipartRequest_PropagatesCancellation()
+    {
+        // IDISP013 false positive: these handlers are not used after the canceled request completes.
+#pragma warning disable IDISP013 // Await in using
+        using RecordingHandler obicoHandler = new(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        Mock<IHttpClientFactory> factory = new(MockBehavior.Strict);
+        factory.Setup(clientFactory => clientFactory.CreateClient("ObicoML"))
+            .Returns(new HttpClient(obicoHandler, disposeHandler: false));
+        ObicoFailureDetectionService service = CreateService(factory);
+        CancellationToken cancellationToken = new(canceled: true);
+
+        Func<Task> act = () => service.AnalyzeImageAsync(
+            [0xFF, 0xD8, 0xFF],
+            "http://obico.local",
+            apiKey: null,
+            ct: cancellationToken);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+#pragma warning restore IDISP013
+    }
+
+    [Fact]
+    public async Task AnalyzeImageFromUrlAsync_WhenCallerCancelsUrlRequest_PropagatesCancellation()
+    {
+        // IDISP013 false positive: these handlers are not used after the canceled request completes.
+#pragma warning disable IDISP013 // Await in using
+        using RecordingHandler obicoHandler = new(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        Mock<IHttpClientFactory> factory = new(MockBehavior.Strict);
+        factory.Setup(clientFactory => clientFactory.CreateClient("ObicoML"))
+            .Returns(new HttpClient(obicoHandler, disposeHandler: false));
+        ObicoFailureDetectionService service = CreateService(factory);
+        CancellationToken cancellationToken = new(canceled: true);
+
+        Func<Task> act = () => service.AnalyzeImageFromUrlAsync(
+            "http://printer.local/snapshot.jpg",
+            "http://obico.local",
+            apiKey: null,
+            ct: cancellationToken);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+#pragma warning restore IDISP013
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WhenCalledThroughProviderContract_MapsObicoScoreAndClassification()
+    {
+        using RecordingHandler obicoHandler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"result\":{\"p\":0.91}}", Encoding.UTF8, "application/json")
+        });
+        using RecordingHandler snapshotHandler = new(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        ObicoFailureDetectionService service = CreateService(CreateFallbackClientFactory(obicoHandler, snapshotHandler));
+
+        FailureDetectionProviderResult result = await service.AnalyzeAsync(
+            new FailureDetectionProviderRequest([1, 2, 3], "http://obico.local"));
+
+        result.ErrorMessage.Should().BeNull();
+        result.Score.Should().Be(0.91m);
+        result.IsFailureDetected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WhenSnapshotUrlIsProvided_UsesObicoSnapshotQueryContract()
+    {
+        const string snapshotUrl = "http://printer.local/webcam/?action=snapshot";
+        List<CapturedRequest> obicoRequests = [];
+        using RecordingHandler obicoHandler = new(request =>
+        {
+            obicoRequests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"result\":{\"p\":0.91}}", Encoding.UTF8, "application/json")
+            };
+        });
+        using RecordingHandler snapshotHandler = new(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        ObicoFailureDetectionService service = CreateService(
+            CreateFallbackClientFactory(obicoHandler, snapshotHandler));
+
+        FailureDetectionProviderResult result = await service.AnalyzeAsync(
+            new FailureDetectionProviderRequest(
+                ImageData: null,
+                Endpoint: "http://obico.local",
+                SnapshotUrl: snapshotUrl));
+
+        result.ErrorMessage.Should().BeNull();
+        result.Score.Should().Be(0.91m);
+        obicoRequests.Should().ContainSingle();
+        obicoRequests[0].Method.Should().Be(HttpMethod.Get);
+        obicoRequests[0].PathAndQuery.Should().StartWith("/p/?img=");
+        Uri.UnescapeDataString(obicoRequests[0].PathAndQuery.Split("img=", 2)[1]).Should().Be(snapshotUrl);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WhenCapturedImageUploadIsUnsupported_FallsBackToSnapshotUrlAndReportsUnpairedAnalysis()
+    {
+        const string snapshotUrl = "http://printer.local/webcam/?action=snapshot";
+        List<CapturedRequest> obicoRequests = [];
+        using RecordingHandler obicoHandler = new(request =>
+        {
+            obicoRequests.Add(CapturedRequest.From(request));
+            return request.Method == HttpMethod.Post
+                ? new HttpResponseMessage(HttpStatusCode.MethodNotAllowed)
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"detections\":[[\"failure\",0.74]]}", Encoding.UTF8, "application/json")
+                };
+        });
+        using RecordingHandler snapshotHandler = new(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        ObicoFailureDetectionService service = CreateService(
+            CreateFallbackClientFactory(obicoHandler, snapshotHandler));
+
+        FailureDetectionProviderResult result = await service.AnalyzeAsync(
+            new FailureDetectionProviderRequest(
+                ImageData: [0xFF, 0xD8, 0xFF, 0xD9],
+                Endpoint: "http://obico.local",
+                SnapshotUrl: snapshotUrl));
+
+        result.ErrorMessage.Should().BeNull();
+        result.Score.Should().Be(0.74m);
+        result.UsedCapturedImage.Should().BeFalse();
+        obicoRequests.Should().HaveCount(2);
+        obicoRequests[0].Method.Should().Be(HttpMethod.Post);
+        obicoRequests[1].Method.Should().Be(HttpMethod.Get);
+        Uri.UnescapeDataString(obicoRequests[1].PathAndQuery.Split("img=", 2)[1]).Should().Be(snapshotUrl);
+    }
+
     private static HttpResponseMessage CreateFallbackResponse(HttpStatusCode status)
     {
         return new HttpResponseMessage(status)
@@ -674,11 +802,17 @@ public partial class ObicoFailureDetectionServiceTests
             });
 
         Mock<ILogger<ObicoFailureDetectionService>> logger = new();
+        IEgressGuard effectiveEgressGuard = egressGuard
+            ?? CreateEgressGuard((_, _) => Task.FromResult(new[] { IPAddress.Parse("192.168.1.50") }));
+        ICameraSnapshotCaptureService snapshotCaptureService = new CameraSnapshotCaptureService(
+            httpClientFactory.Object,
+            NullLogger<CameraSnapshotCaptureService>.Instance,
+            effectiveEgressGuard);
         return new ObicoFailureDetectionService(
             httpClientFactory.Object,
             settingsService.Object,
             logger.Object,
-            egressGuard ?? CreateEgressGuard((_, _) => Task.FromResult(new[] { IPAddress.Parse("192.168.1.50") })));
+            snapshotCaptureService);
     }
 
     private static EgressGuard CreateEgressGuard(Func<string, CancellationToken, Task<IPAddress[]>> resolveHostAsync)
@@ -708,8 +842,9 @@ public partial class ObicoFailureDetectionServiceTests
             }
             else
             {
-                using StreamReader reader = new(request.Content.ReadAsStream(), Encoding.UTF8);
-                body = reader.ReadToEnd();
+                using MemoryStream stream = new();
+                request.Content.ReadAsStream().CopyTo(stream);
+                body = Encoding.Latin1.GetString(stream.ToArray());
             }
 
             return new CapturedRequest(
@@ -741,4 +876,5 @@ public partial class ObicoFailureDetectionServiceTests
             throw _exceptionFactory(request);
         }
     }
+
 }

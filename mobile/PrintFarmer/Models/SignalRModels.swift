@@ -37,10 +37,49 @@ struct PrinterStatusUpdate: Codable, Sendable {
 }
 
 /// Job queue update broadcast via SignalR "jobqueueupdate" event.
-/// Matches the anonymous object shape from PrintJobCompletionService.
+///
+/// Two backend producers share this event name:
+/// - `PrintJobCompletionService` sends `{ printerId, jobs }` with legacy
+///   entries (`queuedAt`, `actualStartTime`, `actualEndTime`).
+/// - Queue reorder (`PrintJobManagementService`, #3684) sends
+///   `{ printerId?, jobs: [QueuedPrintJobDto] }` where `printerId` is null
+///   for unassigned jobs and entries use `queuedAtUtc` /
+///   `actualStartTimeUtc` / `actualEndTimeUtc`.
+///
+/// The event is consumed as a queue invalidation hint, so decoding is
+/// lenient: a missing/null `printerId` decodes to `nil` and entries that
+/// cannot be decoded are skipped instead of failing the whole frame.
 struct JobQueueUpdate: Codable, Sendable {
-    let printerId: UUID
+    let printerId: UUID?
     let jobs: [JobQueueUpdateEntry]
+
+    init(printerId: UUID?, jobs: [JobQueueUpdateEntry]) {
+        self.printerId = printerId
+        self.jobs = jobs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case printerId
+        case jobs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        printerId = try? container.decodeIfPresent(UUID.self, forKey: .printerId)
+        let entries = (try? container.decodeIfPresent(
+            [LossyJobQueueUpdateEntry].self,
+            forKey: .jobs
+        )) ?? []
+        jobs = entries.compactMap(\.entry)
+    }
+}
+
+private struct LossyJobQueueUpdateEntry: Decodable {
+    let entry: JobQueueUpdateEntry?
+
+    init(from decoder: Decoder) throws {
+        entry = try? JobQueueUpdateEntry(from: decoder)
+    }
 }
 
 struct JobQueueUpdateEntry: Codable, Identifiable, Sendable {
@@ -51,6 +90,103 @@ struct JobQueueUpdateEntry: Codable, Identifiable, Sendable {
     let queuedAt: Date
     let actualStartTime: Date?
     let actualEndTime: Date?
+}
+
+extension JobQueueUpdateEntry {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case priority
+        case queuedAt
+        case queuedAtUtc
+        case actualStartTime
+        case actualStartTimeUtc
+        case actualEndTime
+        case actualEndTimeUtc
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        status = try container.decodeIfPresent(PrintJobStatus.self, forKey: .status) ?? .queued
+        priority = try container.decodeIfPresent(PrintJobPriority.self, forKey: .priority) ?? .normal
+        if let legacy = try container.decodeIfPresent(Date.self, forKey: .queuedAt) {
+            queuedAt = legacy
+        } else {
+            queuedAt = try container.decode(Date.self, forKey: .queuedAtUtc)
+        }
+        actualStartTime = try container.decodeIfPresent(Date.self, forKey: .actualStartTime)
+            ?? container.decodeIfPresent(Date.self, forKey: .actualStartTimeUtc)
+        actualEndTime = try container.decodeIfPresent(Date.self, forKey: .actualEndTime)
+            ?? container.decodeIfPresent(Date.self, forKey: .actualEndTimeUtc)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(status, forKey: .status)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(queuedAt, forKey: .queuedAt)
+        try container.encodeIfPresent(actualStartTime, forKey: .actualStartTime)
+        try container.encodeIfPresent(actualEndTime, forKey: .actualEndTime)
+    }
+}
+
+/// Envelope of the lowercase `queueevent` SignalR event published by the
+/// backend queue outbox (`QueueEventEnvelope`, #3684). Printer-group
+/// deliveries are redacted, so every field except `eventType` is optional
+/// and unknown fields are ignored. The event is a queue invalidation hint:
+/// consumers refetch the canonical queue and never treat it as job state.
+struct QueueEvent: Codable, Sendable, Equatable {
+    var schemaVersion: String? = nil
+    var eventId: UUID? = nil
+    var sequence: Int64? = nil
+    var eventType: String
+    var occurredAtUtc: Date? = nil
+    var jobId: UUID? = nil
+    var printerId: UUID? = nil
+    var projectId: UUID? = nil
+    var jobStatus: String? = nil
+
+    /// Fallback delivered when a `queueevent` frame cannot be decoded, so
+    /// consumers still invalidate the queue instead of dropping the signal.
+    static let undecodable = QueueEvent(eventType: "unknown")
+}
+
+/// Authorized queue resources used to restore SignalR group membership.
+/// Matches the backend `QueueSubscriptionResourcesDto` response.
+struct QueueSubscriptionResources: Decodable, Sendable, Equatable {
+    let printerIds: [UUID]
+    let jobIds: [UUID]
+    let projectIds: [UUID]
+}
+
+/// Payload of the lowercase `camerasupdated` SignalR event
+/// (`CamerasUpdatedEvent`, #3684): the printer whose linked cameras changed
+/// and its current camera ids. Consumers reload the printer's camera
+/// metadata; the ids are a hint, not canonical camera state.
+struct CamerasUpdatedEvent: Codable, Sendable, Equatable {
+    let printerId: UUID
+    var cameraIds: [UUID] = []
+
+    init(printerId: UUID, cameraIds: [UUID] = []) {
+        self.printerId = printerId
+        self.cameraIds = cameraIds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case printerId
+        case cameraIds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        printerId = try container.decode(UUID.self, forKey: .printerId)
+        cameraIds = (try? container.decodeIfPresent([UUID].self, forKey: .cameraIds)) ?? []
+    }
 }
 
 /// Kind of change carried by an `attentionchanged` invalidation event

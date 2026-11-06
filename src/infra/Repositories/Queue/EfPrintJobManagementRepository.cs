@@ -461,18 +461,60 @@ public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? 
             .ToListAsync(ct);
         long totalPrintTimeSeconds = printTimes.Sum(t => (long)t.TotalSeconds);
 
-        query = sortBy.ToLowerInvariant() switch
+        string mode = sortBy.ToLowerInvariant();
+        IOrderedQueryable<PrintJob> ordered = mode switch
         {
-            "duration" => query.OrderByDescending(pj => pj.ActualPrintTime),
+            "duration" => query.OrderByDescending(pj => pj.ActualPrintTime ?? TimeSpan.Zero),
+            "duration_asc" => query.OrderBy(pj => pj.ActualPrintTime ?? TimeSpan.Zero),
             "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),
+            "name_desc" => query.OrderByDescending(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),
             "status" => query.OrderBy(pj => pj.Status),
+            "status_desc" => query.OrderByDescending(pj => pj.Status),
+            "printer" => query.OrderBy(pj => pj.AssignedPrinter != null ? pj.AssignedPrinter.Name : "Unassigned"),
+            "printer_desc" => query.OrderByDescending(pj => pj.AssignedPrinter != null ? pj.AssignedPrinter.Name : "Unassigned"),
+            "model" => query.OrderBy(pj => pj.AssignedPrinter == null || pj.AssignedPrinter.Model == null)
+                .ThenBy(pj => pj.AssignedPrinter != null && pj.AssignedPrinter.Model != null ? pj.AssignedPrinter.Model.Name : null),
+            "model_desc" => query.OrderBy(pj => pj.AssignedPrinter == null || pj.AssignedPrinter.Model == null)
+                .ThenByDescending(pj => pj.AssignedPrinter != null && pj.AssignedPrinter.Model != null ? pj.AssignedPrinter.Model.Name : null),
+            "material" => query.OrderBy(pj => (pj.RequiredMaterialType ?? (pj.GcodeFile != null ? pj.GcodeFile.RequiredMaterial : null)) == null)
+                .ThenBy(pj => pj.RequiredMaterialType ?? (pj.GcodeFile != null ? pj.GcodeFile.RequiredMaterial : null)),
+            "material_desc" => query.OrderBy(pj => (pj.RequiredMaterialType ?? (pj.GcodeFile != null ? pj.GcodeFile.RequiredMaterial : null)) == null)
+                .ThenByDescending(pj => pj.RequiredMaterialType ?? (pj.GcodeFile != null ? pj.GcodeFile.RequiredMaterial : null)),
             "oldest" => query.OrderBy(pj => pj.ActualEndTime ?? pj.QueuedAt),
             "deadline" => query.OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1).ThenBy(pj => pj.DeadlineAtUtc),
             "deadline_desc" => query.OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1).ThenByDescending(pj => pj.DeadlineAtUtc),
             _ => query.OrderByDescending(pj => pj.ActualEndTime ?? pj.QueuedAt)
         };
 
-        List<PrintJob> jobs = await query.Skip(offset).Take(limit).ToListAsync(ct);
+        if (mode is "filament" or "filament_desc" or "cost" or "cost_desc")
+        {
+            // Match the table's toolhead-first totals and actual/estimate fallback before paging.
+            var values = query.Select(pj => new
+            {
+                Job = pj,
+                Filament = pj.ToolheadUsages.Any()
+                    ? pj.ToolheadUsages.Sum(tu => tu.FilamentUsageGrams ?? 0)
+                    : pj.ActualFilamentUsage > 0 ? pj.ActualFilamentUsage.Value
+                    : (pj.EstimatedFilamentUsage ?? (pj.GcodeFile != null ? pj.GcodeFile.EstimatedFilamentWeightG : null)) > 0
+                        ? pj.EstimatedFilamentUsage ?? (pj.GcodeFile != null ? pj.GcodeFile.EstimatedFilamentWeightG : null)
+                        : null,
+                Cost = pj.ToolheadUsages.Any()
+                    ? pj.ToolheadUsages.Sum(tu => (double)(tu.MaterialCostUsd ?? 0))
+                    : (double)(pj.MaterialCostUsd ?? 0)
+            });
+            var sortedValues = mode switch
+            {
+                "filament" => values.OrderBy(value => value.Filament == null).ThenBy(value => value.Filament),
+                "filament_desc" => values.OrderBy(value => value.Filament == null).ThenByDescending(value => value.Filament),
+                "cost" => values.OrderBy(value => value.Cost <= 0).ThenBy(value => value.Cost),
+                _ => values.OrderBy(value => value.Cost <= 0).ThenByDescending(value => value.Cost)
+            };
+            List<PrintJob> sortedJobs = await sortedValues.ThenBy(value => value.Job.Id)
+                .Skip(offset).Take(limit).Select(value => value.Job).ToListAsync(ct);
+            return (sortedJobs, totalCount, completedCount, failedCount, cancelledCount, totalPrintTimeSeconds);
+        }
+
+        List<PrintJob> jobs = await ordered.ThenBy(pj => pj.Id).Skip(offset).Take(limit).ToListAsync(ct);
 
         return (jobs, totalCount, completedCount, failedCount, cancelledCount, totalPrintTimeSeconds);
     }

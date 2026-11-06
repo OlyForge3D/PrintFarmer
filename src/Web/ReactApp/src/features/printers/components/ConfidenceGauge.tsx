@@ -23,7 +23,7 @@ let idCounter = 0;
 /**
  * Semicircular arc gauge that visualises a 0-100% print-health score
  * with a red → yellow → green gradient. An optional threshold tick mark
- * shows the auto-pause trigger level.
+ * shows the configured confidence threshold.
  */
 export function ConfidenceGauge({ value, threshold, size = 'sm', className }: ConfidenceGaugeProps) {
   const cfg = SIZE_CONFIG[size];

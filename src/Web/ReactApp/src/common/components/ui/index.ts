@@ -1,5 +1,6 @@
 // UI Component Library
 // This file exports all shared UI components for consistent styling across the application
+export { Toolbar, ToolbarField, HeaderActions, ControlIcon, SearchField, SortSelect, SortDirectionButton, SortControl, FilterChip, FilterButton, FiltersDisclosure, RefreshButton, Pagination } from './toolbar';
 
 export { AccordionButton, type AccordionButtonProps } from './AccordionButton';
 export { Alert, type AlertProps } from './Alert';
@@ -57,9 +58,11 @@ export { Toggle, type ToggleProps } from './Toggle';
 export { Tooltip, type TooltipProps, type TooltipPosition } from './Tooltip';
 export { ViewToggle, type ViewToggleProps } from './ViewToggle';
 export {
+  viewKindIcons,
   viewModeIcons,
   gridTableOptions,
   gridListOptions,
+  type ViewKind,
   type ViewModeIconName,
   type ViewModeOption
 } from './viewModeIcons';

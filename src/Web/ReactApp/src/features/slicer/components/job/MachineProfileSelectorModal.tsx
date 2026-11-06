@@ -14,6 +14,7 @@ import {
  * it is what the slice API matches on, so it must never be a display label.
  */
 export interface MachineProfileChoice {
+  customProfileId?: string;
   /** Canonical profile name; also the selection value. */
   name: string;
   /** Nozzle diameter in mm, when it could be resolved. */
@@ -29,7 +30,8 @@ export interface MachineProfileSelectorModalProps {
   profiles: MachineProfileChoice[];
   /** Currently selected profile name, or '' when nothing is chosen. */
   selectedProfileName: string;
-  onSelect: (profileName: string) => void;
+  selectedCustomProfileId?: string;
+  onSelect: (profileName: string, customProfileId?: string) => void;
   onClose: () => void;
   /** Shown above the list, e.g. the printer's model name. */
   printerLabel?: string;
@@ -69,6 +71,7 @@ export function MachineProfileSelectorModal({
   isOpen,
   profiles,
   selectedProfileName,
+  selectedCustomProfileId,
   onSelect,
   onClose,
   printerLabel,
@@ -163,23 +166,25 @@ export function MachineProfileSelectorModal({
       }));
   }, [visible]);
 
-  const handlePick = (name: string) => {
-    onSelect(name);
+  const handlePick = (profile: MachineProfileChoice) => {
+    if (profile.customProfileId) onSelect(profile.name, profile.customProfileId);
+    else onSelect(profile.name);
     handleClose();
   };
 
   const renderRow = (profile: MachineProfileChoice, labels: Map<string, string>) => {
-    const isSelected = profile.name === selectedProfileName;
+    const isSelected = profile.name === selectedProfileName &&
+      profile.customProfileId === selectedCustomProfileId;
     const highFlow = resolveHighFlow(profile.isHighFlowNozzle, profile.name);
     const label = labels.get(profile.name) ?? profile.name;
 
     return (
       <Button
-        key={profile.name}
+        key={profile.customProfileId ?? profile.name}
         type="button"
         variant="unstyled"
         aria-pressed={isSelected}
-        onClick={() => handlePick(profile.name)}
+        onClick={() => handlePick(profile)}
         className={`w-full flex items-center gap-2 text-left rounded-lg border px-3 py-2 mb-1.5 transition-colors ${
           isSelected
             ? 'border-pf-accent bg-pf-accent/10'

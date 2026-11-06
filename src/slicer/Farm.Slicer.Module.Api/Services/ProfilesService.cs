@@ -2468,10 +2468,11 @@ public class ProfilesService(
     /// </summary>
     /// <param name="httpClient">HTTP client for worker communication</param>
     /// <param name="ct">Cancellation token for async operation</param>
+    /// <param name="engineVersion">Optional exact engine version to query.</param>
     /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy, or null if worker unavailable</returns>
-    public async Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct)
+    public async Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct, string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(cancellationToken: ct);
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion, ct);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");

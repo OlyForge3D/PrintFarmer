@@ -366,24 +366,31 @@ LABEL org.opencontainers.image.title="PrintFarmer Slicer Host" \
 
 RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuser; fi
 
-RUN mkdir -p /app/artifacts /data && chown -R appuser:appuser /app /data
+RUN mkdir -p /app/artifacts /data && chown -R appuser:appuser /app && chown root:root /data && chmod 0755 /data
+
+RUN --mount=type=bind,from=aspnet-apt-index,source=/var/lib/apt/lists,target=/var/lib/apt/lists,rw \
+    pf-apt install -y --no-install-recommends gosu
 
 COPY --chown=appuser:appuser --from=shared-build /app/publish/slicer-host .
+COPY scripts/docker/slicer-host-entrypoint.sh /usr/local/bin/slicer-host-entrypoint
 COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
 COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
+RUN chmod 0755 /usr/local/bin/slicer-host-entrypoint
 
 ENV ASPNETCORE_URLS=http://+:5246
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV ArtifactStorage__RootPath=/data/artifacts
 # Issue #578 dual-engine: point plugin discovery at the mirrored plugin payload
 # copied above so ISlicerRegistry sees both v2_4_0 and v2_3_1 in slicer-host too.
 ENV Slicer__PluginsPath=/app/plugins/slicer
 
-USER appuser
+USER root
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5246/healthz || exit 1
 
-ENTRYPOINT ["dotnet", "Farm.Slicer.Host.dll"]
+ENTRYPOINT ["/usr/local/bin/slicer-host-entrypoint"]
+CMD ["dotnet", "Farm.Slicer.Host.dll"]
 
 ############################################################
 # OrcaSlicer Binary Layer (cached layer for binary assets)

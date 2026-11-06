@@ -20,10 +20,8 @@ function formatDetectedAt(detectedAt: string): string {
 
 export function FailureDetectionAlert({ event, onDismiss }: FailureDetectionAlertProps) {
   const confidencePercent = Math.round(event.confidence * 100);
-  const type = event.autoPaused || event.confidence >= 0.8 ? 'error' : 'warning';
-  const title = event.autoPaused
-    ? 'Print auto-paused after failure detection'
-    : 'Possible print failure detected';
+  const type = event.confidence >= 0.8 ? 'error' : 'warning';
+  const title = `Possible print failure reported by ${event.provider}`;
 
   return (
     <Alert type={type} title={title} onClose={onDismiss}>

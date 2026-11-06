@@ -1,6 +1,8 @@
-# Obico ML API Integration
+# Print Failure Detection Providers
 
-AI-powered print failure detection for PrintFarmer using the open-source Obico ML API.
+PrintFarmer can analyze printer camera frames with Obico ML API, PrintGuard, or
+both. Each provider can be selected independently per printer; neither is
+required when failure detection is not needed.
 
 ## Overview
 
@@ -11,15 +13,49 @@ The Obico ML API analyzes 3D printer camera images and detects print failures in
 - Support structure failures
 - Other print anomalies
 
-**Key Features:**
-- Local inference (no cloud dependencies)
-- CPU-only default (GPU optional)
-- Configurable confidence thresholds
-- REST API for easy integration
+PrintFarmer supports two independently configured analysis providers. When
+both are enabled and available for a printer, the monitor reports paired-frame
+analysis only when both providers actually consume the same captured JPEG.
+Obico's legacy URL-based snapshot fallback does not count as paired, even if
+inference succeeds, because it may analyze a different frame. When only one
+provider is available, it analyzes independently and the cycle is reported as
+unpaired. A provider failure does not invalidate the other provider's result.
+
+Detection is advisory only. PrintFarmer does not automatically pause, cancel,
+or control printers based on these results. Operators remain responsible for
+reviewing alerts and deciding whether to take action.
 
 ## Quick Start
 
-### Enable Obico ML API
+### Select deployment providers
+
+During Docker Compose generation, select either or both optional services:
+
+```bash
+./scripts/docker/compose-generator.sh --include-obico-ml --include-printguard --db-provider postgres
+```
+
+Omit either `--include-*` flag to leave that service out. The interactive
+generator and deploy script also support independent selection; saved deployment
+configuration retains those choices for later regeneration. PrintGuard uses
+the publisher's
+`ghcr.io/oliverbravery/printguard@sha256:f69c6bafb5673e94be26ca55b431f1bf42a9ae19a95be9fa34198f0c27a9d43e`
+image. The service is available only on the internal Docker network and does
+not publish a host port. Do not expose it directly: the publisher documents
+that the service has no built-in authentication of its own.
+
+The bundled Obico image does not support ARM64 runtime targets. Deployment
+rejects the bundled service when the effective Docker runtime target is ARM64;
+use an AMD64 Docker runtime target (including emulation where appropriate), or
+disable the bundled Obico service and configure an external Obico API. The
+deploy script checks `DOCKER_DEFAULT_PLATFORM` when set, otherwise it queries
+the active Docker engine, which also handles remote Docker contexts. Configuration
+validation and regeneration warn if they cannot determine the target; an actual
+deployment with bundled Obico fails closed if the target cannot be determined.
+The deploy script's `--platform` option selects the build platform and is not
+by itself the Compose runtime target.
+
+### Configure Obico ML API
 
 **During Docker Compose generation:**
 ```bash
@@ -38,8 +74,8 @@ curl http://localhost:3333/hc/
 
 **Docker Compose (`.env` file):**
 ```bash
-# Image and version
-OBICO_ML_IMAGE=thespaghettidetective/ml_api:base-1.4
+# Optional custom image; omit to use the pinned default (AMD64 runtime only)
+OBICO_ML_IMAGE=registry.example/obico-ml-api:custom
 
 # Resource limits
 OBICO_ML_CPU_LIMIT=2.0
@@ -51,7 +87,17 @@ OBICO_ML_MEMORY_REQUEST=512m
 OBICO_ML_DEBUG=False
 ```
 
-**PrintFarmer API (for Lambert's integration):**
+The deployment script preserves a custom `OBICO_ML_IMAGE` when regenerating
+`.env`; it leaves the pinned default out so future default image updates are
+not frozen by generated configuration. The pinned image is AMD64-only, so
+bundled Obico is rejected when the effective Docker runtime target is not
+AMD64. Set `OBICO_ML_IMAGE` to an image compatible with your runtime to use a
+different architecture; compatibility of custom images is the operator's
+responsibility. Custom values must be single-line Docker image references;
+whitespace and shell metacharacters are rejected because the generated `.env`
+file is sourced by the deployment script.
+
+**PrintFarmer API:**
 ```bash
 # ML API connection
 OBICO_ML_API_URL=http://obico-ml-api:3333
@@ -61,7 +107,107 @@ OBICO_ML_CONFIDENCE_THRESHOLD=0.7  # 0.0-1.0
 OBICO_ML_SCAN_INTERVAL=30          # seconds
 ```
 
+## Configure PrintGuard
+
+PrintGuard is an independently selectable provider, not a shadow scorer.
+PrintFarmer calls its classification API (`POST /api/v1/classify`); its
+classification results and errors remain attributed to PrintGuard and do not
+replace or suppress Obico results. When both providers are enabled, each
+receives the same locally captured JPEG. If only one is selected and ready, it
+can analyze the frame without the other provider.
+
+Configure PrintGuard through the API process environment or another ASP.NET
+configuration provider. The URL is the service root; PrintFarmer appends
+`/api/v1/classify`.
+
+The Docker deployment generator preserves these provider settings across
+configuration regeneration. It supplies the bundled service URL only when the
+corresponding bundled sidecar is selected; otherwise, configure an external
+provider URL explicitly. Disabled providers do not require a URL.
+When enabling a bundled provider after a disabled deployment, an empty saved
+URL is replaced with its internal service URL. Nonempty saved URLs and explicit
+process-environment URL overrides (including an explicit empty override) are
+preserved; malformed nonempty configuration remains subject to application
+validation rather than being silently replaced.
+
+```bash
+PFARM__PrintGuardShadow__Enabled=true
+PFARM__PrintGuardShadow__ApiUrl=http://printguard:8000
+PFARM__PrintGuardShadow__ApiToken=pg_your_read_scope_token
+PFARM__PrintGuardShadow__RequestTimeoutSeconds=5
+PFARM__PrintGuardShadow__CaptureTimeoutSeconds=5
+```
+
+`Enabled` defaults to `false`. `ApiToken` is optional only when the PrintGuard
+instance permits unauthenticated read requests. When tokens are configured,
+use a read-scoped token; never grant PrintFarmer PrintGuard's `control` scope.
+Keep tokens in deployment configuration, not ordinary PrintFarmer settings.
+Use HTTPS if sending them outside a trusted local network. Enabling this
+provider sends printer camera frames to the configured endpoint; verify that
+transfer is acceptable for the farm before enabling it.
+
+PrintGuard's health endpoint is `GET /api/health`; it confirms service
+readiness, not classification quality. A failed, timed-out, or unavailable
+provider produces its own failure outcome while the other selected provider
+continues independently. If local frame capture fails, image analysis is
+unavailable for that cycle.
+
+The publisher's repository identifies PrintGuard as GPL-2.0 (GPL version 2);
+do not infer the `GPL-2.0-only` SPDX variant from that alone. The add-on uses
+the publisher-provided container image and documented HTTP API, rather than
+vendoring code or weights or building or repackaging the service. This
+architectural boundary is not a categorical legal conclusion that the programs
+are separate works. Confirm distribution plans with qualified counsel. The
+published benchmark is author-reported and has not been independently
+replicated.
+
 ## API Usage
+
+### PrintFarmer system health
+
+PrintFarmer's `/health` also includes a `printguard` check. When the global
+PrintGuard integration is disabled, it does not contact the provider and its
+Admin Control Center and detailed System Health cards are hidden. When enabled,
+invalid URLs, timeouts, or token formatting report Degraded with a configuration
+diagnostic. The check validates the publisher's `GET /api/health` contract
+(`ok: true` and a nonempty version), then calls `GET /api/v1/monitors` with the
+configured bearer token to verify read-scope access. The health endpoint alone
+is authentication-exempt and cannot prove the application may use the read API.
+Neither request submits images or invokes printer controls.
+
+Both requests share a total budget of at most six seconds (or the configured
+request timeout, if shorter). Response bodies are limited to 64 KB. Concurrent
+requests share a probe and completed results are cached for 45 seconds, including
+failures; changing configuration or disabling takes effect on the next request.
+Safe diagnostics distinguish connection, timeout, HTTP, authorization, and
+response-contract failures without exposing endpoint URLs, tokens, upstream
+bodies, or exceptions. Healthy means hub readiness and read-API access, **not**
+classification/model accuracy or proof that a printer has usable camera frames.
+
+PrintFarmer's `/health` includes an `obico` check. When failure detection is
+disabled it reports Healthy without contacting Obico, and the Admin Control
+Center hides its tile. When enabled it actively probes the global fallback
+endpoint and all enabled pooled servers, even on an idle farm. Disabled or
+missing server assignments fall back to the global URL, matching monitoring.
+
+The check shares the administrative server connectivity probe: guarded,
+address-pinned `GET /p/` with the existing legacy `POST /p/` compatibility
+fallback. Identical endpoint/credential combinations are probed once; different
+credentials at the same endpoint remain separate so a broken route cannot be
+masked by a working one. All targets reachable means Healthy; partial or total
+outage, or no usable targets, means Degraded. Degraded remains HTTP 200 on
+`/health`; `/healthz` remains independent liveness.
+
+Probes run at most four at a time within a six-second batch budget. Concurrent
+health requests share the same batch, and completed results are cached for
+45 seconds, including failures. Caller cancellation does not cancel that batch.
+Endpoint/credential changes may take one cache interval to appear; disabling
+takes effect on the next health request. Anonymous health output exposes only
+generic descriptions, the enabled flag and target/reachable counts, never
+endpoint URLs, server names, credentials or upstream errors.
+
+Healthy means backend reachability, **not** ML accuracy, usable camera snapshots,
+or proof that every printer's monitoring loop is protecting an active print.
 
 ### Health Check
 ```bash
@@ -110,20 +256,18 @@ settings: {"confidence_threshold": 0.7}
            ↓
 ┌─────────────────────┐
 │ PrintFarmer API     │
-│ (Feature #1 Logic)  │
+│ Failure Detection  │
 └──────────┬──────────┘
-           │ HTTP POST /v1/detect
-           ↓
-┌─────────────────────┐
-│ Obico ML API        │◄─── Model Cache Volume
-│ (Flask + ONNX/DNN)  │     (obico-ml-model-cache)
-└─────────────────────┘
+           ├── HTTP ──► Obico ML API
+           └── HTTP ──► PrintGuard
 ```
 
 **Network Communication:**
-- Internal Docker network only
+- Optional services are selected independently and communicate over the
+  internal Docker network
 - PrintFarmer API → `http://obico-ml-api:3333`
-- No host port exposure (secure by default)
+- PrintFarmer API → `http://printguard:8000`
+- Neither service publishes a host port by default
 
 ## Resource Requirements
 
@@ -158,7 +302,7 @@ deploy:
 docker compose logs obico-ml-api
 
 # Verify image pull
-docker pull thespaghettidetective/ml_api:base-1.4
+docker pull ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
 
 # Check disk space (models are large)
 df -h
@@ -230,19 +374,19 @@ curl -H "Authorization: Bearer your-secret-token" \
 
 ## Upgrading
 
-**Update to latest model:**
+**Refresh the pinned image:**
 ```bash
-# Pull latest image
+# Pull the configured digest
 docker compose pull obico-ml-api
 
 # Restart service
 docker compose up -d obico-ml-api
 ```
 
-**Pin to specific version:**
+**Pin to the verified publisher image:**
 ```bash
 # In .env or compose file
-OBICO_ML_IMAGE=thespaghettidetective/ml_api:base-1.4
+OBICO_ML_IMAGE=ghcr.io/thespaghettidetective/obico-ml-api-cpu@sha256:e1b1c5b4cfc517ed884cad24e4a709d31b935ea49dab45ff60d31a62f4cb86ee
 ```
 
 ## References
@@ -254,9 +398,9 @@ OBICO_ML_IMAGE=thespaghettidetective/ml_api:base-1.4
 
 ## Status
 
-✅ **Docker infrastructure:** Complete (Parker, 2026-03-13)  
-⬜ **API integration:** Pending (Lambert, Feature #1)  
-⬜ **Frontend UI:** Pending (Quinn, Feature #1)  
+✅ **Docker infrastructure:** Obico ML API and optional PrintGuard add-on
+✅ **API integration:** Independent provider analysis and failure reporting
+✅ **Frontend UI:** Provider selection and failure-detection status
 
 ---
 

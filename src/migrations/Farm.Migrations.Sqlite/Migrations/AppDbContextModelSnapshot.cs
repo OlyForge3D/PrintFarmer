@@ -371,6 +371,115 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("BedClearCommandRecords");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcknowledgedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AcknowledgedBySubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CameraConfigurationAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CameraId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CapturedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GroundTruth")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("GroundTruthAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GroundTruthBySubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ImageFilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActiveReference")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsReferenceEligible")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ProcessingStartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("Score")
+                        .HasColumnType("REAL");
+
+                    b.Property<Guid?>("SourceAcknowledgementId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("ToolheadX")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("ToolheadY")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("ToolheadZ")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BedTypeId");
+
+                    b.HasIndex("CameraId");
+
+                    b.HasIndex("PrintJobId");
+
+                    b.HasIndex("SourceAcknowledgementId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearEvaluations_Acknowledgement");
+
+                    b.HasIndex("State")
+                        .HasDatabaseName("IX_BedClearEvaluations_State");
+
+                    b.HasIndex("PrinterId", "CameraId", "BedTypeId", "IsActiveReference", "GroundTruth")
+                        .HasDatabaseName("IX_BedClearEvaluations_ReferenceScope");
+
+                    b.ToTable("BedClearEvaluations", (string)null);
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2043,6 +2152,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("ResolvedAtUtc")
@@ -6059,6 +6173,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("Password")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("PrintGuardEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("TEXT");
 
@@ -8900,6 +9017,25 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsRequired();
 
                     b.Navigation("UserBalance");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearEvaluation", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.Camera", null)
+                        .WithMany()
+                        .HasForeignKey("CameraId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", null)
+                        .WithMany()
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Farm.Infrastructure.Domain.Printer", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationAttempt", b =>

@@ -60,13 +60,15 @@ Type assertions) are intentionally removed rather than mapped to empty suites.
 `scripts/tests/test_run_tests.py` checks every selected class/method against
 Swift sources and rejects selected classes without real test methods.
 
-Use **Xcode 26.6 (17F113)** and **iOS 26.5 (23F77)** for snapshot and simulator
-tests. CI uses GitHub's `macos-26` runner image and downloads iOS 26.5 when that
+Use **Xcode 26.6 (17F113)** and **iOS 26.5 (23F77)** for authoritative snapshot
+and simulator evidence. CI uses GitHub's `macos-26` runner image and downloads iOS 26.5 when that
 runtime is not already installed. The unchanged-snapshot default is supported by
 [the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
 Install iOS 26.5 in Xcode Settings > Components and create an available iPhone
 simulator. The shared resolver requires Python 3, rejects beta/unapproved
 builds even in fallbacks, and works without `GITHUB_ENV`.
+Xcode 26.6 is unsupported on macOS 27 or later; the resolver stops before
+simulator discovery. Use a macOS 26.2-26.x host for pinned test evidence.
 From the repository root:
 
 ```bash
@@ -77,11 +79,11 @@ cd mobile
   run_dir="$(mktemp -d "$PWD/build/snapshots.XXXXXX")"
   xcodebuild -version | tee "$run_dir/xcode.log"
   git rev-parse HEAD | tee "$run_dir/commit.log"
-  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
-  xcrun simctl list devices available -j > "$run_dir/devices.json"
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
   python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterDetailControlsSnapshotTests \
@@ -91,6 +93,44 @@ cd mobile
     2>&1 | tee "$run_dir/test.log"
 )
 ```
+
+### Local exploration on macOS 27
+
+For development only, macOS 27.x can run simulator tests with **Xcode 27.2
+(27B52)** and the same **iOS 26.5 (23F77)** runtime. Install that runtime and an
+available iPhone simulator in Xcode first. Set `DEVELOPER_DIR` to the installed
+Xcode 27.2 bundle; the path below is an example and does not change the
+system-wide Xcode selection.
+
+```bash
+cd mobile
+(
+  set -euo pipefail
+  export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+  mkdir -p build
+  run_dir="$(mktemp -d "$PWD/build/local-exploratory.XXXXXX")"
+  xcodebuild -version | tee "$run_dir/xcode.log"
+  sw_vers -productVersion | tee "$run_dir/macos.log"
+  git -C .. rev-parse HEAD | tee "$run_dir/commit.log"
+  git -C .. status --porcelain > "$run_dir/worktree-status.log"
+  simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --local-exploratory-udid 2>"$run_dir/destination.log")" ||
+    { cat "$run_dir/destination.log" >&2; exit 1; }
+  cat "$run_dir/destination.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
+  python3 scripts/run-tests.py -- test -scheme PrintFarmer \
+    -destination "platform=iOS Simulator,id=$simulator_udid" \
+    -only-testing:PrintFarmerTests/ModelsTests \
+    -parallel-testing-enabled NO \
+    -resultBundlePath "$run_dir/LocalExploratory.xcresult" \
+    2>&1 | tee "$run_dir/test.log"
+)
+```
+
+The explicit resolver mode rejects CI and `GITHUB_ENV`; its results are
+exploratory, not CI, release, or snapshot-acceptance evidence. Do not re-record
+goldens from this toolchain. The pinned workflow above still requires macOS
+26.2-26.x and Xcode 26.6.
 
 The shared test plan enables XCTest watchdogs. Isolated timeout investigations
 use a 60-second allowance without capping longer adjacent tests; see the

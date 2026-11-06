@@ -16,7 +16,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionTarget: 'North bay camera',
       lastOutcome: 'healthy',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastAutoPaused: false,
     };
 
     render(
@@ -45,7 +44,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       lastOutcome: 'healthy',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
       lastConfidence: 0.15,
-      lastAutoPaused: false,
     };
 
     render(
@@ -74,7 +72,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       lastOutcome: 'healthy',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
       lastConfidence: 0.42,
-      lastAutoPaused: false,
     };
 
     render(
@@ -89,7 +86,7 @@ describe('FailureDetectionMonitoringSummary', () => {
     expect(screen.getByRole('img', { name: /confidence 58%/i })).toBeInTheDocument();
   });
 
-  it('renders auto-pause incident with snapshot link and action badge', () => {
+  it('renders an advisory failure incident with snapshot link and review action', () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: 'printer-1',
       printerName: 'Voron 2.4',
@@ -101,16 +98,16 @@ describe('FailureDetectionMonitoringSummary', () => {
       lastOutcome: 'failure',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
       lastConfidence: 0.91,
-      lastAutoPaused: true,
       lastFailureDetectedAt: '2026-01-15T10:29:30Z',
     };
     const recentEvents: FailureDetectionEvent[] = [
       {
+        provider: 'Obico',
         printerId: 'printer-1',
         printerName: 'Voron 2.4',
         confidence: 0.91,
         detectedAt: '2026-01-15T10:29:30Z',
-        autoPaused: true,
+        autoPaused: false,
         snapshotUrl: 'http://example.com/snapshot-1.jpg',
       },
     ];
@@ -125,13 +122,13 @@ describe('FailureDetectionMonitoringSummary', () => {
       />
     );
 
-    expect(screen.getByText('Print auto-paused')).toBeInTheDocument();
+    expect(screen.getByText('Review required')).toBeInTheDocument();
     expect(screen.getByText('Action:')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /snapshot/i })).toHaveAttribute(
       'href',
       'http://example.com/snapshot-1.jpg'
     );
-    expect(screen.getByText(/Inspect print and verify/)).toBeInTheDocument();
+    expect(screen.getByText(/Check the live camera — pause or cancel if failure is confirmed/)).toBeInTheDocument();
   });
 
   it('surfaces operator action when coverage is blocked by setup issues', () => {
@@ -144,7 +141,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionSource: 'none',
       detectionTarget: '',
       lastOutcome: 'none',
-      lastAutoPaused: false,
     };
 
     render(
@@ -174,7 +170,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionSource: 'none',
       detectionTarget: '',
       lastOutcome: 'none',
-      lastAutoPaused: false,
     };
 
     render(
@@ -203,7 +198,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionSource: 'pooled',
       detectionTarget: 'North bay camera',
       lastOutcome: 'none',
-      lastAutoPaused: false,
     };
 
     render(
@@ -246,7 +240,6 @@ describe('FailureDetectionMonitoringSummary', () => {
         detectionTarget: 'North bay camera',
         lastOutcome: 'healthy',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastAutoPaused: false,
       };
 
       render(

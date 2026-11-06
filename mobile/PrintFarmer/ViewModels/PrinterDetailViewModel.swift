@@ -487,6 +487,21 @@ final class PrinterDetailViewModel {
                 self.applyLiveUpdate(update)
             }
         })
+        // `camerasupdated` (#3684): linked cameras changed for this printer,
+        // so reload canonical detail, which refetches camera metadata.
+        signalRSubscriptions.append(service.onCamerasUpdated { [weak self] event in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ),
+                      event.printerId == self.printerId else {
+                    return
+                }
+                self.requestCanonicalLoad()
+            }
+        })
         let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
             enqueue { [weak self] in
                 guard let self,

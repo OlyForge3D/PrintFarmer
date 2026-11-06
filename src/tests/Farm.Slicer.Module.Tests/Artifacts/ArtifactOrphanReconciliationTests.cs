@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Settings;
+﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Infrastructure.Settings;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -779,6 +780,10 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     private static void SetStale(string path) =>
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
 
+    [SuppressMessage(
+        "Design",
+        "CA1064:Exceptions should be public",
+        Justification = "This private exception is a test sentinel used only by this test class.")]
     private sealed class SimulatedHardTerminationException : Exception
     {
         public SimulatedHardTerminationException()

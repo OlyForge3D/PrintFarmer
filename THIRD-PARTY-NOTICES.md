@@ -21,6 +21,12 @@ PrintFarmer does not relicense OrcaSlicer. Upstream license, copyright, and
 modification notices shipped inside the AppImage or source tree must remain
 intact. The worker integration and deployment wrappers are PrintFarmer code.
 
+The marketing fleet screenshot also embeds eight model covers from OrcaSlicer
+v2.4.2, revision `8500fcdccaa10b5099ac20d252af3a7c560046f1`. The site publishes
+the upstream license text at `site/assets/orcaslicer-LICENSE.txt` and credits
+with revision-bound links to each cover at `site/image-notices.html`.
+See `docs/MARKETING_CAPTURES.md` for exact blob identities and provenance limits.
+
 ### PrusaSlicer
 
 - Project: [PrusaSlicer](https://github.com/prusa3d/PrusaSlicer)

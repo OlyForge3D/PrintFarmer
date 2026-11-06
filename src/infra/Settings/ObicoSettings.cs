@@ -12,18 +12,18 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public static string SectionKey => SectionName;
 
     [SettingDisplay(
-        Name = "Enable failure detection",
-        Description = "Enable automatic AI-powered failure detection for active print jobs.",
+        Name = "Enable Obico failure detection",
+        Description = "Allow printers with Obico monitoring enabled to be analyzed by the Obico ML API.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = false;
 
     [SettingDisplay(
         Name = "Obico ML API URL",
-        Description = "URL of the Obico ML API server (default: http://obico-ml-api:3333).",
+        Description = "URL of the Obico ML API server. Required when Obico failure detection is enabled.",
         InputType = SettingInputType.Text)]
     [JsonPropertyName("obicoApiUrl")]
-    public string ObicoApiUrl { get; set; } = "http://obico-ml-api:3333";
+    public string ObicoApiUrl { get; set; } = string.Empty;
 
     [SettingDisplay(
         Name = "Confidence threshold",
@@ -44,13 +44,6 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int ScanIntervalSeconds { get; set; } = 30;
 
     [SettingDisplay(
-        Name = "Auto-pause on failure",
-        Description = "Automatically pause the print job when a failure is detected.",
-        InputType = SettingInputType.Boolean)]
-    [JsonPropertyName("autoPauseOnFailure")]
-    public bool AutoPauseOnFailure { get; set; } = true;
-
-    [SettingDisplay(
         Name = "Startup delay", Unit = "seconds",
         Description = "How long the monitor waits after application start before beginning scans. Allows the database and printer connections to initialize. Setting this too low causes a burst of errors on every restart.",
         InputType = SettingInputType.Number,
@@ -61,7 +54,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
 
     [SettingDisplay(
         Name = "Print warmup grace period", Unit = "seconds",
-        Description = "How long to wait after a print starts before scanning for failures. Skips the nozzle heating, purge line, and first-layer adhesion phases that frequently trigger false positives. Reducing this significantly increases the risk of false auto-pauses.",
+        Description = "How long to wait after a print starts before scanning for failures. Skips the nozzle heating, purge line, and first-layer adhesion phases that frequently trigger false positives.",
         InputType = SettingInputType.Number,
         MinValue = 0,
         MaxValue = 600)]
@@ -79,15 +72,18 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
 
     public void Validate()
     {
-        if (string.IsNullOrWhiteSpace(ObicoApiUrl))
+        if (Enabled)
         {
-            throw new System.ComponentModel.DataAnnotations.ValidationException("Obico API URL is required.");
-        }
+            if (string.IsNullOrWhiteSpace(ObicoApiUrl))
+            {
+                throw new System.ComponentModel.DataAnnotations.ValidationException("Obico API URL is required.");
+            }
 
-        if (!Uri.TryCreate(ObicoApiUrl, UriKind.Absolute, out Uri? uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new System.ComponentModel.DataAnnotations.ValidationException("Obico API URL must be a valid HTTP or HTTPS URL.");
+            if (!Uri.TryCreate(ObicoApiUrl, UriKind.Absolute, out Uri? uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                throw new System.ComponentModel.DataAnnotations.ValidationException("Obico API URL must be a valid HTTP or HTTPS URL.");
+            }
         }
 
         if (ConfidenceThreshold < 0m || ConfidenceThreshold > 1m)

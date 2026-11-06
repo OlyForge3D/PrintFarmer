@@ -28,7 +28,7 @@ public class ProfilesControllerHierarchyCancellationTests
         cts.Cancel();
 
         _ = profilesService
-            .Setup(s => s.GetWorkerProfilesHierarchyAsync(It.IsAny<HttpClient>(), cts.Token))
+            .Setup(s => s.GetWorkerProfilesHierarchyAsync(It.IsAny<HttpClient>(), cts.Token, null))
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         ProfilesController controller = CreateController(profilesService, catalogService);
@@ -72,7 +72,7 @@ public class ProfilesControllerHierarchyCancellationTests
         CancellationToken requestToken = CancellationToken.None;
 
         _ = profilesService
-            .Setup(s => s.GetWorkerProfilesHierarchyAsync(It.IsAny<HttpClient>(), requestToken))
+            .Setup(s => s.GetWorkerProfilesHierarchyAsync(It.IsAny<HttpClient>(), requestToken, null))
             .ThrowsAsync(new OperationCanceledException(unrelatedCts.Token));
 
         ProfilesController controller = CreateController(profilesService, catalogService);

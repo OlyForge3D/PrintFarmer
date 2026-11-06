@@ -45,6 +45,9 @@ mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/xcrun" <<'MOCK'
 #!/bin/bash
 set -euo pipefail
+if [[ -n "${SIMCTL_CALL_MARKER:-}" ]]; then
+  touch "$SIMCTL_CALL_MARKER"
+fi
 case "$*" in
   "simctl list devices available -j") cat "$SIMCTL_FIXTURE" ;;
   "simctl list runtimes -j") cat "$SIMCTL_RUNTIME_FIXTURE" ;;
@@ -61,6 +64,18 @@ printf 'Xcode %s\nBuild version %s\n' \
   "${XCODE_BUILD_FIXTURE:-17F113}"
 MOCK
 chmod +x "$MOCK_BIN/xcodebuild"
+
+cat > "$MOCK_BIN/sw_vers" <<'MOCK'
+#!/bin/bash
+set -euo pipefail
+[[ "$*" == "-productVersion" ]] || { echo "Unexpected sw_vers arguments: $*" >&2; exit 64; }
+if [[ "${MACOS_VERSION_FAIL:-0}" == "1" ]]; then
+  echo "sw_vers failed" >&2
+  exit 1
+fi
+printf '%s\n' "${MACOS_VERSION_FIXTURE-26.6.2}"
+MOCK
+chmod +x "$MOCK_BIN/sw_vers"
 
 export SIMCTL_RUNTIME_FIXTURE="$TEMP_DIR/runtimes.json"
 cat > "$SIMCTL_RUNTIME_FIXTURE" <<'JSON'
@@ -170,6 +185,90 @@ test_xcode_build_policy() {
   fi
   assert_contains "$output" "Xcode 26.6 build 17F113 is required"
   assert_contains "$output" "Build version 17F114"
+}
+
+test_macos_version_policy() {
+  local version mode output github_env marker log_file
+  for version in 26.2 26.6.2; do
+    output="$(
+      env -u GITHUB_ENV -u IOS_SIMULATOR_DEVICE_FAMILY -u IOS_SIMULATOR_DEVICE_PREFIX \
+        -u IOS_SIMULATOR_DEVICE_PREFERENCE -u IOS_SIMULATOR_RUNTIME_PREFERENCE \
+        PATH="$MOCK_BIN:$PATH" MACOS_VERSION_FIXTURE="$version" \
+        SIMCTL_FIXTURE="$FIXTURE_MIXED" "$RESOLVER" --udid 2>"$TEMP_DIR/macos-supported.log"
+    )"
+    [[ "$output" == PHONE-15-UDID ]] || fail "Supported macOS $version selected '$output'"
+  done
+
+  for version in 25.7 26.0 26.1 27.0 27.2 28.0; do
+    for mode in local ci; do
+      github_env="$TEMP_DIR/macos-$version-$mode.env"
+      marker="$TEMP_DIR/macos-$version-$mode.simctl"
+      log_file="$TEMP_DIR/macos-$version-$mode.log"
+      printf '%s\n' "EXISTING=value" > "$github_env"
+      if [[ "$mode" == local ]]; then
+        if output="$(
+          env PATH="$MOCK_BIN:$PATH" MACOS_VERSION_FIXTURE="$version" \
+            SIMCTL_FIXTURE="$FIXTURE_MIXED" SIMCTL_CALL_MARKER="$marker" \
+            GITHUB_ENV="$github_env" "$RESOLVER" --udid 2>"$log_file"
+        )"; then
+          fail "Expected macOS $version to fail in local mode"
+        fi
+      else
+        if output="$(
+          env PATH="$MOCK_BIN:$PATH" MACOS_VERSION_FIXTURE="$version" \
+            SIMCTL_FIXTURE="$FIXTURE_MIXED" SIMCTL_CALL_MARKER="$marker" \
+            GITHUB_ENV="$github_env" "$RESOLVER" 2>"$log_file"
+        )"; then
+          fail "Expected macOS $version to fail in CI mode"
+        fi
+      fi
+      [[ -z "$output" ]] || fail "Rejected macOS emitted stdout: $output"
+      [[ ! -e "$marker" ]] || fail "Rejected macOS called xcrun"
+      [[ "$(cat "$github_env")" == "EXISTING=value" ]] || fail "Rejected macOS modified CI environment"
+      assert_contains "$(cat "$log_file")" "not supported on macOS $version"
+      assert_contains "$(cat "$log_file")" "macOS 26.2-26.x"
+    done
+  done
+
+  for version in malformed empty failed; do
+    marker="$TEMP_DIR/macos-$version.simctl"
+    github_env="$TEMP_DIR/macos-$version.env"
+    printf '%s\n' "EXISTING=value" > "$github_env"
+    case "$version" in
+      malformed) export MACOS_VERSION_FIXTURE="27beta" MACOS_VERSION_FAIL=0 ;;
+      empty) export MACOS_VERSION_FIXTURE="" MACOS_VERSION_FAIL=0 ;;
+      failed) export MACOS_VERSION_FIXTURE="26.6" MACOS_VERSION_FAIL=1 ;;
+    esac
+    if output="$(
+      env PATH="$MOCK_BIN:$PATH" SIMCTL_FIXTURE="$FIXTURE_MIXED" \
+        SIMCTL_CALL_MARKER="$marker" GITHUB_ENV="$github_env" \
+        "$RESOLVER" --udid 2>"$TEMP_DIR/macos-$version.log"
+    )"; then
+      fail "Expected $version macOS detection to fail"
+    fi
+    [[ -z "$output" ]] || fail "Invalid macOS detection emitted stdout: $output"
+    [[ ! -e "$marker" ]] || fail "Invalid macOS detection called xcrun"
+    [[ "$(cat "$github_env")" == "EXISTING=value" ]] || fail "Invalid macOS detection modified CI environment"
+    assert_contains "$(cat "$TEMP_DIR/macos-$version.log")" "cannot check Xcode 26.6 compatibility"
+  done
+  unset MACOS_VERSION_FIXTURE MACOS_VERSION_FAIL
+}
+
+test_app_store_caller_reports_unsupported_host() {
+  local output
+  local marker="$TEMP_DIR/app-store.simctl"
+  if output="$(
+    env -u APP_STORE_IPHONE_SIMULATOR -u APP_STORE_IPAD_SIMULATOR \
+      PATH="$MOCK_BIN:$PATH" MACOS_VERSION_FIXTURE="27.2" \
+      SIMCTL_FIXTURE="$FIXTURE_MIXED" SIMCTL_CALL_MARKER="$marker" \
+      python3 -B "$REPO_ROOT/mobile/scripts/app-store-screenshots.py" \
+      2>"$TEMP_DIR/app-store.log"
+  )"; then
+    fail "Expected App Store capture to reject the unsupported host"
+  fi
+  [[ -z "$output" ]] || fail "App Store rejection emitted stdout: $output"
+  [[ ! -e "$marker" ]] || fail "App Store capture called xcrun on the unsupported host"
+  assert_contains "$(cat "$TEMP_DIR/app-store.log")" "not supported on macOS 27.2"
 }
 
 test_explicit_ipad_with_quoted_names() {
@@ -349,12 +448,93 @@ PY
   assert_contains "$(cat "$TEMP_DIR/local.log")" "23F77"
 }
 
+test_local_exploratory_policy() {
+  local output marker log_file indicator value version build host
+  log_file="$TEMP_DIR/exploratory.log"
+  output="$(
+    env -u CI -u GITHUB_ACTIONS -u GITHUB_ENV -u IOS_SIMULATOR_DEVICE_FAMILY \
+      -u IOS_SIMULATOR_DEVICE_PREFIX -u IOS_SIMULATOR_DEVICE_PREFERENCE \
+      -u IOS_SIMULATOR_RUNTIME_PREFERENCE \
+      PATH="$MOCK_BIN:$PATH" XCODE_VERSION_FIXTURE="27.2" \
+      XCODE_BUILD_FIXTURE="27B52" MACOS_VERSION_FIXTURE="27.2" \
+      SIMCTL_FIXTURE="$FIXTURE_MIXED" "$RESOLVER" --local-exploratory-udid \
+      2>"$log_file"
+  )"
+  [[ "$output" == PHONE-15-UDID ]] || fail "Exploratory destination polluted: $output"
+  assert_contains "$(cat "$log_file")" "LOCAL EXPLORATORY ONLY"
+  assert_contains "$(cat "$log_file")" "not pinned CI, release, or snapshot-acceptance evidence"
+  assert_contains "$(cat "$log_file")" "iOS 26.5, 23F77"
+
+  for indicator in CI GITHUB_ACTIONS GITHUB_ENV; do
+    marker="$TEMP_DIR/exploratory-$indicator.simctl"
+    value=true
+    if [[ "$indicator" == GITHUB_ENV ]]; then
+      value="$TEMP_DIR/exploratory-github.env"
+      printf '%s\n' "EXISTING=value" > "$value"
+    fi
+    if output="$(
+      env -u CI -u GITHUB_ACTIONS -u GITHUB_ENV \
+        PATH="$MOCK_BIN:$PATH" XCODE_VERSION_FIXTURE="27.2" \
+        XCODE_BUILD_FIXTURE="27B52" MACOS_VERSION_FIXTURE="27.2" \
+        SIMCTL_FIXTURE="$FIXTURE_MIXED" SIMCTL_CALL_MARKER="$marker" \
+        "$indicator=$value" "$RESOLVER" --local-exploratory-udid 2>"$log_file"
+    )"; then
+      fail "Exploratory mode accepted $indicator"
+    fi
+    [[ -z "$output" && ! -e "$marker" ]] || fail "CI rejection selected a simulator"
+    assert_contains "$(cat "$log_file")" "cannot be used in CI or with GITHUB_ENV"
+    if [[ "$indicator" == GITHUB_ENV ]]; then
+      [[ "$(cat "$value")" == "EXISTING=value" ]] || fail "Exploratory mode modified GITHUB_ENV"
+    fi
+  done
+
+  while read -r version build host; do
+    marker="$TEMP_DIR/exploratory-$version-$build-$host.simctl"
+    if output="$(
+      env -u CI -u GITHUB_ACTIONS -u GITHUB_ENV \
+        PATH="$MOCK_BIN:$PATH" XCODE_VERSION_FIXTURE="$version" \
+        XCODE_BUILD_FIXTURE="$build" MACOS_VERSION_FIXTURE="$host" \
+        SIMCTL_FIXTURE="$FIXTURE_MIXED" SIMCTL_CALL_MARKER="$marker" \
+        "$RESOLVER" --local-exploratory-udid 2>"$log_file"
+    )"; then
+      fail "Exploratory mode accepted Xcode $version ($build) on macOS $host"
+    fi
+    [[ -z "$output" && ! -e "$marker" ]] || fail "Unapproved host selected a simulator"
+    if [[ "$version" != 27.2 || "$build" != 27B52 ]]; then
+      assert_contains "$(cat "$log_file")" "Xcode 27.2 build 27B52 is required"
+    else
+      assert_contains "$(cat "$log_file")" "requires macOS 27.x"
+    fi
+  done <<'CASES'
+27.0 27A266a 27.2
+27.2 27B53 27.2
+27.2 27B52 26.6
+27.2 27B52 28.0
+CASES
+
+  if output="$(
+    env -u CI -u GITHUB_ACTIONS -u GITHUB_ENV \
+      PATH="$MOCK_BIN:$PATH" XCODE_VERSION_FIXTURE="27.2" \
+      XCODE_BUILD_FIXTURE="27B52" MACOS_VERSION_FIXTURE="27.2" \
+      SIMCTL_FIXTURE="$TEMP_DIR/same-version-beta-devices.json" \
+      SIMCTL_RUNTIME_FIXTURE="$TEMP_DIR/same-version-beta-runtimes.json" \
+      "$RESOLVER" --local-exploratory-udid 2>"$log_file"
+  )"; then
+    fail "Exploratory mode accepted an unapproved runtime build"
+  fi
+  [[ -z "$output" ]] || fail "Unapproved exploratory runtime emitted a destination"
+  assert_contains "$(cat "$log_file")" "Approved runtime: iOS 26.5 (23F77)"
+}
+
 test_shared_workflow_policy() {
   python3 - "$REPO_ROOT" <<'PY'
 import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
+for workflow in (root / '.github/workflows').glob('*.y*ml'):
+    assert '--local-exploratory-udid' not in workflow.read_text(), workflow.name
+
 for name, count in [('ios-pr-ci', 3), ('ios-live-sensor-e2e', 1), ('ci', 1), ('testflight-beta', 1)]:
     text = (root / f'.github/workflows/{name}.yml').read_text()
     assert text.count('runs-on: macos-26') == count, name
@@ -387,10 +567,13 @@ PY
 test_default_iphone
 test_xcode_version_policy
 test_xcode_build_policy
+test_macos_version_policy
+test_app_store_caller_reports_unsupported_host
 test_explicit_ipad_with_quoted_names
 test_no_matching_family
 test_invalid_family_and_prefix
 test_runtime_policy
+test_local_exploratory_policy
 test_shared_workflow_policy
 
 log_success "resolve-ios-simulator.sh tests passed"

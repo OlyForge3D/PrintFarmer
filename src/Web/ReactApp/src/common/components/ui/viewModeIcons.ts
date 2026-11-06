@@ -1,22 +1,47 @@
+import {
+  mdiMapMarker,
+  mdiPrinter3d,
+  mdiTable,
+  mdiViewAgenda,
+  mdiViewComfy,
+  mdiViewCompact,
+  mdiViewGrid,
+  mdiViewList,
+} from '@mdi/js';
+
 /**
- * MDI icon paths for common view modes
- * 
- * These paths are extracted from Material Design Icons (@mdi/js) for use
- * with the ViewToggle component without requiring the full MDI dependency.
+ * MDI icon paths for semantic view kinds. Every kind has a distinct glyph.
+ */
+export const viewKindIcons = {
+  cards: mdiViewGrid,
+  table: mdiTable,
+  list: mdiViewList,
+  compactCards: mdiViewCompact,
+  detailedCards: mdiViewComfy,
+  explorer: mdiViewAgenda,
+  locationGroups: mdiMapMarker,
+  printerGroups: mdiPrinter3d,
+} as const;
+
+export type ViewKind = keyof typeof viewKindIcons;
+
+/**
+ * Legacy MDI icon paths retained for consumers outside ViewToggle.
  */
 export const viewModeIcons = {
   /** Grid of cards (mdiViewGrid) */
   grid: 'M3,11H11V3H3M3,21H11V13H3M13,21H21V13H13M13,3V11H21V3',
-  /** Table/list view (mdiViewList) */
-  table: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
-  /** List view (mdiViewList) - alias for table */
+  /** Table view (mdiTable) */
+  table: mdiTable,
+  /** List view (mdiViewList) */
   list: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
-  /** Compact cards (mdiViewGrid) - alias for grid */
-  compact: 'M3,11H11V3H3M3,21H11V13H3M13,21H21V13H13M13,3V11H21V3',
+  /** Compact cards (mdiViewCompact) */
+  compact: mdiViewCompact,
   /** Collapsed view (mdiViewList) */
   collapsed: 'M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z',
   /** Expandable view (mdiViewComfy) */
-  expandable: 'M2,4V20H22V4H2M4,6H8V10H4V6M4,18V12H8V18H4M20,18H10V14H20V18M20,12H10V6H20V12Z',
+  expandable: mdiViewComfy,
+  explorer: mdiViewAgenda,
   /** Quilt/tile view (mdiViewQuilt) */
   quilt: 'M10,5V11H21V5M16,18H21V12H16M10,18H15V12H10M3,5V18H9V5H3Z',
   /** Glass effect (mdiBlur) */
@@ -33,35 +58,20 @@ export const viewModeIcons = {
   drawer: 'M22,4V2H2V4H11V18.17L5.5,12.67L4.08,14.08L12,22L19.92,14.08L18.5,12.67L13,18.17V4H22Z',
 } as const;
 
-/**
- * Type for built-in view mode icon names
- */
 export type ViewModeIconName = keyof typeof viewModeIcons;
 
-/**
- * A single view mode option
- */
 export interface ViewModeOption<T extends string = string> {
-  /** The mode value */
   mode: T;
-  /** MDI icon path string, or a key from viewModeIcons */
-  icon: string | ViewModeIconName;
-  /** Tooltip/title for the button */
+  kind: ViewKind;
   title: string;
 }
 
-/**
- * Pre-configured options for grid/table toggle (catalog pages)
- */
 export const gridTableOptions: ViewModeOption<'grid' | 'table'>[] = [
-  { mode: 'grid', icon: 'grid', title: 'Grid view' },
-  { mode: 'table', icon: 'table', title: 'Table view' },
+  { mode: 'grid', kind: 'cards', title: 'Grid view' },
+  { mode: 'table', kind: 'table', title: 'Table view' },
 ];
 
-/**
- * Pre-configured options for grid/list toggle
- */
 export const gridListOptions: ViewModeOption<'grid' | 'list'>[] = [
-  { mode: 'grid', icon: 'grid', title: 'Grid view' },
-  { mode: 'list', icon: 'list', title: 'List view' },
+  { mode: 'grid', kind: 'cards', title: 'Grid view' },
+  { mode: 'list', kind: 'list', title: 'List view' },
 ];

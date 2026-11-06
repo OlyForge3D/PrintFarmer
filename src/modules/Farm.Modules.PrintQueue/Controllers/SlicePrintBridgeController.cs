@@ -182,37 +182,13 @@ public class SlicePrintBridgeController(
 
         // File.ReadAllTextAsync (used previously) strips a leading UTF-8 byte-order-mark via
         // StreamReader's BOM detection. Decoding the raw bytes directly does not: a BOM byte
-        // sequence decodes to a literal U+FEFF character, which would prepend the first g-code
-        // command and let it silently evade the safety interpreter's line parsing. Trim it so
-        // validation behaves identically to a BOM-stripped read.
+        // sequence decodes to a literal U+FEFF character. Preserve the BOM-stripped text
+        // contract for empty-input validation and report metadata.
         string gcodeText = System.Text.Encoding.UTF8.GetString(gcodeBytes).TrimStart('\uFEFF');
 
-        // 7. Run the general g-code safety pass before this program is ever streamed to a
-        // physical printer. This is not calibration-scoped: any command is allowed
-        // (AllowedCommands: null), and the machine envelope is sourced from the printer/
-        // toolhead domain fields, never from Printer.Calibration* columns.
-        GcodeSafetyLimits safetyLimits;
-        try
-        {
-            safetyLimits = BuildSafetyLimits(printer);
-        }
-        catch (InvalidSafetyGeometryException ex)
-        {
-            logger.LogError(
-                ex,
-                "Printer {PrinterId} has invalid printable-polygon/excluded-region configuration; refusing to send gcode without a trustworthy safety envelope",
-                printer.Id);
-            return BadRequest(new
-            {
-                error = "Printer geometry configuration (printable polygon or excluded regions) is invalid and cannot be safely enforced.",
-                printerId = printer.Id,
-                detail = ex.Message,
-            });
-        }
-
+        // 7. Reject empty input only; firmware and operators own command safety.
         GcodeSafetyResult<GcodeSafetyReport> safetyResult = gcodeSafetyValidator.Validate(
             new GcodeSafetyRequest(
-                safetyLimits,
                 gcodeText,
                 GcodeSafetyCheckpoint.BeforeSendToPrinter));
 
@@ -245,29 +221,6 @@ public class SlicePrintBridgeController(
         }
 
         return await UploadOnlyAsync(id, request.PrinterId, fileName, uploadStream, ct);
-    }
-
-    /// <summary>
-    /// Builds the authoritative g-code safety envelope for <paramref name="printer"/> from its
-    /// own domain fields and primary toolhead. Deliberately does not read any
-    /// <c>Printer.Calibration*</c> column: those are calibration-scoped ceilings slated for
-    /// removal and must never gate the general send-to-printer safety pass.
-    /// </summary>
-    /// <exception cref="InvalidSafetyGeometryException">
-    /// The printer has a configured (non-null) <c>PrintablePolygonJson</c> or
-    /// <c>ExcludedRegionsJson</c> value that is malformed or geometrically invalid. Callers must
-    /// treat this as a request failure, not fall back to an unguarded envelope.
-    /// </exception>
-    private static GcodeSafetyLimits BuildSafetyLimits(Farm.Infrastructure.Domain.Printer printer)
-    {
-        try
-        {
-            return PrinterGcodeSafetyLimits.Build(printer);
-        }
-        catch (GcodeSafetyGeometryException ex)
-        {
-            throw new InvalidSafetyGeometryException(ex.Message, ex);
-        }
     }
 
     /// <summary>
@@ -346,6 +299,21 @@ public class SlicePrintBridgeController(
             });
         }
 
+        if (request.AssignedPrinterId is Guid printerId)
+        {
+            if (resourceAuthorization is not null &&
+                !await resourceAuthorization.CanAccessPrinterAsync(
+                    User, printerId, PrinterGroupAccessLevel.Submit, ct))
+            {
+                return NotFound(new { error = "Printer not found.", printerId });
+            }
+
+            if (await printersService.FindByIdWithIncludesAsync(printerId, ct) is null)
+            {
+                return NotFound(new { error = "Printer not found.", printerId });
+            }
+        }
+
         // 3. Commit the staged artifact through the same durable promotion path used by Save.
         var actor = new CalibrationActor(
             userId,
@@ -398,7 +366,7 @@ public class SlicePrintBridgeController(
         var queueDto = new QueuePrintJobDto
         {
             GcodeFileId = promotion.Value.GcodeFileId,
-            AssignedPrinterId = null, // auto-dispatch
+            AssignedPrinterId = request.AssignedPrinterId,
             Priority = request.Priority ?? PrintJobPriority.Normal,
             Copies = request.Copies ?? 1,
             RequiredPrinterModel = request.RequiredPrinterModel,
@@ -643,29 +611,4 @@ public class SlicePrintBridgeController(
                 "Calibration slice output must be promoted as an immutable G-code artifact and " +
                 "created through POST /api/job-queue. Direct send and generic slice import are not allowed.",
         });
-}
-
-/// <summary>
-/// Thrown by <see cref="SlicePrintBridgeController"/> when a printer's configured (non-null)
-/// printable-polygon or excluded-region JSON is present but invalid — malformed JSON, missing
-/// required coordinates, or fewer than three points in a polygon. Unlike an unconfigured
-/// (<see langword="null"/>) field, which means "no geometry guard was ever set up" and safely
-/// skips that check, a configured-but-broken value is a data-integrity problem on an
-/// authoritative safety envelope and must fail closed rather than silently disable the guard.
-/// </summary>
-public sealed class InvalidSafetyGeometryException : Exception
-{
-    public InvalidSafetyGeometryException()
-    {
-    }
-
-    public InvalidSafetyGeometryException(string message)
-        : base(message)
-    {
-    }
-
-    public InvalidSafetyGeometryException(string message, Exception innerException)
-        : base(message, innerException)
-    {
-    }
 }

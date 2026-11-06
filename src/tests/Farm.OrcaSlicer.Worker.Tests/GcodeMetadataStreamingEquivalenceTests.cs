@@ -117,8 +117,10 @@ public sealed class GcodeMetadataStreamingEquivalenceTests : IDisposable
         OrcaSlicingPipelineService.GcodeMetadata actual =
             await OrcaSlicingPipelineService.ExtractGcodeMetadataAsync(path, CancellationToken.None);
 
+        // Filament usage is intentionally excluded: the legacy regex never matched Orca's
+        // "; filament used [g] = N" footer and fell back to a file-size guess. It is pinned by
+        // GcodeMetadataFilamentParsingTests instead.
         actual.PrintTimeSeconds.Should().Be(expected.PrintTimeSeconds, "print time for {0}", path);
-        actual.FilamentUsageGrams.Should().Be(expected.FilamentUsageGrams, "filament usage for {0}", path);
         actual.LayerCount.Should().Be(expected.LayerCount, "layer count for {0}", path);
     }
 

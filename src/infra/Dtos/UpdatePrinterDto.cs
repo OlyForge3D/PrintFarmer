@@ -54,6 +54,7 @@ public record UpdatePrinterDto(
 
     // Obico AI failure detection opt-in
     bool? ObicoEnabled = null,
+    bool? PrintGuardEnabled = null,
 
     // Z-offset calibration
     decimal? ZOffsetMm = null,

@@ -9,6 +9,7 @@ import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal'
 import { Modal } from '@/common/components/modals/Modal';
 import { PrinterLocationDragDrop } from '@/features/printers/components/PrinterLocationDragDrop';
 import { Button, Input, Textarea, FormField } from '@/common/components/ui';
+import { HeaderActions } from '@/common/components/ui';
 
 interface TreeRowViewProps {
   node: LocationTreeNode;
@@ -313,11 +314,13 @@ export const LocationManagement: React.FC<LocationManagementProps> = ({
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className={clsx(embedded ? 'text-xl' : 'text-3xl', 'font-bold text-pf-text-primary')}>Printer Locations</h2>
+        <HeaderActions>
         {!showForm && (
-          <Button onClick={() => { setFormData({ name: '', description: '', parentId: initialParentId ?? null }); setShowForm(true); }}>
+          <Button control onClick={() => { setFormData({ name: '', description: '', parentId: initialParentId ?? null }); setShowForm(true); }}>
             Add Location
           </Button>
         )}
+        </HeaderActions>
       </div>
 
       {error && (

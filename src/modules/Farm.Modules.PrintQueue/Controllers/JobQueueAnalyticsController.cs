@@ -328,7 +328,9 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
-    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status, deadline, deadline_desc)</param>
+    /// <param name="sortBy">Sort mode (default completedAt/newest; oldest, duration [descending], duration_asc,
+    /// name, status, printer, model, material, filament, cost, deadline; each named field except duration
+    /// also supports a _desc suffix). Sorting and deterministic ID ties are applied before pagination.</param>
     /// <param name="statuses">Comma-separated list of statuses to filter by (completed, failed, cancelled)</param>
     /// <param name="dateStart">Start date filter (ISO 8601 format, inclusive)</param>
     /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>

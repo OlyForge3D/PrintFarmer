@@ -40,6 +40,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MmuControlAction = Farm.Infrastructure.Services.Printers.MmuControlAction;
 using MmuControlProtocol = Farm.Infrastructure.Services.Printers.MmuControlProtocol;
@@ -88,7 +89,8 @@ public partial class PrintersController(
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
     Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IOptionsMonitor<PrintGuardShadowSettings>? printGuardSettings = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -99,6 +101,7 @@ public partial class PrintersController(
     private readonly AppDbContext? _appDbContext = appDbContext;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? _printerSafetyGuard = printerSafetyGuard;
+    private readonly IOptionsMonitor<PrintGuardShadowSettings>? _printGuardSettings = printGuardSettings;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -1363,7 +1366,8 @@ public partial class PrintersController(
             false,
             false,
             rowVersion,
-            p.ShowExternalSpool);
+            p.ShowExternalSpool,
+            p.PrintGuardEnabled);
     }
 
     /// <summary>
@@ -1879,6 +1883,27 @@ public partial class PrintersController(
             return BadRequest(metrologyProblem);
         }
 
+        // Validate PrintGuard opt-in before provider updates that may persist through a separate
+        // DbContext, such as Obico server assignment.
+        if (dto.PrintGuardEnabled == true && !p.PrintGuardEnabled)
+        {
+            PrintGuardShadowSettings? settings = _printGuardSettings?.CurrentValue;
+            if (settings is null
+                || !settings.Enabled
+                || !settings.TryGetClassificationEndpoint(out _))
+            {
+                return BadRequest(new
+                {
+                    error = "PrintGuard is not enabled with valid deployment configuration. Configure PFARM__PrintGuardShadow__Enabled and PFARM__PrintGuardShadow__ApiUrl before opting in a printer."
+                });
+            }
+
+            if (p.Cameras == null || p.Cameras.Count == 0)
+            {
+                return BadRequest(new { error = "PrintGuard monitoring requires at least one camera configured on the printer." });
+            }
+        }
+
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
         // from PopulateCredential's decrypt → EncryptSensitiveFieldsOnTrackedEntities's re-encrypt cycle
         string? originalApiKey = p.ApiKey;
@@ -2065,6 +2090,11 @@ public partial class PrintersController(
                 p.ObicoEnabled = false;
                 await _obicoServerAssignment.UnassignServerAsync(p.Id, ct);
             }
+        }
+
+        if (dto.PrintGuardEnabled.HasValue && dto.PrintGuardEnabled.Value != p.PrintGuardEnabled)
+        {
+            p.PrintGuardEnabled = dto.PrintGuardEnabled.Value;
         }
 
         // Track if any capability field changed to conditionally update LastCapabilityUpdate
@@ -2400,7 +2430,8 @@ public partial class PrintersController(
             UseModelDispatchDefaults: p.UseModelDispatchDefaults,
             RowVersion: EncodeRowVersion(p.RowVersion),
             ConfigurationRevision: p.ConfigurationRevision,
-            ShowExternalSpool: p.ShowExternalSpool);
+            ShowExternalSpool: p.ShowExternalSpool,
+            PrintGuardEnabled: p.PrintGuardEnabled);
 
         return Ok(dtoResponse);
     }

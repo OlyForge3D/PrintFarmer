@@ -24,6 +24,17 @@ export interface ArtifactListItemResponse {
   isPrimary: boolean;
 }
 
+export type SliceProfileSelection =
+  | { source: 'system'; name: string; customProfileId?: never }
+  | { source: 'user'; name: string; customProfileId: string };
+
+export interface SliceProfileSelections {
+  machine: SliceProfileSelection;
+  process: SliceProfileSelection;
+  /** Ordered by physical extruder index, including repeated selections. */
+  filaments: SliceProfileSelection[];
+}
+
 // Slice Job DTOs matching backend
 export interface SubmitSliceJobRequest {
   userId: string;
@@ -45,6 +56,8 @@ export interface SubmitSliceJobRequest {
   slicerProfileJson: string;
   // Optional reference to a stored slicer profile (takes precedence over slicerProfileJson if provided)
   slicerProfileId?: string;
+  /** Explicit identities are resolved to immutable native snapshots by the server. */
+  profileSelections?: SliceProfileSelections;
   requiredCapabilitiesJson: string;
   priority?: number;
   modelTransformJson?: string;
@@ -82,6 +95,7 @@ export function formatQueuePositionSuffix(
 
 export interface SliceJobStatusResponse {
   id: string;
+  printerId?: string | null;
   status: string;
   /**
    * Slicer engine version resolved on submit (issue #578). Null/undefined
@@ -240,6 +254,7 @@ export interface SpoolCostResponse {
 
 export interface AddSliceToQueueRequest {
   artifactId: string;
+  assignedPrinterId?: string | null;
   priority?: string;
   spoolId?: number;
   copies?: number;

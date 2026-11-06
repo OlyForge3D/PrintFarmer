@@ -224,7 +224,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 QueueActorIdentity.AutoDispatch,
@@ -295,7 +295,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
                     false));
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 QueueActorIdentity.AutoDispatch,
@@ -366,7 +366,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
                     false));
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 reviewedJob.Id,
                 printer.Id,
                 QueueActorIdentity.AutoDispatch,
@@ -468,7 +468,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
         const string actorSubject = "8a196a30-022e-4c5f-92e6-dc13677b5bf6";
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 actorSubject,
@@ -572,7 +572,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
         const string actorSubject = "operator-unknown";
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 actorSubject,
@@ -721,7 +721,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
             FilamentPreflightEvaluator.ComputeVersion(changedCheck);
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 "operator-claim-change",
@@ -1291,7 +1291,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchReviewedJobAsync(
+            .Setup(service => service.DispatchBedClearConfirmedJobAsync(
                 unassignedJob.Id,
                 printer.Id,
                 QueueActorIdentity.AutoDispatch,

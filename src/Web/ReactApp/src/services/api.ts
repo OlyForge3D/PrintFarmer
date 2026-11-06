@@ -4667,6 +4667,40 @@ export class ApiClient {
     return response.data;
   }
 
+  async getBedClearEvaluations(printerId: string): Promise<import('@/types/api').BedClearEvaluationDto[]> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async captureBedClearEvaluation(printerId: string): Promise<{ id: string }> {
+    const response = await this.client.post(`/bed-clear-detector/printers/${printerId}/evaluations`);
+    return response.data;
+  }
+
+  async getBedClearDetectorMetrics(printerId: string): Promise<import('@/types/api').BedClearDetectorMetricsDto> {
+    const response = await this.client.get(`/bed-clear-detector/printers/${printerId}/metrics`);
+    return response.data;
+  }
+
+  async getBedClearEvaluationImage(evaluationId: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/bed-clear-detector/evaluations/${evaluationId}/image`,
+      { responseType: 'blob' }
+    );
+    return response.data;
+  }
+
+  async labelBedClearEvaluation(
+    evaluationId: string,
+    groundTruth: import('@/types/api').BedClearGroundTruth
+  ): Promise<void> {
+    await this.client.put(`/bed-clear-detector/evaluations/${evaluationId}/label`, { groundTruth });
+  }
+
+  async deleteBedClearEvaluation(evaluationId: string): Promise<void> {
+    await this.client.delete(`/bed-clear-detector/evaluations/${evaluationId}`);
+  }
+
   /**
    * Link a camera to a printer (idempotent). isPrimary=true makes it the printer's primary camera.
    */
