@@ -17,7 +17,7 @@ export function SelectableRow({ isSelected = false, className, children, ref, ..
   // same utilities layer -- so an unconditional hover would repaint a selected
   // row and erase its highlight (#1088). Every selectable table row whose only
   // selection signal is a background is conditional for that reason. (Some
-  // non-table pickers -- LocationTreePicker, WorkerSelector -- do pair an
+  // non-table pickers -- LocationTreePicker -- do pair an
   // unconditional hover with a tinted selection, but they also carry accent
   // text or a ring, so the selection survives the repaint.)
   const classes = `${isSelected ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'} transition-colors ${className ?? ''}`.trim();
@@ -28,4 +28,3 @@ export function SelectableRow({ isSelected = false, className, children, ref, ..
     </tr>
   );
 }
-

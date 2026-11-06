@@ -98,7 +98,7 @@ function hasActiveJobs(jobs: SliceJobStatusResponse[]): boolean {
 
 /**
  * Embeddable slice jobs panel with real-time updates, filtering, and job actions.
- * Used both standalone (SliceJobsPage) and embedded (WorkerManagementPage Jobs tab).
+ * Embedded in the WorkerManagementPage Jobs tab.
  */
 export function SliceJobsPanel() {
   const queryClient = useQueryClient();
