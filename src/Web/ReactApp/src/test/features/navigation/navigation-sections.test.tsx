@@ -7,6 +7,7 @@ import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import { getNavPreferencesStorageKey, NAV_PREFERENCES_VERSION, saveNavPreferences } from '@/common/utils/navPreferences';
 
 import { createStorageEvent } from '@/test/utils/storage-event';
+import { tasksApi } from '@/services/tasksApi';
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -87,8 +88,10 @@ vi.mock('@/services/printer-signalr', () => ({
   },
 }));
 
-vi.mock('@/features/tasks', () => ({
-  TasksBadge: () => null,
+vi.mock('@/services/tasksApi', () => ({
+  tasksApi: {
+    getPendingCount: vi.fn().mockResolvedValue(0),
+  },
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
@@ -122,7 +125,47 @@ describe('Navigation rail sections', () => {
     mockUserRole = 'farm_admin';
     mockPermissionOverride = null;
     mockIsAuthenticated = true;
+    vi.mocked(tasksApi.getPendingCount).mockReset().mockResolvedValue(0);
     localStorage.clear();
+  });
+
+  it.each([1, 4, 12])('places the %i pending-tasks badge immediately before System in each responsive header', async (count) => {
+    vi.mocked(tasksApi.getPendingCount).mockResolvedValue(count);
+    const { container } = renderLayout();
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle(`${count} pending task${count === 1 ? '' : 's'}`)).toHaveLength(2);
+    });
+
+    const headers = container.querySelectorAll('header');
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveClass('hidden', 'lg:flex');
+    expect(headers[1]).toHaveClass('lg:hidden');
+    for (const header of headers) {
+      const badge = within(header).getByTitle(`${count} pending task${count === 1 ? '' : 's'}`);
+      expect(badge).toHaveAttribute('href', '/dashboard');
+      expect(badge).toHaveTextContent(count > 9 ? '9+' : String(count));
+      expect(badge.nextElementSibling).toContainElement(within(header).getByRole('button', { name: /system/i }));
+      expect(header.querySelectorAll('a[title*="pending task"]')).toHaveLength(1);
+    }
+    expect(container.querySelector('aside a[title*="pending task"]')).toBeNull();
+    expect(container.querySelector('#mobile-navigation-drawer a[title*="pending task"]')).toBeNull();
+  });
+
+  it('hides pending-tasks badges when the count is zero', async () => {
+    renderLayout();
+
+    await waitFor(() => expect(tasksApi.getPendingCount).toHaveBeenCalled());
+    expect(screen.queryAllByTitle(/pending tasks?/)).toHaveLength(0);
+  });
+
+  it('does not render or fetch pending-tasks badges for signed-out visitors', () => {
+    mockIsAuthenticated = false;
+    vi.mocked(tasksApi.getPendingCount).mockResolvedValue(4);
+    renderLayout();
+
+    expect(screen.queryAllByTitle(/pending tasks?/)).toHaveLength(0);
+    expect(tasksApi.getPendingCount).not.toHaveBeenCalled();
   });
 
   it('renders the new left rail sections with grouped child links', async () => {

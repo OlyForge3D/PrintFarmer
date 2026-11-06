@@ -15,6 +15,7 @@ import {
 import { NotificationBell } from '@/common/components/NotificationBell';
 import { Button } from '@/common/components/ui';
 import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
+import { TasksBadge } from '@/features/tasks/components/TasksBadge';
 
 // These are standalone `const` strings rather than `className` attributes, so the
 // radius rule cannot see them and each corner below was decided by hand. The bar
@@ -85,6 +86,7 @@ export function FloatingControlBar({
 
   const bar = (
     <div className={mobile ? MOBILE_BAR_CLASS_NAME : FLOATING_BAR_CLASS_NAME}>
+      {isAuthenticated && <TasksBadge />}
       <SystemPulsePill onClick={onViewSystemStatus} compact={compact} />
       {isAuthenticated && <NotificationBell buttonClassName={ICON_BUTTON_CLASS_NAME} />}
 

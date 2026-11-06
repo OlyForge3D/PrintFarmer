@@ -1,7 +1,6 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
-import { TasksBadge } from '@/features/tasks/components/TasksBadge';
 import { InstallBanner } from '@/common/components/InstallBanner';
 import { ReleaseUpdateBanner } from '@/features/admin/components/ReleaseUpdateBanner';
 import clsx from 'clsx';
@@ -1088,7 +1087,7 @@ export function Layout() {
               need — that mismatch was pushing the account button past the
               viewport edge even though nothing here looked clipped. All
               squeeze pressure lands on the truncating title on the left
-              instead. The attention/tasks badges are secondary — if space is
+              instead. The printer attention badge is secondary — if space is
               still tight after that they scroll away first (never invisibly
               clipped, since this container isn't the ancestor's
               `overflow-hidden`). The status, notification, and account
@@ -1113,8 +1112,6 @@ export function Layout() {
                   </span>
                 </Button>
               )}
-
-              {isAuthenticated && <TasksBadge />}
             </div>
             <FloatingControlBar
               mobile
@@ -1246,10 +1243,6 @@ export function Layout() {
               )}
 
               <div className={clsx('flex items-center gap-2', navbarCollapsed ? 'flex-col' : 'justify-between')}>
-                <div className={clsx('flex items-center gap-2', navbarCollapsed && 'flex-col')}>
-                  {isAuthenticated && <TasksBadge />}
-                </div>
-
                 <div className="flex items-center gap-2">
                   {navbarCollapsed && pendingAttentionCount > 0 && (
                     <Button
