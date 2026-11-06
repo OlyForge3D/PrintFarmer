@@ -58,6 +58,7 @@
        exercise real backend-client types and EF Core migration assemblies directly. -->
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\tools\ObicoRollbackPreflight\ObicoRollbackPreflight.csproj" />
     <ProjectReference Include="..\Farm.Testing.Shared\Farm.Testing.Shared.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />

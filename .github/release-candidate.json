@@ -1,0 +1,17 @@
+{
+  "branch": "release/v0.2.3",
+  "target": "0.2.3",
+  "sourceCommit": "a07fb2cdaf85ea5a90f7eed36d1cb4ef842508b3",
+  "owner": "jpapiez",
+  "qualification": "https://github.com/OlyForge3D/PrintFarmer/issues/3697 - pending routing-only qualification; not approved for publication or activation",
+  "created": "2026-11-06T23:18:48Z",
+  "expires": "2026-11-13T23:18:48Z",
+  "publish": false,
+  "source": {
+    "deployedCommit": "05078dcb5dc237f38ffe672e88cb6fd026562082",
+    "routingPatchBase": "297117976b514505d5846b0af0166256d46a1d6b",
+    "routingPatchHead": "1f5b31064e3bf305fda1d9f8e3c3dd16d65cb14d",
+    "scope": "Complete 42-path routing patch plus narrowly related qualification fixes; excludes the 39-path unrelated cleanup"
+  },
+  "removalGate": "Retain recovery and provenance evidence; remove only after documented abandonment or separately authorized publication and reviewed merge-back parity. Neither publication nor deletion is authorized by this record."
+}

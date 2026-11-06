@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <DirectoryBuildPropsPath>$(MSBuildThisFileDirectory)../../src/Directory.Build.props</DirectoryBuildPropsPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Match src/.editorconfig: this repository does not require file headers. -->
+    <NoWarn>$(NoWarn);SA1633</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/infra/Farm.Infrastructure.csproj" />
+    <InternalsVisibleTo Include="Farm.Infrastructure.Tests" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+</Project>

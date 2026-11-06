@@ -92,6 +92,47 @@ Global-only installations retain explicit manual analysis for idle printers
 when Obico is enabled and the legacy destination is available. Health probes,
 not arbitrary camera inference, remain the idle pool diagnostics.
 
+### Rollback safety
+
+Rollback requires an idle maintenance window and a fresh, verified, matched
+pre-upgrade backup of the whole database, artifact blobs, configuration, key
+rings, and certificates. Restore and verify that backup in isolation first.
+Running EF migration `Down` alone is not a rollback: it cannot recover cleared
+legacy printer pins, and the old API misinterprets per-print routing state and
+can use the global destination when the new API would refuse overflow.
+Never run old and new APIs concurrently against the farm.
+
+**Before starting any old API**, check the isolated restored Obico settings
+with the rollback package's `Farm.Infrastructure.dll` and its SHA-256 from an
+independently trusted artifact manifest. A hash calculated from the selected
+DLL itself, or a locally rebuilt old-source DLL, is not proof that it is the
+deployed rollback artifact. Keep its packaged dependencies beside the DLL.
+From `src`, run the preflight without starting API or printer services:
+
+```powershell
+dotnet run --project ..\tools\ObicoRollbackPreflight -- sqlite <isolated-restored-db-path> <rollback-infrastructure-dll> <trusted-sha256>
+```
+
+For PostgreSQL or SQL Server, use `postgres` or `sqlserver` instead of `sqlite`
+and `-` instead of the database path. Supply
+`PFARM_ROLLBACK_CONNECTION_STRING` through the local process environment, with
+least-privilege read-only access to an explicitly isolated restored database;
+do not put credentials on the command line or point the tool at production.
+
+The tool requires exactly one nonempty saved Obico row and invokes the selected
+old binary's settings validator. Pool-only settings with Obico enabled and an
+empty legacy URL are incompatible with the old validator. Missing, duplicate,
+malformed, null, incompatible, or unverifiable settings block rollback; the
+tool does not repair configuration, disable monitoring, or accept configuration
+fallback silently. A successful check covers **Obico settings only**, not other
+settings, schema compatibility, backup matching, or permission to activate.
+
+Restoring a backup loses subsequent database writes. Operators must reconcile
+jobs and reservations with physical printer state before activation; database
+rollback does not rewind a printer. If compatibility cannot be proven, keep the
+old API stopped and resolve the restore with the operator rather than weakening
+validation or silently changing monitoring.
+
 ## Quick Start
 
 ### Select deployment providers
