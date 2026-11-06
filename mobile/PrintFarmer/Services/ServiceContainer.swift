@@ -363,10 +363,12 @@ final class ServiceContainer: @unchecked Sendable {
         signalRServiceFactory: @escaping SignalRServiceFactory = { baseURL, client in
             SignalRService(
                 serverURL: baseURL,
-                session: APIClient.makePrivateNetworkSession()
-            ) {
-                client.currentAccessToken()
-            }
+                session: APIClient.makePrivateNetworkSession(),
+                tokenProvider: { client.currentAccessToken() },
+                queueSubscriptionResourcesProvider: {
+                    try await client.get("/api/job-queue/subscription-resources")
+                }
+            )
         }
     ) {
         self.serverRegistry = serverRegistry
@@ -1360,10 +1362,12 @@ final class ServiceContainer: @unchecked Sendable {
         self.signalRServiceFactory = { baseURL, client in
             SignalRService(
                 serverURL: baseURL,
-                session: APIClient.makePrivateNetworkSession()
-            ) {
-                await client.currentAccessToken()
-            }
+                session: APIClient.makePrivateNetworkSession(),
+                tokenProvider: { await client.currentAccessToken() },
+                queueSubscriptionResourcesProvider: {
+                    try await client.get("/api/job-queue/subscription-resources")
+                }
+            )
         }
         self.offlineReplayProviderResolutionHook = {}
         self.farmShapeStore = FarmShapeStore()

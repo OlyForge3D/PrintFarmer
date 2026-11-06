@@ -17,6 +17,8 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
     private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
+    private let queueEventHub: SignalREventHub<QueueEvent>
+    private let camerasUpdatedHub: SignalREventHub<CamerasUpdatedEvent>
     private let capturedAttentionLock = NSLock()
     private var capturedAttentionHandlers:
         [@Sendable (AttentionChangedEvent) -> Void] = []
@@ -35,6 +37,8 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
         self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
+        self.queueEventHub = SignalREventHub<QueueEvent>(coordinator: coordinator)
+        self.camerasUpdatedHub = SignalREventHub<CamerasUpdatedEvent>(coordinator: coordinator)
     }
 
     /// Race-free connection-state read; drains any pending mutation before
@@ -117,6 +121,16 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     @discardableResult
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
         jobQueueUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription {
+        queueEventHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onCamerasUpdated(_ handler: @escaping @Sendable (CamerasUpdatedEvent) -> Void) -> SignalRSubscription {
+        camerasUpdatedHub.subscribe(handler)
     }
 
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
@@ -206,6 +220,16 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         jobQueueUpdateHub.deliverSync(update)
     }
 
+    /// Simulate a `queueevent` envelope (#3684).
+    func simulateQueueEvent(_ event: QueueEvent) {
+        queueEventHub.deliverSync(event)
+    }
+
+    /// Simulate a `camerasupdated` invalidation (#3684).
+    func simulateCamerasUpdated(_ event: CamerasUpdatedEvent) {
+        camerasUpdatedHub.deliverSync(event)
+    }
+
     // MARK: - Test introspection
 
     var connectionStateSubscriberCount: Int { connectionStateHub.handlerCountForTesting }
@@ -224,6 +248,8 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }
     var jobQueueSubscriberCount: Int { jobQueueUpdateHub.handlerCountForTesting }
+    var queueEventSubscriberCount: Int { queueEventHub.handlerCountForTesting }
+    var camerasUpdatedSubscriberCount: Int { camerasUpdatedHub.handlerCountForTesting }
     var printerSubscriptionCalls: [[UUID]] {
         printerSubscriptionLock.lock()
         defer { printerSubscriptionLock.unlock() }

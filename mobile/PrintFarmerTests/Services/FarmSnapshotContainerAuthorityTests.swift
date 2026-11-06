@@ -61,6 +61,8 @@ private final class OrphanProbeSignalR: SignalRServiceProtocol, @unchecked Senda
     }
     @discardableResult func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription { base.onPrinterUpdated(handler) }
     @discardableResult func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription { base.onJobQueueUpdated(handler) }
+    @discardableResult func onQueueEvent(_ handler: @escaping @Sendable (QueueEvent) -> Void) -> SignalRSubscription { base.onQueueEvent(handler) }
+    @discardableResult func onCamerasUpdated(_ handler: @escaping @Sendable (CamerasUpdatedEvent) -> Void) -> SignalRSubscription { base.onCamerasUpdated(handler) }
     @discardableResult func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription { base.onAttentionChanged(handler) }
     @discardableResult func onFilamentCoverageChanged(_ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void) -> SignalRSubscription { base.onFilamentCoverageChanged(handler) }
     @discardableResult func onTaskInvalidated(_ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void) -> SignalRSubscription { base.onTaskInvalidated(handler) }
