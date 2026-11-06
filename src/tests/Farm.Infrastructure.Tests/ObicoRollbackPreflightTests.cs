@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Settings;
 using Microsoft.Data.Sqlite;
 using Xunit;
