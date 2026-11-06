@@ -3,7 +3,7 @@ using Farm.Infrastructure.Settings;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
-namespace Farm.Infrastructure.Tests;
+namespace Farm.Infrastructure.Tests.Settings;
 
 public sealed class ObicoRollbackPreflightTests
 {
