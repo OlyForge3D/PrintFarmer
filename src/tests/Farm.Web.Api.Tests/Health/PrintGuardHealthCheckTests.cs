@@ -66,7 +66,8 @@ public sealed class PrintGuardHealthCheckTests
         {
             request.Method.Should().Be(HttpMethod.Get);
             request.Content.Should().BeNull();
-            (request.Headers.Authorization?.Parameter).Should().Be(token);
+            (request.Headers.Authorization?.Parameter).Should().Be(
+                request.RequestUri!.AbsolutePath == "/prefix/api/health" ? null : token);
             return Task.FromResult(Json(request.RequestUri!.AbsolutePath == "/prefix/api/health"
                 ? """{"ok":true,"version":"2.6.5"}""" : "[]"));
         };
@@ -167,6 +168,64 @@ public sealed class PrintGuardHealthCheckTests
     }
 
     [Fact]
+    public async Task CheckHealthAsync_BodyStreamFails_RedactsAndCachesDegradedResult()
+    {
+        using var fixture = new Fixture();
+        var stream = new Mock<Stream>();
+        stream.Setup(value => value.CanRead).Returns(true);
+#pragma warning disable IDISP013 // The mocked read returns a faulted ValueTask; the response owns and disposes the stream.
+        stream.Setup(value => value.ReadAsync(It.IsAny<Memory<byte>>(), It.IsAny<CancellationToken>()))
+            .Returns(() => ValueTask.FromException<int>(new HttpIOException(HttpRequestError.ResponseEnded, "private transport diagnostics")));
+#pragma warning restore IDISP013
+        fixture.Handler.Response = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(stream.Object),
+        });
+
+        HealthCheckResult result = await fixture.Check.CheckHealthAsync(new());
+        await fixture.Check.CheckHealthAsync(new());
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Data["enabled"].Should().Be(true);
+        result.Exception.Should().BeNull();
+        JsonSerializer.Serialize(result).Should().NotContain("private").And.NotContain("transport diagnostics");
+        fixture.Handler.Paths.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_UnexpectedClientFailure_RedactsAndCachesDegradedResult()
+    {
+        using var fixture = new Fixture();
+        fixture.Factory.Setup(factory => factory.CreateClient("PrintGuard"))
+            .Throws(new InvalidOperationException("private factory diagnostics"));
+
+        HealthCheckResult result = await fixture.Check.CheckHealthAsync(new());
+        await fixture.Check.CheckHealthAsync(new());
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Data["enabled"].Should().Be(true);
+        result.Exception.Should().BeNull();
+        JsonSerializer.Serialize(result).Should().NotContain("private");
+        fixture.Factory.Verify(factory => factory.CreateClient("PrintGuard"), Times.Once);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ConfigurationBindingFails_ReportsSafeDegradedAvailability()
+    {
+        var options = new Mock<IOptionsMonitor<PrintGuardShadowSettings>>();
+        options.Setup(value => value.CurrentValue).Throws(new InvalidOperationException("private configuration details"));
+        var factory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
+        var check = new PrintGuardHealthCheck(options.Object, factory.Object, NullLogger<PrintGuardHealthCheck>.Instance);
+
+        HealthCheckResult result = await check.CheckHealthAsync(new());
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Data["enabled"].Should().Be(true);
+        result.Description.Should().Contain("configuration could not be read");
+        JsonSerializer.Serialize(result).Should().NotContain("private");
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_OversizedResponse_ReportsBoundedFailure()
     {
         using var fixture = new Fixture();
@@ -197,6 +256,39 @@ public sealed class PrintGuardHealthCheckTests
     }
 
 #pragma warning disable IDISP013, VSTHRD003 // Deliberate concurrent callers; all tasks finish before fixture disposal.
+    [Fact]
+    public async Task CheckHealthAsync_SupersededProbeFinishesLast_ExpiresFromActiveProbeCompletion()
+    {
+        using var fixture = new Fixture();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Handler.Response = async (request, ct) =>
+        {
+            if (request.RequestUri!.Host == "provider.invalid" && request.RequestUri.AbsolutePath == "/api/health")
+            {
+                started.TrySetResult();
+                await finish.Task.WaitAsync(ct);
+            }
+
+            return Json(request.RequestUri.AbsolutePath == "/api/health"
+                ? """{"ok":true,"version":"2.6.5"}""" : "[]");
+        };
+        Task<HealthCheckResult> original = fixture.Check.CheckHealthAsync(new());
+        await started.Task;
+        fixture.Settings.ApiUrl = "http://replacement.invalid";
+        await fixture.Check.CheckHealthAsync(new());
+        DateTimeOffset activeCompletedAt = fixture.Clock.Now;
+        fixture.Clock.Now += TimeSpan.FromSeconds(5);
+        finish.SetResult();
+        await original;
+        fixture.Handler.Paths.Should().HaveCount(4);
+
+        fixture.Clock.Now = activeCompletedAt + PrintGuardHealthCheck.CacheDuration;
+        await fixture.Check.CheckHealthAsync(new());
+
+        fixture.Handler.Paths.Should().HaveCount(6);
+    }
+
     [Fact]
     public async Task CheckHealthAsync_ConcurrentAndCancelledCallers_ShareProbeAndRespectConfigurationChanges()
     {
@@ -249,6 +341,7 @@ public sealed class PrintGuardHealthCheckTests
             .AddPrintFarmerHealthChecks().BuildServiceProvider();
         HealthCheckRegistration registration = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
             .Value.Registrations.Single(value => value.Name == PrintGuardHealthCheck.Name);
+        registration.FailureStatus.Should().Be(HealthStatus.Degraded);
         using IServiceScope first = provider.CreateScope();
         using IServiceScope second = provider.CreateScope();
         registration.Factory(first.ServiceProvider).Should().BeSameAs(registration.Factory(second.ServiceProvider));

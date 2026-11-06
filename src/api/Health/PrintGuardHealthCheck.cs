@@ -27,12 +27,23 @@ public sealed class PrintGuardHealthCheck(
     private Task<HealthCheckResult>? _pending;
     private DateTimeOffset _completedAt = DateTimeOffset.MinValue;
     private (string Url, string? Token, int RequestTimeout, int CaptureTimeout)? _configuration;
+    private long _generation;
 
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        PrintGuardShadowSettings settings = settingsMonitor.CurrentValue;
+        PrintGuardShadowSettings settings;
+        try
+        {
+            settings = settingsMonitor.CurrentValue;
+        }
+        catch (Exception ex)
+        {
+            LogUnexpectedFailure(ex);
+            return Degraded("PrintGuard configuration could not be read: check the enabled flag, service URL and numeric timeouts");
+        }
+
         if (!settings.Enabled)
         {
             return HealthCheckResult.Healthy("PrintGuard failure detection disabled", Data(enabled: false));
@@ -56,7 +67,8 @@ public sealed class PrintGuardHealthCheck(
                 || (_pending.IsCompleted && _clock.GetUtcNow() - _completedAt >= CacheDuration))
             {
                 _configuration = configuration;
-                _pending = ProbeAndCacheAsync(settings.ApiUrl, settings.ApiToken, settings.RequestTimeoutSeconds);
+                _pending = ProbeAndCacheAsync(new Uri(endpoint, "../../"), settings.ApiToken,
+                    settings.RequestTimeoutSeconds, ++_generation);
             }
 
             pending = _pending;
@@ -66,18 +78,14 @@ public sealed class PrintGuardHealthCheck(
         return await pending.WaitAsync(cancellationToken);
     }
 
-    private async Task<HealthCheckResult> ProbeAndCacheAsync(string url, string? token, int requestTimeoutSeconds)
+    private async Task<HealthCheckResult> ProbeAndCacheAsync(Uri baseAddress, string? token, int requestTimeoutSeconds, long generation)
     {
         using var timeout = new CancellationTokenSource(
             TimeSpan.FromSeconds(Math.Min(requestTimeoutSeconds, ProbeTimeout.TotalSeconds)));
         try
         {
             using HttpClient client = httpClientFactory.CreateClient("PrintGuard");
-            client.BaseAddress = new Uri(url.TrimEnd('/') + "/");
-            if (!string.IsNullOrEmpty(token))
-            {
-                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            }
+            client.BaseAddress = baseAddress;
 
             using HttpResponseMessage health = await client.GetAsync(
                 "api/health", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
@@ -99,8 +107,14 @@ public sealed class PrintGuardHealthCheck(
 
             // /api/health is auth-exempt. This read route uses the same scope as
             // /api/v1/classify, so a healthy hub alone cannot hide a rejected token.
-            using HttpResponseMessage access = await client.GetAsync(
-                "api/v1/monitors", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            using var accessRequest = new HttpRequestMessage(HttpMethod.Get, "api/v1/monitors");
+            if (!string.IsNullOrEmpty(token))
+            {
+                accessRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            using HttpResponseMessage access = await client.SendAsync(
+                accessRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!access.IsSuccessStatusCode)
             {
                 return Degraded(access.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
@@ -133,14 +147,25 @@ public sealed class PrintGuardHealthCheck(
         {
             return Degraded("PrintGuard availability response exceeded the 64 KB limit");
         }
+        catch (Exception ex)
+        {
+            LogUnexpectedFailure(ex);
+            return Degraded("PrintGuard availability could not be determined: check provider and application logs");
+        }
         finally
         {
             lock (_gate)
             {
-                _completedAt = _clock.GetUtcNow();
+                if (_generation == generation)
+                {
+                    _completedAt = _clock.GetUtcNow();
+                }
             }
         }
     }
+
+    private void LogUnexpectedFailure(Exception exception) =>
+        logger.LogWarning("PrintGuard health check failed with {ExceptionType}", exception.GetType().Name);
 
     private HealthCheckResult Degraded(string description)
     {

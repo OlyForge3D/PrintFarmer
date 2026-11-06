@@ -1,4 +1,5 @@
 ﻿using Farm.Web.Api.Health;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Farm.Web.Api.Startup;
 
@@ -20,7 +21,7 @@ public static class HealthCheckStartup
             .AddCheck<SignalRHealthCheck>("signalr")
             .AddCheck<SpoolmanHealthCheck>("spoolman")
             .AddCheck<ObicoHealthCheck>(ObicoHealthCheck.Name)
-            .AddCheck<PrintGuardHealthCheck>(PrintGuardHealthCheck.Name)
+            .AddCheck<PrintGuardHealthCheck>(PrintGuardHealthCheck.Name, failureStatus: HealthStatus.Degraded)
             .AddCheck<QueueConsumersHealthCheck>(QueueConsumersHealthCheck.Name);
 
         return services;
