@@ -165,6 +165,14 @@ replicated.
 
 ### PrintFarmer system health
 
+Obico administration and system health share an egress-validated prediction-route
+probe. For the bundled upstream API, the expected HTTP 400 response must contain
+an empty `detections` array and a `Failed to get image` message identifying the
+exact synthetic probe URL. That response proves route compatibility, not image
+fetching or classification. Unrelated HTTP 400 responses, authorization failures,
+server errors, and unreachable endpoints still fail validation. Legacy servers
+are checked separately through their supported upload contract.
+
 PrintFarmer's `/health` also includes a `printguard` check. When the global
 PrintGuard integration is disabled, it does not contact the provider and its
 Admin Control Center and detailed System Health cards are hidden. When enabled,
