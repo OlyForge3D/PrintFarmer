@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Authorization;
+﻿using System.Data;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
@@ -46,7 +47,13 @@ public class ObicoServerController : ControllerBase
             .OrderBy(s => s.Name)
             .ToListAsync(ct);
 
-        return Ok(servers.Select(ToDto).ToList());
+        Dictionary<Guid, int> activeCounts = await _dbContext.PrinterServiceStates
+            .Where(state => state.ObicoServerId != null && state.ObicoPrintKey != null)
+            .GroupBy(state => state.ObicoServerId!.Value)
+            .Select(group => new { ServerId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(group => group.ServerId, group => group.Count, ct);
+
+        return Ok(servers.Select(server => ToDto(server, activeCounts.GetValueOrDefault(server.Id))).ToList());
     }
 
     /// <summary>
@@ -63,7 +70,7 @@ public class ObicoServerController : ControllerBase
             return NotFound($"Obico server with ID {id} not found");
         }
 
-        return Ok(ToDto(server));
+        return Ok(ToDto(server, await CountActivePrintsAsync(id, ct)));
     }
 
     /// <summary>
@@ -77,6 +84,11 @@ public class ObicoServerController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        if (dto.MaxConcurrentAnalyses is <= 0)
+        {
+            return BadRequest("Concurrent print capacity must be greater than zero.");
         }
 
         // Validate URL format
@@ -137,6 +149,11 @@ public class ObicoServerController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        if (dto.MaxConcurrentAnalyses is <= 0)
+        {
+            return BadRequest("Concurrent print capacity must be greater than zero.");
         }
 
         ObicoServer? server = await _dbContext.ObicoServers.FindAsync([id], ct);
@@ -230,7 +247,7 @@ public class ObicoServerController : ControllerBase
             "[ObicoServer] Updated Obico server: {ServerId} ({ServerName})",
             server.Id, LogSanitizer.Sanitize(server.Name));
 
-        return Ok(ToDto(server));
+        return Ok(ToDto(server, await CountActivePrintsAsync(id, ct)));
     }
 
     /// <summary>
@@ -242,31 +259,37 @@ public class ObicoServerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteServerAsync(Guid id, CancellationToken ct)
     {
-        ObicoServer? server = await _dbContext.ObicoServers
-            .Include(s => s.PrinterServiceStates)
-            .FirstOrDefaultAsync(s => s.Id == id, ct);
-
-        if (server == null)
+        return await _dbContext.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            return NotFound($"Obico server with ID {id} not found");
-        }
+            // Allocation uses the same isolation: no print may acquire a slot between
+            // this capacity check and deletion of the server's cascading references.
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            ObicoServer? server = await _dbContext.ObicoServers
+                .FirstOrDefaultAsync(s => s.Id == id, ct);
 
-        // Check if any printers are assigned to this server
-        if (server.PrinterServiceStates.Count > 0)
-        {
-            return BadRequest(
-                $"Cannot delete Obico server '{server.Name}' because {server.PrinterServiceStates.Count} printer(s) are assigned to it. " +
-                "Please reassign or remove the printers first.");
-        }
+            if (server == null)
+            {
+                return (IActionResult)NotFound($"Obico server with ID {id} not found");
+            }
 
-        _dbContext.ObicoServers.Remove(server);
-        await _dbContext.SaveChangesAsync(ct);
+            int activePrints = await CountActivePrintsAsync(id, ct);
+            if (activePrints > 0)
+            {
+                return BadRequest(
+                    $"Cannot delete Obico server '{server.Name}' because {activePrints} active print reservation(s) use it. " +
+                    "Wait for the prints to finish and the next monitoring scan to release their capacity.");
+            }
 
-        _logger.LogInformation(
-            "[ObicoServer] Deleted Obico server: {ServerId} ({ServerName})",
-            server.Id, LogSanitizer.Sanitize(server.Name));
+            _dbContext.ObicoServers.Remove(server);
+            await _dbContext.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
 
-        return NoContent();
+            _logger.LogInformation(
+                "[ObicoServer] Deleted Obico server: {ServerId} ({ServerName})",
+                server.Id, LogSanitizer.Sanitize(server.Name));
+
+            return NoContent();
+        });
     }
 
     /// <summary>
@@ -310,7 +333,11 @@ public class ObicoServerController : ControllerBase
         };
     }
 
-    private static ObicoServerDto ToDto(ObicoServer server)
+    private Task<int> CountActivePrintsAsync(Guid serverId, CancellationToken ct) =>
+        _dbContext.PrinterServiceStates.CountAsync(
+            state => state.ObicoServerId == serverId && state.ObicoPrintKey != null, ct);
+
+    private static ObicoServerDto ToDto(ObicoServer server, int activePrintCount = 0)
     {
         return new ObicoServerDto
         {
@@ -320,6 +347,7 @@ public class ObicoServerController : ControllerBase
             IsEnabled = server.IsEnabled,
             HasApiKey = !string.IsNullOrEmpty(server.ApiKey),
             MaxConcurrentAnalyses = server.MaxConcurrentAnalyses,
+            ActivePrintCount = activePrintCount,
             CreatedAt = server.CreatedAt,
             UpdatedAt = server.UpdatedAt
         };
@@ -345,6 +373,9 @@ public sealed class ObicoServerDto
     public bool HasApiKey { get; init; }
 
     public int MaxConcurrentAnalyses { get; init; }
+
+    /// <summary>Print-lifetime reservations, including temporarily unavailable printers.</summary>
+    public int ActivePrintCount { get; init; }
 
     public DateTime CreatedAt { get; init; }
 

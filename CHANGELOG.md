@@ -2,6 +2,12 @@
 
 ### Features
 
+- Route Obico monitoring per print instead of permanently pinning printers
+  (#3693). Reserve healthy pool capacity through warmup, pauses, and API
+  restarts; release it when prints end. Unavailable monitoring never blocks
+  printing or automatically pauses printers. Apply `AddObicoPrintRouting`;
+  configured pools no longer silently overflow to the legacy global URL.
+
 - Add rich printer-file settings and durable thumbnails through one bounded,
   confirmed-idle background pipeline for Moonraker, OctoPrint, and PrusaLink
   (#3570, #3571). Native metadata takes precedence over bounded G-code/BGCode

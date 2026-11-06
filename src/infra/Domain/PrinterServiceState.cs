@@ -42,10 +42,18 @@ public class PrinterServiceState : IRevisionedEntity
     /// </summary>
     public DateTime? LastStatsSyncAttemptedAt { get; set; }
 
-    /// <summary>Internal Obico ML server assignment.</summary>
+    /// <summary>Obico pool slot held by the current print, not a printer preference.</summary>
     public Guid? ObicoServerId { get; set; }
 
     public ObicoServer? ObicoServer { get; set; }
+
+    /// <summary>Identity of the print holding this route; null for legacy printer pins.</summary>
+    [MaxLength(100)]
+    public string? ObicoPrintKey { get; set; }
+
+    /// <summary>Legacy global-only destination selected for the current print.</summary>
+    [MaxLength(500)]
+    public string? ObicoFallbackUrl { get; set; }
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;

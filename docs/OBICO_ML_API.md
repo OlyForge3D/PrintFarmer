@@ -25,6 +25,73 @@ Detection is advisory only. PrintFarmer does not automatically pause, cancel,
 or control printers based on these results. Operators remain responsible for
 reviewing alerts and deciding whether to take action.
 
+## Per-print Obico routing
+
+Printer settings select **whether** Obico monitoring is wanted, not a permanent
+server. On the first monitoring scan observing a starting or active print,
+PrintFarmer reserves an enabled, reachable server with spare capacity. Selection
+prefers the lowest fraction of occupied slots, then the lowest reservation count.
+The existing `maxConcurrentAnalyses` API/configuration property now means
+**simultaneous monitored prints**, not registered printers or instantaneous HTTP
+requests. Warmup and operator pauses retain a slot.
+
+The route is persisted with the print identity in `PrinterServiceState`, so API
+restarts and concurrent starts do not redistribute ongoing prints or overbook the
+shared database budget. Apply `AddObicoPrintRouting` for PostgreSQL, SQL Server,
+and migrated SQLite installations before running the new API. Existing saved
+pool entries and capacities are preserved; old permanent printer pins are cleared
+and active prints are allocated under the new rules on the first scan.
+Do not run old and new API versions against the same farm during cutover: old
+instances do not understand print reservations.
+
+Completion, cancellation, failure, a different print identity, or monitoring
+opt-out releases the reservation on the next scan. All ended prints are released
+before new prints are allocated. Starting managed jobs reserve before the image
+warmup grace period expires. Externally started prints use the live printer
+status and adopt the synthetic external job identity when that record appears.
+Without a backend job identity, repeated same-file prints cannot be distinguished
+unless an intervening non-printing state is observed.
+
+Offline or missing telemetry is **not** proof that a print ended: its reservation
+is retained until a terminal state or tracked job completion is observed.
+This intentionally favors continuity over reclaiming uncertain capacity.
+An operator can opt the printer out to release a stranded reservation. Routing
+is scan-based (startup delay and scan interval apply), not on the physical
+printer-command path, and never delays a print start.
+
+If no healthy server has capacity, monitoring reports unavailable and retries
+allocation on later scans. If the selected server fails or is disabled, that
+print retains its slot and reports unavailable monitoring while retrying the
+**same** server; it does not silently fail over, submit to a global overflow
+destination, or pause/cancel the printer. Other printers and PrintGuard continue
+independently. A healthy connectivity probe is not proof of successful inference:
+analysis errors remain visible in each provider's monitoring status.
+
+The global Obico URL remains supported for installations with **no registered
+pool entries**. This legacy mode has no configurable pool capacity limit.
+Register a pool entry to enforce a budget, even for one server. Once a pool
+exists, disabled, unreachable, or full pool entries never fall back to the
+global URL; remove all pool entries to return to global-only routing. Global
+prints already running when a pool is added retain their global route until
+they finish. Changing that global URL makes those old routes unavailable rather
+than silently substituting another destination.
+
+Admin server cards show **active print reservations / concurrent print capacity**.
+The server list/detail API includes additive `activePrintCount`; legacy
+`maxConcurrentAnalyses` names and saved values remain compatible. Capacity edits
+do not evict ongoing prints. Servers with active reservations cannot be deleted;
+wait for completion and reconciliation. Disabling a server prevents new
+reservations and visibly degrades its current monitoring without controlling
+its printers.
+
+`POST /api/failure-detection/analyze/{printerId}` also uses the active print's
+reserved route and requires access to that printer. It returns HTTP 503 without
+inference when the route is unavailable or no print has reserved pool capacity;
+manual requests do not create permanent printer pins or bypass a full pool.
+Global-only installations retain explicit manual analysis for idle printers
+when Obico is enabled and the legacy destination is available. Health probes,
+not arbitrary camera inference, remain the idle pool diagnostics.
+
 ## Quick Start
 
 ### Select deployment providers
@@ -194,9 +261,10 @@ classification/model accuracy or proof that a printer has usable camera frames.
 
 PrintFarmer's `/health` includes an `obico` check. When failure detection is
 disabled it reports Healthy without contacting Obico, and the Admin Control
-Center hides its tile. When enabled it actively probes the global fallback
-endpoint and all enabled pooled servers, even on an idle farm. Disabled or
-missing server assignments fall back to the global URL, matching monitoring.
+Center hides its tile. When enabled it actively probes all enabled pooled
+servers, even on an idle farm. The global endpoint is probed only in global-only
+mode or while a pre-existing global print is finishing after a pool was added.
+A disabled pool is unavailable, not permission to bypass its capacity budget.
 
 The check shares the administrative server connectivity probe: guarded,
 address-pinned `GET /p/` with the existing legacy `POST /p/` compatibility

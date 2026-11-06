@@ -7319,6 +7319,14 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ObicoFallbackUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObicoPrintKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("TEXT");
 

@@ -50,6 +50,7 @@ See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidenc
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
+✅ **Advisory Print Monitoring** - [Obico per-print capacity routing and independent PrintGuard alerts](./docs/OBICO_ML_API.md#per-print-obico-routing); neither automatically pauses printers
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
 ### Moonraker temperature and sensor controls

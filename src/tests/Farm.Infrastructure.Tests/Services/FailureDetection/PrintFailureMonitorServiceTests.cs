@@ -7,6 +7,67 @@ namespace Farm.Infrastructure.Tests.Services.FailureDetection;
 
 public class PrintFailureMonitorServiceTests
 {
+    [Theory]
+    [InlineData("Heating")]
+    [InlineData("Printing")]
+    [InlineData("Paused")]
+    [InlineData("Resuming")]
+    public void ResolvePrintActivity_TrackedPrintAcrossActiveStates_RetainsStableJobIdentity(string state)
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        var status = new PrinterStatusDto(printerId, true, state);
+
+        ObicoPrintActivity result = PrintFailureMonitorService.ResolvePrintActivity(printerId, status, jobId, PrintJobStatus.Printing);
+
+        result.PrintKey.Should().Be($"job:{jobId:N}");
+        result.RetainExisting.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ResolvePrintActivity_StartingBeforeLivePrinting_ReservesBeforeWarmup()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        var status = new PrinterStatusDto(printerId, true, "Idle");
+
+        ObicoPrintActivity result = PrintFailureMonitorService.ResolvePrintActivity(printerId, status, jobId, PrintJobStatus.Starting);
+
+        result.PrintKey.Should().Be($"job:{jobId:N}");
+    }
+
+    [Fact]
+    public void ResolvePrintActivity_ExternalPrintAndSyntheticJob_PreservesInitialReservationIdentity()
+    {
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(printerId, true, "Printing", JobName: "folder/external.gcode");
+        ObicoPrintActivity live = PrintFailureMonitorService.ResolvePrintActivity(printerId, status, null, null);
+        ObicoPrintActivity tracked = PrintFailureMonitorService.ResolvePrintActivity(
+            printerId, status, Guid.NewGuid(), PrintJobStatus.Printing, isExternalJob: true);
+
+        live.PrintKey.Should().StartWith("external:");
+        tracked.AdoptExternalKey.Should().Be(live.PrintKey);
+        tracked.PrintKey.Should().StartWith("job:");
+    }
+
+    [Theory]
+    [InlineData(false, "Printing", true)]
+    [InlineData(true, null, true)]
+    [InlineData(true, "Idle", false)]
+    [InlineData(true, "Complete", false)]
+    [InlineData(true, "Cancelled", false)]
+    [InlineData(true, "Error", false)]
+    public void ResolvePrintActivity_EndOrUnknownTelemetry_ReleasesOnlyConfirmedEnd(bool online, string? state, bool retain)
+    {
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(printerId, online, state);
+
+        ObicoPrintActivity result = PrintFailureMonitorService.ResolvePrintActivity(printerId, status, Guid.NewGuid(), PrintJobStatus.Printing);
+
+        result.PrintKey.Should().BeNull();
+        result.RetainExisting.Should().Be(retain);
+    }
+
     [Fact]
     public void EvaluateMonitoringWindow_WhenPrinterIsNotReportingPrinting_ReturnsIdle()
     {

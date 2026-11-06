@@ -212,7 +212,7 @@ export function ObicoServersSection() {
         <div className="min-w-[16rem] flex-1">
           <h3 className="text-lg font-semibold text-pf-text-primary">Registered Obico ML Servers</h3>
           <p className="text-sm text-pf-text-secondary">
-            Add pooled Obico ML servers here. Printers can use one of these servers or fall back to the global Obico Failure Detection settings above.
+            Each print reserves an available, healthy server until it ends, including pauses. The global URL is used only when no pool is registered, never as overflow. Monitoring never pauses printing.
           </p>
         </div>
         <Button variant="primary" onClick={handleOpenAddModal} iconLeft={<PlusIcon />}>
@@ -223,8 +223,8 @@ export function ObicoServersSection() {
       {misconfiguredServers.length > 0 && (
         <Alert variant="warning" title="Obico server misconfiguration detected">
           {misconfiguredServers.length === 1
-            ? `"${misconfiguredServers[0].name}" is enabled but unreachable. Print failure detection will not work for printers assigned to this server.`
-            : `${misconfiguredServers.length} servers are enabled but unreachable: ${misconfiguredServers.map(s => s.name).join(', ')}. Print failure detection will not work for printers assigned to these servers.`}
+            ? `"${misconfiguredServers[0].name}" is enabled but unreachable. Its active prints retain their reservations while Obico monitoring retries; printing continues.`
+            : `${misconfiguredServers.length} servers are enabled but unreachable: ${misconfiguredServers.map(s => s.name).join(', ')}. Their active prints retain reservations while Obico monitoring retries; printing continues.`}
         </Alert>
       )}
 
@@ -265,7 +265,7 @@ export function ObicoServersSection() {
                     </div>
                     <p className="text-sm text-pf-text-secondary truncate">{server.url}</p>
                     <p className="text-xs text-pf-text-tertiary mt-1">
-                      Max concurrent analyses: {server.maxConcurrentAnalyses}
+                      Active print reservations: {server.activePrintCount ?? 0} / {server.maxConcurrentAnalyses}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -355,9 +355,9 @@ export function ObicoServersSection() {
           </FormField>
 
           <FormField
-            label="Max Concurrent Analyses"
+            label="Concurrent Print Capacity"
             htmlFor="max-concurrent"
-            helper="Maximum number of printers this server can analyze simultaneously"
+            helper="Maximum simultaneous prints, including warmup and pauses. Capacity is released after each print."
           >
             <Input
               id="max-concurrent"
@@ -413,9 +413,9 @@ export function ObicoServersSection() {
           </FormField>
 
           <FormField
-            label="Max Concurrent Analyses"
+            label="Concurrent Print Capacity"
             htmlFor="edit-max-concurrent"
-            helper="Maximum number of printers this server can analyze simultaneously"
+            helper="Maximum simultaneous prints, including warmup and pauses. Lowering this does not evict existing prints."
           >
             <Input
               id="edit-max-concurrent"
@@ -454,7 +454,7 @@ export function ObicoServersSection() {
           Are you sure you want to delete <strong>{selectedServer?.name}</strong>?
           {servers.length > 0 && (
             <span className="block mt-2 text-pf-warning">
-              Warning: Printers assigned to this server will fall back to the default configuration.
+              Servers with active print reservations cannot be deleted. Disable a server to stop new reservations; existing prints continue without Obico monitoring until it is re-enabled.
             </span>
           )}
         </p>
