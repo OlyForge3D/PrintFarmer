@@ -82,7 +82,8 @@ public sealed class DatabaseMigrationTests
             "20261027212835_AddPrinterFileEnrichment",
             "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
-            "20261105000821_AddFailureDetectionIncidentProvider");
+            "20261105000821_AddFailureDetectionIncidentProvider",
+            "20261106201513_AddObicoPrintRouting");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -819,7 +820,8 @@ public sealed class DatabaseMigrationTests
             "20261027212835_AddPrinterFileEnrichment",
             "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
-            "20261105000821_AddFailureDetectionIncidentProvider");
+            "20261105000821_AddFailureDetectionIncidentProvider",
+            "20261106201513_AddObicoPrintRouting");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1384,6 +1386,7 @@ public sealed class DatabaseMigrationTests
                 "20261104185029_AddBedClearEvaluations",
                 "20261104222340_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
+                "20261106201434_AddObicoPrintRouting",
             ]
             :
             [
@@ -1431,6 +1434,7 @@ public sealed class DatabaseMigrationTests
                 "20261104185033_AddBedClearEvaluations",
                 "20261104222359_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
+                "20261106201456_AddObicoPrintRouting",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
