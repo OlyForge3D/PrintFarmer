@@ -301,7 +301,7 @@ generate_env_file
 assert_endpoints "malformed" "malformed"
 EOF
     chmod +x "$helper_script"
-    capture_output "bash '$helper_script' 2>&1"
+    capture_output "cd '$TEST_TEMP_DIR' && bash '$helper_script' 2>&1"
     if [[ "$(get_output_exit_code)" != 0 ]]; then
         test_info "Provider endpoint generation failed: $(get_output)"
         fail_test "Provider endpoint regeneration must preserve overrides and default only selected empty URLs"
