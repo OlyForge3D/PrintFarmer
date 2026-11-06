@@ -124,6 +124,11 @@ The Docker deployment generator preserves these provider settings across
 configuration regeneration. It supplies the bundled service URL only when the
 corresponding bundled sidecar is selected; otherwise, configure an external
 provider URL explicitly. Disabled providers do not require a URL.
+When enabling a bundled provider after a disabled deployment, an empty saved
+URL is replaced with its internal service URL. Nonempty saved URLs and explicit
+process-environment URL overrides (including an explicit empty override) are
+preserved; malformed nonempty configuration remains subject to application
+validation rather than being silently replaced.
 
 ```bash
 PFARM__PrintGuardShadow__Enabled=true
@@ -159,6 +164,25 @@ replicated.
 ## API Usage
 
 ### PrintFarmer system health
+
+PrintFarmer's `/health` also includes a `printguard` check. When the global
+PrintGuard integration is disabled, it does not contact the provider and its
+Admin Control Center and detailed System Health cards are hidden. When enabled,
+invalid URLs, timeouts, or token formatting report Degraded with a configuration
+diagnostic. The check validates the publisher's `GET /api/health` contract
+(`ok: true` and a nonempty version), then calls `GET /api/v1/monitors` with the
+configured bearer token to verify read-scope access. The health endpoint alone
+is authentication-exempt and cannot prove the application may use the read API.
+Neither request submits images or invokes printer controls.
+
+Both requests share a total budget of at most six seconds (or the configured
+request timeout, if shorter). Response bodies are limited to 64 KB. Concurrent
+requests share a probe and completed results are cached for 45 seconds, including
+failures; changing configuration or disabling takes effect on the next request.
+Safe diagnostics distinguish connection, timeout, HTTP, authorization, and
+response-contract failures without exposing endpoint URLs, tokens, upstream
+bodies, or exceptions. Healthy means hub readiness and read-API access, **not**
+classification/model accuracy or proof that a printer has usable camera frames.
 
 PrintFarmer's `/health` includes an `obico` check. When failure detection is
 disabled it reports Healthy without contacting Obico, and the Admin Control

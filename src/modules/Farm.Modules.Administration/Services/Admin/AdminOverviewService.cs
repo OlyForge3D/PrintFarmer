@@ -188,6 +188,13 @@ public sealed class AdminOverviewService : IAdminOverviewService
                 entry => TruncateDescription(entry.Description)));
         }
 
+        if (report.Entries.TryGetValue("printguard", out HealthReportEntry printguard)
+            && printguard.Data.TryGetValue("enabled", out object? printguardEnabled) && printguardEnabled is true)
+        {
+            tiles.Add(BuildTileFromEntry("printguard", "PrintGuard Failure Detection", printguard,
+                entry => TruncateDescription(entry.Description)));
+        }
+
         return tiles;
     }
 
@@ -502,6 +509,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
         "signalr" => "SignalR hub is not healthy",
         "spoolman" => "Spoolman integration is not healthy",
         "obico" => "Obico failure detection is not healthy",
+        "printguard" => "PrintGuard failure detection is not healthy",
         "comprehensive" => "Core systems are not healthy",
         _ => $"Health check '{entryName}' is not healthy",
     };

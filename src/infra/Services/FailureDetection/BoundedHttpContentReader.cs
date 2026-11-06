@@ -1,7 +1,9 @@
 ﻿namespace Farm.Infrastructure.Services.FailureDetection;
 
-internal static class BoundedHttpContentReader
+/// <summary>Reads provider responses without accepting an unbounded response body.</summary>
+public static class BoundedHttpContentReader
 {
+    /// <summary>Reads the content, rejecting declared or streamed bodies larger than <paramref name="maximumBytes"/>.</summary>
     public static async Task<byte[]> ReadAsByteArrayAsync(
         HttpContent content,
         int maximumBytes,
