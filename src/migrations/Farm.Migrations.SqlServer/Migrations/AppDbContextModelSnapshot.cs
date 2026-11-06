@@ -7365,6 +7365,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ObicoFallbackUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ObicoPrintKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uniqueidentifier");
 

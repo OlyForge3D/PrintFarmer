@@ -25,12 +25,10 @@ public class ObicoSettingsTests
     }
 
     [Fact]
-    public void Validate_EnabledWithoutUrl_Throws()
+    public void Validate_EnabledWithoutUrl_AllowsPoolOnlyConfiguration()
     {
         var settings = new ObicoSettings { Enabled = true };
 
-        ValidationException exception = Assert.Throws<ValidationException>(settings.Validate);
-
-        Assert.Contains("Obico API URL is required", exception.Message, StringComparison.Ordinal);
+        settings.Validate();
     }
 }

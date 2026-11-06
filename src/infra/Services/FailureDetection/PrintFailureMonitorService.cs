@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
@@ -26,9 +28,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
     private const string AnalysisOutcomeFailure = "failure";
     private const string AnalysisOutcomeHealthy = "healthy";
     private const string AnalysisOutcomeNone = "none";
-    private const string DetectionSourceGlobal = "global";
     private const string DetectionSourceNone = "none";
-    private const string DetectionSourcePooled = "pooled";
     private const string PrinterStateDisabled = "disabled";
     private const string PrinterStateError = "error";
     private const string PrinterStateIdle = "idle";
@@ -105,7 +105,27 @@ public sealed class PrintFailureMonitorService : BackgroundService
         _logger.LogInformation("[PrintFailureMonitor] Service stopped");
     }
 
-    private sealed record ActivePrintWindow(PrintJobStatus Status, DateTime StartedAtUtc, string? JobName);
+    private sealed record ActivePrintWindow(Guid Id, PrintJobStatus Status, DateTime StartedAtUtc, string? JobName, bool IsExternal);
+
+    internal static ObicoPrintActivity ResolvePrintActivity(
+        Guid printerId,
+        PrinterStatusDto? status,
+        Guid? jobId,
+        PrintJobStatus? jobStatus,
+        bool isExternalJob = false)
+    {
+        string externalKey = "external:" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(status?.JobName ?? status?.FileName ?? string.Empty)));
+        bool livePrint = status?.IsOnline == true && PrinterStateClassifier.IsActivePrintingJob(status.State);
+        bool starting = jobStatus == PrintJobStatus.Starting;
+        if (starting || livePrint)
+        {
+            return new(printerId, jobId.HasValue ? $"job:{jobId:N}" : externalKey,
+                AdoptExternalKey: isExternalJob ? externalKey : null);
+        }
+
+        return new(printerId, null, RetainExisting: status is null || !status.IsOnline || string.IsNullOrWhiteSpace(status.State));
+    }
 
     internal static (bool ShouldMonitor, string IdleReason) EvaluateMonitoringWindow(
         PrinterStatusDto? status,
@@ -232,12 +252,6 @@ public sealed class PrintFailureMonitorService : BackgroundService
             }
 
             ObicoSettings currentSettings = settingsService.Get<ObicoSettings>();
-            Dictionary<Guid, ObicoServer> obicoServers = currentSettings.Enabled
-                ? await dbContext.ObicoServers
-                    .Where(s => s.IsEnabled)
-                    .ToDictionaryAsync(s => s.Id, cancellationToken)
-                : [];
-
             List<Printer> configuredPrinters = await LoadMonitoredPrintersAsync(dbContext, cancellationToken);
             List<Guid> configuredPrinterIds = configuredPrinters.Select(p => p.Id).ToList();
             List<PrintJob> activeJobs = configuredPrinterIds.Count == 0
@@ -258,8 +272,35 @@ public sealed class PrintFailureMonitorService : BackgroundService
                             .OrderByDescending(j => j.ActualStartTime ?? j.UpdatedAt)
                             .First();
                         DateTime startedAtUtc = currentJob.ActualStartTime ?? currentJob.UpdatedAt;
-                        return new ActivePrintWindow(currentJob.Status, startedAtUtc, currentJob.Name);
+                        return new ActivePrintWindow(currentJob.Id, currentJob.Status, startedAtUtc, currentJob.Name, currentJob.IsExternalPrint);
                     });
+            Dictionary<Guid, PrinterStatusDto?> cachedStatuses = configuredPrinters
+                .ToDictionary(printer => printer.Id, printer => _statusCache.GetStatus(printer.Id));
+
+            IReadOnlyDictionary<Guid, ObicoPrintRoute> obicoRoutes;
+            try
+            {
+                var routing = scope.ServiceProvider.GetRequiredService<IObicoServerAssignmentService>();
+                ObicoPrintActivity[] activities = configuredPrinters.Where(printer => printer.ObicoEnabled)
+                    .Select(printer =>
+                    {
+                        activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? job);
+                        return ResolvePrintActivity(printer.Id, cachedStatuses[printer.Id], job?.Id, job?.Status, job?.IsExternal == true);
+                    }).ToArray();
+                obicoRoutes = await routing.ReconcileAsync(activities, currentSettings, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[PrintFailureMonitor] Obico route reconciliation failed; printing and other providers continue");
+                obicoRoutes = configuredPrinters.ToDictionary(
+                    printer => printer.Id,
+                    _ => new ObicoPrintRoute("none", null, null, null,
+                        "Obico routing failed. Printing continues without Obico monitoring; check server logs."));
+            }
 
             var printerStatuses = new List<FailureDetectionPrinterStatusDto>(configuredPrinters.Count);
             foreach (Printer printer in configuredPrinters)
@@ -278,7 +319,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     string? snapshotUrl = cameraSelection.Camera?.SnapshotUrl;
 
                     activeJobsByPrinter.TryGetValue(printer.Id, out ActivePrintWindow? activeJob);
-                    PrinterStatusDto? cachedPrinterStatus = _statusCache.GetStatus(printer.Id);
+                    PrinterStatusDto? cachedPrinterStatus = cachedStatuses[printer.Id];
                     var monitoringWindow = EvaluateMonitoringWindow(
                         cachedPrinterStatus,
                         activeJob?.Status,
@@ -289,8 +330,11 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     var jobContext = ResolveJobContext(cachedPrinterStatus, activeJob?.JobName);
                     bool obicoSelected = printer.ObicoEnabled;
                     bool printGuardSelected = printer.PrintGuardEnabled;
-                    var (obicoDetectionSource, obicoDetectionTarget, obicoServerUrl, obicoApiKey) =
-                        ResolveDetectionTarget(printer, obicoServers, currentSettings);
+                    obicoRoutes.TryGetValue(printer.Id, out ObicoPrintRoute? obicoRoute);
+                    string obicoDetectionSource = obicoRoute?.Source ?? DetectionSourceNone;
+                    string? obicoDetectionTarget = obicoRoute?.Target;
+                    string? obicoServerUrl = obicoRoute?.Url;
+                    string? obicoApiKey = obicoRoute?.ApiKey;
                     (string detectionSource, string? detectionTarget) = ResolveProviderTargets(
                         obicoSelected,
                         printGuardSelected,
@@ -303,13 +347,17 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         bool obicoConfigured = !string.IsNullOrWhiteSpace(obicoServerUrl);
                         string obicoReason = !currentSettings.Enabled
                             ? "Obico is disabled in Settings."
-                            : obicoConfigured ? string.Empty : "No Obico server configured.";
-                        providerStatuses.Add(CreateInitialProviderStatus(
+                            : obicoConfigured ? string.Empty
+                                : obicoRoute?.UnavailableReason ?? "Obico monitoring unavailable. Printing continues.";
+                        FailureDetectionProviderStatusDto obicoStatus = CreateInitialProviderStatus(
                             "Obico",
                             currentSettings.Enabled && obicoConfigured,
                             obicoReason,
                             previousStatus,
-                            AnalysisOutcomeNone));
+                            AnalysisOutcomeNone);
+                        providerStatuses.Add(currentSettings.Enabled && !obicoConfigured && isPrinting
+                            ? obicoStatus with { State = PrinterStateError, LastOutcome = AnalysisOutcomeError }
+                            : obicoStatus);
                     }
 
                     if (printGuardSelected)
@@ -360,8 +408,10 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     {
                         printerStatuses.Add(baseStatus with
                         {
-                            State = PrinterStateDisabled,
-                            Reason = "No selected failure-detection provider is enabled and configured.",
+                            State = isPrinting && currentSettings.Enabled && obicoSelected ? PrinterStateError
+                                : isPrinting ? PrinterStateDisabled : PrinterStateIdle,
+                            Reason = !isPrinting ? monitoringWindow.IdleReason
+                                : obicoRoute?.UnavailableReason ?? "No selected failure-detection provider is enabled and configured.",
                         });
                         continue;
                     }
@@ -817,25 +867,6 @@ public sealed class PrintFailureMonitorService : BackgroundService
             LastError = lastError,
             Printers = printers,
         };
-
-    private (string DetectionSource, string? DetectionTarget, string? ObicoServerUrl, string? ObicoApiKey) ResolveDetectionTarget(
-        Printer printer,
-        Dictionary<Guid, ObicoServer> obicoServers,
-        ObicoSettings currentSettings)
-    {
-        if (printer.ServiceState?.ObicoServerId.HasValue == true &&
-            obicoServers.TryGetValue(printer.ServiceState.ObicoServerId.Value, out ObicoServer? assignedServer))
-        {
-            return (DetectionSourcePooled, assignedServer.Name, assignedServer.Url, assignedServer.ApiKey);
-        }
-
-        if (!string.IsNullOrWhiteSpace(currentSettings.ObicoApiUrl))
-        {
-            return (DetectionSourceGlobal, currentSettings.ObicoApiUrl, currentSettings.ObicoApiUrl, null);
-        }
-
-        return (DetectionSourceNone, null, null, null);
-    }
 
     private static (string DetectionSource, string? DetectionTarget) ResolveProviderTargets(
         bool obicoSelected,

@@ -20,7 +20,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
 
     [SettingDisplay(
         Name = "Obico ML API URL",
-        Description = "URL of the Obico ML API server. Required when Obico failure detection is enabled.",
+        Description = "Legacy server URL used only when no pooled Obico servers are registered. Register pooled servers to enforce active-print capacity.",
         InputType = SettingInputType.Text)]
     [JsonPropertyName("obicoApiUrl")]
     public string ObicoApiUrl { get; set; } = string.Empty;
@@ -72,13 +72,8 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
 
     public void Validate()
     {
-        if (Enabled)
+        if (Enabled && !string.IsNullOrWhiteSpace(ObicoApiUrl))
         {
-            if (string.IsNullOrWhiteSpace(ObicoApiUrl))
-            {
-                throw new System.ComponentModel.DataAnnotations.ValidationException("Obico API URL is required.");
-            }
-
             if (!Uri.TryCreate(ObicoApiUrl, UriKind.Absolute, out Uri? uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {

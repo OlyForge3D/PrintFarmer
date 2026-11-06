@@ -5,7 +5,7 @@ namespace Farm.Infrastructure.Domain;
 /// <summary>
 /// Represents an Obico ML API server for AI-powered print failure detection.
 /// Multiple servers can be configured to distribute load across GPU machines
-/// or assign specific servers to specific printers.
+/// for the duration of individual prints.
 /// </summary>
 public class ObicoServer
 {
@@ -44,8 +44,8 @@ public class ObicoServer
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// Maximum number of concurrent image analyses this server can handle.
-    /// Used for load balancing across multiple printers.
+    /// Maximum number of simultaneous prints monitored by this server.
+    /// The API property name is retained for compatibility.
     /// </summary>
     public int MaxConcurrentAnalyses { get; set; } = 4;
 

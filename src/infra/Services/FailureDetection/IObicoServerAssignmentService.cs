@@ -1,35 +1,41 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Settings;
 
 namespace Farm.Infrastructure.Services.FailureDetection;
 
-/// <summary>
-/// Manages automatic assignment of printers to Obico ML servers.
-/// When a printer opts in to Obico monitoring, this service picks the
-/// best available server based on health, capacity, and load balancing.
-/// </summary>
+/// <summary>Reconciles durable print-lifetime Obico routes with observed printer activity.</summary>
 public interface IObicoServerAssignmentService
 {
     /// <summary>
-    /// Assigns the best available Obico server to a printer.
-    /// Picks the enabled, healthy server with the most available capacity.
+    /// Resolves an existing print route for explicit manual analysis without allocating capacity.
+    /// Global-only installations retain their legacy manual-analysis destination.
     /// </summary>
-    /// <param name="printerId">Printer to assign a server to.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The assigned ObicoServer, or null if no server is available.</returns>
-    Task<ObicoServer?> AssignServerAsync(Guid printerId, CancellationToken ct = default);
+    Task<ObicoPrintRoute> GetRouteAsync(Guid printerId, ObicoSettings settings, CancellationToken ct = default);
 
     /// <summary>
-    /// Removes the Obico server assignment from a printer (when opting out).
+    /// Releases ended prints before allocating healthy pool capacity to new prints.
+    /// Unknown/offline observations retain existing reservations without creating new ones.
     /// </summary>
-    /// <param name="printerId">Printer to unassign.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task UnassignServerAsync(Guid printerId, CancellationToken ct = default);
-
-    /// <summary>
-    /// Rebalances all Obico-enabled printers across available servers.
-    /// Useful after adding/removing servers or when server health changes.
-    /// </summary>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>Number of printers reassigned.</returns>
-    Task<int> RebalanceAsync(CancellationToken ct = default);
+    Task<IReadOnlyDictionary<Guid, ObicoPrintRoute>> ReconcileAsync(
+        IReadOnlyCollection<ObicoPrintActivity> activities,
+        ObicoSettings settings,
+        CancellationToken ct = default);
 }
+
+/// <summary>
+/// A print identity, or a confirmed end when the identity is null.
+/// RetainExisting represents missing/offline telemetry, not a print end.
+/// AdoptExternalKey allows a synthetic external job to take over its initial live-only identity.
+/// </summary>
+public sealed record ObicoPrintActivity(
+    Guid PrinterId,
+    string? PrintKey,
+    bool RetainExisting = false,
+    string? AdoptExternalKey = null);
+
+/// <summary>A selected monitoring destination, or an actionable reason why it is unavailable.</summary>
+public sealed record ObicoPrintRoute(
+    string Source,
+    string? Target,
+    string? Url,
+    string? ApiKey,
+    string? UnavailableReason = null);

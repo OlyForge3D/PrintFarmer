@@ -7340,6 +7340,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("LastStatsSyncAttemptedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ObicoFallbackUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ObicoPrintKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uuid");
 

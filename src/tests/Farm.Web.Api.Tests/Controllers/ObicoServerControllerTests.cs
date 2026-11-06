@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Data;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using Farm.Infrastructure.Data;
@@ -9,7 +10,10 @@ using Farm.Modules.Observability.Controllers;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -117,6 +121,101 @@ public class ObicoServerControllerTests
         Assert.IsType<string>(badRequest.Value).Should().Contain("Cannot reach prediction endpoint");
         dbContext.ObicoServers.Should().BeEmpty();
         calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetAllServersAsync_ActiveAndLegacyAssignments_CountsOnlyPrintReservations()
+    {
+        (ObicoServerController controller, AppDbContext db) = CreateController(_ => throw new InvalidOperationException("No network expected."));
+        ObicoServer server = new() { Id = Guid.NewGuid(), Name = "Pool", Url = "http://pool.invalid" };
+        db.ObicoServers.Add(server);
+        db.PrinterServiceStates.AddRange(
+            new PrinterServiceState { PrinterId = Guid.NewGuid(), ObicoServerId = server.Id, ObicoPrintKey = "external:print" },
+            new PrinterServiceState { PrinterId = Guid.NewGuid(), ObicoServerId = server.Id });
+        await db.SaveChangesAsync();
+
+        ActionResult<List<ObicoServerDto>> result = await controller.GetAllServersAsync(CancellationToken.None);
+
+        var servers = Assert.IsType<List<ObicoServerDto>>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        servers.Should().ContainSingle().Which.ActivePrintCount.Should().Be(1);
+        ObicoServerDto detail = Assert.IsType<ObicoServerDto>(
+            Assert.IsType<OkObjectResult>((await controller.GetServerAsync(server.Id, CancellationToken.None)).Result).Value);
+        detail.ActivePrintCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DeleteServerAsync_ActivePrintReservation_RejectsDeletionWithoutReassigning()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        (ObicoServerController controller, AppDbContext db) = CreateController(
+            _ => throw new InvalidOperationException("No network expected."), databaseOptions: options);
+        await using var ownedDb = db;
+        await db.Database.EnsureCreatedAsync();
+        ObicoServer server = new() { Id = Guid.NewGuid(), Name = "Pool", Url = "http://pool.invalid" };
+        Manufacturer manufacturer = new() { Id = Guid.NewGuid(), Name = "Manufacturer" };
+        PrinterModel model = new() { Id = Guid.NewGuid(), Name = "Model", Manufacturer = manufacturer };
+        Printer printer = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Printer",
+            ServerUrl = "http://printer.invalid",
+            Manufacturer = manufacturer,
+            Model = model
+        };
+        db.Printers.Add(printer);
+        db.ObicoServers.Add(server);
+        db.PrinterServiceStates.Add(new PrinterServiceState
+        {
+            PrinterId = printer.Id,
+            ObicoServerId = server.Id,
+            ObicoPrintKey = "external:print"
+        });
+        await db.SaveChangesAsync();
+
+        IActionResult result = await controller.DeleteServerAsync(server.Id, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result).Value.Should().BeOfType<string>()
+            .Which.Should().Contain("active print reservation");
+        (await db.ObicoServers.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DeleteServerAsync_UnreservedServer_HoldsSerializableTransactionThroughDeletion()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new ServerDeletionTransactionInterceptor();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        (ObicoServerController controller, AppDbContext db) = CreateController(
+            _ => throw new InvalidOperationException("No network expected."), databaseOptions: options);
+        await using var ownedDb = db;
+        await db.Database.EnsureCreatedAsync();
+        ObicoServer server = new() { Id = Guid.NewGuid(), Name = "Pool", Url = "http://pool.invalid" };
+        db.ObicoServers.Add(server);
+        await db.SaveChangesAsync();
+
+        IActionResult result = await controller.DeleteServerAsync(server.Id, CancellationToken.None);
+
+        result.Should().BeOfType<NoContentResult>();
+        interceptor.DeletionObserved.Should().BeTrue();
+        (await db.ObicoServers.CountAsync()).Should().Be(0);
+        db.Database.CurrentTransaction.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task CreateServerAsync_InvalidPrintCapacity_RejectsWithoutProbe(int capacity)
+    {
+        (ObicoServerController controller, _) = CreateController(_ => throw new InvalidOperationException("No network expected."));
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(
+            new CreateObicoServerDto { Name = "Pool", Url = "http://pool.invalid", MaxConcurrentAnalyses = capacity }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result).Value.Should().Be("Concurrent print capacity must be greater than zero.");
     }
 
     [Fact]
@@ -564,9 +663,10 @@ public class ObicoServerControllerTests
 
     private static (ObicoServerController Controller, AppDbContext DbContext) CreateController(
         Func<HttpRequestMessage, HttpResponseMessage> responder,
-        IEgressGuard? egressGuard = null)
+        IEgressGuard? egressGuard = null,
+        DbContextOptions<AppDbContext>? databaseOptions = null)
     {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+        DbContextOptions<AppDbContext> options = databaseOptions ?? new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase($"ObicoServerControllerTests_{Guid.NewGuid()}")
             .Options;
 
@@ -590,6 +690,25 @@ public class ObicoServerControllerTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ObicoConnectivityProbe>.Instance);
         ObicoServerController controller = new(dbContext, probe, logger.Object);
         return (controller, dbContext);
+    }
+
+    private sealed class ServerDeletionTransactionInterceptor : SaveChangesInterceptor
+    {
+        public bool DeletionObserved { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context is AppDbContext db
+                && db.ChangeTracker.Entries<ObicoServer>().Any(entry => entry.State == EntityState.Deleted))
+            {
+                IDbContextTransaction transaction = Assert.IsAssignableFrom<IDbContextTransaction>(db.Database.CurrentTransaction);
+                transaction.GetDbTransaction().IsolationLevel.Should().Be(IsolationLevel.Serializable);
+                DeletionObserved = true;
+            }
+
+            return new(result);
+        }
     }
 
     private sealed record CapturedRequest(HttpMethod Method, string PathAndQuery)
