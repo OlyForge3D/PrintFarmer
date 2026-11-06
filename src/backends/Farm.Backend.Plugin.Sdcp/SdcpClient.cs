@@ -1177,6 +1177,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
             ObicoEnabled: printer.ObicoEnabled,
+            PrintGuardEnabled: printer.PrintGuardEnabled,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
             CurrentLayer: status.CurrentLayer,
             TotalLayers: status.TotalLayers,

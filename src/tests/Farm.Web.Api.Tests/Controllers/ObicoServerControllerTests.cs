@@ -18,6 +18,107 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public class ObicoServerControllerTests
 {
+    private const string ExpectedProbeFailure = """
+        {"detections":[],"message":"Failed to get image ImmutableMultiDict([('img', 'http://printfarmer.local/obico-health-probe.jpg')]) - Connection refused"}
+        """;
+
+    [Fact]
+    public async Task UpdateServerAsync_WhenBundledServerCannotFetchSyntheticProbe_PersistsUrlWithoutLegacyPost()
+    {
+        List<CapturedRequest> requests = [];
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(request =>
+        {
+            requests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent(ExpectedProbeFailure, Encoding.UTF8, "application/json")
+            };
+        });
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Obico",
+            Url = "http://retired-obico.local:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 5,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow.AddDays(-1),
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(
+            server.Id, new UpdateObicoServerDto { Url = "http://obico-ml-api:3333" }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        ObicoServer persisted = await dbContext.ObicoServers.SingleAsync();
+        persisted.Url.Should().Be("http://obico-ml-api:3333");
+        persisted.Name.Should().Be("Existing Obico");
+        persisted.IsEnabled.Should().BeTrue();
+        persisted.MaxConcurrentAnalyses.Should().Be(5);
+        persisted.ApiKey.Should().BeNull();
+        requests.Should().ContainSingle();
+        requests[0].Method.Should().Be(HttpMethod.Get);
+        requests[0].PathAndQuery.Should().Be("/p/?img=http%3A%2F%2Fprintfarmer.local%2Fobico-health-probe.jpg");
+    }
+
+    [Theory]
+    [InlineData(400, "{\"detections\":[],\"message\":\"Invalid request params\"}")]
+    [InlineData(400, "{\"detections\":[],\"message\":\"Failed to get image http://different.local/frame.jpg\"}")]
+    [InlineData(400, "{\"detections\":[{}],\"message\":\"Failed to get image http://printfarmer.local/obico-health-probe.jpg\"}")]
+    [InlineData(400, "{\"message\":\"Failed to get image http://printfarmer.local/obico-health-probe.jpg\"}")]
+    [InlineData(400, "{\"detections\":[],\"message\":null}")]
+    [InlineData(400, "{\"detections\":[],\"message\":\"Internal error for http://printfarmer.local/obico-health-probe.jpg\"}")]
+    [InlineData(400, "Failed to get image http://printfarmer.local/obico-health-probe.jpg")]
+    [InlineData(400, "[]")]
+    [InlineData(401, ExpectedProbeFailure)]
+    [InlineData(403, ExpectedProbeFailure)]
+    [InlineData(500, ExpectedProbeFailure)]
+    [InlineData(503, ExpectedProbeFailure)]
+    public async Task CreateServerAsync_WhenProbeFailureIsNotExpectedSyntheticResponse_RejectsServer(
+        int statusCode, string body)
+    {
+        List<CapturedRequest> requests = [];
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(request =>
+        {
+            requests.Add(CapturedRequest.From(request));
+            return new HttpResponseMessage((HttpStatusCode)statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+        });
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(
+            new CreateObicoServerDto { Name = "Rejected Obico", Url = "http://obico.local:3333", IsEnabled = true },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        dbContext.ObicoServers.Should().BeEmpty();
+        requests.Should().NotBeEmpty();
+        requests.Should().OnlyContain(request => request.Method == HttpMethod.Get,
+            "an unrelated upstream failure must never become a successful legacy probe");
+    }
+
+    [Fact]
+    public async Task CreateServerAsync_WhenPredictionEndpointIsUnreachable_RejectsServer()
+    {
+        int calls = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(_ =>
+        {
+            calls++;
+            throw new HttpRequestException("Synthetic network failure");
+        });
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(
+            new CreateObicoServerDto { Name = "Unreachable Obico", Url = "http://obico.local:3333", IsEnabled = true },
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.IsType<string>(badRequest.Value).Should().Contain("Cannot reach prediction endpoint");
+        dbContext.ObicoServers.Should().BeEmpty();
+        calls.Should().Be(1);
+    }
+
     [Fact]
     public async Task CreateServerAsync_WhenUpstreamContractIsAvailable_PersistsServer()
     {

@@ -88,6 +88,11 @@ public sealed class ObicoConnectivityProbe(
             string body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == HttpStatusCode.BadRequest && IsExpectedProbeSnapshotFailure(body))
+                {
+                    return (true, null);
+                }
+
                 if (ObicoSnapshotFallbackDetector.ShouldFallbackToLegacyUpload(response.StatusCode)
                     || ObicoSnapshotFallbackDetector.ShouldFallbackBecauseSnapshotWasUnreachable(response.StatusCode, body))
                 {
@@ -132,6 +137,30 @@ public sealed class ObicoConnectivityProbe(
                 && document.RootElement.EnumerateObject().Any(property =>
                     string.Equals(property.Name, "detections", StringComparison.OrdinalIgnoreCase)
                     && property.Value.ValueKind == JsonValueKind.Array);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsExpectedProbeSnapshotFailure(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement root = document.RootElement;
+
+            // The upstream deliberately cannot fetch this synthetic URL; no image is submitted.
+            return root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("detections", out JsonElement detections)
+                && detections.ValueKind == JsonValueKind.Array
+                && detections.GetArrayLength() == 0
+                && root.TryGetProperty("message", out JsonElement message)
+                && message.ValueKind == JsonValueKind.String
+                && message.GetString() is string text
+                && text.StartsWith("Failed to get image ", StringComparison.Ordinal)
+                && text.Contains(SnapshotUrl, StringComparison.Ordinal);
         }
         catch (JsonException)
         {

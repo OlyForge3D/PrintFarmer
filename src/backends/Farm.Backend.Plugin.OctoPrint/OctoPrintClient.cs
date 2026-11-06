@@ -638,7 +638,8 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
             BackendUrl: printer.BackendUrl,
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
-            ObicoEnabled: printer.ObicoEnabled);
+            ObicoEnabled: printer.ObicoEnabled,
+            PrintGuardEnabled: printer.PrintGuardEnabled);
     }
 
     public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
