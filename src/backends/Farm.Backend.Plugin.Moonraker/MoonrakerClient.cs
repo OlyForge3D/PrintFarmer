@@ -814,6 +814,7 @@ public partial class MoonrakerClient(
             FrontendUrl: printer.FrontendUrl,
             Location: printer.Location == null ? null : new LocationSummaryDto(printer.Location.Id, printer.Location.Name, printer.Location.Description),
             ObicoEnabled: printer.ObicoEnabled,
+            PrintGuardEnabled: printer.PrintGuardEnabled,
             ThumbnailCacheIdentity: status.ThumbnailCacheIdentity,
             CurrentLayer: status.CurrentLayer,
             TotalLayers: status.TotalLayers,
