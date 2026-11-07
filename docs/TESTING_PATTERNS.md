@@ -187,11 +187,11 @@ HTTP responses.
 
 **NFC read time.** `src/infra/Services/NfcDevices/NfcTagService.cs`,
 `ProcessTagReadAsync`, emits `readAt`; `LinkNfcTagRequest.ReadAt` in
-`src/infra/Dtos/NfcDeviceDtos.cs` is optional for manual linking. Both NFC
-binding/pairing modals forward the scan timestamp; `LinkTagAsync` uses it for
-spool last-seen state. Event `readAt` remains required, request `readAt` optional.
-`src/Web/ReactApp/src/features/nfc/components/__tests__/NfcBindingModal.test.tsx`
-checks timestamp forwarding and an omitted spool ID.
+`src/infra/Dtos/NfcDeviceDtos.cs` is optional for manual linking. The active
+`NfcPairingModal` forwards the scan timestamp; `LinkTagAsync` uses it for spool
+last-seen state. Event `readAt` remains required, request `readAt` optional.
+`src/Web/ReactApp/src/features/nfc/components/__tests__/NfcPairingModal.test.tsx`
+checks timestamp forwarding.
 
 **File size.** `src/infra/Dtos/GcodeFileDtos.cs` exposes required `long FileSize`,
 serialized as numeric `fileSize`. `GcodeFileCard` and `GcodeFileBrowser` consume
@@ -207,8 +207,9 @@ invent required count fields. `SlicerServiceResponse` in
 Worker management's separate `WorkerResponse.ActiveJobs` in
 `src/slicer/Farm.Slicer.Module/Contracts/WorkerDtos.cs` is real and retained.
 `src/Web/ReactApp/src/services/__tests__/slicerRegistry.test.ts`
-checks the exact mapped discovery shape; `workersService.test.ts` in that
-directory covers worker-management counts.
+checks the exact mapped discovery shape. The worker service's canonical
+collection route and pagination are covered by
+`src/Web/ReactApp/src/services/__tests__/workerService.test.ts`.
 
 Controller and SignalR serialization use camelCase names and string enums
 (`ControllerStartup.cs:28-36`, `SignalRStartup.cs:35-45`). These conclusions do

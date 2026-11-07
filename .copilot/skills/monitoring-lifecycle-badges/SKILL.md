@@ -18,7 +18,7 @@ Use this when the UI shows a secondary subsystem status badge (camera AI, health
 ## Examples
 - `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`
 - `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
-- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringSummary.tsx`
 - `src/Web/ReactApp/src/test/features/printers/FailureDetectionMonitoringBadge.test.tsx`
 
 ## Anti-Patterns

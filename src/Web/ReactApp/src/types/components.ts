@@ -9,7 +9,7 @@ import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
 import type { Model } from './models';
 
 // ====================================
-// Queue Component Props
+// Models3D Component Props
 // ====================================
 
 export interface ModelListViewProps {
@@ -24,6 +24,10 @@ export interface ModelListViewProps {
   onSelectModel?: (modelId: string, selected: boolean) => void;
   onSelectAllModels?: (modelIds: string[]) => void;
 }
+
+// ====================================
+// Queue Component Props
+// ====================================
 
 export interface JobTagsEditorProps {
   jobId: string;

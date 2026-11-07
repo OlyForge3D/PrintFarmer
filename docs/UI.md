@@ -897,7 +897,7 @@ import type { Model, ModelTag } from '@/types/models';
 import type { JobStatus, HistoryJob } from '@/types/queue';
 
 // Component props
-import type { ModelGridViewProps } from '@/types/components';
+import type { ModelListViewProps } from '@/types/components';
 
 // API types
 import type { Printer, GcodeFile } from '@/types/api';
