@@ -9,13 +9,16 @@ description: "Land a PrintFarmer pull request after review, CI, sync, and thread
 2. Inspect the live PR and checks:
 
    ```bash
-   gh pr view <N> --json number,title,isDraft,baseRefName,headRefOid,statusCheckRollup,reviewDecision,url
+   gh pr view <N> --json number,title,isDraft,baseRefName,headRefOid,statusCheckRollup,reviewDecision,labels,closingIssuesReferences,url
    gh pr checks <N>
    ```
 
    Squad PRs target `development`, carry the bare `squad` label, and include
    `Closes #N` for each issue they resolve. Draft PRs may remain open during
-   review; readiness is a separate gate.
+   review; readiness is a separate gate. Before proceeding, verify the live base
+   is `development`, the `squad` label is present, and every issue this PR
+   resolves appears in `closingIssuesReferences`. Correct missing labels or
+   closing references before readiness; do not merge without them.
 3. If the branch is behind `development`, sync before collecting final evidence:
 
    ```bash
@@ -36,7 +39,10 @@ description: "Land a PrintFarmer pull request after review, CI, sync, and thread
 
    Require valid evidence for the full change's risk class. `NOT_APPLICABLE`,
    `MISSING`, `INVALID`, `SUPERSEDED`, and `CHANGES_REQUESTED` are not merge
-   approval. Use the canonical review-scope rules to choose reviewer count.
+   approval. For verifier exit 3 (`MISSING`), the only fallback is a verified
+   current administrator GitHub approval; see the exit-code guidance in the
+   Ralph merge reference. This does not waive required CI. Use the canonical
+   review-scope rules to choose reviewer count.
 5. Resolve review feedback and run the exact-head review-thread preflight:
 
    ```bash
@@ -46,16 +52,16 @@ description: "Land a PrintFarmer pull request after review, CI, sync, and thread
      --expected-head "$HEAD" --json
    ```
 
-   Fix or reply to every reported thread, then rerun the preflight. Never
-   auto-resolve or ignore outdated threads. Exit `1`, `2`, or `3` blocks merge.
-6. Require all required checks to pass at the same head. The owner has marked
-   the unrelated iPhone `LoginFlowUITests` password-entry flake out of scope:
-   do not expand an unrelated PR to chase it. If that known failure is the only
-   red iOS check, record its run/job and apply only this narrow owner-authorized
-   exception; every other required check and review gate must still pass. Do
-   not generalize the exception to other iOS jobs. Also distinguish the CI
-   runner's successful, explicitly selected test retry (green with a flaky
-   warning) from a still-red job. See
+   Fix or reply with an explanation to every reported thread, then explicitly
+   resolve each thread before rerunning the preflight. Never auto-resolve or
+   ignore outdated threads. Exit `1`, `2`, or `3` blocks merge.
+6. Require all required checks to pass at the same head. The unrelated iPhone
+   `LoginFlowUITests` password-entry flake is out of scope for unrelated PRs:
+   do not expand an unrelated PR to chase it. If it is a required red
+   check, it still blocks landing; record its run/job evidence and handle the
+   flake separately. This does not waive the check or any other gate. Also
+   distinguish the CI runner's successful, explicitly selected test retry
+   (green with a flaky warning) from a still-red job. See
    [CI failure triage](../ci-failure-triage/SKILL.md).
 7. Mark ready only after the required review, thread, and CI evidence is
    current:

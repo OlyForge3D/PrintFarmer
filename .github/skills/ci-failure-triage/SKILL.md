@@ -32,8 +32,9 @@ description: "Triage failing PrintFarmer CI checks on a PR without blind reruns 
    A second failure ends rerun attempts.
 5. Track a persistent flake as its own issue after checking for an existing
    duplicate. Keep the current PR focused; report the issue and the evidence.
-   Do not chase the known unrelated iPhone `LoginFlowUITests` password-entry
-   flake as part of another PR; see the narrow exception in
+   Do not expand another PR to fix the known unrelated iPhone
+   `LoginFlowUITests` password-entry flake; report it separately. If it is a
+   required red check, it still blocks landing under the same-head CI rule in
    [PR landing](../pr-landing/SKILL.md).
 6. The XCUI runner has a separate, tightly scoped retry of failed test IDs.
    A test that passes that retry makes the job pass with a **passed on retry
@@ -41,10 +42,10 @@ description: "Triage failing PrintFarmer CI checks on a PR without blind reruns 
    failures remain failures. Do not confuse this built-in retry with rerunning
    an entire Actions run. See the
    [XCUI retry policy](../../../mobile/docs/xcui-timeout-diagnosis.md#one-failed-test-retry-in-normal-xcui-ci).
-7. A failed required check blocks PR landing unless the user explicitly
-   authorizes a specific exception for that PR. Never waive a check by
-   inference. Do not rerun a `squad-review-verdict` workflow run; its verifier
-   rejects rerun attempts. For verdict recovery, use the current procedure in
+7. A failed required check blocks PR landing. Flaky or unrelated failures do
+   not waive required checks. Do not rerun a `squad-review-verdict` workflow
+   run; its verifier rejects rerun attempts. For verdict recovery, use the
+   current procedure in
    [Ralph's merge reference](../../ralph-reference.md).
 
 ## References
