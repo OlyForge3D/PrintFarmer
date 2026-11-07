@@ -57,6 +57,14 @@ beforeAll(async () => {
 }, 60_000);
 
 describe('FailureDetectionStatusCard', () => {
+  it('does not list an untimestamped healthy result as active coverage', () => {
+    render(<FailureDetectionStatusCard />);
+
+    expect(screen.getByText('Awaiting scan')).toBeInTheDocument();
+    expect(screen.getByText(/current coverage is unconfirmed/i)).toBeInTheDocument();
+    expect(screen.getByText(/No printers are actively being monitored/)).toBeInTheDocument();
+  });
+
   it('shows held offline reservations as attention, not actively monitored', () => {
     const original = mockStatus.printers;
     mockStatus.printers = [{

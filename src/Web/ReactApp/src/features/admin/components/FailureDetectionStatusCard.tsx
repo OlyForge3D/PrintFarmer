@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert } from '@/common/components/ui/Alert';
 import { Badge, Card, Spinner } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
+import { getFailureDetectionDisplayState } from '@/features/printers/utils/failureDetectionStatus';
 
 function formatTimestamp(value?: string): string {
   if (!value) {
@@ -33,6 +34,8 @@ function formatStateLabel(state: string): string {
       return 'Reservation held';
     case 'unknown':
       return 'Activity unknown';
+    case 'checking':
+      return 'Awaiting scan';
     default:
       return 'Disabled';
   }
@@ -45,6 +48,7 @@ function stateVariant(state: string): 'default' | 'success' | 'warning' | 'error
     case 'misconfigured':
     case 'reservation-held':
     case 'unknown':
+    case 'checking':
       return 'warning';
     case 'error':
       return 'error';
@@ -83,8 +87,8 @@ export function FailureDetectionStatusCard() {
     return null;
   }
 
-  const activePrinters = data.printers.filter(printer => printer.state === 'monitoring');
-  const attentionPrinters = data.printers.filter(printer => ['misconfigured', 'error', 'reservation-held', 'unknown'].includes(printer.state)).slice(0, 3);
+  const activePrinters = data.printers.filter(printer => getFailureDetectionDisplayState(printer) === 'monitoring');
+  const attentionPrinters = data.printers.filter(printer => ['misconfigured', 'error', 'reservation-held', 'unknown', 'checking'].includes(getFailureDetectionDisplayState(printer) ?? printer.state)).slice(0, 3);
 
   return (
     <Card>
@@ -151,11 +155,15 @@ export function FailureDetectionStatusCard() {
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="font-medium text-pf-text-primary">{printer.printerName}</div>
-                        <Badge variant={stateVariant(printer.state)} size="sm">
-                          {formatStateLabel(printer.state)}
+                        <Badge variant={stateVariant(getFailureDetectionDisplayState(printer) ?? printer.state)} size="sm">
+                          {formatStateLabel(getFailureDetectionDisplayState(printer) ?? printer.state)}
                         </Badge>
                       </div>
-                      <div className="mt-1 text-sm text-pf-text-secondary">{printer.reason}</div>
+                      <div className="mt-1 text-sm text-pf-text-secondary">
+                        {getFailureDetectionDisplayState(printer) === 'checking'
+                          ? 'No timestamped scan result is available; current coverage is unconfirmed.'
+                          : printer.reason}
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -9,10 +9,12 @@ import {
   getFailureDetectionAttentionContent,
   getFailureDetectionDetail,
   getFailureDetectionDisplayState,
+  getFailureDetectionHealthyOutcomeLabel,
   getFailureDetectionIconColorClass,
   getFailureDetectionSourceLabel,
   getFailureDetectionStateLabel,
   getFailureDetectionStateVariant,
+  hasFailureDetectionScanTimestamp,
 } from '@/features/printers/utils/failureDetectionStatus';
 import {
   getFailureDetectionIncidentContext,
@@ -60,7 +62,7 @@ function getFailureDetectionOutcomeLabel(status?: FailureDetectionPrinterStatusD
         ? `Failure detected (${Math.round(status.lastConfidence * 100)}% confidence)`
         : 'Failure detected';
     case 'healthy':
-      return 'No failure detected';
+      return getFailureDetectionHealthyOutcomeLabel(status.state, status.lastAnalyzedAt);
     case 'error':
       return 'Monitoring runtime error';
     case 'none':
@@ -148,14 +150,14 @@ function DetailTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function getProviderOutcomeLabel(outcome: string, confidence?: number): string {
+function getProviderOutcomeLabel(outcome: string, confidence: number | undefined, lastAnalyzedAt: string | undefined, state: string): string {
   switch (outcome) {
     case 'failure':
       return confidence == null
         ? 'Failure detected'
         : `Failure detected (${Math.round(confidence * 100)}% confidence)`;
     case 'healthy':
-      return 'No failure detected';
+      return getFailureDetectionHealthyOutcomeLabel(state, lastAnalyzedAt);
     case 'error':
       return 'Analysis error';
     case 'none':
@@ -296,7 +298,8 @@ export function FailureDetectionStatusModal({
           <p className="mt-2 text-xs text-pf-text-secondary">
             Detection findings do not trigger automatic printer actions.
           </p>
-          {status?.state === 'monitoring' && status.lastConfidence != null && (
+          {status?.state === 'monitoring' && status.lastConfidence != null
+            && hasFailureDetectionScanTimestamp(status.lastAnalyzedAt) && (
             <div className="mt-4 flex items-end gap-4">
               <ConfidenceGauge value={1 - status.lastConfidence} size="lg" />
               <span className="pb-1 text-xs text-pf-text-secondary">
@@ -350,7 +353,7 @@ export function FailureDetectionStatusModal({
                     </div>
                     <p className="mt-2 text-sm text-pf-text-primary">{provider.reason}</p>
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-pf-text-secondary">
-                      <span>{getProviderOutcomeLabel(provider.lastOutcome, provider.lastConfidence)}</span>
+                      <span>{getProviderOutcomeLabel(provider.lastOutcome, provider.lastConfidence, provider.lastAnalyzedAt, provider.state)}</span>
                       <span>{provider.analysisMode === 'paired-frame' ? 'Paired frame' : 'Unpaired analysis'}</span>
                       {analyzedAt && <span>Last analyzed {analyzedAt}</span>}
                     </div>

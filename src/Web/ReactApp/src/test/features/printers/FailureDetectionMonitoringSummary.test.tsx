@@ -5,6 +5,29 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 
 describe('FailureDetectionMonitoringSummary', () => {
+  it.each([
+    ['compact', undefined],
+    ['detailed', undefined],
+    ['compact', 'invalid-time'],
+    ['detailed', 'invalid-time'],
+  ] as const)('does not imply coverage for an untimestamped healthy result in %s summary', (variant, lastAnalyzedAt) => {
+    render(<FailureDetectionMonitoringSummary enabled variant={variant} status={{
+      printerId: 'p1',
+      printerName: 'Unconfirmed scan',
+      state: 'monitoring',
+      reason: 'Monitoring via pooled server.',
+      isPrinting: true,
+      detectionSource: 'pooled',
+      lastOutcome: 'healthy',
+      lastConfidence: 0.2,
+      lastAnalyzedAt,
+    }} />);
+    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    expect(screen.queryByText('Watching current print.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /confidence/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Awaiting scan confirmation')).toBeInTheDocument();
+  });
+
   it.each(['compact', 'detailed'] as const)('shows a held reservation without healthy coverage in %s summary', (variant) => {
     render(<FailureDetectionMonitoringSummary enabled={true} variant={variant} status={{
       printerId: 'p1',

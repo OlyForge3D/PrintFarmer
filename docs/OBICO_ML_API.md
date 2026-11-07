@@ -59,10 +59,17 @@ Offline or missing telemetry is **not** proof that a print ended: its reservatio
 is retained until a terminal state or tracked job completion is observed.
 Unrecognized activity labels, including a backend's explicit `unknown` state,
 also retain reservations; being reachable alone does not prove inactivity.
+Moonraker's confirmed `standby` completion state releases an external-print
+reservation. Disabling Obico globally stops analysis and new allocation, but
+does not discard ongoing or unconfirmed reservations. Confirmed completion and
+per-printer monitoring opt-out still release them while the global toggle is off.
 This intentionally favors continuity over reclaiming uncertain capacity.
 Monitoring details show **Reservation held** (and the selected pool server name
 when known), not healthy monitoring, while activity is unknown/offline.
 Unknown activity without a reservation shows **Activity unknown** instead.
+Healthy outcomes without a valid scan timestamp do not establish current
+coverage. Details label them unconfirmed; summaries await scan confirmation.
+Recorded results for a held or unknown print are historical, not an all-clear.
 Legacy pins awaiting an active identity count toward capacity and block server
 deletion. Their unknown/offline status reports the held reservation and unconfirmed
 identity, without enabling inference or manual analysis. Once an active identity

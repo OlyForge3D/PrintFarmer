@@ -65,6 +65,7 @@ public class PrintFailureMonitorServiceTests
     [InlineData(true, "Idle", false)]
     [InlineData(true, "Ready", false)]
     [InlineData(true, "Operational", false)]
+    [InlineData(true, "standby", false)]
     [InlineData(true, "Finished", false)]
     [InlineData(true, "Stopped", false)]
     [InlineData(true, "Complete", false)]

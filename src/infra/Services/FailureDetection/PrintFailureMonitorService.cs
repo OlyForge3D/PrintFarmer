@@ -141,7 +141,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         // A non-printing label is not necessarily confirmed inactivity (e.g. SDCP "unknown").
         return !PrinterStateClassifier.IsActivePrintingJob(status.State)
             && status.State.Trim().ToUpperInvariant() is not
-                ("IDLE" or "READY" or "OPERATIONAL" or "COMPLETE" or "COMPLETED"
+                ("IDLE" or "READY" or "OPERATIONAL" or "STANDBY" or "COMPLETE" or "COMPLETED"
                 or "FINISHED" or "STOPPED" or "CANCELLED" or "CANCELED" or "ERROR" or "FAILED");
     }
 

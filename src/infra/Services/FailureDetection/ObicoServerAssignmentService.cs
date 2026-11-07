@@ -155,9 +155,8 @@ public sealed class ObicoServerAssignmentService(
             await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         List<ObicoServer> servers = await db.ObicoServers.AsNoTracking().ToListAsync(ct);
         List<PrinterServiceState> states = await db.PrinterServiceStates.ToListAsync(ct);
-        HashSet<Guid> enabledPrinters = settings.Enabled
-            ? (await db.Printers.Where(printer => printer.ObicoEnabled).Select(printer => printer.Id).ToListAsync(ct)).ToHashSet()
-            : [];
+        HashSet<Guid> enabledPrinters = (await db.Printers.Where(printer => printer.ObicoEnabled)
+            .Select(printer => printer.Id).ToListAsync(ct)).ToHashSet();
         HashSet<string> activeJobKeys = (await db.PrintJobs.WhereOccupiesPrinter()
             .Select(job => job.Id).ToListAsync(ct))
             .Select(id => $"job:{id:N}").ToHashSet(StringComparer.Ordinal);
@@ -196,6 +195,12 @@ public sealed class ObicoServerAssignmentService(
             }
 
             statesByPrinter.TryGetValue(activity.PrinterId, out PrinterServiceState? state);
+            if (!settings.Enabled)
+            {
+                routes[activity.PrinterId] = Unavailable("Obico is disabled in Settings. Existing reservations remain held until confirmed print completion or printer monitoring opt-out.");
+                continue;
+            }
+
             if (activity.RetainExisting || activity.PrintKey is null)
             {
                 if (activity.RetainExisting && state is not null

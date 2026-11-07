@@ -637,7 +637,7 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
     [InlineData(false, false)]
     [InlineData(true, true)]
     [InlineData(false, true)]
-    public async Task ReconcileAsync_MonitoringDisabledOrOptedOut_ReleasesReservations(bool disableGlobal, bool legacy)
+    public async Task ReconcileAsync_PrinterOptOut_ReleasesReservationsEvenWhenGloballyDisabled(bool disableGlobal, bool legacy)
     {
         Printer printer = await AddPrinterAsync();
         ObicoServer server = await AddServerAsync(1);
@@ -653,9 +653,8 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
         {
             _settings.Enabled = false;
         }
-        else
+        using (AppDbContext db = CreateDbContext())
         {
-            using AppDbContext db = CreateDbContext();
             (await db.Printers.SingleAsync()).ObicoEnabled = false;
             await db.SaveChangesAsync();
         }
@@ -665,6 +664,60 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
         PrinterServiceState state = await ReadStateAsync(printer.Id);
         state.ObicoServerId.Should().BeNull();
         state.ObicoPrintKey.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileAsync_GlobalDisableEnable_RetainsUnknownReservationAndBlocksNewAllocation(bool legacy)
+    {
+        Printer printer = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await SetRouteAsync(printer.Id, server.Id, legacy ? null : "external:print");
+        Printer waiting = await AddPrinterAsync();
+        ObicoPrintActivity[] observations =
+        [
+            new(printer.Id, null, RetainExisting: true),
+            new(waiting.Id, "external:waiting"),
+        ];
+        _settings.Enabled = false;
+        _probe.Invocations.Clear();
+
+        await CreateService().ReconcileAsync(observations, _settings);
+
+        _probe.Verify(probe => probe.ProbeAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.PrinterServiceStates.AnyAsync(state => state.PrinterId == waiting.Id)).Should().BeFalse();
+        }
+        _settings.Enabled = true;
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> resumed = await CreateService().ReconcileAsync(observations, _settings);
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+        resumed[waiting.Id].Url.Should().BeNull();
+        resumed[printer.Id].Source.Should().Be("pooled");
+        _settings.Enabled = false;
+
+        await CreateService().ReconcileAsync([new(printer.Id, null)], _settings);
+
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_MoonrakerStandby_ReleasesExternalPrintForWaitingPrinter()
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
+        ObicoPrintActivity completed = PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, new PrinterStatusDto(printer.Id, true, "standby"), null, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [completed, new(waiting.Id, "external:waiting")], _settings);
+
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+        routes[waiting.Id].Url.Should().Be(server.Url);
     }
 
 #pragma warning disable VSTHRD003 // The tasks are deliberately concurrent and both are awaited before fixture disposal.

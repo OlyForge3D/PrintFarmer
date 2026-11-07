@@ -10,6 +10,7 @@ import {
   formatFailureDetectionTimestamp,
   getFailureDetectionAttentionContent,
   getFailureDetectionStateLabel,
+  hasFailureDetectionScanTimestamp,
 } from '@/features/printers/utils/failureDetectionStatus';
 
 type FailureDetectionMonitoringSummaryVariant = 'compact' | 'detailed';
@@ -44,7 +45,8 @@ function getSummaryTone(
 ): FailureDetectionMonitoringSummaryTone {
   if (status?.state === 'error') return 'critical';
   if (latestIncident || attention) return 'attention';
-  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return 'healthy';
+  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy'
+    && hasFailureDetectionScanTimestamp(status.lastAnalyzedAt)) return 'healthy';
   return 'standby';
 }
 
@@ -62,7 +64,11 @@ function getHeadline(
   attention: { issue: string; action: string } | null
 ): string {
   if (latestIncident) return 'Review required';
-  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') return getFailureDetectionStateLabel('monitoring');
+  if (status?.state === 'monitoring' && status.lastOutcome === 'healthy') {
+    return hasFailureDetectionScanTimestamp(status.lastAnalyzedAt)
+      ? getFailureDetectionStateLabel('monitoring')
+      : 'Awaiting scan confirmation';
+  }
   if (status?.state === 'monitoring' && status.lastOutcome === 'failure') return 'Failure detected';
   if (status?.state === 'monitoring' && status.lastOutcome === 'error') return 'Scan failed';
   if (status?.state === 'misconfigured') return 'Setup needed';
@@ -114,7 +120,9 @@ function getDetailedSummary(
   const scanTime = formatFailureDetectionTimestamp(status.lastAnalyzedAt);
   if (status.state === 'monitoring') {
     if (status.lastOutcome === 'healthy') {
-      return scanTime ? `Last scan ${scanTime}` : 'Watching current print.';
+      return hasFailureDetectionScanTimestamp(status.lastAnalyzedAt)
+        ? `Last scan ${scanTime}`
+        : 'No timestamped scan result is available; current coverage is unconfirmed.';
     }
     if (status.lastOutcome === 'error') {
       return 'Latest scan failed — check camera connectivity.';
@@ -194,7 +202,7 @@ export function FailureDetectionMonitoringSummary({
             variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
             size="sm"
           >
-            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
+            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : status?.state === 'monitoring' ? 'Checking' : 'Idle'}
           </Badge>
         )}
         {needsAction && snapshotUrl && (
@@ -228,7 +236,7 @@ export function FailureDetectionMonitoringSummary({
             <p className="mt-1 text-sm leading-snug text-pf-text-secondary">{summary}</p>
           </div>
         </div>
-        {isMonitoring && confidence != null && !needsAction && (
+        {isMonitoring && confidence != null && tone === 'healthy' && (
           <ConfidenceGauge value={printHealth} size="lg" />
         )}
         {needsAction && snapshotUrl && (

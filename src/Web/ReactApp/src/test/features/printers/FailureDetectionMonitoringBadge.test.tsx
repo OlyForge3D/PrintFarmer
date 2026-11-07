@@ -28,6 +28,47 @@ vi.mock("@/common/hooks/useApi", () => ({
 }));
 
 describe("FailureDetectionMonitoringBadge", () => {
+  it.each(["monitoring", "reservation-held", "unknown"])("labels untimestamped healthy outcomes as unconfirmed for %s details", (state) => {
+    render(<FailureDetectionMonitoringBadge enabled status={{
+      printerId: "printer-1",
+      printerName: "Untimestamped printer",
+      state,
+      reason: "Printer activity is unconfirmed.",
+      isPrinting: state === "monitoring",
+      detectionSource: "pooled",
+      lastOutcome: "healthy",
+      providers: [{
+        provider: "Obico",
+        state,
+        reason: "Awaiting observation.",
+        lastOutcome: "healthy",
+        analysisMode: "unpaired",
+      }],
+    }} />);
+    const trigger = screen.getByRole("button", { name: /open failure detection details/i });
+    expect(trigger).toHaveAttribute("title", expect.not.stringContaining("Guarding"));
+    fireEvent.click(trigger);
+    expect(screen.queryByText(/^No failure detected$/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/scan time unavailable|scan timestamp|timestamped scan/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no operator action is needed right now/i)).not.toBeInTheDocument();
+  });
+
+  it.each(["reservation-held", "unknown"])("labels timestamped healthy results as historical for %s details", (state) => {
+    render(<FailureDetectionMonitoringBadge enabled status={{
+      printerId: "printer-1",
+      printerName: "Historical printer",
+      state,
+      reason: "Printer activity is unconfirmed.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      lastOutcome: "healthy",
+      lastAnalyzedAt: "2026-01-15T10:30:00Z",
+    }} />);
+    fireEvent.click(screen.getByRole("button", { name: /open failure detection details/i }));
+    expect(screen.getByText("Historical scan: No failure detected")).toBeInTheDocument();
+    expect(screen.queryByText(/^No failure detected$/)).not.toBeInTheDocument();
+  });
+
   it("shows held capacity and safe recovery in the tooltip and monitoring details", () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: "printer-1",

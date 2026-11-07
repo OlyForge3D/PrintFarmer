@@ -68,6 +68,18 @@ function getFailureDetectionAction(
   return 'Open failure-detection settings and review the latest monitor error.';
 }
 
+export function hasFailureDetectionScanTimestamp(value?: string): boolean {
+  return Boolean(value && !Number.isNaN(Date.parse(value)));
+}
+
+export function getFailureDetectionHealthyOutcomeLabel(state: string, lastAnalyzedAt?: string): string {
+  return !hasFailureDetectionScanTimestamp(lastAnalyzedAt)
+    ? 'Healthy result without a scan timestamp; current coverage unconfirmed'
+    : state === 'monitoring'
+      ? 'No failure detected in last recorded scan'
+      : 'Historical scan: No failure detected';
+}
+
 export function getFailureDetectionDisplayState(
   status?: FailureDetectionPrinterStatusDto
 ): string | undefined {
@@ -77,6 +89,11 @@ export function getFailureDetectionDisplayState(
 
   if (status.state === 'error' && !status.isPrinting) {
     return undefined;
+  }
+
+  if (status.state === 'monitoring' && status.lastOutcome === 'healthy'
+    && !hasFailureDetectionScanTimestamp(status.lastAnalyzedAt)) {
+    return 'checking';
   }
 
   return status.state;
@@ -205,6 +222,9 @@ export function getFailureDetectionDetail(
   }
 
   if (displayState !== 'monitoring') {
+    if (displayState === 'checking' && status.lastOutcome === 'healthy') {
+      return 'No timestamped scan result is available; current coverage is unconfirmed.';
+    }
     return status.reason;
   }
 
