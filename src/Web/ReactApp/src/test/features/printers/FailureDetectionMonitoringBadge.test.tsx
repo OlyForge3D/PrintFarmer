@@ -44,12 +44,14 @@ describe("FailureDetectionMonitoringBadge", () => {
           state: "reservation-held",
           reason: "Obico reservation retained; monitoring is not active.",
           lastOutcome: "healthy",
+          analysisMode: "unpaired",
         },
         {
           provider: "PrintGuard",
           state: "unknown",
           reason: "Printer activity is unknown; monitoring is not active.",
           lastOutcome: "healthy",
+          analysisMode: "unpaired",
         },
       ],
     };
@@ -64,7 +66,7 @@ describe("FailureDetectionMonitoringBadge", () => {
     expect(reservedServerTile).toHaveTextContent("Pool A");
     expect(reservedServerTile).not.toHaveTextContent("PrintGuard");
     expect(within(dialog).getByTestId("failure-detection-provider-printguard")).toHaveTextContent("Activity unknown");
-    expect(within(dialog).getByText(/only after physically verifying the printer is idle/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/physically verify the printer is idle/i)).toBeInTheDocument();
     expect(within(dialog).queryByText(/no action is needed until this printer starts a new print/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: /release|disable obico/i })).not.toBeInTheDocument();
   });

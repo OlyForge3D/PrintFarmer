@@ -1,8 +1,8 @@
 import '@testing-library/jest-dom';
 import { renderHook } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { FailureDetectionPollingProvider } from '@/features/printers/hooks/FailureDetectionPollingProvider';
 import {
+  FailureDetectionPollingProvider,
   hasFailureDetectionEnabledPrinter,
   useFailureDetectionPollingEnabled,
 } from '../useFailureDetectionPolling';

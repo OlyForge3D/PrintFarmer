@@ -239,7 +239,7 @@ export function getFailureDetectionAttentionContent(
   if (status.state === 'reservation-held') {
     return {
       issue: ensureSentence(status.reason, 'Printer activity is unknown. Obico reservation retained.'),
-      action: 'Restore printer connectivity. Only after physically verifying the printer is idle, disable Obico for this printer in printer settings to release the reservation on the next monitoring scan.',
+      action: 'Restore printer connectivity, physically verify the printer is idle, and wait for the runtime to confirm the print has ended. The reservation releases on reconciliation without disabling Obico. If it remains held, review connectivity and any tracked job still starting; do not disable monitoring just to free capacity. Before the next print, verify Obico remains enabled and confirm active monitoring once the print starts.',
     };
   }
 

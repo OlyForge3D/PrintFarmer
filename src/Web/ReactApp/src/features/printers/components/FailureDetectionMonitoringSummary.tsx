@@ -194,7 +194,7 @@ export function FailureDetectionMonitoringSummary({
             variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
             size="sm"
           >
-            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
+            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : status?.state === 'unknown' ? 'Activity unknown' : 'Idle'}
           </Badge>
         )}
         {needsAction && snapshotUrl && (

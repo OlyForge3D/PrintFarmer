@@ -28,7 +28,9 @@ describe("failureDetectionStatus utilities", () => {
     expect(getFailureDetectionStateVariant(status.state)).toBe("warning");
     expect(getFailureDetectionIconColorClass(status.state)).toBe("text-pf-warning");
     expect(getFailureDetectionDetail(status, true)).toBe(status.reason);
-    expect(getFailureDetectionAttentionContent(status)?.action).toContain("physically verifying the printer is idle");
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("physically verify the printer is idle");
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("without disabling Obico");
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("Before the next print");
     const unknown = { ...status, state: "unknown", detectionSource: "none", detectionTarget: undefined };
     expect(getFailureDetectionDisplayState(unknown)).toBe("unknown");
     expect(getFailureDetectionStateLabel(unknown.state, true)).toBe("Activity unknown");

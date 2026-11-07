@@ -350,8 +350,15 @@ export function FailureDetectionStatusModal({
                     </div>
                     <p className="mt-2 text-sm text-pf-text-primary">{provider.reason}</p>
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-pf-text-secondary">
-                      <span>{getProviderOutcomeLabel(provider.lastOutcome, provider.lastConfidence)}</span>
-                      <span>{provider.analysisMode === 'paired-frame' ? 'Paired frame' : 'Unpaired analysis'}</span>
+                      <span>
+                        {provider.lastOutcome === 'healthy' && !analyzedAt
+                          ? 'No recorded analysis observation'
+                          : `Last analysis: ${getProviderOutcomeLabel(provider.lastOutcome, provider.lastConfidence)}`}
+                      </span>
+                      {analyzedAt && (
+                        <span>{provider.analysisMode === 'paired-frame' ? 'Paired frame' : 'Unpaired analysis'}</span>
+                      )}
+                      {provider.state === 'unknown' && <span>Current coverage unconfirmed</span>}
                       {analyzedAt && <span>Last analyzed {analyzedAt}</span>}
                     </div>
                   </div>

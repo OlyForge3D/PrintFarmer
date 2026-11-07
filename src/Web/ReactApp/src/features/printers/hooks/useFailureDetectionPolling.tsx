@@ -16,8 +16,11 @@
  * a provider (e.g. isolated tests/stories) get the default of `false`,
  * matching the previous "no explicit opt-in" behavior.
  */
-import { useContext } from 'react';
-import { FailureDetectionPollingContext } from '@/features/printers/hooks/FailureDetectionPollingContext';
+import { createContext, useContext } from 'react';
+
+const FailureDetectionPollingContext = createContext(false);
+
+export const FailureDetectionPollingProvider = FailureDetectionPollingContext.Provider;
 
 /** Whether the fleet has at least one printer opted into any failure-detection provider. */
 export function hasFailureDetectionEnabledPrinter(

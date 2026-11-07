@@ -20,7 +20,24 @@ describe('FailureDetectionMonitoringSummary', () => {
     expect(screen.getAllByText('Reservation held').length).toBeGreaterThan(0);
     expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: /confidence/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/only after physically verifying the printer is idle/i)).toBeInTheDocument();
+    expect(screen.getByText(/physically verify the printer is idle/i)).toBeInTheDocument();
+    expect(screen.getByText(/without disabling Obico/i)).toBeInTheDocument();
+    expect(screen.getByText(/before the next print/i)).toBeInTheDocument();
+  });
+
+  it.each(['compact', 'detailed'] as const)('does not imply confirmed idle for unknown activity in %s summary', (variant) => {
+    render(<FailureDetectionMonitoringSummary enabled variant={variant} status={{
+      printerId: 'p1',
+      printerName: 'Offline printer',
+      state: 'unknown',
+      reason: 'Printer activity is unknown or offline. No reservation is held.',
+      isPrinting: false,
+      detectionSource: 'none',
+      lastOutcome: 'healthy',
+    }} />);
+    expect(screen.getAllByText('Activity unknown').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Idle')).not.toBeInTheDocument();
+    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
   });
 
   it('renders healthy coverage state with compact headline and badge', () => {
