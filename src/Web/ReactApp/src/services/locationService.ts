@@ -2,13 +2,12 @@ import { apiClient } from '@/services/api';
 import type {
   Location,
   LocationTreeNode,
-  LocationBreadcrumbItem,
   CreateLocationRequest,
   UpdateLocationRequest,
   MoveLocationRequest,
 } from '@/types/api';
 
-export type { Location, LocationTreeNode, LocationBreadcrumbItem, CreateLocationRequest, UpdateLocationRequest, MoveLocationRequest };
+export type { Location, LocationTreeNode, CreateLocationRequest, UpdateLocationRequest, MoveLocationRequest };
 
 /**
  * Find a location node in a tree by ID
@@ -37,10 +36,6 @@ export const locationService = {
 
   async getLocationTree(): Promise<LocationTreeNode[]> {
     return apiClient.getLocationTree();
-  },
-
-  async getLocationAncestors(id: string): Promise<LocationBreadcrumbItem[]> {
-    return apiClient.getLocationAncestors(id);
   },
 
   async getLocationDescendants(id: string): Promise<Location[]> {

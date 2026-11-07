@@ -345,9 +345,8 @@ import { apiClient } from '@/services/api';
 const printers = await apiClient.getPrinters();
 const locations = await apiClient.getAllLocations();
 
-// ✅ CORRECT: Use service wrappers (for caching/debouncing)
-import { jobSchedulingService } from '@/services/jobSchedulingService';
-const job = await jobSchedulingService.getScheduledJob(jobId);
+// ✅ CORRECT: Use apiClient for API requests
+const job = await apiClient.getScheduledJob(jobId);
 
 // ❌ WRONG: Creating raw axios instances
 const api = axios.create({ baseURL: '/api' }); // DON'T DO THIS

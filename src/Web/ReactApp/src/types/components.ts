@@ -3,22 +3,14 @@
  * Consolidated from scattered prop interface definitions across features
  */
 
-import type { Model } from './models';
 import type { HistoryJob, HistoryStats, JobAction, JobStatus, JobDetails } from './queue';
 import type { FileEntry } from './gcode';
 import type { GcodeFile, Printer, JobQueuePrintJob } from './api';
+import type { Model } from './models';
 
 // ====================================
-// Models3D Component Props
+// Queue Component Props
 // ====================================
-
-export interface ModelGridViewProps {
-  models: Model[];
-  isLoading: boolean;
-  onViewerModel: (model: Model) => void;
-  onTagModel: (model: Model) => void;
-  formatFileSize: (bytes: number) => string;
-}
 
 export interface ModelListViewProps {
   models: Model[];
@@ -32,10 +24,6 @@ export interface ModelListViewProps {
   onSelectModel?: (modelId: string, selected: boolean) => void;
   onSelectAllModels?: (modelIds: string[]) => void;
 }
-
-// ====================================
-// Queue Component Props
-// ====================================
 
 export interface JobTagsEditorProps {
   jobId: string;
