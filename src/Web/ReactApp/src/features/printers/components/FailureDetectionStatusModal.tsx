@@ -12,6 +12,7 @@ import {
   getFailureDetectionHealthyOutcomeLabel,
   getFailureDetectionIconColorClass,
   getFailureDetectionSourceLabel,
+  getFailureDetectionScanDisplayState,
   getFailureDetectionStateLabel,
   getFailureDetectionStateVariant,
   hasFailureDetectionScanTimestamp,
@@ -336,7 +337,9 @@ export function FailureDetectionStatusModal({
                   : provider.provider === 'Obico'
                     ? 'Obico'
                     : provider.provider;
-                const providerState = getFailureDetectionStateLabel(provider.state, provider.state !== 'disabled');
+                const displayProviderState = getFailureDetectionScanDisplayState(
+                  provider.state, provider.lastOutcome, provider.lastAnalyzedAt);
+                const providerState = getFailureDetectionStateLabel(displayProviderState, provider.state !== 'disabled');
                 const analyzedAt = formatFailureDetectionDateTime(provider.lastAnalyzedAt);
 
                 return (
@@ -347,7 +350,7 @@ export function FailureDetectionStatusModal({
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h4 className="font-medium text-pf-text-primary">{providerName}</h4>
-                      <Badge variant={getFailureDetectionStateVariant(provider.state)} size="sm">
+                      <Badge variant={getFailureDetectionStateVariant(displayProviderState)} size="sm">
                         {providerState}
                       </Badge>
                     </div>

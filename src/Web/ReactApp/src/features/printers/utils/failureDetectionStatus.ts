@@ -80,6 +80,13 @@ export function getFailureDetectionHealthyOutcomeLabel(state: string, lastAnalyz
       : 'Historical scan: No failure detected';
 }
 
+export function getFailureDetectionScanDisplayState(state: string, lastOutcome: string, lastAnalyzedAt?: string): string {
+  return state === 'monitoring' && lastOutcome === 'healthy'
+    && !hasFailureDetectionScanTimestamp(lastAnalyzedAt)
+    ? 'checking'
+    : state;
+}
+
 export function getFailureDetectionDisplayState(
   status?: FailureDetectionPrinterStatusDto
 ): string | undefined {
@@ -91,12 +98,7 @@ export function getFailureDetectionDisplayState(
     return undefined;
   }
 
-  if (status.state === 'monitoring' && status.lastOutcome === 'healthy'
-    && !hasFailureDetectionScanTimestamp(status.lastAnalyzedAt)) {
-    return 'checking';
-  }
-
-  return status.state;
+  return getFailureDetectionScanDisplayState(status.state, status.lastOutcome, status.lastAnalyzedAt);
 }
 
 export function getFailureDetectionStateLabel(state?: string, enabled = false): string {

@@ -28,7 +28,12 @@ vi.mock("@/common/hooks/useApi", () => ({
 }));
 
 describe("FailureDetectionMonitoringBadge", () => {
-  it.each(["monitoring", "reservation-held", "unknown"])("labels untimestamped healthy outcomes as unconfirmed for %s details", (state) => {
+  it.each([
+    ["monitoring", undefined],
+    ["monitoring", "invalid-time"],
+    ["reservation-held", undefined],
+    ["unknown", undefined],
+  ] as const)("labels untimestamped healthy outcomes as unconfirmed for %s details", (state, lastAnalyzedAt) => {
     render(<FailureDetectionMonitoringBadge enabled status={{
       printerId: "printer-1",
       printerName: "Untimestamped printer",
@@ -37,17 +42,24 @@ describe("FailureDetectionMonitoringBadge", () => {
       isPrinting: state === "monitoring",
       detectionSource: "pooled",
       lastOutcome: "healthy",
+      lastAnalyzedAt,
       providers: [{
         provider: "Obico",
         state,
         reason: "Awaiting observation.",
         lastOutcome: "healthy",
+        lastAnalyzedAt,
         analysisMode: "unpaired",
       }],
     }} />);
     const trigger = screen.getByRole("button", { name: /open failure detection details/i });
     expect(trigger).toHaveAttribute("title", expect.not.stringContaining("Guarding"));
     fireEvent.click(trigger);
+    const provider = within(screen.getByTestId("failure-detection-provider-obico"));
+    expect(provider.queryByText("Guarding")).not.toBeInTheDocument();
+    if (state === "monitoring") {
+      expect(provider.getByText("Checking")).toBeInTheDocument();
+    }
     expect(screen.queryByText(/^No failure detected$/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/scan time unavailable|scan timestamp|timestamped scan/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/no operator action is needed right now/i)).not.toBeInTheDocument();
