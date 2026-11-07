@@ -17,11 +17,38 @@ using Xunit;
 
 namespace Farm.Moonraker.Emulator.Tests;
 
-public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
+public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>, IAsyncLifetime
 {
     private readonly ReadyPrinterFactory factory;
+    private readonly List<WebSocket> sockets = [];
 
     public KlipperSensorTests(ReadyPrinterFactory factory) => this.factory = factory;
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            foreach (WebSocket socket in sockets)
+            {
+                if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, timeout.Token);
+                }
+            }
+        }
+        finally
+        {
+            foreach (WebSocket socket in sockets)
+            {
+                socket.Dispose();
+            }
+
+            sockets.Clear();
+        }
+    }
 
     [Fact]
     public async Task ObjectsQuery_PostBody_HonorsObjectAndFieldSelections()
@@ -240,7 +267,7 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
         JsonElement restStatus = rest.RootElement.GetProperty("result").GetProperty("status").GetProperty(name);
         AssertJson(expected, restStatus);
 
-        using WebSocket socket = await ConnectAsync();
+        WebSocket socket = await ConnectAsync();
         await SendAsync(socket, Request("printer.objects.query", name));
         using JsonDocument rpc = await ReceiveAsync(socket);
         AssertJson(expected, rpc.RootElement.GetProperty("result").GetProperty("status").GetProperty(name));
@@ -252,7 +279,7 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     {
         using HttpClient client = factory.CreateClient();
         await ResetAsync(client);
-        using WebSocket socket = await ConnectAsync();
+        WebSocket socket = await ConnectAsync();
         await SendAsync(socket, Request("printer.objects.subscribe", name));
         using JsonDocument subscribed = await ReceiveAsync(socket);
         AssertJson(initial, subscribed.RootElement.GetProperty("result").GetProperty("status").GetProperty(name));
@@ -302,7 +329,7 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
     {
         using HttpClient client = factory.CreateClient();
         await ResetAsync(client);
-        using WebSocket socket = await ConnectAsync();
+        WebSocket socket = await ConnectAsync();
         await SendAsync(socket, JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
@@ -474,8 +501,35 @@ public sealed class KlipperSensorTests : IClassFixture<ReadyPrinterFactory>
             .Select(item => item.GetString()).Should().Contain("heater_generic chamber");
     }
 
-    private async Task<WebSocket> ConnectAsync() =>
-        await factory.Server.CreateWebSocketClient().ConnectAsync(new Uri("ws://localhost/websocket"), CancellationToken.None);
+    [Fact]
+    public async Task DisposeAsync_SubscribedSocket_CompletesCloseBeforeNextReset()
+    {
+        using HttpClient client = factory.CreateClient();
+        await ResetAsync(client);
+        WebSocket socket = await ConnectAsync();
+        await SendAsync(socket, Request("printer.objects.subscribe", "heater_bed"));
+        using JsonDocument subscribed = await ReceiveAsync(socket);
+        subscribed.RootElement.GetProperty("id").GetInt32().Should().Be(1);
+        using HttpResponseMessage change = await client.PostAsync(
+            "/printer/gcode/script", TestRequests.Json("""{"script":"M140 S60"}"""));
+        change.EnsureSuccessStatusCode();
+        using JsonDocument changed = await ReceiveAsync(socket);
+        changed.RootElement.GetProperty("method").GetString().Should().Be("notify_status_update");
+
+        await DisposeAsync();
+
+        socket.State.Should().Be(WebSocketState.Closed);
+        socket.CloseStatus.Should().Be(WebSocketCloseStatus.NormalClosure);
+        await ResetAsync(client);
+    }
+
+    private async Task<WebSocket> ConnectAsync()
+    {
+        WebSocket socket = await factory.Server.CreateWebSocketClient()
+            .ConnectAsync(new Uri("ws://localhost/websocket"), CancellationToken.None);
+        sockets.Add(socket);
+        return socket;
+    }
 
     private static string Request(string method, string name) => JsonSerializer.Serialize(new
     {
