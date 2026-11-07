@@ -192,7 +192,7 @@ public class PrintFailureMonitorServiceTests
     }
 
     [Fact]
-    public void EvaluateMonitoringWindow_WhenPrinterIsOffline_ReturnsIdleEvenIfStateIsPrinting()
+    public void EvaluateMonitoringWindow_WhenPrinterIsOffline_ReturnsUnknownEvenIfStateIsPrinting()
     {
         var status = new PrinterStatusDto(Guid.NewGuid(), IsOnline: false, "Printing");
 
@@ -203,7 +203,20 @@ public class PrintFailureMonitorServiceTests
             utcNow: DateTime.UtcNow);
 
         result.ShouldMonitor.Should().BeFalse();
-        result.IdleReason.Should().Be("Printer is not actively printing.");
+        result.IdleReason.Should().Be("Printer activity is unknown or offline. Monitoring is not active; the print may still be running.");
+    }
+
+    [Fact]
+    public void EvaluateMonitoringWindow_WhenTelemetryMissing_DoesNotClaimPrintHasEnded()
+    {
+        foreach (PrinterStatusDto? status in new PrinterStatusDto?[] { null, new(Guid.NewGuid(), true, "") })
+        {
+            var result = PrintFailureMonitorService.EvaluateMonitoringWindow(
+                status, null, null, DateTime.UtcNow);
+
+            result.ShouldMonitor.Should().BeFalse();
+            result.IdleReason.Should().Contain("activity is unknown").And.Contain("may still be running");
+        }
     }
 
     [Fact]

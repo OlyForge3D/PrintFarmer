@@ -231,11 +231,58 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
         ObicoServer server = await AddServerAsync(1);
         await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
 
-        await CreateService().ReconcileAsync([new(printer.Id, null, RetainExisting: true)], _settings);
+        Printer waiting = await AddPrinterAsync();
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> held = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true), new(waiting.Id, "external:waiting")], _settings);
         (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+        held[printer.Id].Source.Should().Be("pooled");
+        held[printer.Id].Target.Should().Be(server.Name);
+        held[printer.Id].Url.Should().BeNull();
+        held[printer.Id].ApiKey.Should().BeNull();
+        held[printer.Id].UnavailableReason.Should().Contain("Obico reservation retained");
+        held[waiting.Id].Url.Should().BeNull();
+        (await ReadStateAsync(waiting.Id)).ObicoServerId.Should().BeNull();
 
-        await CreateService().ReconcileAsync([new(printer.Id, null)], _settings);
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> ended = await CreateService().ReconcileAsync(
+            [new(printer.Id, null), new(waiting.Id, "external:waiting")], _settings);
         (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+        ended[printer.Id].Source.Should().Be("none");
+        ended[printer.Id].Target.Should().BeNull();
+        ended[waiting.Id].Url.Should().Be(server.Url);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnknownWithoutReservation_DoesNotAllocateOrClaimHeldCapacity()
+    {
+        Printer printer = await AddPrinterAsync();
+        await AddServerAsync(1);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true)], _settings);
+
+        routes[printer.Id].Source.Should().Be("none");
+        routes[printer.Id].Target.Should().BeNull();
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].UnavailableReason.Should().Contain("No Obico server reservation is held");
+        using AppDbContext db = CreateDbContext();
+        (await db.PrinterServiceStates.AnyAsync()).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnknownGlobalReservation_ReportsFriendlyTargetWithoutConnectionDetails()
+    {
+        Printer printer = await AddPrinterAsync();
+        await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true)], _settings);
+
+        routes[printer.Id].Source.Should().Be("global");
+        routes[printer.Id].Target.Should().Be("Global Obico server");
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].ApiKey.Should().BeNull();
+        routes[printer.Id].UnavailableReason.Should().NotContain(_settings.ObicoApiUrl);
+        (await ReadStateAsync(printer.Id)).ObicoFallbackUrl.Should().Be(_settings.ObicoApiUrl);
     }
 
     [Fact]

@@ -58,6 +58,58 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("FailureDetectionMonitoringOverlay", () => {
+  it.each([undefined, "2026-01-15T10:30:00Z"])("does not present unknown coverage as a current all-clear with observation %s", (lastAnalyzedAt) => {
+    renderWithQueryClient(<FailureDetectionMonitoringOverlay enabled status={{
+      printerId: "p1",
+      printerName: "Offline printer",
+      state: "reservation-held",
+      reason: "Printer activity is unknown or offline. Obico reservation retained.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      detectionTarget: "Pool A",
+      lastOutcome: "healthy",
+      providers: [{
+        provider: "Obico",
+        state: "unknown",
+        reason: "Monitoring is not active.",
+        lastOutcome: "healthy",
+        lastAnalyzedAt,
+        analysisMode: "paired-frame",
+      }],
+    }} />);
+    fireEvent.click(screen.getByRole("button", { name: /open failure detection details/i }));
+    const provider = screen.getByTestId("failure-detection-provider-obico");
+    expect(provider).toHaveTextContent("Activity unknown");
+    expect(provider).toHaveTextContent("Current coverage unconfirmed");
+    if (lastAnalyzedAt) {
+      expect(provider).toHaveTextContent("Last analysis: No failure detected");
+      expect(provider).toHaveTextContent("Last analyzed");
+      expect(provider).toHaveTextContent("Paired frame");
+    } else {
+      expect(provider).toHaveTextContent("No recorded analysis observation");
+      expect(provider).not.toHaveTextContent("No failure detected");
+      expect(provider).not.toHaveTextContent("Paired frame");
+    }
+    expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("without disabling Obico");
+    expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("Before the next print");
+  });
+
+  it.each([false, true])("preserves the held reservation label with live isPrinting=%s", (isPrinting) => {
+    renderWithQueryClient(<FailureDetectionMonitoringOverlay enabled={true} isPrinting={isPrinting} status={{
+      printerId: "p1",
+      printerName: "Offline printer",
+      state: "reservation-held",
+      reason: "Printer activity is unknown or offline. Obico reservation retained.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      detectionTarget: "Pool A",
+      lastOutcome: "healthy",
+    }} />);
+    expect(screen.getByRole("button", { name: /open failure detection details/i })).toHaveTextContent("Reservation held");
+    expect(screen.getByLabelText("Failure detection")).toHaveClass("text-pf-warning");
+    expect(screen.queryByText("Guarding")).not.toBeInTheDocument();
+  });
+
   it.each(["idle", "disabled"] as const)(
     "%s chip uses translucent white on the fixed dark camera surface, not a theme neutral token",
     (state) => {

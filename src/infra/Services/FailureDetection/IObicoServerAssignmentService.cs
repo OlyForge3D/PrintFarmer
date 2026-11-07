@@ -38,4 +38,5 @@ public sealed record ObicoPrintRoute(
     string? Target,
     string? Url,
     string? ApiKey,
-    string? UnavailableReason = null);
+    string? UnavailableReason = null,
+    bool SelectedServerUnavailable = false);
