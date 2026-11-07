@@ -257,7 +257,11 @@ test('uses the real merge-base and excludes UI edits made only on the advanced b
   const tree = runGit(['rev-parse', `${head}^{tree}`]);
   const alternateBlob = runGit(['hash-object', '-w', '--stdin'], 'base-only advanced UI change');
   const baseOnlyTree = updateTree(tree, baseOnlyPath.split('/'), alternateBlob);
-  const advancedBase = runGit(['commit-tree', baseOnlyTree, '-p', head, '-m', 'test base-only UI change']);
+  const advancedBase = runGit([
+    '-c', 'user.name=Design detector test',
+    '-c', 'user.email=design-detector-test@example.invalid',
+    'commit-tree', baseOnlyTree, '-p', head, '-m', 'test base-only UI change',
+  ]);
   const endpointDiff = runGit(['diff', '--name-status', advancedBase, head]);
 
   assert.match(endpointDiff, new RegExp(`^M\\t${baseOnlyPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));

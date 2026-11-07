@@ -22,7 +22,7 @@ test('CodeQL exclusion is limited to the pinned upstream vendor folder', () => {
   assert.match(source, /Unmodified upstream Apache-2\.0 Impeccable 4\.0\.3/);
   assert.match(source, /including fork heads.*not inherently trusted/);
   assert.match(source, /excludes all[\s\S]*queries/);
-  assert.match(source, /https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/issues\/3707/);
+  assert.ok(source.includes('https://github.com/OlyForge3D/PrintFarmer/issues/3707'));
   const workflow = yaml.load(read('.github/workflows/codeql.yml'));
   const init = workflow.jobs.analyze.steps.find((step) => step.uses?.startsWith('github/codeql-action/init@'));
   assert.equal(init.with['config-file'], './.github/codeql/codeql-config.yml');

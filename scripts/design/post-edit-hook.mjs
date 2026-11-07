@@ -143,10 +143,14 @@ export function formatContext(results, limits) {
   return context;
 }
 
-export async function runHook(event) {
+export async function runHook(event, {
+  configReader = readSharedConfig,
+  rootResolver = findRepositoryRoot,
+  scanFile = scanSingleUiFile,
+} = {}) {
   const cwd = path.resolve(event.cwd || process.cwd());
-  const root = findRepositoryRoot(cwd);
-  const config = readSharedConfig(root);
+  const root = rootResolver(cwd);
+  const config = configReader(root);
   if (!config.hook.enabled || config.hook.quiet) return undefined;
 
   const files = editedFiles(event).filter(file => file.operation !== 'delete');
@@ -155,11 +159,12 @@ export async function runHook(event) {
   const results = [];
   for (const file of files) {
     const absolutePath = path.isAbsolute(file.path) ? file.path : path.resolve(cwd, file.path);
-    results.push(await scanSingleUiFile(root, absolutePath));
+    results.push(await scanFile(root, absolutePath));
   }
-  if (results.every(result => result.status === 'skipped')) return undefined;
+  const scannedResults = results.filter(result => result.status !== 'skipped');
+  if (scannedResults.length === 0) return undefined;
 
-  const additionalContext = formatContext(results, config.hook.limits);
+  const additionalContext = formatContext(scannedResults, config.hook.limits);
   return { additionalContext };
 }
 

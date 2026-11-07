@@ -59,7 +59,7 @@ export function readSharedConfig(root) {
   const configPath = path.join(root, '.impeccable', 'config.json');
   if (!fs.existsSync(configPath)) {
     return {
-      hook: {},
+      hook: { enabled: true, quiet: false, limits: { maxFindings: 5, maxChars: 8000 } },
       detector: { ignoreRules: [], ignoreFiles: [], ignoreValues: [], designSystem: { enabled: true } },
     };
   }

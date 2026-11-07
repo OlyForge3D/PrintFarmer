@@ -5,8 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { editedFiles, formatContext, runHook } from '../post-edit-hook.mjs';
+import { readSharedConfig } from '../check-ui-design.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const testsDirectory = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(testsDirectory, '..', '..', '..');
 
 test('parses apply_patch strings with moves, deletions, spaces, and mixed files', () => {
   const patch = [
@@ -61,6 +63,69 @@ test('does not read deleted paths from an apply_patch event', async () => {
     toolArgs: '*** Begin Patch\n*** Delete File: src/Web/ReactApp/src/missing-deleted-file.tsx\n*** End Patch',
   });
   assert.equal(result, undefined);
+});
+
+test('preserves UI findings when an apply_patch event also edits non-UI files', async () => {
+  const result = await runHook({
+    cwd: root,
+    toolName: 'apply_patch',
+    toolArgs: [
+      '*** Begin Patch',
+      '*** Update File: src/Web/ReactApp/src/ui.tsx',
+      '*** Add File: notes/ordinary.txt',
+      '*** End Patch',
+    ].join('\n'),
+  }, {
+    scanFile: async (_root, filePath) => filePath.endsWith('ordinary.txt')
+      ? { status: 'skipped' }
+      : {
+        status: 'fail',
+        scannedFiles: ['src/Web/ReactApp/src/ui.tsx'],
+        findings: [{
+          file: 'src/Web/ReactApp/src/ui.tsx',
+          line: 7,
+          antipattern: 'small-target',
+          description: 'Interactive target is too small.',
+        }],
+        advisories: [],
+      },
+  });
+
+  assert.match(result.additionalContext, /src\/Web\/ReactApp\/src\/ui\.tsx:7 \[small-target\]/);
+  assert.doesNotMatch(result.additionalContext, /could not run/i);
+  assert.doesNotMatch(result.additionalContext, /undefined/);
+});
+
+test('runs with complete defaults when shared config is absent', async () => {
+  const missingConfigRoot = path.join(testsDirectory, 'fixtures', 'no-shared-config');
+  const config = readSharedConfig(missingConfigRoot);
+  assert.deepEqual(config.hook, {
+    enabled: true,
+    quiet: false,
+    limits: { maxFindings: 5, maxChars: 8000 },
+  });
+
+  const result = await runHook({
+    cwd: root,
+    toolName: 'edit_file',
+    toolArgs: { path: 'src/Web/ReactApp/src/ui.tsx' },
+  }, {
+    configReader: () => readSharedConfig(missingConfigRoot),
+    scanFile: async () => ({
+      status: 'fail',
+      scannedFiles: ['src/Web/ReactApp/src/ui.tsx'],
+      findings: [{
+        file: 'src/Web/ReactApp/src/ui.tsx',
+        line: 3,
+        antipattern: 'small-target',
+        description: 'Interactive target is too small.',
+      }],
+      advisories: [],
+    }),
+  });
+
+  assert.match(result.additionalContext, /src\/Web\/ReactApp\/src\/ui\.tsx:3 \[small-target\]/);
+  assert.doesNotMatch(result.additionalContext, /could not run/i);
 });
 
 test('caps aggregate multi-file findings and reports omissions', () => {
