@@ -115,6 +115,23 @@ test('verifier preserves additive design approval, dissent and blocking reasons 
   }
 });
 
+test('trusted deployment bootstrap is missing evidence without design, never a success fallback', () => {
+  const evidence = fixture();
+  evidence.status.state = 'failure';
+  evidence.status.description =
+    `BLOCKED @ ${shortSha}: trusted UI policy not deployed; exact-head design-reviewer approval required`;
+  const blocked = verifySquadVerdict(evidence);
+  assert.equal(blocked.classification, 'MISSING');
+  assert.equal(exitCodeFor(blocked.classification), 3);
+  assert.match(blocked.blockedReason, /trusted UI policy not deployed/);
+  evidence.status.state = 'success';
+  evidence.status.description = `REVIEWED (self-attested) @ ${shortSha} by bishop+hicks+design-reviewer`;
+  const reviewed = verifySquadVerdict(evidence);
+  assert.equal(reviewed.classification, 'REVIEWED');
+  assert.equal(reviewed.carriedAcrossSync, false);
+  assert.match(reviewed.actor, /design-reviewer/);
+});
+
 test('a carried-across-sync description is classified REVIEWED and flagged as such', () => {
   const evidence = fixture();
   evidence.status.description =

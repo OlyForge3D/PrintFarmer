@@ -234,12 +234,19 @@ be inferred, stop that work and report needs-input under Escalation.
 Fix-only refinements preserve the existing identity and behavior; do not turn
 them into a redesign or block them on an unrelated brand questionnaire.
 
+Before opening a rendered-UI PR, including a draft, follow the canonical
+[UI visual evidence](../.github/copilot-instructions.md#ui-visual-evidence)
+requirement: start the affected app locally, attach desktop/mobile browser
+screenshots and available native simulator captures, and identify their source
+SHA and capture context. Report unavailable native tooling honestly; policy-only
+work records why screenshots are not applicable, not invented runtime evidence.
+
 After implementation and before ready/merge, classify PR paths using
 `scripts/design/ui-paths.mjs` and run the UI design review ceremony in
 `.squad/ceremonies.md`. Dispatch the read-only `design-reviewer` task role
 under `.squad/agents/design-reviewer/charter.md`, using the canonical
 `Squad-Reviewer: design-reviewer` identity, not Newt. Provide the exact head, baseline, changed UI paths,
-platform authorities, author test/scanner evidence and prior findings. A
+platform authorities, author test/scanner and visual evidence and prior findings. A
 missing classifier, required evidence or design review blocks readiness;
 do not equate a scanner pass with design approval. Do not promise hooks are
 active before their implementation reaches the default branch. The existing

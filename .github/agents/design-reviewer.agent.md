@@ -21,6 +21,13 @@ guidance for SwiftUI. The root `PRODUCT.md` / `DESIGN.md` constrain web work;
 incumbent identity and product truth. Do not substitute personal taste for
 documented usability, accessibility, hierarchy, or design-system requirements.
 
+Evaluate author-supplied screenshots and their provenance under
+[UI visual evidence](../copilot-instructions.md#ui-visual-evidence), including
+desktop/mobile browser widths and available native simulator captures.
+Report missing required captures or visible defects as blockers, and native
+unavailability as an explicit limitation. Policy/tooling-only work records why
+rendered evidence is not applicable; it still requires source design review.
+
 Missing skill, inaccessible source, missing required visual evidence, or an
 unproven platform behavior is an explicit limitation, never a clean bill of
 health. Source-only review is not rendered accessibility verification. Never

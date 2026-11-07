@@ -83,6 +83,10 @@ the keyboard, and keep interactive targets at least 44 by 44 points. The
 printer card changes its horizontal layout to vertical at accessibility
 sizes and uses `ViewThatFits` where content may not fit. Preserve usable
 large text, long content and distinct loading, offline and stale states.
+**Incumbent limitation:** `PrinterCardView.swift` caps its rendered Dynamic
+Type size at `.xxxLarge` when an accessibility size is requested. The
+vertical layout does not establish support for larger accessibility text
+sizes; this document does not certify that support.
 
 The product defines Farm, Queue and Filament as the three core destinations,
 with Scan as an action, not a fourth tab. Regular-width iPad uses a sidebar;
@@ -127,6 +131,28 @@ Use native SwiftUI navigation, platform controls and SF Symbols where
 appropriate. Preserve the system back gesture, safe-area behavior and
 VoiceOver labels. Product navigation and scope are specified in
 [`PRODUCT.md`](PRODUCT.md); do not add a competing analytical shell.
+
+## Cross-surface conventions
+
+Follow the shared [cross-surface contract](../src/Web/ReactApp/src/design-system/DESIGN-LANGUAGE.md#cross-surface-conventions):
+preserve incumbent glyphs unless a redesign is explicitly scoped; show heater
+and status activity with semantic color plus meaningful non-color information;
+keep secondary explanations in accessible disclosure rather than extra inline
+labels; preserve behavior between table/card views and web/native clients.
+Essential status, errors, readings, units and field labels stay visible.
+
+Adapt explanations to touch and VoiceOver; a hover tooltip is not a native
+interaction requirement. Preserve native navigation and gestures, and the
+same action meaning, availability, permissions and outcomes as web.
+`TemperatureView.swift` currently colors a positive target red for hotend and
+blue for bed, otherwise reducing opacity to 35 percent. Web heat glyphs use
+finite current-temperature thresholds instead. This is an incumbent semantic
+difference, not proven parity or permission to change heater behavior.
+
+Misleading activity, clipped readings or inaccessible explanations falsify
+the design. Operators and assistive-technology users could be harmed; wrong
+hardware actions can have irreversible effects. Validate with isolated mock
+state, never real heating or motion.
 
 ## Do's and Don'ts
 

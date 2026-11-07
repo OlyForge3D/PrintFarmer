@@ -422,6 +422,20 @@ jobs:
 
             let rawComments;
             let changedPaths;
+            // During deployment this workflow can precede its trusted default-
+            // branch module. Never import the PR copy to bridge that gap.
+            const bootstrapPathsFromFiles = (files, changedFiles) => {
+              if (!Array.isArray(files) || !Number.isSafeInteger(changedFiles) ||
+                  changedFiles < 1 || files.length !== changedFiles || files.length >= 3000 ||
+                  new Set(files.map((file) => file?.filename)).size !== files.length ||
+                  files.some((file) => typeof file?.filename !== 'string' || !file.filename ||
+                    (file.status === 'renamed' &&
+                      (typeof file.previous_filename !== 'string' || !file.previous_filename)))) {
+                throw new Error('PR changed-file scope is unavailable or incomplete');
+              }
+              return files.flatMap((file) =>
+                [file.filename, file.previous_filename].filter((name) => typeof name === 'string' && name));
+            };
             try {
               const [comments, files] = await Promise.all([
                 github.paginate(github.rest.issues.listComments,
@@ -430,7 +444,9 @@ jobs:
                   { owner, repo, pull_number: prNumber, per_page: 100 }),
               ]);
               rawComments = comments;
-              changedPaths = gate.changedPathsFromFiles(files, pull.changed_files);
+              changedPaths = typeof gate.changedPathsFromFiles === 'function'
+                ? gate.changedPathsFromFiles(files, pull.changed_files)
+                : bootstrapPathsFromFiles(files, pull.changed_files);
             } catch (error) {
               await postStatus(
                 'failure',
@@ -462,6 +478,60 @@ jobs:
             }
 
             const reviews = await loadReviews();
+
+            if (gate.designEvidenceVersion !== 1) {
+              // No trusted shared path policy is available yet. Conservatively
+              // require design evidence for EVERY in-scope non-fork PR, without
+              // claiming UI classification or rendering was checked.
+              const designMember = 'design-reviewer';
+              const designComments = comments.filter((comment) =>
+                gate.parseVerdictComment(comment)?.reviewer === designMember);
+              const codeComments = comments.filter((comment) =>
+                gate.parseVerdictComment(comment)?.reviewer !== designMember);
+              const design = gate.collectVerdicts(designComments, headSha).current.get(designMember);
+              const designEligible = design && !design.isSelfDeclaredAdmin &&
+                roster.has(designMember) && !author.members.has(designMember);
+              const designApproved = designEligible && design.verdict === 'APPROVE';
+              const codeResult = gate.evaluateGate({
+                headSha, changedPaths, comments: codeComments, reviews, roster,
+                authorMembers: author.members, authorSource: author.source,
+                squadLabeled: true,
+              });
+              let state = codeResult.state;
+              let description = codeResult.description;
+              if (codeResult.override && codeResult.passed) {
+                const dissent = (codeResult.dissent?.length ?? 0) +
+                  Number(Boolean(designEligible && design.verdict === 'REQUEST_CHANGES'));
+                const short = (codeResult.missingApprovals ?? 0) + Number(!designApproved);
+                description = codeResult.description.replace(
+                  /; dissent=\d+; short=\d+$/,
+                  `; dissent=${dissent}; short=${short}`,
+                );
+              } else if (!codeResult.override) {
+                if (author.members.has(designMember)) {
+                  state = 'failure';
+                  description = `BLOCKED @ ${headSha.slice(0, 12)}: required design-reviewer is the PR author`;
+                } else if (designEligible && design.verdict === 'REQUEST_CHANGES') {
+                  state = 'failure';
+                  description = `REQUEST_CHANGES @ ${headSha.slice(0, 12)} by design-reviewer`;
+                } else if (!designApproved) {
+                  state = 'failure';
+                  description = `BLOCKED @ ${headSha.slice(0, 12)}: trusted UI policy not deployed; ` +
+                    'exact-head design-reviewer approval required';
+                } else if (codeResult.passed) {
+                  description = `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by ${
+                    [...codeResult.approvals, designMember].join('+')}`.slice(0, 140);
+                }
+              }
+              await postStatus(state, description);
+              core.warning(
+                'Bootstrap: trusted default-branch gate lacks UI design scope support. ' +
+                'All in-scope non-fork PRs require extra exact-head design evidence; ' +
+                'no sync carry is attempted. This is source-review evidence, not rendered UI validation. ' +
+                'An authenticated exact-head owner override remains authoritative; retain operator premerge evidence.',
+              );
+              return;
+            }
 
             // Sync-carry-forward exemption (issue #1633, "Option A"). A
             // record pinned to an old head SHA stays valid at the current

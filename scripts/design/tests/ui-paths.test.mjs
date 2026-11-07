@@ -35,6 +35,7 @@ test('scopes shared design and reviewer policy artifacts', () => {
     '.github/workflows/design-detector.yml',
     '.github/workflows/squad-review-verdict.yml',
     '.github/copilot-instructions.md',
+    '.github/pull_request_template.md',
     '.github/agents/design-reviewer.agent.md',
     '.github/skills/reviewer-protocol/SKILL.md',
     'mobile/.impeccable/design.json',
@@ -45,12 +46,28 @@ test('scopes shared design and reviewer policy artifacts', () => {
     '.squad/agents/design-reviewer/charter.md',
     '.squad/agents/hicks/charter.md',
     '.squad/agents/vasquez/charter.md',
+    '.squad/ceremonies.md',
+    '.squad/routing.md',
+    '.squad/ralph-instructions.md',
     '.squad/skills/reviewer-protocol/SKILL.md',
+    'PRODUCT.md',
+    'mobile/PRODUCT.md',
     'scripts/ci/squad-verdict-gate.mjs',
     'scripts/ci/tests/test-design-ci-integration.mjs',
     'scripts/ci/tests/test-squad-verdict-gate.mjs',
     'scripts/ci/verify-squad-verdict.mjs',
     'scripts/design/swiftui-targets.mjs',
+  ]) {
+    assert.equal(isUiPath(filePath), true, filePath);
+  }
+});
+
+test('scopes user-visible public identity, app icons, manifest, and printer illustrations', () => {
+  for (const filePath of [
+    'src/Web/ReactApp/public/printfarmer-logo.svg',
+    'src/Web/ReactApp/public/icons/apple-touch-icon.png',
+    'src/Web/ReactApp/public/manifest.webmanifest',
+    'src/Web/ReactApp/public/assets/printers/generic-printer.svg',
   ]) {
     assert.equal(isUiPath(filePath), true, filePath);
   }
@@ -68,6 +85,13 @@ test('excludes tests, build output, vendored code, dependencies, and non-UI area
     'mobile/PrintFarmer/ViewModels/DashboardViewModel.swift',
     'mobile/PrintFarmer/Models/FarmShape.swift',
     'mobile/PrintFarmer/Services/PrinterViewService.swift',
+    'src/Web/ReactApp/public/assets/orcaslicer/creality/Printer.png',
+    'src/Web/ReactApp/public/icons/orca/param_dependencies_printers.svg',
+    'src/Web/ReactApp/public/assets/printers/bed-model.stl',
+    'src/Web/ReactApp/public/assets/hdri/studio_small_03_1k.hdr',
+    'src/Web/ReactApp/public/licenses/droid-fonts/README.txt',
+    'src/Web/ReactApp/public/sw.js',
+    'src/Web/ReactApp/public/images/unclassified.png',
   ]) {
     assert.equal(isUiPath(filePath), false, filePath);
   }

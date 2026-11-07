@@ -15,6 +15,12 @@ unrelated brand interview.
 
 ## UI design review
 
+Before opening a rendered-UI PR, the author supplies local desktop/mobile
+browser screenshots and available native simulator captures under the canonical
+[UI visual evidence](../.github/copilot-instructions.md#ui-visual-evidence)
+requirement. This applies to drafts too. Policy/tooling-only changes record an
+explicit not-applicable reason rather than fabricated visual evidence.
+
 For each `squad`-labelled PR, use the shared
 `scripts/design/ui-paths.mjs` classifier against the PR's changed paths. When
 it identifies UI changes, the coordinator automatically dispatches
@@ -34,6 +40,8 @@ this ceremony implements that policy, not a separate gate.
 The dispatch packet includes the exact current head SHA, comparison baseline,
 all changed UI paths and platforms, the applicable `PRODUCT.md` and `DESIGN.md`
 authorities, author-supplied test and scanner evidence (or explicit absence),
+the PR's visual evidence with source SHA, screen, viewport/device, appearance,
+state and unavailable-platform limitations,
 and all prior stable finding IDs with their disposition and closure criteria.
 Web uses the root authorities; native iOS uses `mobile/PRODUCT.md` and
 `mobile/DESIGN.md`. For mixed changes provide both. Recheck the head before
@@ -51,6 +59,8 @@ did not occur. A source-only adaptation of Impeccable critique is degraded:
 say so explicitly, including the absent independent assessment and visual
 evidence; do not claim a full dual-agent critique. The deterministic scanner
 is supplementary and cannot substitute for judgment or verify native behavior.
+Assess supplied screenshots against the source and documented UI conventions;
+missing required captures or visible unresolved defects block approval.
 
 Report actionable findings with stable IDs, severity, location, user impact
 and closure criteria; include positive evidence and preserve unresolved

@@ -58,6 +58,7 @@ test('rejects incomplete or unsafe changed-path enumeration', () => {
 test('strictly reads shared config and rejects malformed JSON', () => {
   const config = readSharedConfig(configuredRoot);
   assert.equal(config.detector.ignoreValues[0].reason.includes('warning state'), true);
+  assert.deepEqual(config.hook.limits, { maxFindings: 5, maxChars: 8000 });
   assert.throws(() => readSharedConfig(malformedRoot), /Cannot parse/);
 });
 
@@ -81,6 +82,14 @@ test('rejects unreasoned, unscoped, and broad suppression config', async () => {
       detector: { ignoreValues: [{ rule: 'side-tab', value: 'border-l-4', reason: 'Too broad' }] },
     }));
     await assert.rejects(() => scanChangedUiFiles(configuredRoot, rules), /requires one or more file globs/);
+    fs.writeFileSync(configPath, JSON.stringify({
+      hook: { limits: { maxFindings: 1, maxChars: 128 } },
+    }));
+    assert.deepEqual(readSharedConfig(configuredRoot).hook.limits, { maxFindings: 1, maxChars: 128 });
+    fs.writeFileSync(configPath, JSON.stringify({
+      hook: { limits: { maxFindings: 1, unknown: 2 } },
+    }));
+    assert.throws(() => readSharedConfig(configuredRoot), /not a supported limit/);
   } finally {
     fs.writeFileSync(configPath, JSON.stringify(original, null, 2) + '\n');
   }
@@ -155,6 +164,23 @@ test('scans the narrow SwiftUI target rule without claiming full SwiftUI coverag
   assert.deepEqual(clean, []);
 });
 
+test('keeps public design assets in scope without claiming they were scanned', async () => {
+  const assetPaths = [
+    'src/Web/ReactApp/public/printfarmer-logo.svg',
+    'src/Web/ReactApp/public/icons/apple-touch-icon.png',
+    'src/Web/ReactApp/public/manifest.webmanifest',
+    'src/Web/ReactApp/public/assets/printers/generic-printer.svg',
+  ];
+  const result = await scanChangedUiFiles(configuredRoot, assetPaths.map(filePath => ({
+    status: 'M',
+    paths: [filePath],
+    currentPath: filePath,
+  })));
+  assert.deepEqual(result.changedScopePaths, [...assetPaths].sort());
+  assert.deepEqual(result.scannedFiles, []);
+  assert.deepEqual(result.nonScannedUiPaths, [...assetPaths].sort());
+});
+
 test('preserves deleted UI paths in scope without attempting to read them', async () => {
   const result = await scanChangedUiFiles(configuredRoot, [{
     status: 'D',
@@ -188,6 +214,54 @@ test('reports non-UI pull requests as an explicit skip', async () => {
   const result = await runDesignCheck({ root, base: head, head });
   assert.equal(result.status, 'skipped');
   assert.match(result.reason, /No UI source or design-policy paths changed/);
+});
+
+test('uses the real merge-base and excludes UI edits made only on the advanced base', () => {
+  const root = path.resolve(here, '..', '..', '..');
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  const runGit = (args, input) => {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', input });
+    assert.equal(result.status, 0, String(result.stderr));
+    return result.stdout.trim();
+  };
+  const updateTree = (tree, segments, blob) => {
+    const entries = runGit(['ls-tree', '-z', tree]).split('\0').filter(Boolean).map(entry => {
+      const [metadata, name] = entry.split('\t');
+      const [mode, type, object] = metadata.split(' ');
+      return { mode, type, object, name };
+    });
+    const index = entries.findIndex(entry => entry.name === segments[0]);
+    assert.notEqual(index, -1, `Missing test path segment ${segments[0]}`);
+    const current = entries[index];
+    if (segments.length === 1) {
+      assert.equal(current.type, 'blob');
+      entries[index] = { ...current, object: blob };
+    } else {
+      assert.equal(current.type, 'tree');
+      entries[index] = {
+        ...current,
+        object: updateTree(current.object, segments.slice(1), blob),
+      };
+    }
+    const treeInput = entries
+      .map(entry => `${entry.mode} ${entry.type} ${entry.object}\t${entry.name}\0`)
+      .join('');
+    return runGit(['mktree', '-z'], treeInput);
+  };
+
+  const sourceFiles = runGit(['ls-tree', '-r', '--name-only', head, '--', 'src/Web/ReactApp/src'])
+    .split('\n')
+    .filter(filePath => /\.(?:css|html|js|jsx|scss|ts|tsx)$/i.test(filePath));
+  assert.ok(sourceFiles.length > 0, 'Expected a tracked React UI source file for the divergence fixture.');
+  const baseOnlyPath = sourceFiles[0];
+  const tree = runGit(['rev-parse', `${head}^{tree}`]);
+  const alternateBlob = runGit(['hash-object', '-w', '--stdin'], 'base-only advanced UI change');
+  const baseOnlyTree = updateTree(tree, baseOnlyPath.split('/'), alternateBlob);
+  const advancedBase = runGit(['commit-tree', baseOnlyTree, '-p', head, '-m', 'test base-only UI change']);
+  const endpointDiff = runGit(['diff', '--name-status', advancedBase, head]);
+
+  assert.match(endpointDiff, new RegExp(`^M\\t${baseOnlyPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.deepEqual(enumerateChangedPaths(root, advancedBase, head), []);
 });
 
 test('validates the vendored detector integrity pin and fails when the head differs', () => {

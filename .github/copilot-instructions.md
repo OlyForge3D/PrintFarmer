@@ -481,6 +481,46 @@ verdict workflow loads both the gate and shared UI policy from the trusted
 default branch, never executes PR code, and uses the existing live write-access
 authentication for design comments with no bot-identity exceptions.
 
+**Deployment bootstrap.** If a new verdict workflow runs before its trusted
+default-branch module exposes `designEvidenceVersion: 1`, it validates PR-file
+completeness inline and conservatively requires additional exact-head design
+evidence for **every** in-scope non-fork PR. It never imports PR-head code,
+claims shared UI classification, or carries bootstrap reviews across sync.
+Existing code quorum and authenticated owner overrides remain; owner audit
+counts retain design dissent/shortfall. Operator premerge source-review evidence
+is still required; rendered screenshots are not invented for policy-only work.
+Once the module and shared policy land together on the trusted default branch,
+normal UI-only scope resumes without a separate permissive status.
+
+### UI visual evidence
+
+Before opening a PR (including a draft) that changes rendered UI, the author
+must start the affected app locally and capture the changed surfaces. Web
+evidence requires browser screenshots at desktop and mobile widths. Native
+iOS evidence requires simulator screenshots when a simulator is available;
+otherwise record the unavailable host/toolchain and the unverified surfaces,
+not a substitute web screenshot. A missing required web capture blocks opening
+the UI PR. Attach the screenshots to the PR and identify the full source SHA,
+route or screen, viewport or device, appearance, relevant state and observed
+limitations. Use safe local test data; omit credentials and identifying farm
+information, and do not operate real heaters or motion merely to stage a capture.
+
+Refresh evidence when a later change affects the captured UI. Before ready/merge,
+the design reviewer evaluates the supplied images alongside source, platform
+authorities and the author's validation results. Missing required evidence or
+a visible unresolved defect blocks approval. Reviewers remain source/evidence-only:
+they do not launch apps, browsers, simulators, builds or tests. Supplied screenshots
+are author evidence, not independent review, interaction proof or accessibility
+certification. Report native unavailability explicitly in the verdict.
+
+Shared UI classification also covers design policy, tooling and assets. A
+policy/tooling-only change with no rendered product change must record visual
+evidence as **not applicable**, with the reason; do not invent app screenshots
+or waive its required source design review. A changed visual asset is not
+policy-only just because the source detector cannot parse it. This is a required
+author/reviewer workflow, not a claim that the deterministic scanner or commit
+status can authenticate screenshot content.
+
 **High-risk routing:** choose the two lenses most relevant to the full change:
 Bishop owns integration/architecture (boundaries, persistence, cross-layer fit);
 Hicks owns behavior/contracts/tests (observable behavior, compatibility, regression

@@ -237,6 +237,39 @@ Changes are reversible per batch; printer actions are not, so visual validation
 must use isolated mocks and never issue physical commands. Geometry checks do
 not establish accessibility conformance or real-device usability.
 
+### Cross-surface conventions
+
+- Preserve incumbent action, sensor and status glyphs. Change the vocabulary
+  only in an explicitly scoped redesign, not as incidental cleanup.
+- Heater and status glyphs use semantic active-state color and a non-color cue.
+  Web heater readouts reuse `PrinterSensorGlyph` and `isPrinterHeaterHot`:
+  finite reported current temperature above 50 C for a hotend or 35 C for a
+  bed determines the hot glyph, not a requested target. Missing telemetry
+  must remain unknown, not appear active. Preserve current/target values and
+  units; visual work must not change safety thresholds or printer commands.
+- Secondary explanatory text uses the shared hover/focus `Tooltip`, not
+  additional inline labels or native `title` attributes. Icon-only controls
+  still need accessible names. Essential status, errors, values, units and
+  field labels remain visible and must not become hover-only information.
+  Touch and native clients need accessible disclosure rather than hover.
+- Table and card views preserve action meaning, availability, permissions,
+  reported state and outcomes. The same behavioral parity applies between
+  web and native clients, with platform-appropriate navigation, gestures and
+  layout rather than identical pixels.
+
+**Incumbent difference:** native `TemperatureView.swift` colors by a positive
+target (red hotend, blue bed), while web glyph heat state uses reported current
+temperature. Neither this policy nor a design review certifies identical
+predicates or hues. A proposed semantic alignment needs an explicit behavior
+decision and regression evidence; do not silently translate one into the other.
+See the [native adaptation](../../../../../mobile/DESIGN.md#cross-surface-conventions).
+
+Clipped essential readings, inaccessible explanations, differing action
+availability or misleading heat state falsify the design. Operators and
+keyboard, touch or low-vision users bear the cost of mistakes. Presentation is
+reversible; physical actions may not be, so use isolated mock telemetry for
+visual evidence and never activate real heat or motion to obtain screenshots.
+
 ### Toolbar regression evidence
 
 `src/test/design-system/toolbar-glyphs.test.tsx` checks migrated control text,

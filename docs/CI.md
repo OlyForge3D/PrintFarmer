@@ -66,7 +66,7 @@ tests under `scripts/ci/tests/`, plus yamllint on changed workflow YAML.
 
 ## Automatic UI design gates
 
-UI work gets three complementary checks rather than a user-prompted cleanup:
+UI work gets complementary checks rather than a user-prompted cleanup:
 
 - Before a UI feature is built, Ralph requires Impeccable `shape` against the
   issue and the relevant product/design authority. Material unresolved choices
@@ -77,17 +77,31 @@ UI work gets three complementary checks rather than a user-prompted cleanup:
 - PR CI scans changed UI files, and UI-touching Squad PRs additionally require a
   current-head `design-reviewer` verdict after Impeccable critique and audit.
   Design approval supplements, never replaces, the risk-routed code reviewers.
+- Before opening a rendered-UI PR, including a draft, the author starts the app
+  locally and attaches desktop/mobile browser screenshots and available native
+  simulator captures under the canonical
+  [UI visual evidence](../.github/copilot-instructions.md#ui-visual-evidence)
+  requirement. Record source SHA and capture context, disclose unavailable native
+  tooling, and refresh captures when their UI changes. Policy/tooling-only work
+  records why images are not applicable. The reviewer evaluates supplied evidence;
+  the scanner does not authenticate screenshots or certify accessibility.
 
 Web authority is the root `PRODUCT.md` / `DESIGN.md` and existing component
 tokens. Native authority is `mobile/PRODUCT.md` / `mobile/DESIGN.md` and SwiftUI
 components. The shared classifier in `scripts/design/ui-paths.mjs` owns UI path
 scope; renames must consider both the old and new paths.
+User-visible public assets are in review scope, but unsupported binary formats
+are scope-only: the detector does not claim to inspect their rendered contents.
+Product/design authority and the shaping/review ceremonies also require design
+review so editing the gate's own instructions cannot silently bypass it.
 
 The standalone detector workflow filters inside the job so non-UI PRs still
 receive a completed check. The same detector is wired into the existing required
 **CI tooling tests** job, which also gates **CI summary**. No new branch-protection
 permission or local Copilot app installation is required. Detector changes,
 shared design configuration, and design authority need review too.
+The detector reads the immutable PR head; afterward the tooling job restores
+the CI integration source so existing checks still validate the merge result.
 
 ### Detection is not design judgment
 
@@ -126,6 +140,17 @@ account, not independent approval. Existing authenticated owner overrides,
 exact-head code review rules, fork handling, and the bare `squad` scope remain
 unchanged. The design review itself requires fresh current-head evidence rather
 than carrying an old design approval across a sync.
+
+The privileged verdict job executes only trusted default-branch tooling.
+During the first deployment, an older trusted module cannot use the new shared
+classifier. The compatibility path conservatively requires current-head code
+and design evidence for every in-scope non-fork PR and disables sync carry.
+It does not load PR code to obtain the missing helper. The verifier still
+rejects a PR-sourced review workflow that differs from the trusted definition;
+initial rollout therefore requires authenticated owner authorization and
+operator-reviewed design evidence, not a claim that the new gate is already
+active. After the approved workflow reaches the default branch, normal shared
+classification applies.
 
 False positives can delay useful fixes; false negatives can leave farm operators
 with inaccessible or ambiguous controls. A known-bad fixture producing a clean

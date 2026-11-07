@@ -294,6 +294,88 @@ test('privileged workflow posts a blocking status on failed or incomplete PR fil
   }
 });
 
+test('new privileged workflow with old trusted gate enforces conservative exact-head bootstrap evidence', async () => {
+  const workflow = yaml.load(await readFile(
+    path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'), 'utf8',
+  ));
+  const source = workflow.jobs.record.steps.find((step) => step.with?.script)?.with.script;
+  const script = source.slice(source.indexOf('const prNumberInput ='))
+    .replace("String(process.env.PR_NUMBER ?? '')", "'3705'");
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const execute = new AsyncFunction('github', 'core', 'context', 'gate', script);
+  const legacyGate = {
+    ...gateModule,
+    changedPathsFromFiles: undefined,
+    designEvidenceVersion: undefined,
+    designReviewer: undefined,
+    evaluateGate: (input) => gateModule.evaluateGate({
+      ...input, changedPaths: ['scripts/ci/gh-api.mjs'],
+    }),
+  };
+  const code = ['bishop', 'hicks'].map((member) => comment(member, 'APPROVE'));
+  const owner = comment('jpapiez', 'APPROVE', headSha);
+  for (const scenario of [
+    { name: 'code only', comments: code, state: 'failure', pattern: /trusted UI policy not deployed/ },
+    { name: 'design only', comments: [comment(designReviewer, 'APPROVE')], state: 'failure', pattern: /no review recorded/ },
+    { name: 'combined', comments: [...code, comment(designReviewer, 'APPROVE')], state: 'success', pattern: /REVIEWED.*design-reviewer/ },
+    { name: 'stale design', comments: [...code, comment(designReviewer, 'APPROVE', staleSha)], state: 'failure', pattern: /exact-head design-reviewer approval required/ },
+    { name: 'design dissent', comments: [...code, comment(designReviewer, 'REQUEST_CHANGES')], state: 'failure', pattern: /REQUEST_CHANGES.*design-reviewer/ },
+    { name: 'unresolved design permission', comments: [...code, comment(designReviewer, 'APPROVE', headSha, { user: { login: 'unresolved' } })], state: 'failure', pattern: /exact-head design-reviewer approval required/ },
+    { name: 'owner missing design', comments: [...code, owner], state: 'success', pattern: /APPROVE \(owner\).*dissent=0; short=1/ },
+    { name: 'owner design dissent', comments: [...code, owner, comment(designReviewer, 'REQUEST_CHANGES')], state: 'success', pattern: /APPROVE \(owner\).*dissent=1; short=1/ },
+    { name: 'design author', author: designReviewer, comments: [...code, comment(designReviewer, 'APPROVE')], state: 'failure', pattern: /design-reviewer is the PR author/ },
+    { name: 'truncated files', changedFiles: 2, comments: [...code, owner], state: 'failure', pattern: /scope or review evidence unavailable\/incomplete/ },
+  ]) {
+    const statuses = [];
+    const warnings = [];
+    const listLabels = () => {};
+    const listComments = () => {};
+    const listFiles = () => {};
+    const listReviews = () => {};
+    const github = {
+      rest: {
+        pulls: {
+          get: async () => ({ data: {
+            state: 'open', labels: [{ name: 'squad' }], changed_files: scenario.changedFiles ?? 1,
+            body: `Squad-Author: ${scenario.author ?? 'parker'}`,
+            head: { sha: headSha, ref: 'squad/3705-ui', repo: { full_name: 'OlyForge3D/PrintFarmer' } },
+          } }),
+          listFiles, listReviews,
+        },
+        issues: { listLabelsForRepo: listLabels, listComments },
+        repos: {
+          createCommitStatus: async (status) => statuses.push(status),
+          getCollaboratorPermissionLevel: async ({ username }) => {
+            if (username === 'unresolved') throw new Error('permission unavailable');
+            return { data: { permission: 'admin' } };
+          },
+        },
+      },
+      graphql: async () => ({ repository: { pullRequest: { closingIssuesReferences: { nodes: [] } } } }),
+      paginate: async (method) => {
+        if (method === listLabels) return [...designRoster].map((member) => ({ name: `squad:${member}` }));
+        if (method === listComments) return scenario.comments;
+        if (method === listFiles) return [{ filename: uiPath, status: 'modified' }];
+        if (method === listReviews) return [];
+        throw new Error('Unexpected API access');
+      },
+    };
+    await execute(github, {
+      warning: (message) => warnings.push(message), notice: () => {},
+      setFailed: (message) => assert.fail(message),
+    }, {
+      repo: { owner: 'OlyForge3D', repo: 'PrintFarmer' }, serverUrl: 'https://github.com', runId: 1,
+    }, legacyGate);
+    assert.equal(statuses.length, 1, scenario.name);
+    assert.equal(statuses[0].state, scenario.state, scenario.name);
+    assert.match(statuses[0].description, scenario.pattern, scenario.name);
+    assert.ok(statuses[0].description.length <= 140, scenario.name);
+    if (!scenario.changedFiles) {
+      assert.ok(warnings.some((message) => /no sync carry.*source-review evidence/.test(message)), scenario.name);
+    }
+  }
+});
+
 test('normalizes emoji-decorated squad identities', () => {
   assert.equal(normalizeMember('squad:🔍 Bishop'), 'bishop');
   assert.equal(normalizeMember('Bishop'), 'bishop');

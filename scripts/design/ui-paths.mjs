@@ -32,11 +32,31 @@ const webExcludedSegments = new Set([
   'vendor',
 ]);
 
+const webPublicImageExtensions = new Set([
+  '.avif',
+  '.gif',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.png',
+  '.svg',
+  '.webp',
+]);
+
+const webPublicIdentityFiles = new Set([
+  'favicon-16x16.png',
+  'favicon.png',
+  'manifest.webmanifest',
+  'printables-icon.png',
+  'printfarmer-logo.svg',
+]);
+
 const sharedDesignFiles = new Set([
   'mobile/.impeccable/design.json',
   'mobile/AGENTS.md',
   'mobile/DESIGN.md',
   '.github/copilot-instructions.md',
+  '.github/pull_request_template.md',
   '.github/agents/design-reviewer.agent.md',
   '.github/hooks/impeccable.json',
   '.github/workflows/ci.yml',
@@ -50,7 +70,12 @@ const sharedDesignFiles = new Set([
   '.squad/agents/design-reviewer/charter.md',
   '.squad/agents/hicks/charter.md',
   '.squad/agents/vasquez/charter.md',
+  '.squad/ceremonies.md',
+  '.squad/ralph-instructions.md',
+  '.squad/routing.md',
   '.squad/skills/reviewer-protocol/SKILL.md',
+  'PRODUCT.md',
+  'mobile/PRODUCT.md',
   'DESIGN.json',
   'DESIGN.md',
   'scripts/ci/squad-verdict-gate.mjs',
@@ -84,6 +109,18 @@ function hasExcludedWebSegment(filePath) {
 function isWebUiPath(filePath) {
   const webIndex = 'src/Web/ReactApp/index.html';
   if (filePath === webIndex) return true;
+
+  const publicPrefix = 'src/Web/ReactApp/public/';
+  if (filePath.startsWith(publicPrefix)) {
+    const publicPath = filePath.slice(publicPrefix.length);
+    if (webPublicIdentityFiles.has(publicPath)) return true;
+    const extension = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+    if (publicPath.startsWith('icons/') &&
+      !publicPath.startsWith('icons/orca/') &&
+      webPublicImageExtensions.has(extension)) return true;
+    return publicPath.startsWith('assets/printers/') &&
+      webPublicImageExtensions.has(extension);
+  }
 
   const webSourcePrefix = 'src/Web/ReactApp/src/';
   if (!filePath.startsWith(webSourcePrefix) || hasExcludedWebSegment(filePath)) {

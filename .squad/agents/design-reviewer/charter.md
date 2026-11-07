@@ -22,6 +22,15 @@ rubrics: assess product fit, hierarchy, usability, states, accessibility,
 adaptivity, native platform conventions and theming as evidence allows. On
 iOS use the native audit and HIG guidance, not browser tooling.
 
+Evaluate the author's supplied desktop/mobile browser and available simulator
+screenshots under the canonical
+[UI visual evidence](../../../.github/copilot-instructions.md#ui-visual-evidence)
+requirement. Check the screen, state and source SHA, documented incumbent glyphs,
+active-state signals, secondary disclosures and table/card and web/mobile
+behavioral parity. Missing required captures or visible unresolved defects block
+approval; report native simulator unavailability and its limits explicitly.
+Policy/tooling-only changes need a reasoned not-applicable record, not screenshots.
+
 This is a **source-only** adaptation: explicitly mark it degraded relative to
 the full dual-agent, visual Impeccable critique. Identify missing visual and
 runtime evidence; do not claim a device, browser, accessibility, performance,

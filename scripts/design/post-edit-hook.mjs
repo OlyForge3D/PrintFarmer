@@ -2,28 +2,95 @@
 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { readSharedConfig, scanSingleUiFile } from './check-ui-design.mjs';
 
-function parseToolArgs(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
-  if (typeof value !== 'string') return {};
+const scriptPath = fileURLToPath(import.meta.url);
+
+function parseJsonArgument(value) {
+  if (typeof value !== 'string') return value;
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    return JSON.parse(value);
   } catch {
-    return {};
+    return value;
   }
 }
 
-function editedPaths(event) {
-  const args = parseToolArgs(event.toolArgs ?? event.tool_input);
-  if (event.toolName === 'apply_patch' && typeof event.toolArgs === 'string') {
-    return [...event.toolArgs.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)]
-      .map(match => match[1].trim());
+function nestedObjects(value) {
+  const found = [];
+  const visit = current => {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return;
+    found.push(current);
+    for (const key of ['input', 'tool_input', 'arguments', 'toolArgs']) {
+      if (key in current) visit(parseJsonArgument(current[key]));
+    }
+  };
+  visit(parseJsonArgument(value));
+  return found;
+}
+
+function applyPatchText(objects, rawArgs) {
+  for (const object of objects) {
+    for (const key of ['patch', 'input']) {
+      if (typeof object[key] === 'string' && object[key].includes('*** ')) return object[key];
+    }
   }
-  const filePath = args.path || args.file_path || args.filePath || args.target_file;
-  return typeof filePath === 'string' && filePath ? [filePath] : [];
+  return typeof rawArgs === 'string' && rawArgs.includes('*** ') ? rawArgs : undefined;
+}
+
+function pathsFromApplyPatch(patch) {
+  const files = [];
+  let current;
+  const appendCurrent = () => {
+    if (current) files.push(current);
+    current = undefined;
+  };
+
+  for (const line of patch.split(/\r?\n/)) {
+    let match = line.match(/^\*\*\* (Add|Update|Delete) File: (.+)$/);
+    if (match) {
+      appendCurrent();
+      current = {
+        path: match[2].trim(),
+        operation: match[1].toLowerCase(),
+      };
+      continue;
+    }
+    match = line.match(/^\*\*\* Move to: (.+)$/);
+    if (match && current?.operation === 'update') {
+      current = { ...current, path: match[1].trim(), operation: 'move' };
+    }
+  }
+  appendCurrent();
+  const latestByPath = new Map();
+  for (const file of files) latestByPath.set(file.path, file);
+  return [...latestByPath.values()];
+}
+
+export function editedFiles(event) {
+  const rawArgs = event.toolArgs ?? event.tool_input;
+  const args = parseJsonArgument(rawArgs);
+  const objects = nestedObjects(args);
+  const toolName = String(event.toolName || '').toLowerCase();
+  if (toolName.includes('apply_patch') || toolName === 'applypatch') {
+    const patch = applyPatchText(objects, typeof rawArgs === 'string' ? rawArgs : undefined);
+    if (patch) return pathsFromApplyPatch(patch);
+  }
+
+  const files = [];
+  for (const object of objects) {
+    const filePath = object.path || object.file_path || object.filePath || object.target_file;
+    if (typeof filePath !== 'string' || !filePath) continue;
+    const action = String(object.operation || object.action || '').toLowerCase();
+    const operation = action === 'delete' || action === 'remove' || toolName.includes('delete')
+      ? 'delete'
+      : 'update';
+    files.push({ path: filePath, operation });
+  }
+
+  return files.filter((file, index, list) =>
+    list.findIndex(candidate => candidate.path === file.path && candidate.operation === file.operation) === index);
 }
 
 function findRepositoryRoot(cwd) {
@@ -38,23 +105,62 @@ function findRepositoryRoot(cwd) {
   return path.resolve(result.stdout.trim());
 }
 
-function formatContext(result) {
-  if (result.status === 'skipped') return '';
-  const lines = [
-    `Impeccable deterministic design checks scanned ${result.scannedFiles.length} changed UI source file(s).`,
-  ];
-  for (const finding of result.findings) {
-    lines.push(`${finding.file}:${finding.line || 1} [${finding.antipattern}] ${finding.description}`);
+export function formatContext(results, limits) {
+  const scannedFiles = results.flatMap(result => result.scannedFiles);
+  const entries = results.flatMap(result => [
+    ...result.findings.map(finding => ({ ...finding, kind: 'finding' })),
+    ...result.advisories.map(finding => ({ ...finding, kind: 'advisory' })),
+  ]);
+  const linesFor = (visibleEntries, omittedCount) => {
+    const lines = [`Design checks scanned ${scannedFiles.length} changed UI source file(s).`];
+    for (const entry of visibleEntries) {
+      const prefix = entry.kind === 'advisory' ? 'Advisory: ' : '';
+      lines.push(`${prefix}${entry.file}:${entry.line || 1} [${entry.antipattern}] ${entry.description}`);
+    }
+    if (omittedCount > 0) lines.push(`${omittedCount} finding(s) omitted; see CI for complete output.`);
+    if (entries.length === 0) {
+      lines.push('No deterministic design findings. This is a static check, not a visual or model-based review.');
+    } else {
+      lines.push('Review findings and fix real issues; only use narrow, justified file-scoped ignores for intentional exceptions.');
+    }
+    return lines.join('\n');
+  };
+
+  let visibleEntries = entries.slice(0, limits.maxFindings);
+  let omittedCount = entries.length - visibleEntries.length;
+  let context = linesFor(visibleEntries, omittedCount);
+  while (context.length > limits.maxChars && visibleEntries.length > 0) {
+    visibleEntries = visibleEntries.slice(0, -1);
+    omittedCount = entries.length - visibleEntries.length;
+    context = linesFor(visibleEntries, omittedCount);
   }
-  for (const finding of result.advisories) {
-    lines.push(`Advisory: ${finding.file}:${finding.line || 1} [${finding.antipattern}] ${finding.description}`);
+  if (context.length > limits.maxChars) {
+    context = entries.length === 0
+      ? 'Design check passed; no findings.'
+      : `${omittedCount} finding(s) omitted; see CI for complete output.`;
   }
-  if (result.findings.length === 0 && result.advisories.length === 0) {
-    lines.push('No deterministic design findings. This is a static check, not a visual or model-based review.');
-  } else {
-    lines.push('Review the findings and fix real issues; only use narrow, justified file-scoped ignores for intentional exceptions.');
+  if (context.length > limits.maxChars) context = 'Design check output omitted; see CI.';
+  return context;
+}
+
+export async function runHook(event) {
+  const cwd = path.resolve(event.cwd || process.cwd());
+  const root = findRepositoryRoot(cwd);
+  const config = readSharedConfig(root);
+  if (!config.hook.enabled || config.hook.quiet) return undefined;
+
+  const files = editedFiles(event).filter(file => file.operation !== 'delete');
+  if (files.length === 0) return undefined;
+
+  const results = [];
+  for (const file of files) {
+    const absolutePath = path.isAbsolute(file.path) ? file.path : path.resolve(cwd, file.path);
+    results.push(await scanSingleUiFile(root, absolutePath));
   }
-  return lines.join('\n');
+  if (results.every(result => result.status === 'skipped')) return undefined;
+
+  const additionalContext = formatContext(results, config.hook.limits);
+  return { additionalContext };
 }
 
 async function main() {
@@ -63,23 +169,8 @@ async function main() {
     for await (const chunk of process.stdin) chunks.push(chunk);
     const input = Buffer.concat(chunks).toString('utf8');
     const event = input ? JSON.parse(input) : {};
-    const cwd = path.resolve(event.cwd || process.cwd());
-    const root = findRepositoryRoot(cwd);
-    const config = readSharedConfig(root);
-    if (!config.hook.enabled) return;
-
-    const paths = editedPaths(event);
-    if (paths.length === 0) return;
-    const context = [];
-    for (const editedPath of paths) {
-      const absolutePath = path.isAbsolute(editedPath) ? editedPath : path.resolve(cwd, editedPath);
-      const result = await scanSingleUiFile(root, absolutePath);
-      const formatted = formatContext(result);
-      if (formatted) context.push(formatted);
-    }
-    if (context.length > 0 && !config.hook.quiet) {
-      process.stdout.write(`${JSON.stringify({ additionalContext: context.join('\n\n') })}\n`);
-    }
+    const result = await runHook(event);
+    if (result) process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
     process.stdout.write(`${JSON.stringify({
       additionalContext: `Impeccable deterministic design check could not run: ${error.message}. CI will fail closed if shared detector configuration or coverage is invalid.`,
@@ -87,4 +178,6 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
+  main();
+}

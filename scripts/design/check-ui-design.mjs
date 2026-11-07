@@ -87,11 +87,23 @@ export function readSharedConfig(root) {
   }
   if ('limits' in hookConfig) {
     if (!isObject(hookConfig.limits)) fail('.impeccable/config.json: hook.limits must be an object.');
+    const supportedLimitNames = new Set(['maxFindings', 'maxChars']);
     for (const [name, value] of Object.entries(hookConfig.limits)) {
+      if (!supportedLimitNames.has(name)) {
+        fail(`.impeccable/config.json: hook.limits.${name} is not a supported limit.`);
+      }
       if (!Number.isInteger(value) || value <= 0) {
         fail(`.impeccable/config.json: hook.limits.${name} must be a positive integer.`);
       }
     }
+  }
+
+  const hookLimits = {
+    maxFindings: hookConfig.limits?.maxFindings ?? 5,
+    maxChars: hookConfig.limits?.maxChars ?? 8000,
+  };
+  if (hookLimits.maxChars < 64) {
+    fail('.impeccable/config.json: hook.limits.maxChars must be at least 64 to report bounded output safely.');
   }
 
   const configArray = (section, key) => {
@@ -147,7 +159,11 @@ export function readSharedConfig(root) {
   if (!isObject(designSystem)) fail('.impeccable/config.json: detector.designSystem must be an object.');
 
   return {
-    hook: { enabled: hookConfig.enabled !== false, quiet: hookConfig.quiet === true },
+    hook: {
+      enabled: hookConfig.enabled !== false,
+      quiet: hookConfig.quiet === true,
+      limits: hookLimits,
+    },
     detector: {
       ignoreRules,
       ignoreFiles,
@@ -277,6 +293,10 @@ export function enumerateChangedPaths(root, base, head) {
   if (currentHead !== headSha) {
     fail(`Checked-out HEAD ${currentHead} does not match requested --head ${headSha}.`);
   }
+  const mergeBase = runGit(root, ['merge-base', baseSha, headSha]).trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(mergeBase)) {
+    fail(`Could not resolve a merge-base for --base ${baseSha} and --head ${headSha}.`);
+  }
   const raw = runGit(root, [
     'diff',
     '--no-ext-diff',
@@ -284,7 +304,7 @@ export function enumerateChangedPaths(root, base, head) {
     '--name-status',
     '-z',
     '--find-renames=50%',
-    baseSha,
+    mergeBase,
     headSha,
     '--',
   ]);

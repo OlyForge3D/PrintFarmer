@@ -28,6 +28,7 @@ import { isUiPath } from '../design/ui-paths.mjs';
 
 export const verdictContext = 'squad/pre-pr-verdict';
 export const designReviewer = 'design-reviewer';
+export const designEvidenceVersion = 1;
 
 /** The PR files endpoint caps results at 3,000; incomplete scope is not evidence. */
 export function changedPathsFromFiles(files, changedFiles) {
