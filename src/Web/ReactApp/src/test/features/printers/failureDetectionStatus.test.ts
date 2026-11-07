@@ -12,6 +12,31 @@ import {
 import type { FailureDetectionPrinterStatusDto } from "@/types/api";
 
 describe("failureDetectionStatus utilities", () => {
+  it("preserves held reservations separately from unknown activity and monitoring", () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: "printer-1",
+      printerName: "Pool printer",
+      state: "reservation-held",
+      reason: "Printer activity is unknown or offline. Obico reservation retained.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      detectionTarget: "Pool A",
+      lastOutcome: "healthy",
+    };
+    expect(getFailureDetectionDisplayState(status)).toBe("reservation-held");
+    expect(getFailureDetectionStateLabel(status.state, true)).toBe("Reservation held");
+    expect(getFailureDetectionStateVariant(status.state)).toBe("warning");
+    expect(getFailureDetectionIconColorClass(status.state)).toBe("text-pf-warning");
+    expect(getFailureDetectionDetail(status, true)).toBe(status.reason);
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("physically verify the printer is idle");
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("without disabling Obico");
+    expect(getFailureDetectionAttentionContent(status)?.action).toContain("Before the next print");
+    const unknown = { ...status, state: "unknown", detectionSource: "none", detectionTarget: undefined };
+    expect(getFailureDetectionDisplayState(unknown)).toBe("unknown");
+    expect(getFailureDetectionStateLabel(unknown.state, true)).toBe("Activity unknown");
+    expect(getFailureDetectionAttentionContent(unknown)).toBeNull();
+  });
+
   describe("getFailureDetectionDisplayState", () => {
     it("returns undefined when status is missing", () => {
       expect(getFailureDetectionDisplayState(undefined)).toBeUndefined();
@@ -85,12 +110,12 @@ describe("failureDetectionStatus utilities", () => {
       expect(getFailureDetectionStateLabel(undefined, false)).toBe("Off");
     });
 
-    it('returns "Checking" for unknown state when enabled is true', () => {
-      expect(getFailureDetectionStateLabel("unknown", true)).toBe("Checking");
+    it('returns "Activity unknown" for unknown activity', () => {
+      expect(getFailureDetectionStateLabel("unknown", true)).toBe("Activity unknown");
     });
 
     it('returns "Off" for unknown state when enabled is false', () => {
-      expect(getFailureDetectionStateLabel("unknown", false)).toBe("Off");
+      expect(getFailureDetectionStateLabel("unrecognized", false)).toBe("Off");
     });
   });
 

@@ -34,9 +34,12 @@ public sealed class PrintFailureMonitorService : BackgroundService
     private const string PrinterStateIdle = "idle";
     private const string PrinterStateMisconfigured = "misconfigured";
     private const string PrinterStateMonitoring = "monitoring";
+    private const string PrinterStateReservationHeld = "reservation-held";
+    private const string PrinterStateUnknown = "unknown";
     private const string StartingIdleReason = "Print is starting — monitoring will begin after warmup.";
     private const string WarmupIdleReason = "Print just started — monitoring will begin shortly.";
     private const string NotPrintingReason = "Printer is not actively printing.";
+    private const string UnknownActivityReason = "Printer activity is unknown or offline. Monitoring is not active; the print may still be running.";
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IFailureDetectionMonitorStatus _monitorStatus;
     private readonly IPrinterStatusCacheReader _statusCache;
@@ -134,9 +137,12 @@ public sealed class PrintFailureMonitorService : BackgroundService
         DateTime utcNow,
         int warmupGracePeriodSeconds = 120)
     {
-        if (status is null
-            || !status.IsOnline
-            || !PrinterStateClassifier.IsActivePrintingJob(status.State))
+        if (status is null || !status.IsOnline || string.IsNullOrWhiteSpace(status.State))
+        {
+            return (false, UnknownActivityReason);
+        }
+
+        if (!PrinterStateClassifier.IsActivePrintingJob(status.State))
         {
             return (false, NotPrintingReason);
         }
@@ -278,6 +284,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 .ToDictionary(printer => printer.Id, printer => _statusCache.GetStatus(printer.Id));
 
             IReadOnlyDictionary<Guid, ObicoPrintRoute> obicoRoutes;
+            bool obicoRoutingFailed = false;
             try
             {
                 var routing = scope.ServiceProvider.GetRequiredService<IObicoServerAssignmentService>();
@@ -296,6 +303,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[PrintFailureMonitor] Obico route reconciliation failed; printing and other providers continue");
+                obicoRoutingFailed = true;
                 obicoRoutes = configuredPrinters.ToDictionary(
                     printer => printer.Id,
                     _ => new ObicoPrintRoute("none", null, null, null,
@@ -327,12 +335,14 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         DateTime.UtcNow,
                         currentSettings.WarmupGracePeriodSeconds);
                     bool isPrinting = monitoringWindow.ShouldMonitor;
+                    bool activityUnknown = monitoringWindow.IdleReason == UnknownActivityReason;
                     var jobContext = ResolveJobContext(cachedPrinterStatus, activeJob?.JobName);
                     bool obicoSelected = printer.ObicoEnabled;
                     bool printGuardSelected = printer.PrintGuardEnabled;
                     obicoRoutes.TryGetValue(printer.Id, out ObicoPrintRoute? obicoRoute);
                     string obicoDetectionSource = obicoRoute?.Source ?? DetectionSourceNone;
-                    string? obicoDetectionTarget = obicoRoute?.Target;
+                    string? obicoDetectionTarget = activityUnknown && obicoRoute?.Source == "global"
+                        ? "Global Obico server" : obicoRoute?.Target;
                     string? obicoServerUrl = obicoRoute?.Url;
                     string? obicoApiKey = obicoRoute?.ApiKey;
                     (string detectionSource, string? detectionTarget) = ResolveProviderTargets(
@@ -403,6 +413,36 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         Reason = "Monitoring request failed.",
                         LastOutcome = AnalysisOutcomeError,
                     };
+
+                    if (activityUnknown)
+                    {
+                        bool reservationHeld = obicoRoute?.Source is "pooled" or "global";
+                        string unknownReason = reservationHeld && obicoRoute is { UnavailableReason: null }
+                            ? "Printer activity is unknown or offline. Obico reservation retained; monitoring is not active. The print may still be running."
+                                + (string.IsNullOrWhiteSpace(obicoDetectionTarget) ? string.Empty : $" Reserved server: {obicoDetectionTarget}.")
+                            : obicoRoute?.UnavailableReason ?? UnknownActivityReason;
+                        printerStatuses.Add(baseStatus with
+                        {
+                            State = reservationHeld ? PrinterStateReservationHeld : PrinterStateUnknown,
+                            DetectionSource = reservationHeld ? obicoDetectionSource : detectionSource,
+                            DetectionTarget = reservationHeld ? obicoDetectionTarget : detectionTarget,
+                            Reason = obicoSelected && currentSettings.Enabled
+                                ? unknownReason
+                                : UnknownActivityReason,
+                            Providers = providerStatuses.Select(provider => provider with
+                            {
+                                State = provider.Provider == "Obico" && currentSettings.Enabled
+                                    ? obicoRoutingFailed || obicoRoute?.SelectedServerUnavailable == true
+                                        ? PrinterStateError
+                                        : reservationHeld ? PrinterStateReservationHeld : PrinterStateUnknown
+                                    : provider.State == "ready" ? PrinterStateUnknown : provider.State,
+                                Reason = provider.Provider == "Obico" && currentSettings.Enabled
+                                    ? unknownReason
+                                    : provider.State == "ready" ? UnknownActivityReason : provider.Reason,
+                            }).ToArray(),
+                        });
+                        continue;
+                    }
 
                     if (readyProviderCount == 0)
                     {

@@ -66,6 +66,7 @@ function getHeadline(
   if (status?.state === 'monitoring' && status.lastOutcome === 'failure') return 'Failure detected';
   if (status?.state === 'monitoring' && status.lastOutcome === 'error') return 'Scan failed';
   if (status?.state === 'misconfigured') return 'Setup needed';
+  if (status?.state === 'reservation-held' || status?.state === 'unknown') return getFailureDetectionStateLabel(status.state);
   if (status?.state === 'error' || attention) return 'Degraded';
   if (status?.state === 'idle') return 'Standing by';
   return enabled ? 'Connecting' : 'Off';
@@ -193,7 +194,7 @@ export function FailureDetectionMonitoringSummary({
             variant={tone === 'critical' ? 'error' : tone === 'attention' ? 'warning' : tone === 'healthy' ? 'success' : 'default'}
             size="sm"
           >
-            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : 'Idle'}
+            {tone === 'critical' ? 'Action' : tone === 'attention' ? 'Review' : tone === 'healthy' ? getFailureDetectionStateLabel('monitoring') : status?.state === 'unknown' ? 'Activity unknown' : 'Idle'}
           </Badge>
         )}
         {needsAction && snapshotUrl && (

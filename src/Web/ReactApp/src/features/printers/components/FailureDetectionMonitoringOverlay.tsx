@@ -37,6 +37,8 @@ function getChipStyles(state?: string): { border: string; glow: string; icon: st
         icon: 'text-white/80',
       };
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return {
         border: 'border-pf-warning/40',
         glow: 'shadow-[0_2px_8px_rgba(245,158,11,0.4)]',

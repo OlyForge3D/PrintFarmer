@@ -88,6 +88,10 @@ export function getFailureDetectionStateLabel(state?: string, enabled = false): 
       return 'Guarding';
     case 'idle':
       return 'Ready';
+    case 'reservation-held':
+      return 'Reservation held';
+    case 'unknown':
+      return 'Activity unknown';
     case 'misconfigured':
       return 'Needs setup';
     case 'error':
@@ -106,6 +110,8 @@ export function getFailureDetectionStateVariant(state?: string, enabled = false)
     case 'idle':
       return 'primary';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'warning';
     case 'error':
       return 'error';
@@ -137,6 +143,8 @@ export function getFailureDetectionIconColorClass(state?: string, enabled = fals
     case 'idle':
       return 'text-pf-status-idle-text';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'text-pf-warning';
     case 'error':
       return 'text-pf-error';
@@ -226,6 +234,13 @@ export function getFailureDetectionAttentionContent(
 ): { issue: string; action: string } | null {
   if (!status) {
     return null;
+  }
+
+  if (status.state === 'reservation-held') {
+    return {
+      issue: ensureSentence(status.reason, 'Printer activity is unknown. Obico reservation retained.'),
+      action: 'Restore printer connectivity, physically verify the printer is idle, and wait for the runtime to confirm the print has ended. The reservation releases on reconciliation without disabling Obico. If it remains held, review connectivity and any tracked job still starting; do not disable monitoring just to free capacity. Before the next print, verify Obico remains enabled and confirm active monitoring once the print starts.',
+    };
   }
 
   if (status.state === 'misconfigured') {

@@ -57,6 +57,27 @@ beforeAll(async () => {
 }, 60_000);
 
 describe('FailureDetectionStatusCard', () => {
+  it('shows held offline reservations as attention, not actively monitored', () => {
+    const original = mockStatus.printers;
+    mockStatus.printers = [{
+      printerId: 'held',
+      printerName: 'Offline printer',
+      state: 'reservation-held',
+      reason: 'Printer activity is unknown or offline. Obico reservation retained.',
+      isPrinting: false,
+      detectionSource: 'pooled',
+      lastOutcome: 'healthy',
+    }];
+    try {
+      render(<FailureDetectionStatusCard />);
+      expect(screen.getByText('Offline printer')).toBeInTheDocument();
+      expect(screen.getByText('Reservation held')).toBeInTheDocument();
+      expect(screen.getByText(/No printers are actively being monitored/)).toBeInTheDocument();
+    } finally {
+      mockStatus.printers = original;
+    }
+  });
+
   it('renders runtime summary and printers needing attention', () => {
     render(<FailureDetectionStatusCard />);
 

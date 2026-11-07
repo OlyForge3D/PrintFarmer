@@ -29,6 +29,10 @@ function formatStateLabel(state: string): string {
       return 'Error';
     case 'idle':
       return 'Idle';
+    case 'reservation-held':
+      return 'Reservation held';
+    case 'unknown':
+      return 'Activity unknown';
     default:
       return 'Disabled';
   }
@@ -39,6 +43,8 @@ function stateVariant(state: string): 'default' | 'success' | 'warning' | 'error
     case 'monitoring':
       return 'success';
     case 'misconfigured':
+    case 'reservation-held':
+    case 'unknown':
       return 'warning';
     case 'error':
       return 'error';
@@ -78,7 +84,7 @@ export function FailureDetectionStatusCard() {
   }
 
   const activePrinters = data.printers.filter(printer => printer.state === 'monitoring');
-  const attentionPrinters = data.printers.filter(printer => printer.state === 'misconfigured' || printer.state === 'error').slice(0, 3);
+  const attentionPrinters = data.printers.filter(printer => ['misconfigured', 'error', 'reservation-held', 'unknown'].includes(printer.state)).slice(0, 3);
 
   return (
     <Card>
