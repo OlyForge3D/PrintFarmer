@@ -39,8 +39,11 @@ The route is persisted with the print identity in `PrinterServiceState`, so API
 restarts and concurrent starts do not redistribute ongoing prints or overbook the
 shared database budget. Apply `AddObicoPrintRouting` for PostgreSQL, SQL Server,
 and migrated SQLite installations before running the new API. Existing saved
-pool entries and capacities are preserved; old permanent printer pins are cleared
-and active prints are allocated under the new rules on the first scan.
+pool entries and capacities are preserved. Legacy printer pins keep their server
+while activity is active, unknown, offline, or not yet observed. The first confirmed
+active print adopts that reservation without redistributing it, even if its server
+is disabled, unhealthy, or above capacity. Confirmed inactivity or monitoring opt-out
+releases the legacy pin; a missing print identity alone never releases it.
 Do not run old and new API versions against the same farm during cutover: old
 instances do not understand print reservations.
 
@@ -58,6 +61,10 @@ This intentionally favors continuity over reclaiming uncertain capacity.
 Monitoring details show **Reservation held** (and the selected pool server name
 when known), not healthy monitoring, while activity is unknown/offline.
 Unknown activity without a reservation shows **Activity unknown** instead.
+Legacy pins awaiting an active identity count toward capacity and block server
+deletion. Their unknown/offline status reports the held reservation and unconfirmed
+identity, without enabling inference or manual analysis. Once an active identity
+is adopted, normal print-lifetime release rules apply.
 An external print that never becomes observable again can hold capacity
 indefinitely. Restore connectivity, physically verify the printer is idle, and
 wait for the runtime to confirm the print has ended. Reconciliation releases
@@ -281,7 +288,8 @@ PrintFarmer's `/health` includes an `obico` check. When failure detection is
 disabled it reports Healthy without contacting Obico, and the Admin Control
 Center hides its tile. When enabled it actively probes all enabled pooled
 servers, even on an idle farm. The global endpoint is probed only in global-only
-mode or while a pre-existing global print is finishing after a pool was added.
+mode or while a pre-existing global reservation remains held after a pool was
+added, including legacy routes whose print identity is still unconfirmed.
 A disabled pool is unavailable, not permission to bypass its capacity budget.
 
 The check shares the administrative server connectivity probe: guarded,

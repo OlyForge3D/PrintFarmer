@@ -47,7 +47,7 @@ public class PrinterServiceState : IRevisionedEntity
 
     public ObicoServer? ObicoServer { get; set; }
 
-    /// <summary>Identity of the print holding this route; null for legacy printer pins.</summary>
+    /// <summary>Identity of the print holding this route; legacy pins retain a null key until activity is confirmed.</summary>
     [MaxLength(100)]
     public string? ObicoPrintKey { get; set; }
 
