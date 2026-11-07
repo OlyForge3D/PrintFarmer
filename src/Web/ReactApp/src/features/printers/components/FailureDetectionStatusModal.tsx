@@ -60,7 +60,9 @@ function getFailureDetectionOutcomeLabel(status?: FailureDetectionPrinterStatusD
         ? `Failure detected (${Math.round(status.lastConfidence * 100)}% confidence)`
         : 'Failure detected';
     case 'healthy':
-      return 'No failure detected';
+      return status.lastAnalyzedAt
+        ? 'No failure detected'
+        : 'No recorded analysis observation';
     case 'error':
       return 'Monitoring runtime error';
     case 'none':
@@ -317,7 +319,7 @@ export function FailureDetectionStatusModal({
             value={detectionTarget ?? 'Current camera target not reported'}
           />
           {lastScan && <DetailTile label="Last scan" value={lastScan} />}
-          {lastOutcome && <DetailTile label="Latest outcome" value={lastOutcome} />}
+          {lastOutcome && <DetailTile label="Last analysis outcome" value={lastOutcome} />}
           {lastFailure && <DetailTile label="Last failure detected" value={lastFailure} />}
         </div>
 

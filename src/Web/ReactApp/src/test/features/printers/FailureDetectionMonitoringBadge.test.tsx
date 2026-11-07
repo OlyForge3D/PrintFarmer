@@ -542,7 +542,7 @@ describe("FailureDetectionMonitoringBadge", () => {
       "The monitoring runtime has not reported printer-specific detail yet.",
     )).toBeInTheDocument();
     expect(screen.getByText("Runtime is still checking")).toBeInTheDocument();
-    expect(screen.queryByText("Latest outcome")).not.toBeInTheDocument();
+    expect(screen.queryByText("Last analysis outcome")).not.toBeInTheDocument();
     expect(screen.queryByText("No scans yet")).not.toBeInTheDocument();
     expect(screen.queryByText("Last scan")).not.toBeInTheDocument();
     expect(screen.queryByText("Auto-pause")).not.toBeInTheDocument();
@@ -574,7 +574,7 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     // Modal should open
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Latest outcome")).toBeInTheDocument();
+    expect(screen.getByText("Last analysis outcome")).toBeInTheDocument();
     expect(screen.getByText("No scans yet")).toBeInTheDocument();
     expect(screen.getAllByText("Printer is not actively printing.")).toHaveLength(1);
     expect(screen.queryByText("Why this is showing")).not.toBeInTheDocument();

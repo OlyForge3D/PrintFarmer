@@ -66,9 +66,10 @@ and any tracked job still starting; do not disable monitoring just to free
 capacity. Before the next print, verify Obico remains enabled and confirm active
 monitoring once the print starts.
 
-Provider results are labeled **Last analysis**, with the recorded timestamp and
+The aggregate outcome is labeled **Last analysis outcome**, and provider results
+are labeled **Last analysis**, with the recorded timestamp and
 analysis mode when available; they are historical observations, not proof of
-current coverage. A healthy result without a timestamp shows **No recorded
+current coverage. At either level, a healthy result without a timestamp shows **No recorded
 analysis observation**. Unknown provider activity shows **Current coverage
 unconfirmed**, and summary badges show **Activity unknown**, never confirmed idle
 or healthy monitoring.

@@ -1,6 +1,6 @@
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FailureDetectionMonitoringOverlay } from "@/features/printers/components/FailureDetectionMonitoringOverlay";
 import { usePrinterFailureDetectionStatus } from "@/features/printers/hooks/usePrinterFailureDetectionStatus";
@@ -58,16 +58,22 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("FailureDetectionMonitoringOverlay", () => {
-  it.each([undefined, "2026-01-15T10:30:00Z"])("does not present unknown coverage as a current all-clear with observation %s", (lastAnalyzedAt) => {
+  it.each([
+    ["reservation-held", undefined],
+    ["reservation-held", "2026-01-15T10:30:00Z"],
+    ["unknown", undefined],
+    ["unknown", "2026-01-15T10:30:00Z"],
+  ] as const)("does not present %s coverage as a current all-clear with observation %s", (state, lastAnalyzedAt) => {
     renderWithQueryClient(<FailureDetectionMonitoringOverlay enabled status={{
       printerId: "p1",
       printerName: "Offline printer",
-      state: "reservation-held",
+      state,
       reason: "Printer activity is unknown or offline. Obico reservation retained.",
       isPrinting: false,
       detectionSource: "pooled",
       detectionTarget: "Pool A",
       lastOutcome: "healthy",
+      lastAnalyzedAt,
       providers: [{
         provider: "Obico",
         state: "unknown",
@@ -78,20 +84,52 @@ describe("FailureDetectionMonitoringOverlay", () => {
       }],
     }} />);
     fireEvent.click(screen.getByRole("button", { name: /open failure detection details/i }));
+    const dialog = screen.getByRole("dialog");
+    const aggregateOutcome = within(dialog).getByText("Last analysis outcome").parentElement;
     const provider = screen.getByTestId("failure-detection-provider-obico");
     expect(provider).toHaveTextContent("Activity unknown");
     expect(provider).toHaveTextContent("Current coverage unconfirmed");
     if (lastAnalyzedAt) {
+      expect(aggregateOutcome).toHaveTextContent("No failure detected");
+      expect(within(dialog).getByText("Last scan")).toBeInTheDocument();
       expect(provider).toHaveTextContent("Last analysis: No failure detected");
       expect(provider).toHaveTextContent("Last analyzed");
       expect(provider).toHaveTextContent("Paired frame");
     } else {
+      expect(aggregateOutcome).toHaveTextContent("No recorded analysis observation");
+      expect(dialog).not.toHaveTextContent("No failure detected");
+      expect(within(dialog).queryByText("Last scan")).not.toBeInTheDocument();
       expect(provider).toHaveTextContent("No recorded analysis observation");
       expect(provider).not.toHaveTextContent("No failure detected");
       expect(provider).not.toHaveTextContent("Paired frame");
     }
-    expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("without disabling Obico");
-    expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("Before the next print");
+    if (state === "reservation-held") {
+      expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("without disabling Obico");
+      expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("Before the next print");
+    } else {
+      expect(screen.getByTestId("failure-detection-next-step")).toHaveTextContent("Restore printer connectivity and verify its physical state");
+    }
+  });
+
+  it("preserves active monitoring while identifying a timestamped healthy outcome as historical analysis", () => {
+    renderWithQueryClient(<FailureDetectionMonitoringOverlay enabled status={{
+      printerId: "p1",
+      printerName: "Active printer",
+      state: "monitoring",
+      reason: "Monitoring via global Obico ML settings.",
+      isPrinting: true,
+      detectionSource: "global",
+      lastOutcome: "healthy",
+      lastAnalyzedAt: "2026-01-15T10:30:00Z",
+    }} />);
+    const trigger = screen.getByRole("button", { name: /open failure detection details/i });
+    expect(trigger).toHaveTextContent("Guarding");
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Last analysis outcome").parentElement).toHaveTextContent("No failure detected");
+    expect(within(dialog).getByText("Last scan")).toBeInTheDocument();
+    expect(within(dialog).getByText("Guarding")).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent("No recorded analysis observation");
   });
 
   it.each([false, true])("preserves the held reservation label with live isPrinting=%s", (isPrinting) => {
