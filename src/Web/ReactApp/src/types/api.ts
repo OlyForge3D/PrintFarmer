@@ -637,16 +637,6 @@ export interface LocationTreeNode {
   children: LocationTreeNode[];
 }
 
-/**
- * Breadcrumb item matching backend LocationBreadcrumbDto.
- */
-export interface LocationBreadcrumbItem {
-  id: string;
-  name: string;
-  /** Client-only field for UI rendering; not returned by the API. */
-  depth?: number;
-}
-
 /** Request DTO for creating a location. Matches backend CreateLocationDto. */
 export interface CreateLocationRequest {
   name: string;
