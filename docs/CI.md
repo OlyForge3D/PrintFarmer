@@ -42,6 +42,22 @@ paths and emits outputs consumed by the conditional jobs. This produces a
 required, stable check name even when no application build runs, such as a
 docs-only PR.
 
+## Devcontainer publication
+
+The [devcontainer workflow](../.github/workflows/devcontainer-multiarch.yml)
+skips its entire `build-push` job for published prereleases, including GHCR login,
+image pushes and package visibility updates. Publishing a prerelease for
+source/SBOM disclosure must not overwrite the public devcontainer's `latest`.
+Stable published releases, existing main/tag push triggers and manual dispatch
+retain their current publication behavior; this is not a general tag-name guard.
+
+The ordinary `ci-tools` job checks the event-condition truth table without running
+the publisher. Run the same check locally from the repository root:
+
+```bash
+node --test scripts/ci/tests/test-devcontainer-publication.mjs
+```
+
 ## Squad upgrades
 
 Squad CLI upgrades can overwrite customized automation and install upstream-only

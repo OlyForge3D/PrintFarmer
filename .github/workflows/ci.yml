@@ -387,6 +387,9 @@ jobs:
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
 
+      - name: Test devcontainer prerelease publication guard
+        run: node --test scripts/ci/tests/test-devcontainer-publication.mjs
+
       - name: Test run-owned daily UI validation
         run: node --test scripts/ci/tests/test-daily-validation.mjs
 
