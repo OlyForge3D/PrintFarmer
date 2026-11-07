@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
@@ -127,7 +128,21 @@ public sealed class PrintFailureMonitorService : BackgroundService
                 AdoptExternalKey: isExternalJob ? externalKey : null);
         }
 
-        return new(printerId, null, RetainExisting: status is null || !status.IsOnline || string.IsNullOrWhiteSpace(status.State));
+        return new(printerId, null, RetainExisting: IsActivityUnknown(status));
+    }
+
+    private static bool IsActivityUnknown([NotNullWhen(false)] PrinterStatusDto? status)
+    {
+        if (status is null || !status.IsOnline || string.IsNullOrWhiteSpace(status.State))
+        {
+            return true;
+        }
+
+        // A non-printing label is not necessarily confirmed inactivity (e.g. SDCP "unknown").
+        return !PrinterStateClassifier.IsActivePrintingJob(status.State)
+            && status.State.Trim().ToUpperInvariant() is not
+                ("IDLE" or "READY" or "OPERATIONAL" or "COMPLETE" or "COMPLETED"
+                or "FINISHED" or "STOPPED" or "CANCELLED" or "CANCELED" or "ERROR" or "FAILED");
     }
 
     internal static (bool ShouldMonitor, string IdleReason) EvaluateMonitoringWindow(
@@ -137,7 +152,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         DateTime utcNow,
         int warmupGracePeriodSeconds = 120)
     {
-        if (status is null || !status.IsOnline || string.IsNullOrWhiteSpace(status.State))
+        if (IsActivityUnknown(status))
         {
             return (false, UnknownActivityReason);
         }

@@ -468,6 +468,38 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
         (await ReadStateAsync(printer.Id)).ObicoFallbackUrl.Should().Be(_settings.ObicoApiUrl);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileAsync_UnconfirmedLegacyGlobalReservationWithPool_ProbesHeldDestination(bool healthy)
+    {
+        Printer printer = await AddPrinterAsync();
+        await AddServerAsync(1);
+        using (AppDbContext db = CreateDbContext())
+        {
+            db.PrinterServiceStates.Add(new PrinterServiceState
+            {
+                PrinterId = printer.Id,
+                ObicoFallbackUrl = _settings.ObicoApiUrl,
+            });
+            await db.SaveChangesAsync();
+        }
+        _probe.Setup(probe => probe.ProbeAsync(_settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(healthy, 1, healthy ? null : "offline"));
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true)], _settings);
+
+        _probe.Verify(probe => probe.ProbeAsync(_settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()), Times.Once);
+        routes[printer.Id].SelectedServerUnavailable.Should().Be(!healthy);
+        routes[printer.Id].Source.Should().Be("global");
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].ApiKey.Should().BeNull();
+        PrinterServiceState state = await ReadStateAsync(printer.Id);
+        state.ObicoPrintKey.Should().BeNull();
+        state.ObicoFallbackUrl.Should().Be(_settings.ObicoApiUrl);
+    }
+
     [Fact]
     public async Task ReconcileAsync_TrackedJobEndsWhileOffline_ReleasesReservation()
     {

@@ -53,7 +53,20 @@ public class PrintFailureMonitorServiceTests
     [Theory]
     [InlineData(false, "Printing", true)]
     [InlineData(true, null, true)]
+    [InlineData(true, "unknown", true)]
+    [InlineData(true, "Online", true)]
+    [InlineData(true, "Attention", true)]
+    [InlineData(true, "future-backend-state", true)]
+    [InlineData(true, "Preparing", true)]
+    [InlineData(true, "Cancelling", true)]
+    [InlineData(true, "Offline", true)]
+    [InlineData(true, "Shutdown", true)]
+    [InlineData(true, "Disconnected", true)]
     [InlineData(true, "Idle", false)]
+    [InlineData(true, "Ready", false)]
+    [InlineData(true, "Operational", false)]
+    [InlineData(true, "Finished", false)]
+    [InlineData(true, "Stopped", false)]
     [InlineData(true, "Complete", false)]
     [InlineData(true, "Cancelled", false)]
     [InlineData(true, "Error", false)]
@@ -81,6 +94,27 @@ public class PrintFailureMonitorServiceTests
 
         result.ShouldMonitor.Should().BeFalse();
         result.IdleReason.Should().Be("Printer is not actively printing.");
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("Online")]
+    [InlineData("Attention")]
+    [InlineData("future-backend-state")]
+    [InlineData("Preparing")]
+    [InlineData("Cancelling")]
+    [InlineData("Offline")]
+    [InlineData("Shutdown")]
+    [InlineData("Disconnected")]
+    public void EvaluateMonitoringWindow_WhenActivityIsUnconfirmed_DoesNotClaimIdle(string state)
+    {
+        var status = new PrinterStatusDto(Guid.NewGuid(), true, state);
+
+        var result = PrintFailureMonitorService.EvaluateMonitoringWindow(
+            status, null, null, DateTime.UtcNow);
+
+        result.ShouldMonitor.Should().BeFalse();
+        result.IdleReason.Should().Contain("unknown");
     }
 
     [Fact]
@@ -172,12 +206,8 @@ public class PrintFailureMonitorServiceTests
     [InlineData("Idle")]
     [InlineData("Complete")]
     [InlineData("Cancelled")]
-    [InlineData("Cancelling")]
     [InlineData("Error")]
-    [InlineData("Offline")]
-    [InlineData("Shutdown")]
-    [InlineData("Disconnected")]
-    public void EvaluateMonitoringWindow_WhenStateIsNotActivePrintingJob_ReturnsIdle(string state)
+    public void EvaluateMonitoringWindow_WhenStateConfirmsInactivity_ReturnsIdle(string state)
     {
         var status = new PrinterStatusDto(Guid.NewGuid(), true, state);
 

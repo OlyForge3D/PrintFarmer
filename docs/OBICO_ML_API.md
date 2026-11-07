@@ -57,6 +57,8 @@ unless an intervening non-printing state is observed.
 
 Offline or missing telemetry is **not** proof that a print ended: its reservation
 is retained until a terminal state or tracked job completion is observed.
+Unrecognized activity labels, including a backend's explicit `unknown` state,
+also retain reservations; being reachable alone does not prove inactivity.
 This intentionally favors continuity over reclaiming uncertain capacity.
 Monitoring details show **Reservation held** (and the selected pool server name
 when known), not healthy monitoring, while activity is unknown/offline.

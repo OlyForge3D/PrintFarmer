@@ -105,9 +105,9 @@ public sealed class ObicoServerAssignmentService(
             var results = await Task.WhenAll(probeServers.Where(server => server.IsEnabled)
                 .Select(async server => (server.Id, Result: await connectivityProbe.ProbeAsync(server.Url, server.ApiKey, ct))));
             health = results.ToDictionary(result => result.Id, result => result.Result);
-            bool hasGlobalPrint = await probeDb.PrinterServiceStates.AsNoTracking()
-                .AnyAsync(state => state.ObicoPrintKey != null && state.ObicoFallbackUrl == settings.ObicoApiUrl, ct);
-            if ((probeServers.Count == 0 || hasGlobalPrint) && !string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
+            bool hasGlobalReservation = await probeDb.PrinterServiceStates.AsNoTracking()
+                .AnyAsync(state => state.ObicoFallbackUrl == settings.ObicoApiUrl, ct);
+            if ((probeServers.Count == 0 || hasGlobalReservation) && !string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
             {
                 globalHealth = await connectivityProbe.ProbeAsync(settings.ObicoApiUrl, null, ct);
             }
