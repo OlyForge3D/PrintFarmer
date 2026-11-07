@@ -28,6 +28,52 @@ vi.mock("@/common/hooks/useApi", () => ({
 }));
 
 describe("FailureDetectionMonitoringBadge", () => {
+  it("shows held capacity and safe recovery in the tooltip and monitoring details", () => {
+    const status: FailureDetectionPrinterStatusDto = {
+      printerId: "printer-1",
+      printerName: "Offline printer",
+      state: "reservation-held",
+      reason: "Printer activity is unknown or offline. Obico reservation retained; monitoring is not active. The print may still be running.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      detectionTarget: "Pool A",
+      lastOutcome: "healthy",
+      providers: [{
+        provider: "Obico",
+        state: "reservation-held",
+        reason: "Obico reservation retained; monitoring is not active.",
+        lastOutcome: "healthy",
+      }],
+    };
+    render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
+    const trigger = screen.getByRole("button", { name: /open failure detection details for offline printer/i });
+    expect(trigger).toHaveAttribute("title", expect.stringContaining("Reservation held"));
+    expect(trigger).toHaveAttribute("title", expect.not.stringContaining("Guarding"));
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Pool A")).toBeInTheDocument();
+    expect(within(dialog).getByText(/only after physically verifying the printer is idle/i)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/no action is needed until this printer starts a new print/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /release|disable obico/i })).not.toBeInTheDocument();
+  });
+
+  it("does not offer reservation recovery for unknown activity without a reservation", () => {
+    render(<FailureDetectionMonitoringBadge enabled={true} status={{
+      printerId: "printer-1",
+      printerName: "Unobserved printer",
+      state: "unknown",
+      reason: "Printer activity is unknown or offline. No Obico server reservation is held; the print may still be running.",
+      isPrinting: false,
+      detectionSource: "none",
+      lastOutcome: "none",
+    }} />);
+    const trigger = screen.getByRole("button", { name: /open failure detection details for unobserved printer/i });
+    expect(trigger).toHaveAttribute("title", expect.stringContaining("Activity unknown"));
+    fireEvent.click(trigger);
+    expect(screen.getByText(/restore printer connectivity and verify its physical state/i)).toBeInTheDocument();
+    expect(screen.queryByText(/disable Obico for this printer/i)).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     historyMock = [];
     historyLoadingMock = false;

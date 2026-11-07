@@ -113,6 +113,10 @@ function getFailureDetectionNextStep(
   }
 
   switch (displayState ?? status.state) {
+    case 'reservation-held':
+      return getFailureDetectionAttentionContent(status)?.action ?? status.reason;
+    case 'unknown':
+      return 'Restore printer connectivity and verify its physical state before assuming the print has ended.';
     case 'monitoring':
       return 'No operator action is needed right now. Failure detection is actively watching the current print.';
     case 'idle':
@@ -309,7 +313,7 @@ export function FailureDetectionStatusModal({
             value={sourceLabel ?? (enabled ? 'Runtime is still checking' : 'Disabled')}
           />
           <DetailTile
-            label="Watching"
+            label={status?.state === 'reservation-held' ? 'Reserved server' : 'Watching'}
             value={detectionTarget ?? 'Current camera target not reported'}
           />
           {lastScan && <DetailTile label="Last scan" value={lastScan} />}

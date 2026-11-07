@@ -142,6 +142,15 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         live = live with { IsOnline = false };
         await RunCycleAsync();
         await AssertRouteAsync(serverId);
+        FailureDetectionPrinterStatusDto held = status.GetSnapshot().Printers.Single();
+        held.State.Should().Be("reservation-held");
+        held.IsPrinting.Should().BeFalse();
+        held.DetectionSource.Should().Be("pooled");
+        held.DetectionTarget.Should().Be("Pool");
+        held.Reason.Should().Contain("Obico reservation retained").And.Contain("Selected Obico server is unavailable");
+        held.Providers.Should().ContainSingle().Which.State.Should().Be("error");
+        held.Providers.Single().Reason.Should().Contain("Selected Obico server is unavailable");
+        status.GetSnapshot().ActivelyMonitoredPrinterCount.Should().Be(0);
         using (AppDbContext db = CreateDbContext())
         {
             (await db.PrintJobs.SingleAsync()).Status = PrintJobStatus.Completed;
@@ -151,6 +160,60 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         live = live with { IsOnline = true, State = "Idle" };
         await RunCycleAsync();
         await AssertRouteAsync(null);
+        status.GetSnapshot().Printers.Single().State.Should().Be("idle");
+        live = live with { IsOnline = false };
+        await RunCycleAsync();
+        await AssertRouteAsync(null);
+        FailureDetectionPrinterStatusDto unknown = status.GetSnapshot().Printers.Single();
+        unknown.State.Should().Be("unknown");
+        unknown.DetectionSource.Should().Be("none");
+        unknown.DetectionTarget.Should().BeNull();
+        unknown.Reason.Should().Contain("No Obico server reservation is held");
+        unknown.Providers.Should().ContainSingle().Which.State.Should().Be("unknown");
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.Printers.SingleAsync()).PrintGuardEnabled = true;
+            await db.SaveChangesAsync();
+        }
+
+        settings.Enabled = false;
+        options.SetupGet(value => value.CurrentValue).Returns(new PrintGuardShadowSettings
+        {
+            Enabled = true,
+            ApiUrl = "http://printguard.invalid"
+        });
+        await RunCycleAsync();
+        FailureDetectionPrinterStatusDto printGuardOnly = status.GetSnapshot().Printers.Single();
+        printGuardOnly.State.Should().Be("unknown");
+        printGuardOnly.Providers.Single(provider => provider.Provider == "Obico").State.Should().Be("disabled");
+        printGuardOnly.Providers.Single(provider => provider.Provider == "PrintGuard").State.Should().Be("unknown");
+        printGuardOnly.Reason.Should().NotContain("Obico reservation retained");
+
+        settings.Enabled = true;
+        probe.Setup(value => value.ProbeAsync("http://pool.invalid", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(true, 1, null));
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.PrintJobs.SingleAsync()).Status = PrintJobStatus.Starting;
+            await db.SaveChangesAsync();
+        }
+
+        await RunCycleAsync();
+        await AssertRouteAsync(serverId);
+        FailureDetectionPrinterStatusDto startingOffline = status.GetSnapshot().Printers.Single();
+        startingOffline.State.Should().Be("reservation-held");
+        startingOffline.Providers.Single(provider => provider.Provider == "Obico").State.Should().Be("reservation-held");
+        startingOffline.Providers.Single(provider => provider.Provider == "PrintGuard").State.Should().Be("unknown");
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.Printers.SingleAsync()).ObicoEnabled = false;
+            await db.SaveChangesAsync();
+        }
+
+        await RunCycleAsync();
+        await AssertRouteAsync(null);
+        status.GetSnapshot().Printers.Single().Providers.Should().ContainSingle()
+            .Which.Provider.Should().Be("PrintGuard");
 
         async Task RunCycleAsync()
         {

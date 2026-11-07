@@ -55,7 +55,14 @@ unless an intervening non-printing state is observed.
 Offline or missing telemetry is **not** proof that a print ended: its reservation
 is retained until a terminal state or tracked job completion is observed.
 This intentionally favors continuity over reclaiming uncertain capacity.
-An operator can opt the printer out to release a stranded reservation. Routing
+Monitoring details show **Reservation held** (and the selected pool server name
+when known), not healthy monitoring, while activity is unknown/offline.
+Unknown activity without a reservation shows **Activity unknown** instead.
+An external print that never becomes observable again can hold capacity
+indefinitely. Restore connectivity, or **physically verify the printer is idle
+before disabling Obico for that printer in printer settings**. This existing
+opt-out releases its reservation on the next scan; it does not stop a print.
+Routing
 is scan-based (startup delay and scan interval apply), not on the physical
 printer-command path, and never delays a print start.
 

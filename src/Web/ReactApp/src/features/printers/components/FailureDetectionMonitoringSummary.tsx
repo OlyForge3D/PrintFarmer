@@ -66,6 +66,7 @@ function getHeadline(
   if (status?.state === 'monitoring' && status.lastOutcome === 'failure') return 'Failure detected';
   if (status?.state === 'monitoring' && status.lastOutcome === 'error') return 'Scan failed';
   if (status?.state === 'misconfigured') return 'Setup needed';
+  if (status?.state === 'reservation-held' || status?.state === 'unknown') return getFailureDetectionStateLabel(status.state);
   if (status?.state === 'error' || attention) return 'Degraded';
   if (status?.state === 'idle') return 'Standing by';
   return enabled ? 'Connecting' : 'Off';
