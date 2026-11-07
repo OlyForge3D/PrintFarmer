@@ -417,7 +417,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     if (activityUnknown)
                     {
                         bool reservationHeld = obicoRoute?.Source is "pooled" or "global";
-                        string unknownReason = reservationHeld && obicoRoute?.UnavailableReason is null
+                        string unknownReason = reservationHeld && obicoRoute is { UnavailableReason: null }
                             ? "Printer activity is unknown or offline. Obico reservation retained; monitoring is not active. The print may still be running."
                                 + (string.IsNullOrWhiteSpace(obicoDetectionTarget) ? string.Empty : $" Reserved server: {obicoDetectionTarget}.")
                             : obicoRoute?.UnavailableReason ?? UnknownActivityReason;
