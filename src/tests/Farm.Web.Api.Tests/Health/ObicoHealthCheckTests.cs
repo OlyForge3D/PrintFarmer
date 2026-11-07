@@ -178,8 +178,13 @@ public sealed class ObicoHealthCheckTests
         fixture.Probe.Verify(probe => probe.ProbeAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task CheckHealthAsync_PreExistingGlobalPrintAfterPoolAdded_IncludesItsDestination()
+    [Theory]
+    [InlineData("external:print", true, HealthStatus.Healthy, 2)]
+    [InlineData("external:print", false, HealthStatus.Degraded, 1)]
+    [InlineData(null, true, HealthStatus.Healthy, 2)]
+    [InlineData(null, false, HealthStatus.Degraded, 1)]
+    public async Task CheckHealthAsync_PreExistingGlobalReservationAfterPoolAdded_IncludesItsDestination(
+        string? printKey, bool globalHealthy, HealthStatus status, int reachable)
     {
         using var fixture = new Fixture();
         await fixture.AddServerAsync("http://pool.invalid", null);
@@ -189,16 +194,22 @@ public sealed class ObicoHealthCheckTests
             db.PrinterServiceStates.Add(new PrinterServiceState
             {
                 PrinterId = Guid.NewGuid(),
-                ObicoPrintKey = "external:print",
+                ObicoPrintKey = printKey,
                 ObicoFallbackUrl = fixture.Settings.ObicoApiUrl
             });
             await db.SaveChangesAsync();
         }
 
+        fixture.Probe.Setup(probe => probe.ProbeAsync(fixture.Settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(globalHealthy, 1, "private diagnostics"));
+
         HealthCheckResult result = await fixture.Check.CheckHealthAsync(new());
 
+        result.Status.Should().Be(status);
         result.Data["targetCount"].Should().Be(2);
+        result.Data["reachableCount"].Should().Be(reachable);
         fixture.Probe.Verify(probe => probe.ProbeAsync(fixture.Settings.ObicoApiUrl, null, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Probe.Verify(probe => probe.ProbeAsync("http://pool.invalid", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

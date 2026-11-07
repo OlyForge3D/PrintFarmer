@@ -288,7 +288,8 @@ PrintFarmer's `/health` includes an `obico` check. When failure detection is
 disabled it reports Healthy without contacting Obico, and the Admin Control
 Center hides its tile. When enabled it actively probes all enabled pooled
 servers, even on an idle farm. The global endpoint is probed only in global-only
-mode or while a pre-existing global print is finishing after a pool was added.
+mode or while a pre-existing global reservation remains held after a pool was
+added, including legacy routes whose print identity is still unconfirmed.
 A disabled pool is unavailable, not permission to bypass its capacity budget.
 
 The check shares the administrative server connectivity probe: guarded,

@@ -179,7 +179,10 @@ public class ObicoServerControllerTests
         IActionResult result = await controller.DeleteServerAsync(server.Id, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result).Value.Should().BeOfType<string>()
-            .Which.Should().Contain("active print reservation");
+            .Which.Should().Contain("held print reservation")
+            .And.Contain("restore printer connectivity")
+            .And.Contain("explicitly opt out of monitoring")
+            .And.Contain("next monitoring scan");
         (await db.ObicoServers.CountAsync()).Should().Be(1);
     }
 

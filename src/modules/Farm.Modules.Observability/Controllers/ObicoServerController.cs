@@ -276,8 +276,9 @@ public class ObicoServerController : ControllerBase
             if (activePrints > 0)
             {
                 return BadRequest(
-                    $"Cannot delete Obico server '{server.Name}' because {activePrints} active print reservation(s) use it. " +
-                    "Wait for the prints to finish and the next monitoring scan to release their capacity.");
+                    $"Cannot delete Obico server '{server.Name}' because {activePrints} held print reservation(s) use it. " +
+                    "Let active prints finish, restore printer connectivity to confirm inactivity, or explicitly opt out of monitoring. " +
+                    "The next monitoring scan releases confirmed inactive or opted-out reservations.");
             }
 
             _dbContext.ObicoServers.Remove(server);
