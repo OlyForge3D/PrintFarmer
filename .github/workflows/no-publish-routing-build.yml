@@ -15,17 +15,12 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [api-runtime, frontend-runtime]
-        platform: [linux/amd64, linux/arm64]
     env:
       SOURCE_SHA: 483974a11c2f6ff1fba55c1dbda101567da16cde
-      TARGET: ${{ matrix.target }}
-      PLATFORM: ${{ matrix.platform }}
+      TARGET: api-runtime
+      PLATFORM: linux/arm64
     steps:
       # No checkout action or credential persistence: only already-public source.
       - name: Fetch and verify immutable public candidate
@@ -43,10 +38,6 @@ jobs:
           test ! -e .github/workflows/no-publish-routing-build.yml
           echo "Verified clean candidate: $SOURCE_SHA"
           echo "Source: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
-        with:
-          platforms: arm64
 
       - name: Build canonical runtime into runner-local image store only
         shell: bash
