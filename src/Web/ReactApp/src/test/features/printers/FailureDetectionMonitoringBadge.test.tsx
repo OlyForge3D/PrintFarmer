@@ -38,12 +38,20 @@ describe("FailureDetectionMonitoringBadge", () => {
       detectionSource: "pooled",
       detectionTarget: "Pool A",
       lastOutcome: "healthy",
-      providers: [{
-        provider: "Obico",
-        state: "reservation-held",
-        reason: "Obico reservation retained; monitoring is not active.",
-        lastOutcome: "healthy",
-      }],
+      providers: [
+        {
+          provider: "Obico",
+          state: "reservation-held",
+          reason: "Obico reservation retained; monitoring is not active.",
+          lastOutcome: "healthy",
+        },
+        {
+          provider: "PrintGuard",
+          state: "unknown",
+          reason: "Printer activity is unknown; monitoring is not active.",
+          lastOutcome: "healthy",
+        },
+      ],
     };
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
     const trigger = screen.getByRole("button", { name: /open failure detection details for offline printer/i });
@@ -52,6 +60,10 @@ describe("FailureDetectionMonitoringBadge", () => {
     fireEvent.click(trigger);
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Pool A")).toBeInTheDocument();
+    const reservedServerTile = within(dialog).getByText("Reserved server").parentElement;
+    expect(reservedServerTile).toHaveTextContent("Pool A");
+    expect(reservedServerTile).not.toHaveTextContent("PrintGuard");
+    expect(within(dialog).getByTestId("failure-detection-provider-printguard")).toHaveTextContent("Activity unknown");
     expect(within(dialog).getByText(/only after physically verifying the printer is idle/i)).toBeInTheDocument();
     expect(within(dialog).queryByText(/no action is needed until this printer starts a new print/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: /release|disable obico/i })).not.toBeInTheDocument();

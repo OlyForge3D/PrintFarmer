@@ -202,6 +202,8 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
         await AssertRouteAsync(serverId);
         FailureDetectionPrinterStatusDto startingOffline = status.GetSnapshot().Printers.Single();
         startingOffline.State.Should().Be("reservation-held");
+        startingOffline.DetectionSource.Should().Be("pooled");
+        startingOffline.DetectionTarget.Should().Be("Pool");
         startingOffline.Providers.Single(provider => provider.Provider == "Obico").State.Should().Be("reservation-held");
         startingOffline.Providers.Single(provider => provider.Provider == "PrintGuard").State.Should().Be("unknown");
         using (AppDbContext db = CreateDbContext())

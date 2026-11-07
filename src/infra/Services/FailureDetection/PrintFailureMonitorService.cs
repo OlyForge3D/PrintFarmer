@@ -424,6 +424,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
                         printerStatuses.Add(baseStatus with
                         {
                             State = reservationHeld ? PrinterStateReservationHeld : PrinterStateUnknown,
+                            DetectionSource = reservationHeld ? obicoDetectionSource : detectionSource,
+                            DetectionTarget = reservationHeld ? obicoDetectionTarget : detectionTarget,
                             Reason = obicoSelected && currentSettings.Enabled
                                 ? unknownReason
                                 : UnknownActivityReason,
