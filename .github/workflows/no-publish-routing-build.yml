@@ -1,0 +1,169 @@
+name: No-publication routing candidate build
+run-name: Routing build 8244aa343b03137cc36673bfc92eef664a9dd4a4 (no publication)
+
+on:
+  push:
+    branches: ['dev/jpapiez/no-publish-routing-build']
+    paths: ['.github/workflows/no-publish-routing-build.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: no-publish-routing-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [api-runtime, frontend-runtime]
+    env:
+      SOURCE_SHA: 8244aa343b03137cc36673bfc92eef664a9dd4a4
+      TARGET: ${{ matrix.target }}
+    steps:
+      # No checkout action or credential persistence: only already-public source.
+      - name: Fetch and verify immutable public candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          cd candidate
+          git init --quiet
+          git remote add origin https://github.com/OlyForge3D/PrintFarmer.git
+          git -c credential.helper= fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          test ! -e .github/workflows/no-publish-routing-build.yml
+          echo "Verified clean candidate: $SOURCE_SHA"
+          echo "Source: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build canonical runtime into runner-local image store only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          sdk_tag="$(python3 scripts/dotnet-sdk.py tag)"
+          docker buildx create --name routing-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+          docker buildx build --load --platform linux/amd64 \
+            --provenance=false --sbom=false --progress=plain \
+            --file scripts/docker/dockerfiles/Dockerfile.multistage \
+            --target "$TARGET" --tag "routing-local:$TARGET" \
+            --build-arg "SDK_TAG=$sdk_tag" \
+            --build-arg "GIT_SHA=$SOURCE_SHA" \
+            --build-arg "VITE_GIT_SHA=$SOURCE_SHA" \
+            --build-arg "VCS_REF=$SOURCE_SHA" \
+            --build-arg "BUILD_VERSION=validation-${SOURCE_SHA:0:12}" \
+            --build-arg SOURCE_REPOSITORY=https://github.com/OlyForge3D/PrintFarmer \
+            --build-arg "SOURCE_ARCHIVE_URL=https://github.com/OlyForge3D/PrintFarmer/archive/$SOURCE_SHA.tar.gz" \
+            .
+          id="$(docker image inspect "routing-local:$TARGET" --format '{{.Id}}')"
+          revision="$(docker image inspect "routing-local:$TARGET" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          test "$revision" = "$SOURCE_SHA"
+          docker image inspect "routing-local:$TARGET" \
+            --format 'Image ID: {{.Id}}; OS/arch: {{.Os}}/{{.Architecture}}; Labels: {{json .Config.Labels}}'
+          {
+            echo "Target: $TARGET"
+            echo "Runner-local image ID: $id"
+            echo "Revision label: $revision"
+            echo "SDK tag: $sdk_tag"
+            echo "No image, cache, SBOM, or binary artifact uploaded; no registry digest claimed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke runtime with synthetic data and no external network
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create --internal routing-smoke
+          test "$(docker network inspect routing-smoke --format '{{.Internal}}')" = true
+          if [ "$TARGET" = api-runtime ]; then
+            jwt="$(openssl rand -hex 48)"
+            worker="$(openssl rand -hex 32)"
+            bootstrap="$(openssl rand -hex 32)"
+            echo "::add-mask::$jwt"
+            echo "::add-mask::$worker"
+            echo "::add-mask::$bootstrap"
+            docker run --detach --name routing-smoke --network routing-smoke \
+              --env ASPNETCORE_ENVIRONMENT=Production \
+              --env DB_PROVIDER=sqlite \
+              --env 'ConnectionStrings__Default=Data Source=/app/models/routing-smoke.db' \
+              --env "Jwt__Key=$jwt" --env "WorkerAuth__SharedKey=$worker" \
+              --env "PFARM__Setup__BootstrapSecret=$bootstrap" \
+              --env NetworkDiscovery__EnableDiscovery=false \
+              --env Slicer__Enabled=false \
+              --env DEPLOYMENT_MODE=monolith \
+              "routing-local:$TARGET"
+            url=http://localhost:5000/healthz
+          else
+            docker run --detach --name routing-smoke --network routing-smoke "routing-local:$TARGET"
+            url=http://localhost:80/health
+          fi
+          healthy=false
+          for attempt in $(seq 1 90); do
+            if docker exec routing-smoke curl --fail --silent --output /dev/null "$url"; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$healthy" != true ]; then
+            echo "::error::Runtime health failed: $TARGET"
+            docker logs --tail 100 routing-smoke
+            exit 1
+          fi
+          test "$(docker inspect routing-smoke --format '{{len .HostConfig.PortBindings}}')" = 0
+          test "$(docker inspect routing-smoke --format '{{len .Mounts}}')" = 0
+          if [ "$TARGET" = frontend-runtime ]; then
+            python3 - <<'PY'
+          import hashlib
+          import subprocess
+          from html.parser import HTMLParser
+          from urllib.parse import urlsplit
+
+          def fetch(path):
+              return subprocess.check_output([
+                  "docker", "exec", "routing-smoke", "curl", "--fail",
+                  "--silent", "http://localhost:80" + path
+              ])
+
+          class Assets(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.paths = set()
+
+              def handle_starttag(self, tag, attrs):
+                  for key, value in attrs:
+                      if key in ("src", "href") and value and value.startswith("/assets/"):
+                          self.paths.add(value)
+
+          index = fetch("/index.html")
+          assert b'<div id="root">' in index, "Missing React root"
+          parser = Assets()
+          parser.feed(index.decode())
+          assert parser.paths, "No built assets referenced by index.html"
+          for path in sorted(parser.paths):
+              body = fetch(path)
+              file_path = "/usr/share/nginx/html" + urlsplit(path).path
+              expected = subprocess.check_output([
+                  "docker", "exec", "routing-smoke", "sha256sum", file_path
+              ]).decode().split()[0]
+              assert body and hashlib.sha256(body).hexdigest() == expected, path
+          print(f"Frontend index and {len(parser.paths)} referenced assets served with exact file hashes")
+          PY
+          fi
+          echo "PASS: $TARGET health; internal network; no host ports or mounts"
+          echo "PASS: $TARGET runtime smoke (synthetic data; internal network; no host ports/mounts)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Destroy ephemeral runtime and builder
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force routing-smoke 2>/dev/null || true
+          docker network rm routing-smoke 2>/dev/null || true
+          docker buildx rm routing-builder 2>/dev/null || true
+          docker image rm "routing-local:$TARGET" 2>/dev/null || true
