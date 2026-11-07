@@ -1,5 +1,5 @@
 name: No-publication routing candidate build
-run-name: Routing build 8244aa343b03137cc36673bfc92eef664a9dd4a4 (no publication)
+run-name: Routing build 483974a11c2f6ff1fba55c1dbda101567da16cde (no publication)
 
 on:
   push:
@@ -21,9 +21,11 @@ jobs:
       fail-fast: false
       matrix:
         target: [api-runtime, frontend-runtime]
+        platform: [linux/amd64, linux/arm64]
     env:
-      SOURCE_SHA: 8244aa343b03137cc36673bfc92eef664a9dd4a4
+      SOURCE_SHA: 483974a11c2f6ff1fba55c1dbda101567da16cde
       TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
     steps:
       # No checkout action or credential persistence: only already-public source.
       - name: Fetch and verify immutable public candidate
@@ -42,6 +44,10 @@ jobs:
           echo "Verified clean candidate: $SOURCE_SHA"
           echo "Source: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
+        with:
+          platforms: arm64
+
       - name: Build canonical runtime into runner-local image store only
         shell: bash
         run: |
@@ -50,7 +56,7 @@ jobs:
           sdk_tag="$(python3 scripts/dotnet-sdk.py tag)"
           docker buildx create --name routing-builder --driver docker-container --use
           docker buildx inspect --bootstrap
-          docker buildx build --load --platform linux/amd64 \
+          docker buildx build --load --platform "$PLATFORM" \
             --provenance=false --sbom=false --progress=plain \
             --file scripts/docker/dockerfiles/Dockerfile.multistage \
             --target "$TARGET" --tag "routing-local:$TARGET" \
@@ -64,11 +70,14 @@ jobs:
             .
           id="$(docker image inspect "routing-local:$TARGET" --format '{{.Id}}')"
           revision="$(docker image inspect "routing-local:$TARGET" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          image_platform="$(docker image inspect "routing-local:$TARGET" --format '{{.Os}}/{{.Architecture}}')"
           test "$revision" = "$SOURCE_SHA"
+          test "$image_platform" = "$PLATFORM"
           docker image inspect "routing-local:$TARGET" \
             --format 'Image ID: {{.Id}}; OS/arch: {{.Os}}/{{.Architecture}}; Labels: {{json .Config.Labels}}'
           {
             echo "Target: $TARGET"
+            echo "Platform: $PLATFORM"
             echo "Runner-local image ID: $id"
             echo "Revision label: $revision"
             echo "SDK tag: $sdk_tag"
