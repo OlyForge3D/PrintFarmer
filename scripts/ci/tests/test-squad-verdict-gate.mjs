@@ -6,10 +6,13 @@ import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import './test-reviewer-dispatch.mjs';
 import { gitMergeFile } from '../git-merge-file.mjs';
+import * as gateModule from '../squad-verdict-gate.mjs';
 import {
   canAutoScope,
+  changedPathsFromFiles,
   classifyChangeScope,
   collectVerdicts,
+  designReviewer,
   diffFingerprint,
   evaluateGate,
   fullGateFiles,
@@ -37,6 +40,8 @@ const roster = rosterFromLabels([
   'squad:🔍 bishop', 'squad:🔍 hicks', 'squad:🔍 vasquez',
   'squad:⚙️ parker', 'squad:🏗️ dallas', 'priority:p1',
 ]);
+const designRoster = new Set([...roster, designReviewer]);
+const uiPath = 'src/Web/ReactApp/src/components/PrinterCard.tsx';
 
 function comment(reviewer, verdict, sha = headSha, overrides = {}) {
   return {
@@ -71,6 +76,223 @@ function gate(overrides = {}) {
     ...overrides,
   });
 }
+
+function uiGate(overrides = {}) {
+  return gate({ changedPaths: [uiPath], roster: designRoster, ...overrides });
+}
+
+test('UI review is additive: code alone, design alone, and neither cannot pass', () => {
+  for (const comments of [
+    [],
+    [comment('bishop', 'APPROVE')],
+    [comment(designReviewer, 'APPROVE')],
+  ]) {
+    const result = uiGate({ comments });
+    assert.equal(result.passed, false);
+    assert.equal(result.requiredCount, 2);
+    assert.match(result.description, /^BLOCKED/);
+  }
+  const result = uiGate({
+    comments: [comment('bishop', 'APPROVE'), comment(designReviewer, 'APPROVE')],
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.designRequired, true);
+  assert.deepEqual(result.approvals, ['bishop', designReviewer]);
+});
+
+test('high-risk UI requires two code approvals plus dedicated design evidence', () => {
+  const input = {
+    changedPaths: ['src/Web/ReactApp/src/features/admin/NewSettings.tsx'],
+    comments: [comment('bishop', 'APPROVE'), comment(designReviewer, 'APPROVE')],
+  };
+  assert.equal(uiGate(input).passed, false);
+  const result = uiGate({ ...input, comments: [...input.comments, comment('hicks', 'APPROVE')] });
+  assert.equal(result.passed, true);
+  assert.equal(result.requiredCount, 3);
+  assert.deepEqual(result.requiredMembers, ['bishop', 'hicks', 'vasquez', designReviewer]);
+});
+
+test('design artifacts and shared path policy require design evidence rather than bypassing UI scope', () => {
+  for (const changedPath of [
+    'DESIGN.md', '.impeccable/config.json', 'scripts/design/ui-paths.mjs',
+    'scripts/ci/squad-verdict-gate.mjs', 'scripts/ci/verify-squad-verdict.mjs',
+    '.github/workflows/squad-review-verdict.yml', '.github/copilot-instructions.md',
+  ]) {
+    const input = {
+      changedPaths: [changedPath],
+      comments: [comment('bishop', 'APPROVE'), comment('hicks', 'APPROVE')],
+    };
+    assert.match(uiGate(input).description, /missing exact-head design-reviewer/, changedPath);
+    assert.equal(uiGate({
+      ...input, comments: [...input.comments, comment(designReviewer, 'APPROVE')],
+    }).passed, true, changedPath);
+  }
+});
+
+test('missing, stale, rejected and unauthenticated UI design reviews are explicit blockers', () => {
+  const code = [comment('bishop', 'APPROVE')];
+  for (const [design, expected] of [
+    [undefined, /missing exact-head design-reviewer/],
+    [comment(designReviewer, 'APPROVE', staleSha), /design-reviewer stale/],
+    [comment(designReviewer, 'REQUEST_CHANGES'), /REQUEST_CHANGES.*design-reviewer/],
+    [comment(designReviewer, 'APPROVE', headSha, { squadWriteAccess: false }),
+      /design-reviewer has no authenticated/],
+  ]) {
+    const result = uiGate({ comments: [...code, ...(design ? [design] : [])] });
+    assert.equal(result.passed, false);
+    assert.match(result.description, expected);
+    assert.ok(result.description.length <= 140);
+  }
+});
+
+test('design reviews never carry, but code sync evidence can combine with fresh design evidence', () => {
+  for (const verdict of ['APPROVE', 'REQUEST_CHANGES']) {
+    const staleDesign = comment(designReviewer, verdict, staleSha);
+    const input = {
+      carriedShas: new Set([staleSha]),
+      comments: [comment('bishop', 'APPROVE', staleSha), staleDesign],
+    };
+    assert.equal(uiGate(input).passed, false);
+    assert.equal(collectVerdicts([staleDesign], headSha, input).current.size, 0);
+    const result = uiGate({
+      ...input, comments: [...input.comments, comment(designReviewer, 'APPROVE')],
+    });
+    assert.equal(result.passed, true);
+    assert.deepEqual(result.carried, ['bishop']);
+    assert.match(result.description, /carried across sync/);
+    assert.ok(result.description.length <= 140);
+  }
+});
+
+test('stale design comments never erase live design rejection', () => {
+  const result = uiGate({
+    carriedShas: new Set([staleSha]),
+    comments: [
+      comment('bishop', 'APPROVE'),
+      comment(designReviewer, 'REQUEST_CHANGES'),
+      comment(designReviewer, 'APPROVE', staleSha, { updated_at: '2026-08-09T01:00:00Z' }),
+    ],
+  });
+  assert.equal(result.passed, false);
+  assert.match(result.description, /REQUEST_CHANGES.*design-reviewer/);
+});
+
+test('design evidence requires a rostered identity and cannot self-review', () => {
+  assert.equal(uiGate({
+    roster,
+    comments: [comment('bishop', 'APPROVE'), comment(designReviewer, 'APPROVE')],
+  }).passed, false);
+  assert.match(uiGate({
+    authorMembers: new Set([designReviewer]),
+    comments: [comment('bishop', 'APPROVE')],
+  }).description, /design-reviewer is the PR author/);
+  assert.deepEqual([...resolveAuthorMembers({
+    branchName: 'squad/3704-design-reviewer-ui', roster: designRoster,
+  }).members], [designReviewer]);
+});
+
+test('owner overrides preserve design dissent and dedicated shortfall, even with extra code approvals', () => {
+  const owner = comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true });
+  for (const design of [undefined, comment(designReviewer, 'REQUEST_CHANGES')]) {
+    const result = uiGate({
+      changedPaths: ['src/Web/ReactApp/src/features/admin/NewSettings.tsx'],
+      comments: [
+        owner, ...['bishop', 'hicks', 'vasquez'].map((member) => comment(member, 'APPROVE')),
+        ...(design ? [design] : []),
+      ],
+    });
+    assert.equal(result.passed, true);
+    assert.equal(result.missingApprovals, 1);
+    assert.deepEqual(result.dissent, design ? [designReviewer] : []);
+    assert.match(result.description, /short=1/);
+    assert.ok(result.description.length <= 140);
+  }
+  assert.equal(uiGate({
+    authorMembers: new Set([designReviewer]), comments: [owner],
+  }).passed, true);
+});
+
+test('non-UI and non-squad behavior is unchanged by the additional design requirement', () => {
+  const result = gate({
+    changedPaths: ['docs/ARCHITECTURE.md'],
+    roster: designRoster,
+    comments: [comment('bishop', 'APPROVE')],
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.designRequired, false);
+  assert.equal(result.requiredCount, 1);
+  assert.equal(uiGate({ squadLabeled: false }).scope, 'out-of-scope');
+});
+
+test('rename scope includes old UI paths and unavailable or truncated file lists fail closed', () => {
+  const files = [{ filename: 'archive/PrinterCard.txt', previous_filename: uiPath, status: 'renamed' }];
+  const changedPaths = changedPathsFromFiles(files, 1);
+  assert.equal(uiGate({ changedPaths, comments: [comment('bishop', 'APPROVE')] }).passed, false);
+  assert.equal(uiGate({ changedPaths, comments: [
+    comment('bishop', 'APPROVE'), comment('hicks', 'APPROVE'), comment(designReviewer, 'APPROVE'),
+  ] }).passed, true);
+  for (const [data, count] of [
+    [files, 2], [files, undefined], [[], 0], [undefined, 1],
+    [[{ filename: 'archive/PrinterCard.txt', status: 'renamed' }], 1],
+    [[{ filename: undefined }], 1],
+    [[{ filename: 'README.md' }, { filename: 'README.md' }], 2],
+    [Array.from({ length: 3000 }, () => ({ filename: 'README.md' })), 3000],
+  ]) {
+    assert.throws(() => changedPathsFromFiles(data, count), /unavailable or incomplete/);
+  }
+});
+
+test('privileged workflow posts a blocking status on failed or incomplete PR file lookup', async () => {
+  const workflow = yaml.load(await readFile(
+    path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'), 'utf8',
+  ));
+  const source = workflow.jobs.record.steps.find((step) => step.with?.script)?.with.script;
+  const script = source.slice(source.indexOf('const prNumberInput ='))
+    .replace("String(process.env.PR_NUMBER ?? '')", "'3704'");
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const execute = new AsyncFunction('github', 'core', 'context', 'gate', script);
+  for (const mode of ['api-failure', 'truncated', 'malformed-rename']) {
+    const statuses = [];
+    const pull = {
+      state: 'open', labels: [{ name: 'squad' }], changed_files: 2,
+      head: { sha: headSha, ref: 'squad/3704-ui', repo: { full_name: 'OlyForge3D/PrintFarmer' } },
+    };
+    const labels = () => {};
+    const comments = () => {};
+    const files = () => {};
+    const github = {
+      rest: {
+        pulls: { get: async () => ({ data: pull }), listFiles: files },
+        issues: { listLabelsForRepo: labels, listComments: comments },
+        repos: { createCommitStatus: async (status) => statuses.push(status) },
+      },
+      graphql: async () => ({ repository: { pullRequest: { closingIssuesReferences: { nodes: [] } } } }),
+      paginate: async (method) => {
+        if (method === labels) return [];
+        if (method === comments) return [];
+        if (method === files) {
+          if (mode === 'api-failure') throw new Error('rate limited');
+          if (mode === 'malformed-rename') {
+            pull.changed_files = 1;
+            return [{ filename: 'archive/UI.txt', status: 'renamed' }];
+          }
+          return [{ filename: 'README.md', status: 'modified' }];
+        }
+        throw new Error('Unexpected API access');
+      },
+    };
+    await execute(github, {
+      warning: () => {}, notice: () => {}, setFailed: (message) => assert.fail(message),
+    }, {
+      repo: { owner: 'OlyForge3D', repo: 'PrintFarmer' }, serverUrl: 'https://github.com', runId: 1,
+    }, gateModule);
+    assert.equal(statuses.length, 1, mode);
+    assert.equal(statuses[0].state, 'failure', mode);
+    assert.equal(statuses[0].sha, headSha, mode);
+    assert.match(statuses[0].description, /BLOCKED.*scope or review evidence unavailable\/incomplete/, mode);
+    assert.ok(statuses[0].description.length <= 140);
+  }
+});
 
 test('normalizes emoji-decorated squad identities', () => {
   assert.equal(normalizeMember('squad:🔍 Bishop'), 'bishop');
@@ -302,7 +524,7 @@ test('requires two panel approvals for a high-risk change', () => {
 test('any two distinct eligible panel approvals satisfy high-risk review', () => {
   for (const pair of [['bishop', 'hicks'], ['bishop', 'vasquez'], ['hicks', 'vasquez']]) {
     const result = gate({
-      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      changedPaths: ['scripts/ci/gh-api.mjs'],
       comments: pair.map((member) => comment(member, 'APPROVE')),
     });
     assert.equal(result.passed, true, pair.join('+'));
@@ -321,7 +543,7 @@ test('duplicates, outsiders, non-panel members, stale and unauthenticated record
     comment('hicks', 'APPROVE', headSha, { squadWriteAccess: false }),
   ]) {
     const result = gate({
-      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      changedPaths: ['scripts/ci/gh-api.mjs'],
       comments: [comment('bishop', 'APPROVE'), extra],
     });
     assert.equal(result.passed, false);
@@ -336,7 +558,7 @@ test('a third or other roster reviewer rejection blocks the pair until that revi
       comment('hicks', 'APPROVE'),
       comment(rejector, 'REQUEST_CHANGES'),
     ];
-    const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'], comments };
+    const input = { changedPaths: ['scripts/ci/gh-api.mjs'], comments };
     assert.equal(gate(input).passed, false);
     comments.push(comment(rejector, 'APPROVE', headSha, {
       updated_at: '2026-08-08T02:00:00Z',
@@ -347,7 +569,7 @@ test('a third or other roster reviewer rejection blocks the pair until that revi
 
 test('a proven pure-sync pair counts but its carried rejection still blocks', () => {
   const input = {
-    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    changedPaths: ['scripts/ci/gh-api.mjs'],
     comments: [comment('bishop', 'APPROVE', staleSha), comment('hicks', 'APPROVE')],
     carriedShas: new Set([staleSha]),
   };
@@ -1202,7 +1424,7 @@ test('the owner can also block through the same override path', () => {
 
 test('a newer owner comment clears a native rejection from the shared owner account', () => {
   const result = gate({
-    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    changedPaths: ['scripts/ci/gh-api.mjs'],
     authorMembers: new Set(['bishop']),
     reviews: [{
       id: 1, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'JPapiez',
@@ -1223,7 +1445,7 @@ test('a newer owner comment clears a native rejection from the shared owner acco
 
 test('a current native owner approval wins over agent rejection and missing panel records', () => {
   const result = gate({
-    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    changedPaths: ['scripts/ci/gh-api.mjs'],
     reviews: [{
       state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
     }],
@@ -1241,7 +1463,7 @@ test('a current native owner approval wins over agent rejection and missing pane
 test('owner audit counts only eligible records and fits the status limit for a maximal login', () => {
   const login = 'a'.repeat(39);
   const result = gate({
-    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    changedPaths: ['scripts/ci/gh-api.mjs'],
     reviews: [{ state: 'APPROVED', commitId: headSha, login, isAdmin: true }],
     comments: [
       comment('bishop', 'APPROVE'),
@@ -1263,7 +1485,7 @@ test('owner audit counts only eligible records and fits the status limit for a m
 
 test('owner authorization with the full quorum preserves dissent without a shortfall', () => {
   const result = gate({
-    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    changedPaths: ['scripts/ci/gh-api.mjs'],
     comments: [
       comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true }),
       comment('bishop', 'APPROVE'),
@@ -1574,7 +1796,7 @@ test('delta-only panel rereview requires a fresh quorum at the new head', () => 
     record.body += `\n\nReviewed revision delta ${staleSha} to ${headSha}; prior findings resolved.`;
     return record;
   });
-  const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'] };
+  const input = { changedPaths: ['scripts/ci/gh-api.mjs'] };
   for (const freshCount of [0, 1]) {
     const result = gate({
       ...input, comments: [...previousRound, ...revisionRound.slice(0, freshCount)],
@@ -1898,7 +2120,10 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /squad-verdict-gate\.mjs/);
-  assert.match(workflow, /file\.previous_filename/);
+  assert.match(workflow, /gate\.changedPathsFromFiles\(files, pull\.changed_files\)/);
+  assert.match(workflow, /shape\.reviewer !== gate\.designReviewer && shape\.headSha !== headSha/);
+  assert.match(workflow, /sparse-checkout: \|\s+scripts\/ci\s+scripts\/design/);
+  assert.match(workflow, /PR changed-file scope or review evidence unavailable\/incomplete/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);

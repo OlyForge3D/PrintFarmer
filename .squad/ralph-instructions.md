@@ -221,6 +221,34 @@ named reason. Green checks do not imply mergeability. GitHub is authoritative
 because threads can change without a new head; report merge refusals rather
 than retrying blindly.
 
+### UI work: shape and design review
+
+For a UI feature, before writing UI code run Impeccable `shape` against the
+appropriate product and design authorities. Use the issue and product brief
+as evidence for the job, audience, intended outcomes, states, constraints and
+scope; record the concise brief and clearly mark any assumptions. A precise
+issue may already supply the intent: do not demand a generic brand interview
+for every minor change. Never claim a human confirmed a brief without actual
+confirmation. If a material decision remains unresolved and cannot reasonably
+be inferred, stop that work and report needs-input under Escalation.
+Fix-only refinements preserve the existing identity and behavior; do not turn
+them into a redesign or block them on an unrelated brand questionnaire.
+
+After implementation and before ready/merge, classify PR paths using
+`scripts/design/ui-paths.mjs` and run the UI design review ceremony in
+`.squad/ceremonies.md`. Dispatch the read-only `design-reviewer` task role
+under `.squad/agents/design-reviewer/charter.md`, using the canonical
+`Squad-Reviewer: design-reviewer` identity, not Newt. Provide the exact head, baseline, changed UI paths,
+platform authorities, author test/scanner evidence and prior findings. A
+missing classifier, required evidence or design review blocks readiness;
+do not equate a scanner pass with design approval. Do not promise hooks are
+active before their implementation reaches the default branch. The existing
+`squad` scope, fork handling, owner override and risk-review rules remain.
+Use the canonical design requirement in `.github/copilot-instructions.md`
+("Risk-Based Review Scope"): inspect both old and new rename paths, fail
+closed on incomplete scope, and require fresh exact-head design evidence
+after every head change; design reviews do not carry across sync.
+
 ### Post-Task Actions
 
 After completing work on an issue, unassign yourself if no PR was opened, and

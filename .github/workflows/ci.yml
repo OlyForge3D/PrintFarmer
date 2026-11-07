@@ -295,9 +295,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ env.CI_SOURCE_SHA }}
+          ref: ${{ github.event.pull_request.head.sha || env.CI_SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -306,6 +308,16 @@ jobs:
 
       - name: Install tooling dependencies
         run: npm ci
+
+      - name: Test automatic design gate integration
+        run: node --test scripts/design/tests/*.test.mjs scripts/ci/tests/test-design-ci-integration.mjs
+
+      - name: Enforce changed UI design
+        if: github.event_name == 'pull_request'
+        env:
+          DESIGN_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DESIGN_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/design/check-ui-design.mjs --base "$DESIGN_BASE_SHA" --head "$DESIGN_HEAD_SHA"
 
       - name: Enforce authoritative SDK selection
         run: node scripts/ci/check-dotnet-sdk.mjs

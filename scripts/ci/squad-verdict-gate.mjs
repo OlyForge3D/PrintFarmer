@@ -24,7 +24,25 @@
 //   Squad-Verdict: APPROVE
 //   Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 
+import { isUiPath } from '../design/ui-paths.mjs';
+
 export const verdictContext = 'squad/pre-pr-verdict';
+export const designReviewer = 'design-reviewer';
+
+/** The PR files endpoint caps results at 3,000; incomplete scope is not evidence. */
+export function changedPathsFromFiles(files, changedFiles) {
+  if (!Array.isArray(files) || !Number.isSafeInteger(changedFiles) ||
+      changedFiles < 1 || files.length !== changedFiles || files.length >= 3000 ||
+      new Set(files.map((file) => file?.filename)).size !== files.length ||
+      files.some((file) => typeof file?.filename !== 'string' || !file.filename ||
+        (file.status === 'renamed' &&
+          (typeof file.previous_filename !== 'string' || !file.previous_filename)))) {
+    throw new Error('PR changed-file scope is unavailable or incomplete');
+  }
+  return files.flatMap((file) =>
+    [file.filename, file.previous_filename].filter((name) => typeof name === 'string' && name),
+  );
+}
 
 /**
  * Eligible elevated reviewers. Two are required; the third adjudicates
@@ -815,6 +833,7 @@ export function collectVerdicts(comments, headSha, { carriedShas } = {}) {
     }
     const isCurrentHead = record.headSha === head;
     const isCarried = !isCurrentHead && !record.isSelfDeclaredAdmin &&
+      record.reviewer !== designReviewer &&
       carried.has(record.headSha);
     const pool = (isCurrentHead || isCarried) ? current : staleLatest;
     const candidate = isCarried ? { ...record, carriedAcrossSync: true } : record;
@@ -949,6 +968,12 @@ export function resolveAuthorMembers({
 
   const branchTokens = branchName.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const fromBranch = new Set(branchTokens.filter((token) => roster.has(token)));
+  for (const member of roster) {
+    const escapedMember = member.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (member.includes('-') && new RegExp(`(?:^|[^a-z0-9])${escapedMember}(?:$|[^a-z0-9])`, 'i').test(branchName)) {
+      fromBranch.add(member);
+    }
+  }
   if (fromBranch.size > 0) {
     return { members: fromBranch, source: 'head branch name' };
   }
@@ -1121,8 +1146,17 @@ export function evaluateGate({
     adminDecisions.find((decision) => decision.state === 'CHANGES_REQUESTED');
   const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
   const scope = classifyChangeScope(changedPaths);
-  const requiredCount = scope.highRisk ? 2 : 1;
-  const requiredMembers = scope.highRisk ? reviewPanel : [];
+  const designRequired = changedPaths.some((path) => isUiPath(path));
+  const codeRequiredCount = scope.highRisk ? 2 : 1;
+  const codeRequiredMembers = scope.highRisk ? reviewPanel : [];
+  const requiredCount = codeRequiredCount + Number(designRequired);
+  const requiredMembers = [...codeRequiredMembers, ...(designRequired ? [designReviewer] : [])];
+  const isCodeApproval = (record) => record.verdict === 'APPROVE' &&
+    record.reviewer !== designReviewer &&
+    (!scope.highRisk || reviewPanel.includes(record.reviewer));
+  const isDesignApproval = (record) => designRequired &&
+    record.reviewer === designReviewer && record.verdict === 'APPROVE' &&
+    record.headSha === head && !record.carriedAcrossSync;
   if (adminDecision) {
     const passed = adminDecision.state === 'APPROVED';
     const agentRecords = [...current.values()].filter((record) =>
@@ -1132,10 +1166,11 @@ export function evaluateGate({
       .filter((record) => record.verdict === 'REQUEST_CHANGES')
       .map((record) => record.reviewer).sort();
     const approvals = agentRecords
-      .filter((record) => record.verdict === 'APPROVE' &&
-        (!scope.highRisk || reviewPanel.includes(record.reviewer)))
+      .filter((record) => isCodeApproval(record) || isDesignApproval(record))
       .map((record) => record.reviewer).sort();
-    const missingApprovals = Math.max(0, requiredCount - approvals.length);
+    const codeApprovals = agentRecords.filter(isCodeApproval);
+    const missingApprovals = Math.max(0, codeRequiredCount - codeApprovals.length) +
+      Number(designRequired && !agentRecords.some(isDesignApproval));
     const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
     notes.push(
       `Owner decision is authorization, not agent review. Agent approvals: ${approvals.join(', ') || '(none)'}.`,
@@ -1158,6 +1193,7 @@ export function evaluateGate({
       notes,
       requiredMembers,
       requiredCount,
+      designRequired,
       approvals,
       dissent,
       missingApprovals,
@@ -1177,9 +1213,15 @@ export function evaluateGate({
 
   notes.push(
     scope.highRisk
-      ? `High-risk gate (${scope.reason}): ${requiredCount} approvals from ${reviewPanel.join('/')} are required.`
+      ? `High-risk gate (${scope.reason}): ${codeRequiredCount} approvals from ${reviewPanel.join('/')} are required.`
       : `${scope.docsOnly ? 'Documentation-only change' : 'Standard change'} (${scope.reason}): one reviewer required.`,
   );
+  if (designRequired) {
+    notes.push(
+      'UI-touching PR: an additional design-reviewer APPROVE at the exact current head is required; ' +
+      'design evidence never replaces code review or carries across sync.',
+    );
+  }
   if (authorMembers.size > 0) {
     notes.push(
       `PR authored by ${[...authorMembers].join(', ')} (source: ${authorSource}).`,
@@ -1201,6 +1243,20 @@ export function evaluateGate({
   const authoringPanelMembers = scope.highRisk
     ? reviewPanel.filter((member) => authorMembers.has(member))
     : [];
+  if (designRequired && authorMembers.has(designReviewer)) {
+    return {
+      state: 'failure',
+      passed: false,
+      description: `BLOCKED @ ${shortSha(head)}: required design-reviewer is the PR author`,
+      reason: 'design-reviewer authored this UI PR; self-review cannot satisfy required design evidence',
+      notes,
+      requiredMembers,
+      requiredCount,
+      designRequired,
+      approvals: [],
+      stale,
+    };
+  }
   if (authoringPanelMembers.length > 0) {
     const members = authoringPanelMembers.join('+');
     return {
@@ -1213,7 +1269,9 @@ export function evaluateGate({
         `required high-risk panel member ${members} is the squad member who authored ` +
         `this PR (source: ${authorSource}); no substitute is permitted`,
       notes,
-      requiredMembers: reviewPanel,
+      requiredMembers,
+      requiredCount,
+      designRequired,
       approvals: [],
       stale,
     };
@@ -1239,7 +1297,9 @@ export function evaluateGate({
           `reviewer ${member} is the squad member who authored this PR ` +
           `(source: ${authorSource})`,
         notes,
-        requiredMembers: [],
+        requiredMembers: designRequired ? requiredMembers : [],
+        requiredCount,
+        designRequired,
         approvals: [],
         stale,
       };
@@ -1259,30 +1319,56 @@ export function evaluateGate({
       ),
       reason: `${rejection.reviewer} recorded REQUEST_CHANGES on the current head`,
       notes,
-      requiredMembers: [],
+      requiredMembers: designRequired ? requiredMembers : [],
+      requiredCount,
+      designRequired,
       approvals: [],
       stale,
     };
   }
 
   const approvals = [...eligible.values()]
-    .filter((record) => record.verdict === 'APPROVE' &&
-      (!scope.highRisk || reviewPanel.includes(record.reviewer)))
+    .filter((record) => isCodeApproval(record) || isDesignApproval(record))
     .map((record) => record.reviewer)
     .sort();
 
   // 5. Reviewer count and panel membership.
-  const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
-  if (approvals.length < requiredCount) {
+  const missingPanel = codeRequiredMembers.filter((member) => !approvals.includes(member));
+  if (designRequired && !approvals.includes(designReviewer)) {
+    const staleDesign = stale.find((record) => record.reviewer === designReviewer);
+    const unauthenticatedDesign = unauthenticated.some((record) => record.reviewer === designReviewer);
+    const detail = staleDesign
+      ? `design-reviewer stale at ${shortSha(staleDesign.headSha)}; exact-head approval required`
+      : unauthenticatedDesign
+        ? 'design-reviewer has no authenticated exact-head approval'
+        : 'missing exact-head design-reviewer approval';
+    return {
+      state: 'failure',
+      passed: false,
+      description: truncate(`BLOCKED @ ${shortSha(head)}: ${detail}`),
+      reason: detail,
+      notes,
+      requiredMembers,
+      requiredCount,
+      designRequired,
+      approvals,
+      stale,
+    };
+  }
+  const codeApprovalCount = approvals.filter((member) => member !== designReviewer).length;
+  if (codeApprovalCount < codeRequiredCount) {
     const staleNote = stale.length > 0
       ? ` (stale at ${stale.map((r) => `${r.reviewer}@${shortSha(r.headSha)}`).join(', ')})`
       : '';
-    const detail = approvals.length === 0 && stale.length === 0
+    const detail = designRequired
+      ? `have ${codeApprovalCount}/${codeRequiredCount} code approvals` +
+        (missingPanel.length > 0 ? `, choose ${missingPanel.join('+')}` : '') + staleNote
+      : codeApprovalCount === 0 && stale.length === 0
       ? (unauthenticated.length > 0
         ? `no authenticated review for ${shortSha(head)} ` +
           `(${unauthenticated.length} unauthenticated)`
         : `no review recorded for ${shortSha(head)}`)
-      : `have ${approvals.length}/${requiredCount}` +
+      : `have ${codeApprovalCount}/${codeRequiredCount}` +
         (missingPanel.length > 0 ? `, choose ${missingPanel.join('+')}` : '') +
         staleNote;
     return {
@@ -1297,6 +1383,7 @@ export function evaluateGate({
       notes,
       requiredMembers,
       requiredCount,
+      designRequired,
       approvals,
       stale,
     };
@@ -1339,6 +1426,7 @@ export function evaluateGate({
     notes,
     requiredMembers,
     requiredCount,
+    designRequired,
     approvals,
     stale,
     carried: carried.map((record) => record.reviewer),

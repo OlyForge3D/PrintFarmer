@@ -83,6 +83,38 @@ test('accepts a trusted approval for the exact current head', () => {
   assert.equal(verdict.carriedAcrossSync, false);
 });
 
+test('verifier preserves additive design approval, dissent and blocking reasons from the trusted gate', () => {
+  const roster = rosterFromLabels(['squad:bishop', 'squad:hicks', 'squad:design-reviewer']);
+  const record = (reviewer, verdict, sha = reviewedHeadSha) => ({
+    body: `<!-- squad-verdict -->\nSquad-Reviewer: ${reviewer}\nSquad-Verdict: ${verdict}\nSquad-Head-SHA: ${sha}`,
+    user: { login: 'jpapiez' }, author_association: 'OWNER', squadWriteAccess: true,
+  });
+  for (const [design, classification] of [
+    [undefined, 'MISSING'],
+    [record('design-reviewer', 'APPROVE', movedHeadSha), 'MISSING'],
+    [record('design-reviewer', 'REQUEST_CHANGES'), 'CHANGES_REQUESTED'],
+    [record('design-reviewer', 'APPROVE'), 'REVIEWED'],
+  ]) {
+    const result = evaluateGate({
+      headSha: reviewedHeadSha, squadLabeled: true, roster,
+      changedPaths: ['src/Web/ReactApp/src/components/PrinterCard.tsx'],
+      comments: [record('bishop', 'APPROVE'), ...(design ? [design] : [])],
+    });
+    const evidence = fixture();
+    evidence.status.state = result.state;
+    evidence.status.description = result.description;
+    const verified = verifySquadVerdict(evidence);
+    assert.equal(verified.classification, classification);
+    assert.equal(exitCodeFor(verified.classification), classification === 'REVIEWED'
+      ? 0 : classification === 'CHANGES_REQUESTED' ? 2 : 3);
+    if (classification === 'MISSING') {
+      assert.match(verified.blockedReason, /design-reviewer/);
+    } else {
+      assert.match(verified.actor, /design-reviewer/);
+    }
+  }
+});
+
 test('a carried-across-sync description is classified REVIEWED and flagged as such', () => {
   const evidence = fixture();
   evidence.status.description =
