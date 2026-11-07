@@ -517,8 +517,6 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             AcknowledgeBedClearRequest request;
             await using (var seedContext = new AppDbContext(options))
             {
-                // Keep the connection open so SQLite applies this connection-scoped pragma to fixture writes.
-                await seedContext.Database.OpenConnectionAsync();
                 _ = await seedContext.Database.ExecuteSqlRawAsync(
                     "PRAGMA foreign_keys = OFF;");
                 (printerId, jobId, _) =

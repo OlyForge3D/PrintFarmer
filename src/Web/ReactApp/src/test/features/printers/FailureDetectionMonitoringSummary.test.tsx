@@ -5,6 +5,24 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import type { FailureDetectionEvent, FailureDetectionPrinterStatusDto } from '@/types/api';
 
 describe('FailureDetectionMonitoringSummary', () => {
+  it.each(['compact', 'detailed'] as const)('shows a held reservation without healthy coverage in %s summary', (variant) => {
+    render(<FailureDetectionMonitoringSummary enabled={true} variant={variant} status={{
+      printerId: 'p1',
+      printerName: 'Offline printer',
+      state: 'reservation-held',
+      reason: 'Printer activity is unknown or offline. Obico reservation retained.',
+      isPrinting: false,
+      detectionSource: 'pooled',
+      detectionTarget: 'Pool A',
+      lastOutcome: 'healthy',
+      lastConfidence: 0.2,
+    }} />);
+    expect(screen.getAllByText('Reservation held').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Guarding')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /confidence/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/only after physically verifying the printer is idle/i)).toBeInTheDocument();
+  });
+
   it('renders healthy coverage state with compact headline and badge', () => {
     const status: FailureDetectionPrinterStatusDto = {
       printerId: 'printer-1',

@@ -58,6 +58,22 @@ function renderWithQueryClient(ui: React.ReactElement) {
 }
 
 describe("FailureDetectionMonitoringOverlay", () => {
+  it.each([false, true])("preserves the held reservation label with live isPrinting=%s", (isPrinting) => {
+    renderWithQueryClient(<FailureDetectionMonitoringOverlay enabled={true} isPrinting={isPrinting} status={{
+      printerId: "p1",
+      printerName: "Offline printer",
+      state: "reservation-held",
+      reason: "Printer activity is unknown or offline. Obico reservation retained.",
+      isPrinting: false,
+      detectionSource: "pooled",
+      detectionTarget: "Pool A",
+      lastOutcome: "healthy",
+    }} />);
+    expect(screen.getByRole("button", { name: /open failure detection details/i })).toHaveTextContent("Reservation held");
+    expect(screen.getByLabelText("Failure detection")).toHaveClass("text-pf-warning");
+    expect(screen.queryByText("Guarding")).not.toBeInTheDocument();
+  });
+
   it.each(["idle", "disabled"] as const)(
     "%s chip uses translucent white on the fixed dark camera surface, not a theme neutral token",
     (state) => {

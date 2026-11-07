@@ -14,6 +14,7 @@ public interface IObicoServerAssignmentService
     /// <summary>
     /// Releases ended prints before allocating healthy pool capacity to new prints.
     /// Unknown/offline observations retain existing reservations without creating new ones.
+    /// Legacy pins retain their server and adopt the first confirmed active print identity.
     /// </summary>
     Task<IReadOnlyDictionary<Guid, ObicoPrintRoute>> ReconcileAsync(
         IReadOnlyCollection<ObicoPrintActivity> activities,
@@ -38,4 +39,5 @@ public sealed record ObicoPrintRoute(
     string? Target,
     string? Url,
     string? ApiKey,
-    string? UnavailableReason = null);
+    string? UnavailableReason = null,
+    bool SelectedServerUnavailable = false);

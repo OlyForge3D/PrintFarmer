@@ -92,8 +92,9 @@ describe('Slider', () => {
   it('uses live theme tokens for the filled and unfilled track', () => {
     render(<Slider value={25} onChange={() => {}} />);
 
-    expect(screen.getByRole('slider').getAttribute('style')).toMatch(
-      /(?:^|;)\s*background\s*:\s*linear-gradient\(\s*to\s+right\s*,\s*var\(--pf-accent\)\s+0%\s*,\s*var\(--pf-accent\)\s+25%\s*,\s*var\(--pf-bg-2\)\s+25%\s*,\s*var\(--pf-bg-2\)\s+100%\s*\)/,
-    );
+    expect(screen.getByRole('slider')).toHaveStyle({
+      background:
+        'linear-gradient(to right, var(--pf-accent) 0%, var(--pf-accent) 25%, var(--pf-bg-2) 25%, var(--pf-bg-2) 100%)',
+    });
   });
 });

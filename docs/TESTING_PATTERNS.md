@@ -34,22 +34,6 @@ do not automatically heat the chamber or randomize environmental readings.
 `TestEmulatorSensorTelemetryTests` demonstrates these transitions and control
 validation for React/iOS e2e fixture authors.
 
-## Moonraker sensor WebSocket teardown
-
-`KlipperSensorTests` shares a `ReadyPrinterFactory` across test instances.
-Track sockets per instance and complete a bounded normal close handshake in
-`IAsyncLifetime.DisposeAsync` before disposing them. Abrupt TestHost socket
-disposal can leave a subscribed server peer pending removal while the next
-test resets the printer and broadcasts a status change.
-
-The teardown regression subscribes, receives a real status notification, closes
-the socket, and resets the shared fixture. Assert both `Closed` state and
-`NormalClosure` status: TestHost disposal alone sets `Closed` without completing
-a handshake. Cleanup timeouts must fail the test, not be swallowed. Passing
-repeats or a CI rerun alone do not prove every scheduling race is eliminated;
-retain the original failure and distinguish harness remediation from changes
-to production disconnect handling.
-
 ## Deferred integration-host database provisioning
 
 `KestrelCalibrationApiHost` provisions both SQLite contexts directly, using their

@@ -124,7 +124,7 @@ public class ObicoServerControllerTests
     }
 
     [Fact]
-    public async Task GetAllServersAsync_ActiveAndLegacyAssignments_CountsOnlyPrintReservations()
+    public async Task GetAllServersAsync_ActiveAndLegacyAssignments_CountsAllHeldReservations()
     {
         (ObicoServerController controller, AppDbContext db) = CreateController(_ => throw new InvalidOperationException("No network expected."));
         ObicoServer server = new() { Id = Guid.NewGuid(), Name = "Pool", Url = "http://pool.invalid" };
@@ -137,14 +137,16 @@ public class ObicoServerControllerTests
         ActionResult<List<ObicoServerDto>> result = await controller.GetAllServersAsync(CancellationToken.None);
 
         var servers = Assert.IsType<List<ObicoServerDto>>(Assert.IsType<OkObjectResult>(result.Result).Value);
-        servers.Should().ContainSingle().Which.ActivePrintCount.Should().Be(1);
+        servers.Should().ContainSingle().Which.ActivePrintCount.Should().Be(2);
         ObicoServerDto detail = Assert.IsType<ObicoServerDto>(
             Assert.IsType<OkObjectResult>((await controller.GetServerAsync(server.Id, CancellationToken.None)).Result).Value);
-        detail.ActivePrintCount.Should().Be(1);
+        detail.ActivePrintCount.Should().Be(2);
     }
 
-    [Fact]
-    public async Task DeleteServerAsync_ActivePrintReservation_RejectsDeletionWithoutReassigning()
+    [Theory]
+    [InlineData("external:print")]
+    [InlineData(null)]
+    public async Task DeleteServerAsync_ActiveOrLegacyReservation_RejectsDeletionWithoutReassigning(string? printKey)
     {
         using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -170,14 +172,17 @@ public class ObicoServerControllerTests
         {
             PrinterId = printer.Id,
             ObicoServerId = server.Id,
-            ObicoPrintKey = "external:print"
+            ObicoPrintKey = printKey
         });
         await db.SaveChangesAsync();
 
         IActionResult result = await controller.DeleteServerAsync(server.Id, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result).Value.Should().BeOfType<string>()
-            .Which.Should().Contain("active print reservation");
+            .Which.Should().Contain("held print reservation")
+            .And.Contain("restore printer connectivity")
+            .And.Contain("explicitly opt out of monitoring")
+            .And.Contain("next monitoring scan");
         (await db.ObicoServers.CountAsync()).Should().Be(1);
     }
 

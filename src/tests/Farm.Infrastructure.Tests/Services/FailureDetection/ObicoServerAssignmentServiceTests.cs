@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FailureDetection;
 using Farm.Infrastructure.Settings;
@@ -102,6 +103,188 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
 
         (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
         routes[printer.Id].Url.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Heating", true, true)]
+    [InlineData("Printing", true, false)]
+    [InlineData("Paused", false, true)]
+    [InlineData("Resuming", true, true)]
+    public async Task ReconcileAsync_LegacyActivePin_AdoptsIdentityWithoutMovingServer(
+        string printerState, bool serverEnabled, bool serverHealthy)
+    {
+        Printer printer = await AddPrinterAsync();
+        ObicoServer selected = await AddServerAsync(1, serverEnabled);
+        await SetRouteAsync(printer.Id, selected.Id, null);
+        ObicoServer other = await AddServerAsync(10);
+        _probe.Setup(probe => probe.ProbeAsync(selected.Url, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ObicoConnectivityResult(serverHealthy, 1, serverHealthy ? null : "offline"));
+        ObicoPrintActivity activity = PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, new PrinterStatusDto(printer.Id, true, printerState, JobName: "legacy.gcode"), null, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync([activity], _settings);
+
+        PrinterServiceState state = await ReadStateAsync(printer.Id);
+        state.ObicoServerId.Should().Be(selected.Id).And.NotBe(other.Id);
+        state.ObicoPrintKey.Should().Be(activity.PrintKey).And.StartWith("external:");
+        routes[printer.Id].Source.Should().Be("pooled");
+        routes[printer.Id].Target.Should().Be(selected.Name);
+        if (serverEnabled && serverHealthy)
+        {
+            routes[printer.Id].Url.Should().Be(selected.Url);
+        }
+        else
+        {
+            routes[printer.Id].Url.Should().BeNull();
+            routes[printer.Id].SelectedServerUnavailable.Should().BeTrue();
+        }
+    }
+
+    [Theory]
+    [InlineData(false, "Printing")]
+    [InlineData(true, null)]
+    [InlineData(true, "")]
+    [InlineData(false, null)]
+    [InlineData(null, null)]
+    public async Task ReconcileAsync_LegacyUnknownPin_HoldsCapacityWithoutIdentityOrManualInference(bool? online, string? printerState)
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await SetRouteAsync(printer.Id, server.Id, null);
+        ObicoPrintActivity activity = PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, online is { } isOnline ? new PrinterStatusDto(printer.Id, isOnline, printerState) : null, null, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [activity, new(waiting.Id, "external:waiting")], _settings);
+
+        PrinterServiceState held = await ReadStateAsync(printer.Id);
+        held.ObicoServerId.Should().Be(server.Id);
+        held.ObicoPrintKey.Should().BeNull();
+        routes[printer.Id].Source.Should().Be("pooled");
+        routes[printer.Id].Target.Should().Be(server.Name);
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].ApiKey.Should().BeNull();
+        routes[printer.Id].UnavailableReason.Should().Contain("reservation retained").And.Contain("identity is unconfirmed");
+        (await ReadStateAsync(waiting.Id)).ObicoServerId.Should().BeNull();
+        routes[waiting.Id].Url.Should().BeNull();
+        ObicoPrintRoute manual = await CreateService().GetRouteAsync(printer.Id, _settings);
+        manual.Target.Should().Be(server.Name);
+        manual.Url.Should().BeNull();
+        manual.ApiKey.Should().BeNull();
+        manual.UnavailableReason.Should().Contain("identity is unconfirmed");
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_LegacyPinWithoutObservation_HoldsCapacity()
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await SetRouteAsync(printer.Id, server.Id, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(waiting.Id, "external:waiting")], _settings);
+
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+        (await ReadStateAsync(printer.Id)).ObicoPrintKey.Should().BeNull();
+        routes[waiting.Id].Url.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_LegacyPinsAboveReducedCapacity_RetainsBothAndRefusesNewPrint()
+    {
+        Printer active = await AddPrinterAsync();
+        Printer unknown = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(2);
+        await SetRouteAsync(active.Id, server.Id, null);
+        await SetRouteAsync(unknown.Id, server.Id, null);
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.ObicoServers.SingleAsync()).MaxConcurrentAnalyses = 1;
+            await db.SaveChangesAsync();
+        }
+
+        ObicoPrintActivity activeObservation = PrintFailureMonitorService.ResolvePrintActivity(
+            active.Id, new PrinterStatusDto(active.Id, true, "Printing", JobName: "legacy.gcode"), null, null);
+        ObicoPrintActivity unknownObservation = PrintFailureMonitorService.ResolvePrintActivity(unknown.Id, null, null, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [activeObservation, unknownObservation, new(waiting.Id, "external:waiting")], _settings);
+
+        (await ReadStateAsync(active.Id)).ObicoServerId.Should().Be(server.Id);
+        (await ReadStateAsync(active.Id)).ObicoPrintKey.Should().Be(activeObservation.PrintKey);
+        (await ReadStateAsync(unknown.Id)).ObicoServerId.Should().Be(server.Id);
+        (await ReadStateAsync(unknown.Id)).ObicoPrintKey.Should().BeNull();
+        (await ReadStateAsync(waiting.Id)).ObicoServerId.Should().BeNull();
+        routes[unknown.Id].Url.Should().BeNull();
+        routes[waiting.Id].Url.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Idle")]
+    [InlineData("Complete")]
+    [InlineData("Cancelled")]
+    [InlineData("Error")]
+    public async Task ReconcileAsync_LegacyConfirmedInactivePin_FreesCapacityInSameBatch(string printerState)
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await SetRouteAsync(printer.Id, server.Id, null);
+        ObicoPrintActivity activity = PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, new PrinterStatusDto(printer.Id, true, printerState), null, null);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [activity, new(waiting.Id, "external:waiting")], _settings);
+
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+        routes[printer.Id].Source.Should().Be("none");
+        (await ReadStateAsync(waiting.Id)).ObicoServerId.Should().Be(server.Id);
+        routes[waiting.Id].Url.Should().Be(server.Url);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReconcileAsync_LegacyManagedPin_AdoptsThenReleasesCompletedJobEvenOffline(bool completesBeforeAdoption)
+    {
+        Printer printer = await AddPrinterAsync();
+        Printer waiting = await AddPrinterAsync();
+        ObicoServer server = await AddServerAsync(1);
+        await SetRouteAsync(printer.Id, server.Id, null);
+        Guid jobId = Guid.NewGuid();
+        using (AppDbContext db = CreateDbContext())
+        {
+            db.PrintJobs.Add(new PrintJob { Id = jobId, Name = "legacy", AssignedPrinterId = printer.Id, Status = PrintJobStatus.Printing });
+            await db.SaveChangesAsync();
+        }
+
+        ObicoPrintActivity active = PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, new PrinterStatusDto(printer.Id, true, "Printing"), jobId, PrintJobStatus.Printing);
+        if (!completesBeforeAdoption)
+        {
+            await CreateService().ReconcileAsync([active], _settings);
+            (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+            (await ReadStateAsync(printer.Id)).ObicoPrintKey.Should().Be($"job:{jobId:N}");
+        }
+
+        using (AppDbContext db = CreateDbContext())
+        {
+            (await db.PrintJobs.SingleAsync()).Status = PrintJobStatus.Completed;
+            await db.SaveChangesAsync();
+        }
+
+        ObicoPrintActivity ended = completesBeforeAdoption ? active : PrintFailureMonitorService.ResolvePrintActivity(
+            printer.Id, new PrinterStatusDto(printer.Id, false, "Printing"), null, null);
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [ended, new(waiting.Id, "external:waiting")], _settings);
+
+        (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+        (await ReadStateAsync(printer.Id)).ObicoPrintKey.Should().BeNull();
+        routes[printer.Id].Url.Should().BeNull();
+        routes[waiting.Id].Url.Should().Be(server.Url);
     }
 
     [Fact]
@@ -231,11 +414,58 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
         ObicoServer server = await AddServerAsync(1);
         await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
 
-        await CreateService().ReconcileAsync([new(printer.Id, null, RetainExisting: true)], _settings);
+        Printer waiting = await AddPrinterAsync();
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> held = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true), new(waiting.Id, "external:waiting")], _settings);
         (await ReadStateAsync(printer.Id)).ObicoServerId.Should().Be(server.Id);
+        held[printer.Id].Source.Should().Be("pooled");
+        held[printer.Id].Target.Should().Be(server.Name);
+        held[printer.Id].Url.Should().BeNull();
+        held[printer.Id].ApiKey.Should().BeNull();
+        held[printer.Id].UnavailableReason.Should().Contain("Obico reservation retained");
+        held[waiting.Id].Url.Should().BeNull();
+        (await ReadStateAsync(waiting.Id)).ObicoServerId.Should().BeNull();
 
-        await CreateService().ReconcileAsync([new(printer.Id, null)], _settings);
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> ended = await CreateService().ReconcileAsync(
+            [new(printer.Id, null), new(waiting.Id, "external:waiting")], _settings);
         (await ReadStateAsync(printer.Id)).ObicoServerId.Should().BeNull();
+        ended[printer.Id].Source.Should().Be("none");
+        ended[printer.Id].Target.Should().BeNull();
+        ended[waiting.Id].Url.Should().Be(server.Url);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnknownWithoutReservation_DoesNotAllocateOrClaimHeldCapacity()
+    {
+        Printer printer = await AddPrinterAsync();
+        await AddServerAsync(1);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true)], _settings);
+
+        routes[printer.Id].Source.Should().Be("none");
+        routes[printer.Id].Target.Should().BeNull();
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].UnavailableReason.Should().Contain("No Obico server reservation is held");
+        using AppDbContext db = CreateDbContext();
+        (await db.PrinterServiceStates.AnyAsync()).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnknownGlobalReservation_ReportsFriendlyTargetWithoutConnectionDetails()
+    {
+        Printer printer = await AddPrinterAsync();
+        await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
+
+        IReadOnlyDictionary<Guid, ObicoPrintRoute> routes = await CreateService().ReconcileAsync(
+            [new(printer.Id, null, RetainExisting: true)], _settings);
+
+        routes[printer.Id].Source.Should().Be("global");
+        routes[printer.Id].Target.Should().Be("Global Obico server");
+        routes[printer.Id].Url.Should().BeNull();
+        routes[printer.Id].ApiKey.Should().BeNull();
+        routes[printer.Id].UnavailableReason.Should().NotContain(_settings.ObicoApiUrl);
+        (await ReadStateAsync(printer.Id)).ObicoFallbackUrl.Should().Be(_settings.ObicoApiUrl);
     }
 
     [Fact]
@@ -371,13 +601,22 @@ public sealed class ObicoServerAssignmentServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ReconcileAsync_MonitoringDisabledOrOptedOut_ReleasesReservations(bool disableGlobal)
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task ReconcileAsync_MonitoringDisabledOrOptedOut_ReleasesReservations(bool disableGlobal, bool legacy)
     {
         Printer printer = await AddPrinterAsync();
-        await AddServerAsync(1);
-        await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
+        ObicoServer server = await AddServerAsync(1);
+        if (legacy)
+        {
+            await SetRouteAsync(printer.Id, server.Id, null);
+        }
+        else
+        {
+            await CreateService().ReconcileAsync([new(printer.Id, "external:print")], _settings);
+        }
         if (disableGlobal)
         {
             _settings.Enabled = false;

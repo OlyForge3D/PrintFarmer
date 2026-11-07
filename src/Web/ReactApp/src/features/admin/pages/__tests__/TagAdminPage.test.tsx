@@ -46,9 +46,6 @@ async function startEditingResin(user: ReturnType<typeof userEvent.setup>) {
   const nameCell = screen.getAllByText('Resin')[0];
   const row = nameCell.closest('tr') as HTMLElement;
   await user.click(within(row).getByRole('button', { name: /^edit$/i }));
-  // Edit mode focuses and selects the name input in a requestAnimationFrame; wait for it so
-  // that deferred select-all cannot land mid-typing and replace the text being entered.
-  await waitFor(() => expect(screen.getByDisplayValue('Resin')).toHaveFocus());
 }
 
 async function saveCurrentEdit(user: ReturnType<typeof userEvent.setup>) {
@@ -177,8 +174,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
 
     await startEditingResin(user);
     const nameInput = screen.getByDisplayValue('Resin');
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Resin updated');
+    await user.type(nameInput, ' updated');
     await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/network unreachable/i);
@@ -321,9 +317,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await user.click(within(row).getByRole('button', { name: /^edit$/i }));
 
     const nameInput = screen.getByDisplayValue('Unversioned');
-    await waitFor(() => expect(nameInput).toHaveFocus());
-    await user.clear(nameInput);
-    await user.type(nameInput, 'Unversioned updated');
+    await user.type(nameInput, ' updated');
     await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/refresh the page/i);

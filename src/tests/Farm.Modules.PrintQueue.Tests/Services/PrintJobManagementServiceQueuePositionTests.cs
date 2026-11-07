@@ -510,14 +510,8 @@ public class PrintJobManagementServiceQueuePositionTests
         string databasePath = Path.Combine(Path.GetTempPath(), $"queue-position-{Guid.NewGuid():N}.db");
         try
         {
-            string connectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = databasePath,
-                DefaultTimeout = 30,
-                Pooling = false,
-            }.ToString();
             DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(connectionString)
+                .UseSqlite($"Data Source={databasePath};Default Timeout=30")
                 .Options;
             Guid firstId;
             Guid secondId;

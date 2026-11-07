@@ -48,7 +48,7 @@ public class ObicoServerController : ControllerBase
             .ToListAsync(ct);
 
         Dictionary<Guid, int> activeCounts = await _dbContext.PrinterServiceStates
-            .Where(state => state.ObicoServerId != null && state.ObicoPrintKey != null)
+            .Where(state => state.ObicoServerId != null)
             .GroupBy(state => state.ObicoServerId!.Value)
             .Select(group => new { ServerId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(group => group.ServerId, group => group.Count, ct);
@@ -276,8 +276,9 @@ public class ObicoServerController : ControllerBase
             if (activePrints > 0)
             {
                 return BadRequest(
-                    $"Cannot delete Obico server '{server.Name}' because {activePrints} active print reservation(s) use it. " +
-                    "Wait for the prints to finish and the next monitoring scan to release their capacity.");
+                    $"Cannot delete Obico server '{server.Name}' because {activePrints} held print reservation(s) use it. " +
+                    "Let active prints finish, restore printer connectivity to confirm inactivity, or explicitly opt out of monitoring. " +
+                    "The next monitoring scan releases confirmed inactive or opted-out reservations.");
             }
 
             _dbContext.ObicoServers.Remove(server);
@@ -335,7 +336,7 @@ public class ObicoServerController : ControllerBase
 
     private Task<int> CountActivePrintsAsync(Guid serverId, CancellationToken ct) =>
         _dbContext.PrinterServiceStates.CountAsync(
-            state => state.ObicoServerId == serverId && state.ObicoPrintKey != null, ct);
+            state => state.ObicoServerId == serverId, ct);
 
     private static ObicoServerDto ToDto(ObicoServer server, int activePrintCount = 0)
     {
@@ -374,7 +375,7 @@ public sealed class ObicoServerDto
 
     public int MaxConcurrentAnalyses { get; init; }
 
-    /// <summary>Print-lifetime reservations, including temporarily unavailable printers.</summary>
+    /// <summary>Held reservations, including legacy pins awaiting confirmed print activity.</summary>
     public int ActivePrintCount { get; init; }
 
     public DateTime CreatedAt { get; init; }

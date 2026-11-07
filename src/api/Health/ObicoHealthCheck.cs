@@ -101,12 +101,12 @@ public sealed class ObicoHealthCheck(
             .ToListAsync(ct);
 
         bool hasPool = await db.ObicoServers.AnyAsync(ct);
-        bool hasGlobalPrint = await db.PrinterServiceStates.AnyAsync(
-            state => state.ObicoPrintKey != null && state.ObicoFallbackUrl == settings.ObicoApiUrl, ct);
+        bool hasGlobalReservation = await db.PrinterServiceStates.AnyAsync(
+            state => state.ObicoFallbackUrl == settings.ObicoApiUrl, ct);
 
-        // A registered pool is authoritative, even if disabled or full. Existing global
-        // prints can finish after a pool is added, but new prints cannot bypass its budget.
-        if ((!hasPool || hasGlobalPrint) && !string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
+        // A registered pool is authoritative, even if disabled or full. Held global routes,
+        // including unconfirmed legacy identities, still need availability checks.
+        if ((!hasPool || hasGlobalReservation) && !string.IsNullOrWhiteSpace(settings.ObicoApiUrl))
         {
             targets.Add(new { Url = settings.ObicoApiUrl, ApiKey = (string?)null });
         }

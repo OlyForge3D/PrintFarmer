@@ -30,6 +30,15 @@ public sealed class ObicoServerAssignmentService(
         PrinterServiceState? state = await db.PrinterServiceStates.AsNoTracking()
             .Include(candidate => candidate.ObicoServer)
             .SingleOrDefaultAsync(candidate => candidate.PrinterId == printerId, ct);
+        if (state is { ObicoPrintKey: null } && (state.ObicoServerId is not null || state.ObicoFallbackUrl is not null))
+        {
+            return new(
+                state.ObicoServerId is not null ? "pooled" : "global",
+                state.ObicoServerId is not null ? state.ObicoServer?.Name : "Global Obico server",
+                null, null,
+                "Legacy Obico reservation retained; print identity is unconfirmed. Manual analysis is unavailable until monitoring confirms active printer activity.");
+        }
+
         if (state?.ObicoPrintKey is not null)
         {
             if (state.ObicoPrintKey.StartsWith("job:", StringComparison.Ordinal)
@@ -155,17 +164,21 @@ public sealed class ObicoServerAssignmentService(
         Dictionary<Guid, ObicoPrintActivity> observations = activities.ToDictionary(activity => activity.PrinterId);
         Dictionary<Guid, PrinterServiceState> statesByPrinter = states.ToDictionary(state => state.PrinterId);
 
-        // Clear legacy permanent pins and every confirmed end before counting capacity.
+        // Legacy pins have no print identity yet; absence of a key is not proof of inactivity.
+        // Release confirmed ends before counting capacity, including stale job observations.
         foreach (PrinterServiceState state in states)
         {
             observations.TryGetValue(state.PrinterId, out ObicoPrintActivity? activity);
             if (!enabledPrinters.Contains(state.PrinterId)
-                || state.ObicoPrintKey is null
-                || (state.ObicoPrintKey.StartsWith("job:", StringComparison.Ordinal)
+                || (state.ObicoPrintKey is not null && state.ObicoPrintKey.StartsWith("job:", StringComparison.Ordinal)
                     && !activeJobKeys.Contains(state.ObicoPrintKey))
                 || (activity is not null && !activity.RetainExisting
-                    && state.ObicoPrintKey != activity.PrintKey
-                    && state.ObicoPrintKey != activity.AdoptExternalKey))
+                    && (activity.PrintKey is null
+                        || (activity.PrintKey.StartsWith("job:", StringComparison.Ordinal)
+                            && !activeJobKeys.Contains(activity.PrintKey))
+                        || (state.ObicoPrintKey is not null
+                            && state.ObicoPrintKey != activity.PrintKey
+                            && state.ObicoPrintKey != activity.AdoptExternalKey))))
             {
                 ClearRoute(state);
             }
@@ -185,7 +198,29 @@ public sealed class ObicoServerAssignmentService(
             statesByPrinter.TryGetValue(activity.PrinterId, out PrinterServiceState? state);
             if (activity.RetainExisting || activity.PrintKey is null)
             {
-                routes[activity.PrinterId] = Unavailable("Printer activity is unknown or no print is active.");
+                if (activity.RetainExisting && state is not null
+                    && (state.ObicoServerId is not null || state.ObicoFallbackUrl is not null))
+                {
+                    ObicoPrintRoute retained = ResolveRoute(state, settings, servers, probeServers, health, globalHealth);
+                    string? target = retained.Source == "global" ? "Global Obico server" : retained.Target;
+                    routes[activity.PrinterId] = retained with
+                    {
+                        Target = target,
+                        Url = null,
+                        ApiKey = null,
+                        UnavailableReason = "Printer activity is unknown or offline. Obico reservation retained; monitoring is not active. The print may still be running."
+                            + (state.ObicoPrintKey is null ? " Legacy print identity is unconfirmed." : string.Empty)
+                            + (string.IsNullOrWhiteSpace(target) ? string.Empty : $" Reserved server: {target}.")
+                            + (retained.UnavailableReason is null ? string.Empty : $" {retained.UnavailableReason}"),
+                    };
+                }
+                else
+                {
+                    routes[activity.PrinterId] = Unavailable(activity.RetainExisting
+                        ? "Printer activity is unknown or offline. No Obico server reservation is held; the print may still be running."
+                        : "No print is active.");
+                }
+
                 continue;
             }
 
@@ -256,7 +291,8 @@ public sealed class ObicoServerAssignmentService(
             return server is not null && IsHealthy(server, probeServers, health)
                 ? new("pooled", server.Name, server.Url, server.ApiKey)
                 : new("pooled", server?.Name, null, null,
-                    "Selected Obico server is unavailable or disabled. Reservation retained; monitoring will retry this server. Printing continues.");
+                    "Selected Obico server is unavailable or disabled. Reservation retained; monitoring will retry this server. Printing continues.",
+                    SelectedServerUnavailable: true);
         }
 
         if (state.ObicoFallbackUrl is not null)
@@ -265,7 +301,8 @@ public sealed class ObicoServerAssignmentService(
             bool available = state.ObicoFallbackUrl == settings.ObicoApiUrl && globalHealth?.Healthy == true;
             return new("global", state.ObicoFallbackUrl,
                 available ? state.ObicoFallbackUrl : null, null,
-                available ? null : "Selected global Obico server is unavailable or changed. Printing continues without Obico monitoring.");
+                available ? null : "Selected global Obico server is unavailable or changed. Printing continues without Obico monitoring.",
+                SelectedServerUnavailable: !available);
         }
 
         return Unavailable("No enabled, healthy Obico server has available print capacity. Monitoring will retry; printing continues.");

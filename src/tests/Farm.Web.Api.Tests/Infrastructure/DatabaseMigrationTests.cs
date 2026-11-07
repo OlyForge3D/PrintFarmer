@@ -90,6 +90,86 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_ObicoRoutingUpgrade_PreservesLegacyReservationAndPrinterPreferences()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261105000821_AddFailureDetectionIncidentProvider");
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Routing migration maker" };
+        var model = new PrinterModel { Id = Guid.NewGuid(), Name = "Routing migration model", Manufacturer = manufacturer };
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing monitored printer",
+            Manufacturer = manufacturer,
+            Model = model,
+            ServerUrl = "http://migration.invalid",
+            ObicoEnabled = true,
+            PrintGuardEnabled = true,
+        };
+        var server = new ObicoServer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing reserved server",
+            Url = "http://obico.migration.invalid",
+            IsEnabled = false,
+            MaxConcurrentAnalyses = 2,
+        };
+        context.AddRange(printer, server);
+        await context.SaveChangesAsync();
+        DateTime updatedAt = new(2026, 11, 6, 0, 0, 0, DateTimeKind.Utc);
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "PrinterServiceState"
+                ("PrinterId", "ObicoServerId", "LastCapabilityUpdate", "Revision")
+            VALUES ({printer.Id}, {server.Id}, {updatedAt}, {7L});
+            """);
+
+        await migrator.MigrateAsync();
+        context.ChangeTracker.Clear();
+
+        PrinterServiceState state = await context.PrinterServiceStates.SingleAsync();
+        state.PrinterId.Should().Be(printer.Id);
+        state.ObicoServerId.Should().Be(server.Id);
+        state.ObicoPrintKey.Should().BeNull();
+        state.ObicoFallbackUrl.Should().BeNull();
+        state.Revision.Should().Be(7);
+        state.LastCapabilityUpdate.Should().Be(updatedAt);
+        Printer migrated = await context.Printers.SingleAsync();
+        migrated.ObicoEnabled.Should().BeTrue();
+        migrated.PrintGuardEnabled.Should().BeTrue();
+        ObicoServer savedServer = await context.ObicoServers.SingleAsync();
+        savedServer.IsEnabled.Should().BeFalse();
+        savedServer.MaxConcurrentAnalyses.Should().Be(2);
+        context.Database.HasPendingModelChanges().Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Microsoft.EntityFrameworkCore.Sqlite")]
+    [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL")]
+    [InlineData("Microsoft.EntityFrameworkCore.SqlServer")]
+    public void ObicoRoutingMigration_Operations_AddNullableColumnsAndDestructiveDownOnly(string provider)
+    {
+        Migration migration = provider switch
+        {
+            "Microsoft.EntityFrameworkCore.Sqlite" => new Farm.Migrations.Sqlite.Migrations.AddObicoPrintRouting(),
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => new Farm.Migrations.PostgreSQL.Migrations.AddObicoPrintRouting(),
+            _ => new Farm.Migrations.SqlServer.Migrations.AddObicoPrintRouting(),
+        };
+        migration.ActiveProvider = provider;
+        migration.UpOperations.Should().HaveCount(2);
+        AddColumnOperation[] additions = migration.UpOperations.Cast<AddColumnOperation>().ToArray();
+        additions.Select(column => column.Name).Should().BeEquivalentTo("ObicoPrintKey", "ObicoFallbackUrl");
+        additions.Should().OnlyContain(column => column.Table == "PrinterServiceState" && column.IsNullable);
+        additions.Single(column => column.Name == "ObicoPrintKey").MaxLength.Should().Be(100);
+        additions.Single(column => column.Name == "ObicoFallbackUrl").MaxLength.Should().Be(500);
+        migration.DownOperations.Should().HaveCount(2);
+        DropColumnOperation[] drops = migration.DownOperations.Cast<DropColumnOperation>().ToArray();
+        drops.Select(column => column.Name).Should().BeEquivalentTo("ObicoPrintKey", "ObicoFallbackUrl");
+        drops.Should().OnlyContain(column => column.Table == "PrinterServiceState");
+    }
+
+    [Fact]
     public async Task CoreMigration_PrinterCatalogUpgradesPopulatedSchemaWithOrdinalIdentityAndPreservesLocalAssets()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
