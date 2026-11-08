@@ -385,7 +385,7 @@
       "files": [
         {
           "file": "scripts/design/baseline-ui-design.mjs",
-          "sha256": "1060d17a312b2591448e589b18ff70534889600aa8df6b68eb1f0428d3f227c5"
+          "sha256": "58584d545dd4f5b4fddf72dcdd59f33c2a22f2946a56b34dcea81f6bf45c7650"
         },
         {
           "file": "scripts/design/check-ui-design.mjs",
@@ -393,7 +393,7 @@
         },
         {
           "file": "scripts/design/source-adapter.mjs",
-          "sha256": "d7de476fc43cf1d7410587a28ebc7a108ca39bd28023196e42360f1f7825b171"
+          "sha256": "6160de56219d8710cfd1eb58e55a097dd3dd77642b0707a75e7ff2122a375192"
         },
         {
           "file": "scripts/design/swiftui-targets.mjs",
