@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "mode": "total-unsuppressed-count",
+  "baseline": "docs/design/ui-source-baseline.json",
+  "baselineSha256": "bb69e4425ba31b817faf3d81532aa33cb782202e1dfb0f0e6a1d464b494b1a5c",
+  "ceiling": 63,
+  "snapshot": {
+    "blockers": 29,
+    "advisories": 34,
+    "suppressed": 0,
+    "total": 63
+  }
+}

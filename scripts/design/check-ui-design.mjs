@@ -11,7 +11,7 @@ import {
 } from './vendor/impeccable/scripts/lib/impeccable-config.mjs';
 import { applyInlineIgnores } from './vendor/impeccable/scripts/detector/shared/inline-ignores.mjs';
 import { detectHtml } from './vendor/impeccable/scripts/detector/engines/static-html/detect-html.mjs';
-import { detectText } from './vendor/impeccable/scripts/detector/engines/regex/detect-text.mjs';
+import { detectUiText } from './source-adapter.mjs';
 import { loadDesignSystemForTarget } from './vendor/impeccable/scripts/detector/design-system.mjs';
 import { detectSmallSwiftUiTargets } from './swiftui-targets.mjs';
 import { isUiPath } from './ui-paths.mjs';
@@ -381,7 +381,7 @@ export async function scanChangedUiFiles(root, changes) {
       fileFindings = path.posix.extname(filePath).toLowerCase() === '.html' ||
         path.posix.extname(filePath).toLowerCase() === '.htm'
         ? await detectHtml(absolutePath, scanOptions)
-        : detectText(content, absolutePath, scanOptions);
+        : detectUiText(content, absolutePath, scanOptions);
     }
     scannedFiles.push(filePath);
     findings.push(...filterDetectionFindings(fileFindings, config.detector));

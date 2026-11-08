@@ -64,6 +64,8 @@ const sharedDesignFiles = new Set([
   '.github/workflows/design-detector.yml',
   '.github/workflows/squad-review-verdict.yml',
   '.impeccable/config.json',
+  '.impeccable/ui-count-ceiling.json',
+  'docs/design/ui-source-baseline.json',
   '.impeccable/design.json',
   '.squad/agents/bishop/charter.md',
   '.squad/agents/dallas/charter.md',

@@ -161,6 +161,7 @@ layout_diff.txt
 /memory/
 /.impeccable/*
 !/.impeccable/config.json
+!/.impeccable/ui-count-ceiling.json
 /.impeccable/config.local.json
 
 # Python
