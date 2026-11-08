@@ -35,6 +35,7 @@ test('scopes shared design and reviewer policy artifacts', () => {
     '.github/hooks/impeccable.json',
     '.github/workflows/ci.yml',
     '.github/workflows/design-detector.yml',
+    '.github/workflows/ui-count-ratchet.yml',
     '.github/workflows/squad-review-verdict.yml',
     '.github/copilot-instructions.md',
     '.github/pull_request_template.md',

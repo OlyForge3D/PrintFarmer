@@ -62,6 +62,7 @@ const sharedDesignFiles = new Set([
   '.github/workflows/ci.yml',
   '.github/skills/reviewer-protocol/SKILL.md',
   '.github/workflows/design-detector.yml',
+  '.github/workflows/ui-count-ratchet.yml',
   '.github/workflows/squad-review-verdict.yml',
   '.impeccable/config.json',
   '.impeccable/ui-count-ceiling.json',
