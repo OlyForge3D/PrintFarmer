@@ -172,6 +172,15 @@ class CoverageReportTests(unittest.TestCase):
         store_class = source.split("final class AppStoreScreenshotUITests:")[1].split("@MainActor")[0]
         self.assertNotIn("testCaptureCatalog", store_class)
         self.assertIn("testCaptureStoreScreens", store_class)
+        import re
+        # Lexical placement guard, not a Swift compiler or XCTest discovery test.
+        code = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', "", source)
+        for name in ("AppStoreScreenshotUITests", "CatalogVisualAccessibilityUITests"):
+            declaration = re.search(rf"\bfinal class {name}\b", code)
+            self.assertIsNotNone(declaration)
+            prefix = code[:declaration.start()]
+            self.assertEqual(prefix.count("{") - prefix.count("}"), 0,
+                             f"{name} must be at file scope for XCTest discovery")
 
     def test_human_approval_mismatch_is_a_regression_not_rebaseline(self):
         (self.root / "golden.png").write_bytes(b"human-reviewed-contract-fixture")

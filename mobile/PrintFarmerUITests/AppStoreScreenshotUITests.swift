@@ -35,21 +35,6 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
             )
         }
 
-        @MainActor
-        final class AppStoreScreenshotUITests: ScreenshotCaptureUITestCase {
-            func testCaptureStoreScreens() throws {
-                try captureScreens()
-            }
-        }
-
-        @MainActor
-        final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
-            override var capturesCatalog: Bool { true }
-
-            func testCaptureCatalogWithAccessibilityAudits() throws {
-                try captureScreens()
-            }
-        }
         try capture("01-farm")
 
         card.tap()
@@ -192,5 +177,21 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
             return
         }
         XCTFail("Store screen \(name) did not settle within 20 seconds.")
+    }
+}
+
+@MainActor
+final class AppStoreScreenshotUITests: ScreenshotCaptureUITestCase {
+    func testCaptureStoreScreens() throws {
+        try captureScreens()
+    }
+}
+
+@MainActor
+final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
+    override var capturesCatalog: Bool { true }
+
+    func testCaptureCatalogWithAccessibilityAudits() throws {
+        try captureScreens()
     }
 }
