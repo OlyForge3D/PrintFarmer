@@ -561,3 +561,67 @@ git push origin ios/v1.0-beta.<N>
 The in-repository mobile client is licensed under the
 [GNU Affero General Public License v3.0 only](../LICENSE)
 (`AGPL-3.0-only`) beginning with PrintFarmer v0.2.3.
+
+## Catalog visual and accessibility candidates
+
+`ui-coverage/catalog.json` preserves all 37 iOS row IDs from the shared web
+inventory using the same entry schema. This is **not full state coverage**:
+seven adapters currently capture five broad rows; 32 rows have explicit
+fixture, reachability or state-inventory blockers. Even a matched golden
+does not promote an entire broad row to covered. See each row's `reason`.
+
+The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
+the approved Xcode/runtime resolver, and the existing isolated UI-test
+bootstrap. It selects only
+`PrintFarmerUITests/AppStoreScreenshotUITests/testCaptureCatalogWithAccessibilityAudits`.
+It never contacts real printers or approves baselines. Captures use synthetic
+fixtures, a fixed date, portrait, dark appearance, normal Large text, English,
+and stable system chrome on separate iPhone/iPad hosts. The existing App Store
+capture selector remains available without the additional accessibility audit.
+
+Native candidates run XCTest's unfiltered `.all` accessibility audit against
+settled screens, then require a confirming identical frame. An audit failure,
+missing adapter receipt/image, wrong rendering profile, or changed approved
+golden fails the candidate check. A successful audit is **not VoiceOver
+interaction certification**, and this profile does not cover the full
+Dynamic Type, light/system appearance, keyboard or rotation axes.
+
+The check retains screenshots, hashed JSON receipts, host/Xcode/runtime/device
+metadata, `.xcresult`, build/test logs and runner timing/events for three days.
+`report.json` separates blocked rows, partially exercised rows, native
+scenarios and pending human goldens. Missing goldens are non-blocking
+`awaiting-human-golden`, never an automatic baseline pass. No branch-protection
+configuration is changed. A green candidate check cannot establish readiness
+or completion of the full inventory.
+
+On Windows, reporting contracts can be checked without pretending to run iOS:
+
+```powershell
+cd mobile
+python -m unittest discover -s scripts/tests -p 'test_ui_coverage.py' -v
+python scripts/report-ui-coverage.py --family iPhone --head <full-source-sha> `
+  --blocked-reason "No approved macOS simulator available." --output build/report.json
+```
+
+Human-only golden acceptance is a separate reviewed change: inspect the native
+candidate and its metadata, retain the selected PNG under `ui-coverage/goldens`,
+then add a record to `ui-coverage/approved-goldens.json` keyed by
+`<SIMULATOR_MODEL_IDENTIFIER>.<scenarioId>`. Each record needs a plain `file`
+name, PNG `sha256`, human `reviewedBy`, full captured `sourceSha`, and `profile`
+equal to the catalog's pinned `renderProfile`. The reporter verifies the
+retained file hash before comparing; it never writes PNGs or approval records.
+Attribution in a file is self-attested, not independent authentication of a
+human: repository review must enforce the human-only approval rule. The empty
+approval file deliberately approves nothing.
+
+Standard hosted runner compute is currently free for this public repository;
+larger runners and artifact storage have different billing rules. See
+[GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+No billing setting is changed. Runner availability and pinned toolchain support
+must be proven by the actual job, not inferred from a green skipped iOS test.
+
+A receipt/image mismatch, inaccessible screen, missing state, or actual runner
+failure falsifies a coverage claim. Operators and assistive-technology users
+would bear the cost of false confidence; wrong hardware actions can be
+irreversible. These tests use isolated synthetic state and do not certify
+physical NFC, camera permissions, live printer behavior or operational safety.

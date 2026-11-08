@@ -1,0 +1,136 @@
+name: iOS visual and accessibility candidates
+
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/ios-ui-coverage.yml'
+      - 'scripts/ci/resolve-ios-simulator.sh'
+      - 'scripts/ci/boot-ios-simulator.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ui-coverage-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: iOS catalog reporting contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate honest coverage reporting
+        working-directory: mobile
+        run: python3 -m unittest discover -s scripts/tests -p 'test_ui_coverage.py' -v
+
+  candidates:
+    name: iOS capture and accessibility (${{ matrix.family }})
+    needs: contract
+    runs-on: macos-26
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        family: [iPhone, iPad]
+    env:
+      IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+      IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.5
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Initialize all-row blocked report
+        run: |
+          mkdir -p build/ui-coverage
+          git rev-parse HEAD > build/ui-coverage/source-sha.txt
+          python3 scripts/report-ui-coverage.py \
+            --family "$IOS_SIMULATOR_DEVICE_FAMILY" --head "$(git rev-parse HEAD)" \
+            --blocked-reason "No native receipts produced yet; inspect retained runner logs." \
+            --output build/ui-coverage/report.json
+      - name: Verify pinned host and Xcode
+        run: |
+          set -euo pipefail
+          sw_vers | tee build/ui-coverage/host.txt
+          test -d /Applications/Xcode_26.6.app
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version | tee build/ui-coverage/xcode.txt
+          test "$(head -n 1 build/ui-coverage/xcode.txt)" = "Xcode 26.6"
+          test "$(sed -n '2s/^Build version //p' build/ui-coverage/xcode.txt)" = "17F113"
+      - name: Prepare approved simulator
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          runtime=com.apple.CoreSimulator.SimRuntime.iOS-26-5
+          if ! xcrun simctl list runtimes -j | jq -e --arg id "$runtime" \
+            '.runtimes[] | select(.identifier == $id and .buildversion == "23F77" and .isAvailable)' >/dev/null; then
+            sudo xcodebuild -downloadPlatform iOS -buildVersion 23F77 -architectureVariant arm64
+          fi
+          device="$(xcrun simctl list devicetypes -j | jq -er --arg family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+            '.devicetypes | map(select(.productFamily == $family)) | last | .identifier')"
+          name="$(xcrun simctl list devicetypes -j | jq -er --arg id "$device" \
+            '.devicetypes[] | select(.identifier == $id) | .name')"
+          xcrun simctl create "$name" "$device" "$runtime"
+          export IOS_SIMULATOR_DEVICE_PREFERENCE="$name"
+          ../scripts/ci/resolve-ios-simulator.sh
+          xcrun simctl list runtimes -j > build/ui-coverage/runtimes.json
+          xcrun simctl list devices available -j > build/ui-coverage/devices.json
+      - name: Boot isolated hosted simulator and stabilize system chrome
+        run: |
+          ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
+          xcrun simctl status_bar "$SIMULATOR_UDID" override \
+            --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --batteryState charged --batteryLevel 100
+      - name: Build test targets
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          xcodebuild -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
+            build-for-testing 2>&1 | tee build/ui-coverage/build.log
+      - name: Capture isolated native candidates and audit accessibility
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          python3 scripts/run-tests.py -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -test-timeouts-enabled YES -maximum-test-execution-time-allowance 240 \
+            CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO test-without-building \
+            -only-testing:PrintFarmerUITests/AppStoreScreenshotUITests/testCaptureCatalogWithAccessibilityAudits \
+            -resultBundlePath build/ui-coverage/Candidates.xcresult \
+            2>&1 | tee build/ui-coverage/test.log
+      - name: Export native receipts and images
+        if: ${{ !cancelled() }}
+        run: |
+          xcrun xcresulttool export attachments --path build/ui-coverage/Candidates.xcresult \
+            --output-path build/ui-coverage/attachments
+      - name: Report candidates without approving missing goldens
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/report-ui-coverage.py --family "$IOS_SIMULATOR_DEVICE_FAMILY" \
+            --head "$(git rev-parse HEAD)" --attachments build/ui-coverage/attachments \
+            --output build/ui-coverage/report.json
+          echo "::warning::This is partial candidate evidence, not full 37-row coverage. Missing goldens require human review."
+      - name: Retain evidence and blockers
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-ui-coverage-${{ matrix.family }}
+          path: mobile/build/ui-coverage
+          retention-days: 3
+          if-no-files-found: error

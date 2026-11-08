@@ -1,8 +1,10 @@
 import XCTest
 import UIKit
+import CryptoKit
 
 @MainActor
 final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
+    private var catalogCapture = false
     override var waitsForNavigationReadiness: Bool { true }
     override var additionalLaunchArguments: [String] {
         [
@@ -15,7 +17,12 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         ]
     }
 
-    func testCaptureStoreScreens() {
+    func testCaptureCatalogWithAccessibilityAudits() throws {
+        catalogCapture = true
+        try testCaptureStoreScreens()
+    }
+
+    func testCaptureStoreScreens() throws {
         XCUIDevice.shared.orientation = .portrait
         let card = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
         XCTAssertTrue(card.waitForExistence(timeout: 10))
@@ -32,7 +39,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                 "The Farm store image must show the \(label) card state."
             )
         }
-        capture("01-farm")
+        try capture("01-farm")
 
         card.tap()
         let status = app.descendants(matching: .any)["printer.detail.panel.status"]
@@ -52,7 +59,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             format: "label == %@ OR label ENDSWITH %@", "--", ", --"
         )).firstMatch.exists)
         XCTAssertFalse(facts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Unavailable")).firstMatch.exists)
-        capture("02-printer-status")
+        try capture("02-printer-status")
 
         // The redesigned Control tab opens on Tune while printing (#3496, #3540).
         let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
@@ -63,7 +70,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         XCTAssertTrue(tune.waitForExistence(timeout: 8))
         XCTAssertTrue(tune.isSelected, "Control opens on Tune while printing.")
         XCTAssertTrue(app.otherElements["printer.controls.runtime"].waitForExistence(timeout: 8))
-        capture("06-printer-control")
+        try capture("06-printer-control")
         selector.buttons["Status"].tap()
         XCTAssertTrue(status.waitForExistence(timeout: 8))
         app.buttons["printer.detail.farm"].tap()
@@ -81,7 +88,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             XCTAssertTrue(retry.waitForExistence(timeout: 10))
             XCTAssertTrue(retry.isEnabled)
         }
-        capture("03-queue")
+        try capture("03-queue")
 
         let filament = shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8)
         XCTAssertTrue(filament.exists)
@@ -89,7 +96,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["inventory.addSpool"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["inventory.filter.all"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Printer assignment unavailable"].exists)
-        capture("04-filament")
+        try capture("04-filament")
 
         app.buttons["navigation.scan"].tap()
         for identifier in ["scan.primary", "scan.nfc"] {
@@ -97,7 +104,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             XCTAssertTrue(button.waitForExistence(timeout: 8))
             XCTAssertTrue(button.isEnabled)
         }
-        capture("05-scan")
+        try capture("05-scan")
 
         // A camera-equipped printer shows the camera header above full-width media (#3496 D2).
         relaunchAppForTest(additionalArguments: ["--uitesting-issue3496-camera-snapshot"])
@@ -112,12 +119,12 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         for identifier in ["printer.detail.camera.rotate", "printer.detail.camera.refresh"] {
             XCTAssertTrue(app.buttons[identifier].waitForExistence(timeout: 8), identifier)
         }
-        capture("07-printer-camera")
+        try capture("07-printer-camera")
     }
 
     /// Waits for a settled frame, asserts on that rendering, then attaches it only if
     /// a confirming frame is byte-identical, so the assertions cover the exact image.
-    private func capture(_ name: String) {
+    private func capture(_ name: String) throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 20
         var previous: Data?
         var identicalFrames = 0
@@ -134,6 +141,9 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                 unknown.count, 0,
                 "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
             )
+            if catalogCapture {
+                try app.performAccessibilityAudit(for: .all)
+            }
             let confirmed = XCUIScreen.main.screenshot()
             guard confirmed.pngRepresentation == data else {
                 identicalFrames = 0
@@ -143,6 +153,28 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
             attachment.name = "app-store-\(name)"
             attachment.lifetime = .keepAlways
             add(attachment)
+            if catalogCapture {
+                let catalogImage = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+                catalogImage.name = "catalog.\(name).png"
+                catalogImage.lifetime = .keepAlways
+                add(catalogImage)
+                let receipt: [String: String] = [
+                    "scenarioId": name,
+                    "audit": "passed",
+                    "sha256": SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                    "appearance": "dark",
+                    "contentSize": "UICTContentSizeCategoryL",
+                    "device": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown",
+                    "runtime": UIDevice.current.systemVersion,
+                ]
+                let receiptAttachment = XCTAttachment(
+                    data: try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]),
+                    uniformTypeIdentifier: "public.json"
+                )
+                receiptAttachment.name = "catalog.\(name).json"
+                receiptAttachment.lifetime = .keepAlways
+                add(receiptAttachment)
+            }
             return
         }
         XCTFail("Store screen \(name) did not settle within 20 seconds.")
