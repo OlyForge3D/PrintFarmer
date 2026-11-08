@@ -215,9 +215,9 @@ have downstream effects that replacing JSON does not undo.
 ### Total-count non-regression ceiling (Layer 4)
 
 [`ui-count-ceiling.json`](../.impeccable/ui-count-ceiling.json) pins the
-observational snapshot above by SHA-256 and explicitly allows **63 supported,
-unsuppressed findings: 29 blockers plus 34 advisories**. These are static
-observations, not 63 independently confirmed defects. The ceiling compares
+observational snapshot above by SHA-256 and explicitly allows **51 supported,
+unsuppressed findings: 17 blockers plus 34 advisories**. These are static
+observations, not 51 independently confirmed defects. The ceiling compares
 `blockers + advisories`; suppressed findings and unsupported/excluded files do
 not count. All severities and per-platform counts remain visible in evidence.
 
@@ -243,10 +243,30 @@ detectable. This does not infer runtime/dynamic image validity or broadly
 ignore border rules. Vendored Impeccable remains unchanged and integrity-pinned;
 the adapter is separately included in tooling provenance.
 
-The corrected scan removed **25 observations** from the original 88:
+The loading-ring correction covers both paired empty tags and self-closing
+div/span tags. An additional per-site exception covers **only the exact
+`BlobImage` function in `FileThumbnail.tsx`**: its React 19 ref callback assigns
+the created object URL to `image.src`, removes the attribute and revokes the
+same URL in cleanup, and depends on `[blob]`. The adapter matches that complete
+source block once and removes only its image's `broken-image` observation.
+Changing the callback, ref binding or dependency list invalidates the match.
+Other images in the same file and all other ref images remain checked.
+This is conservative source evidence, not a general ref exemption or proof
+that the browser supports object URLs. An unchanged source block rendered
+without that callback behavior would falsify the exception's reasoning.
+If wrong, missing previews could mislead farm operators; the tooling correction
+is reversible, but operational decisions made from a misleading preview are not.
+
+The initial corrected scan removed **25 observations** from the original 88:
 **7 `broken-image` comment examples** and **18 loading-ring
-`border-accent-on-rounded` matches**. The approved ceiling was deliberately
-lowered to 63; advisories and web/iOS/website scope are unchanged. Remaining
+`border-accent-on-rounded` matches**, lowering the ceiling to 63. The complete
+audit of the remaining 12 rounded-border observations found **11 self-closing
+loading rings**; the non-ring `MetadataProfileRenderer.tsx` tab observation is
+retained. Together with the source-proven `BlobImage` correction, this removes
+**12 more observations**, deliberately lowering the ceiling **63 -> 51**
+(29 -> 17 blockers, 34 advisories unchanged). No product source or vendor
+files changed; the immutable inspected commit and web/iOS/website scope are
+unchanged. Remaining
 observations are still provisional, including runtime-built image sources and
 multiline/conditional loading indicators the narrow source adapter cannot infer.
 The changed-file non-HTML detector uses these same authorized bug fixes;

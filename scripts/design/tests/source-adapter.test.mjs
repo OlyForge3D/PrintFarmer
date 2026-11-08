@@ -58,6 +58,8 @@ test('comment masking retains UTF-16 offsets, newlines and live strings/template
 test('only empty, square, explicitly spinning rounded loading rings avoid card-accent findings', () => {
   assert.equal(borderFindings('<div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>').length, 0);
   assert.equal(borderFindings('<span class="animate-spin rounded-full h-4 w-4 border-b-2"></span>').length, 0);
+  assert.equal(borderFindings('<div className="pf-animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent" />').length, 0);
+  assert.equal(borderFindings('<span className="animate-spin rounded-full h-4 w-4 border-t-2" />').length, 0);
   for (const source of [
     '<div className="rounded-lg border-b-2">Card</div>',
     '<div className="rounded-full h-8 w-8 border-b-2"></div>',
@@ -65,7 +67,48 @@ test('only empty, square, explicitly spinning rounded loading rings avoid card-a
     '<div className="animate-spin rounded-full h-8 w-12 border-b-2"></div>',
     '<div className="animate-spin rounded-full h-8 w-8 border-b-2">Card</div>',
     '<div className="animate-spin rounded-full h-8 w-8 border-b-2"></div><div className="rounded-lg border-b-2">Card</div>',
+    '<div className="rounded-lg border-b-2" />',
+    '<div className="rounded-full h-8 w-8 border-b-2" />',
+    '<div className="animate-spin rounded-lg h-8 w-8 border-b-2" />',
+    '<div className="animate-spin rounded-full h-8 w-12 border-b-2" />',
+    '<div className={clsx("rounded-none border-b-2", selected && "border-pf-accent")} />',
   ]) assert.ok(borderFindings(source).length > 0, source);
+  assert.ok(detectUiText('<div className="animate-spin rounded-full h-8 w-8 border-l-4" />', file)
+    .some(finding => finding.antipattern === 'side-tab'));
+});
+
+test('only the source-pinned BlobImage callback avoids a missing-src finding at its own image', () => {
+  const thumbnailFile = 'src/Web/ReactApp/src/features/files/components/FileThumbnail.tsx';
+  const source = `function BlobImage({ blob, alt, className }: BlobImageProps) {
+  const attach = useCallback((image: HTMLImageElement | null) => {
+    if (!image || typeof URL.createObjectURL !== 'function') return undefined;
+    const url = URL.createObjectURL(blob);
+    image.src = url;
+    return () => {
+      image.removeAttribute('src');
+      URL.revokeObjectURL(url);
+    };
+  }, [blob]);
+  return <img ref={attach} alt={alt} className={className} />;
+}`;
+  const find = (text, target = thumbnailFile) => detectUiText(text, target, { inlineIgnores: false })
+    .filter(finding => finding.antipattern === 'broken-image');
+  assert.equal(find(source).length, 0);
+  assert.equal(find(source.replaceAll('\n', '\r\n'), path.resolve(thumbnailFile)).length, 0);
+  assert.deepEqual(find(`${source}\n<img />\n<img src="" />\n<img ref={other} />`).map(finding =>
+    finding.line).sort((a, b) => a - b), [13, 14, 15]);
+  for (const changed of [
+    source.replace('image.src = url;', ''),
+    source.replace('URL.createObjectURL(blob)', '""'),
+    source.replace('URL.revokeObjectURL(url);', ''),
+    source.replace("image.removeAttribute('src');", ''),
+    source.replace('}, [blob]);', '}, []);'),
+    source.replace('ref={attach}', 'ref={other}'),
+    `${source}\n${source}`,
+    `const example = \`${source}\`;`,
+    `/* ${source} */\n<img ref={attach} />`,
+  ]) assert.ok(find(changed).length > 0, changed);
+  assert.equal(find(source, file).length, 1);
 });
 
 test('original comment-based suppressions still apply after masking and raw mode does not suppress', () => {
@@ -82,7 +125,7 @@ test('changed-file scanner uses the adapter fixes without losing real violations
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
   fs.writeFileSync(path.join(root, file), '/** React <img> */\n' +
-    '<div className="pf-animate-spin rounded-full h-8 w-8 border-b-2"></div>\n' +
+    '<div className="pf-animate-spin rounded-full h-8 w-8 border-b-2" />\n' +
     '<img />\n<div className="rounded-lg border-b-2">Card</div>');
   const result = await scanChangedUiFiles(root, [{ status: 'M', paths: [file], currentPath: file }]);
   assert.deepEqual(result.findings.map(finding => [finding.antipattern, finding.line]), [

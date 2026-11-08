@@ -4,7 +4,7 @@ import { applyInlineIgnores } from './vendor/impeccable/scripts/detector/shared/
 
 const scriptExtensions = new Set(['.js', '.jsx', '.ts', '.tsx']);
 
-export function blankSourceComments(source, file) {
+export function blankSourceComments(source, file, onCode) {
   const script = scriptExtensions.has(path.extname(file).toLowerCase());
   const chars = source.split('');
   let quote;
@@ -31,6 +31,7 @@ export function blankSourceComments(source, file) {
       else if (char === quote) quote = undefined;
       continue;
     }
+    onCode?.(index);
     if (char === "'" && /\w/.test(chars[index - 1] || '') && /\w/.test(next || '')) {
       precedingToken = '';
       wordLength = 0;
@@ -84,7 +85,7 @@ export function blankSourceComments(source, file) {
 }
 
 function blankLoadingRingBorders(content) {
-  return content.replace(/<(div|span)\b[^>\n]*\bclass(?:Name)?\s*=\s*["']([^"'\n]*)["'][^>\n]*>[ \t]*<\/\1\s*>/g,
+  return content.replace(/<(div|span)\b[^>\n]*\bclass(?:Name)?\s*=\s*["']([^"'\n]*)["'][^>\n]*(?:\/>|>[ \t]*<\/\1\s*>)/g,
     (element, tag, classes) => {
       const tokens = new Set(classes.split(/\s+/));
       const height = [...tokens].find(token => /^h-\d+$/.test(token));
@@ -95,8 +96,40 @@ function blankLoadingRingBorders(content) {
     });
 }
 
+// Per-site source proof, not a general exemption for ref-driven images.
+const blobImageFile = 'src/Web/ReactApp/src/features/files/components/FileThumbnail.tsx';
+const blobImageSource = `function BlobImage({ blob, alt, className }: BlobImageProps) {
+  const attach = useCallback((image: HTMLImageElement | null) => {
+    if (!image || typeof URL.createObjectURL !== 'function') return undefined;
+    const url = URL.createObjectURL(blob);
+    image.src = url;
+    return () => {
+      image.removeAttribute('src');
+      URL.revokeObjectURL(url);
+    };
+  }, [blob]);
+  return <img ref={attach} alt={alt} className={className} />;
+}`;
+
+function sourceProvenBlobImageLine(source, file) {
+  const normalizedFile = file.replaceAll('\\', '/');
+  if (normalizedFile !== blobImageFile && !normalizedFile.endsWith(`/${blobImageFile}`)) return undefined;
+  const normalizedSource = source.replaceAll('\r\n', '\n');
+  const start = normalizedSource.indexOf(blobImageSource);
+  if (start === -1 || normalizedSource.lastIndexOf(blobImageSource) !== start) return undefined;
+  let startsInCode = false;
+  blankSourceComments(normalizedSource, file, index => {
+    if (index === start) startsInCode = true;
+  });
+  if (!startsInCode) return undefined;
+  const imageOffset = start + blobImageSource.indexOf('<img');
+  return normalizedSource.slice(0, imageOffset).split('\n').length;
+}
+
 export function detectUiText(source, file, options = {}) {
   const content = blankLoadingRingBorders(blankSourceComments(source, file));
-  const findings = detectText(content, file, { ...options, inlineIgnores: false });
+  const blobImageLine = sourceProvenBlobImageLine(content, file);
+  const findings = detectText(content, file, { ...options, inlineIgnores: false }).filter(finding =>
+    finding.antipattern !== 'broken-image' || finding.line !== blobImageLine);
   return options.inlineIgnores === false ? findings : applyInlineIgnores(findings, source);
 }
