@@ -566,14 +566,15 @@ The in-repository mobile client is licensed under the
 
 `ui-coverage/catalog.json` preserves all 37 iOS row IDs from the shared web
 inventory using the same entry schema. This is **not full state coverage**:
-seven adapters currently capture five broad rows; 32 rows have explicit
-fixture, reachability or state-inventory blockers. Even a matched golden
+21 capture scenarios target 17 broad rows; 20 rows have no adapter and explicit
+fixture, reachability or state-inventory blockers. New adapters are candidates,
+not native execution evidence. Even a matched golden
 does not promote an entire broad row to covered. See each row's `reason`.
 
 The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
 the approved Xcode/runtime resolver, and the existing isolated UI-test
 bootstrap. It selects only
-`PrintFarmerUITests/CatalogVisualAccessibilityUITests/testCaptureCatalogWithAccessibilityAudits`
+`PrintFarmerUITests/CatalogVisualAccessibilityUITests`
 in its own test plan. The default plan skips both capture classes; the App Store
 plan still selects only the legacy class and receives seven unique store images.
 It never contacts real printers or approves baselines. Captures use synthetic
@@ -584,9 +585,10 @@ capture selector remains available without the additional accessibility audit.
 Native candidates run XCTest's `.all` accessibility audit against settled
 screens, collect **every** finding into the scenario receipt, then require a
 confirming identical frame. Findings are handled for reporting, not waived:
-the test explicitly fails after collecting all implemented screens, and the
+each test explicitly fails after collecting its implemented screens, and the
 reporter also fails on any failed-audit receipt. This avoids stopping the
-whole catalog at the first known defect. An audit failure,
+whole catalog at the first known defect. Separate navigation groups allow
+remaining tests to run if one destination cannot be reached. An audit failure,
 missing adapter receipt/image, wrong rendering profile, or changed approved
 golden fails the candidate check. A successful audit is **not VoiceOver
 interaction certification**, and this profile does not cover the full

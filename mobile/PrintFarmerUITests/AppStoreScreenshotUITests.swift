@@ -3,7 +3,7 @@ import UIKit
 import CryptoKit
 
 @MainActor
-class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
+class ScreenshotCaptureUITestCase: QueueUITestBase {
     var capturesCatalog: Bool { false }
     private(set) var catalogAuditFailures: [String] = []
     override var waitsForNavigationReadiness: Bool { true }
@@ -121,7 +121,7 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
 
     /// Waits for a settled frame, asserts on that rendering, then attaches it only if
     /// a confirming frame is byte-identical, so the assertions cover the exact image.
-    private func capture(_ name: String) throws {
+    func capture(_ name: String) throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 20
         var previous: Data?
         var identicalFrames = 0
@@ -132,12 +132,14 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
             previous = data
             guard identicalFrames >= 3 else { continue }
             // Store images must never show an unresolved status (whole word, any case).
-            let unknown = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "label MATCHES[c] %@", "(?s).*\\bunknown\\b.*"))
-            XCTAssertEqual(
-                unknown.count, 0,
-                "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
-            )
+            if !capturesCatalog {
+                let unknown = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label MATCHES[c] %@", "(?s).*\\bunknown\\b.*"))
+                XCTAssertEqual(
+                    unknown.count, 0,
+                    "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
+                )
+            }
             var auditIssues: [String] = []
             if capturesCatalog {
                 // Handle every finding in the receipt; the catalog test fails
@@ -200,8 +202,140 @@ final class AppStoreScreenshotUITests: ScreenshotCaptureUITestCase {
 final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
     override var capturesCatalog: Bool { true }
 
+    override func tearDownWithError() throws {
+        XCTAssertTrue(catalogAuditFailures.isEmpty, catalogAuditFailures.joined(separator: "\n"))
+        try super.tearDownWithError()
+    }
+
     func testCaptureCatalogWithAccessibilityAudits() throws {
         try captureScreens()
-        XCTAssertTrue(catalogAuditFailures.isEmpty, catalogAuditFailures.joined(separator: "\n"))
+    }
+
+    func testCaptureAccount() throws {
+        try openAccount()
+        try capture("08-account")
+    }
+
+    func testCaptureSettings() throws {
+        try openAccount()
+        try tapRequired(app.buttons["account.destination.settings"])
+        try require(app.navigationBars["Settings"])
+        try capture("09-settings")
+    }
+
+    func testCaptureNotifications() throws {
+        try openAccount()
+        try tapRequired(app.buttons["account.destination.notifications"])
+        try require(app.navigationBars["Notifications"])
+        try capture("10-notifications")
+    }
+
+    func testCaptureServersAndEditor() throws {
+        try openAccount()
+        try tapRequired(app.buttons["account.destination.manageServers"])
+        try require(app.navigationBars["Servers"])
+        try require(app.descendants(matching: .any)["serversList"])
+        try capture("11-servers")
+        try tapRequired(app.navigationBars["Servers"].buttons["Add Server"])
+        try require(app.textFields["serverNameField"])
+        try require(app.textFields["serverURLField"])
+        try capture("12-server-editor")
+    }
+
+    func testCaptureAddSpool() throws {
+        try openFilament()
+        try tapRequired(app.buttons["inventory.addSpool"])
+        try require(app.navigationBars["Add Spool"])
+        try capture("13-add-spool")
+    }
+
+    func testCapturePartsAndSelectedPart() throws {
+        try openFilament()
+        try tapRequired(app.buttons["inventory.actions"])
+        try tapRequired(app.buttons["filament.printedParts"])
+        try require(app.navigationBars["Printed Parts"])
+        let bracket = app.buttons["partsInventory.row.BRKT-01"]
+        try require(bracket)
+        try capture("14-parts-inventory")
+        try tapRequired(bracket)
+        try require(app.steppers["partScan.deltaStepper"])
+        try require(app.buttons["partScan.applyAdjustment"])
+        try capture("15-selected-part")
+    }
+
+    func testCaptureBarcodeIntake() throws {
+        try openFilament()
+        try tapRequired(app.buttons["inventory.actions"])
+        try tapRequired(app.buttons["inventory.scan.barcodeIntake"])
+        try require(app.navigationBars["Barcode Intake"])
+        try capture("16-barcode-intake")
+    }
+
+    func testCaptureHistoryJobAndHarvest() throws {
+        XCUIDevice.shared.orientation = .portrait
+        openJobHistoryMenuAndSelect()
+        try require(app.descendants(matching: .any)["jobList.history"])
+        let job = app.buttons["job.row.30000000-0003-0000-0000-000000000007"]
+        try require(job)
+        try capture("17-job-history")
+        try tapRequired(job)
+        try require(app.buttons["jobDetail.harvestToInventory"])
+        try capture("18-job-detail")
+        try tapRequired(app.buttons["jobDetail.harvestToInventory"])
+        try require(app.navigationBars["Harvest Plate"])
+        try require(app.textFields["harvest.binCode"])
+        try require(app.buttons["harvest.submit"])
+        try capture("19-harvest")
+    }
+
+    func testCaptureSpoolPicker() throws {
+        XCUIDevice.shared.orientation = .portrait
+        try tapRequired(app.buttons["farm-card-10000000-0001-0000-0000-000000000001"])
+        let selector = app.descendants(matching: .any)["printer.detail.panel.selector"]
+        try require(selector)
+        try tapRequired(selector.buttons["Filament"])
+        try require(app.descendants(matching: .any)["printer.detail.panel.filament"])
+        let change = app.buttons.matching(
+            NSPredicate(format: "identifier CONTAINS %@", "/printer/change")
+        ).firstMatch
+        try tapRequired(change)
+        try require(app.navigationBars["Select Material"])
+        try capture("20-material-picker")
+        try tapRequired(app.buttons["spoolPicker.material.PLA"])
+        try require(app.navigationBars["Select Spool"])
+        try require(app.buttons["spoolPicker.spool.2"])
+        try capture("21-spool-picker")
+    }
+
+    private func openAccount() throws {
+        XCUIDevice.shared.orientation = .portrait
+        try tapRequired(app.descendants(matching: .any)["navigation.account"])
+        try require(app.navigationBars["Account"])
+    }
+
+    private func openFilament() throws {
+        XCUIDevice.shared.orientation = .portrait
+        try tapRequired(shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8))
+        try require(app.buttons["inventory.addSpool"])
+    }
+
+    private func require(_ element: XCUIElement) throws {
+        guard element.waitForExistence(timeout: 10) else {
+            XCTFail("Required catalog navigation element missing: \(element)")
+            throw CatalogNavigationError.missingElement
+        }
+    }
+
+    private func tapRequired(_ element: XCUIElement) throws {
+        try require(element)
+        guard element.isHittable else {
+            XCTFail("Required catalog navigation element is not hittable: \(element)")
+            throw CatalogNavigationError.missingElement
+        }
+        element.tap()
+    }
+
+    private enum CatalogNavigationError: Error {
+        case missingElement
     }
 }

@@ -14,7 +14,7 @@
   "testTargets": [
     {
       "parallelizable": false,
-      "selectedTests": ["CatalogVisualAccessibilityUITests/testCaptureCatalogWithAccessibilityAudits"],
+      "selectedTests": ["CatalogVisualAccessibilityUITests"],
       "target": {
         "containerPath": "container:PrintFarmer.xcodeproj",
         "identifier": "F7060002000000000000D001",

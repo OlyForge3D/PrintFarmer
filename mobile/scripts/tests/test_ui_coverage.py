@@ -116,7 +116,7 @@ class CoverageReportTests(unittest.TestCase):
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
         captures = re.findall(r'try capture\("([^"]+)"\)', source)
         self.assertEqual(set(MODULE.validate_catalog(self.catalog)), set(captures))
-        self.assertEqual(len(captures), 7)
+        self.assertEqual(len(captures), 21)
         self.assertIn("try app.performAccessibilityAudit(for: .all)", source)
         self.assertIn('auditIssues.append("\\(issue.compactDescription): \\(issue.detailedDescription)")', source)
         self.assertIn("XCTAssertTrue(catalogAuditFailures.isEmpty", source)
@@ -166,9 +166,9 @@ class CoverageReportTests(unittest.TestCase):
         ], capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 1, result.stderr)
         summary = MODULE.read_json(output)["summary"]
-        self.assertEqual(summary["exercisedScenarios"], 7)
+        self.assertEqual(summary["exercisedScenarios"], len(scenarios))
         self.assertEqual(summary["failedAuditScenarios"], 1)
-        self.assertEqual(summary["pendingHumanGoldens"], 6)
+        self.assertEqual(summary["pendingHumanGoldens"], len(scenarios) - 1)
         self.assertEqual(summary["fullyCoveredRows"], 0)
 
     def test_attachment_path_traversal_and_duplicates_are_rejected(self):
@@ -210,7 +210,7 @@ class CoverageReportTests(unittest.TestCase):
         default = MODULE.read_json(MOBILE / "PrintFarmer.xctestplan")
         self.assertEqual(store["testTargets"][0]["selectedTests"], ["AppStoreScreenshotUITests"])
         self.assertEqual(catalog["testTargets"][0]["selectedTests"],
-                         ["CatalogVisualAccessibilityUITests/testCaptureCatalogWithAccessibilityAudits"])
+                         ["CatalogVisualAccessibilityUITests"])
         self.assertIn("CatalogVisualAccessibilityUITests", default["testTargets"][1]["skippedTests"])
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
         store_class = source.split("final class AppStoreScreenshotUITests:")[1].split("@MainActor")[0]
