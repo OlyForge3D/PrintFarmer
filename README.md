@@ -241,6 +241,7 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 **Implementation details:**
 - **[API Reference](./docs/API.md)** - REST endpoints and SignalR events
 - **[Design System](./docs/DESIGN_SYSTEM.md)** - UI component library, design tokens, theming
+- **[Automatic design gates](./docs/CI.md#automatic-ui-design-gates)** - Edit-time detection, native design guidance, and required UI review
 - **[UI Documentation](./docs/UI.md)** - Frontend components and pages
 
 **Operations:**

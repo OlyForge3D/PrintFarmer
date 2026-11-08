@@ -14,6 +14,7 @@ How to decide who handles what.
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
 | DevOps, Docker, deployment, CI/CD, infra | Parker | Dockerfiles, compose, deploy scripts, GitHub Actions, install automation |
 | UI/UX design, visual quality, styling, themes, design system | Newt | Component aesthetics, color systems, layout, spacing, dark theme, design tokens, visual audits |
+| UI PR design review | design-reviewer | Read-only critique and audit after implementation; see `.squad/ceremonies.md` |
 | Scope & priorities               | Dallas | What to build next, trade-offs, decisions |
 | Async issue work (bugs, tests, small features) | @copilot 🤖 | Well-defined tasks matching capability profile |
 | Session logging                 | Scribe       | Automatic — never needs routing                                                                   |
@@ -86,3 +87,14 @@ When triaging, the Lead should ask:
     unchanged, which preserves how historical assignment comments render. See
     `scripts/ci/squad-routing.cjs`'s `isRosterExcluded()` doc comment and
     `.github/workflows/squad-issue-assign.yml` for the full policy.
+
+14. **Automatic UI design review** — classify changed paths using the shared
+    `scripts/design/ui-paths.mjs` classifier, not a separately maintained path
+    list. For an in-scope UI PR, dispatch `design-reviewer` via `task` under
+    `.squad/ceremonies.md`; if the custom agent is not loaded, use its
+    read-only charter with a `general-purpose` task. Newt remains a design author, not the independent
+    design reviewer of their own work. Design review supplements, never replaces,
+    the risk-based code-review quorum. If classification or required evidence is
+    unavailable, report the blocker rather than treating the PR as non-UI.
+    The canonical additive gate is defined in
+    `.github/copilot-instructions.md` § "Risk-Based Review Scope".

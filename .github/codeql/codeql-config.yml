@@ -39,3 +39,9 @@ paths-ignore:
   - '**/*.spec.tsx'
   - src/Web/ReactApp/e2e
   - src/Web/ReactApp/src/test
+  # Unmodified upstream Apache-2.0 Impeccable 4.0.3, integrity-pinned and used
+  # in read-only PR CI to analyze changed repository source files. PR source
+  # (including fork heads) is not inherently trusted. This excludes all
+  # queries here, not just the known alerts; audit/removal is tracked in
+  # https://github.com/OlyForge3D/PrintFarmer/issues/3707.
+  - scripts/design/vendor/impeccable/**

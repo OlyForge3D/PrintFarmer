@@ -159,7 +159,9 @@ layout_diff.txt
 # the Squad coordinator can recover them without overwriting canonical state.
 /decisions/
 /memory/
-/.impeccable/
+/.impeccable/*
+!/.impeccable/config.json
+/.impeccable/config.local.json
 
 # Python
 __pycache__/
