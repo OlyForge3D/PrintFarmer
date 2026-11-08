@@ -325,6 +325,12 @@ discarding history. A failed paired refresh leaves incompatible files that
 fail verification, not a success-shaped allowance. The command is a deliberate
 local policy edit, not evidence of human approval or permission to merge.
 
+Approval writers use an exclusive sibling `.lock` file and replace the
+allowance atomically, so concurrent refreshes cannot race the no-increase
+check. A competing writer fails explicitly. After an interrupted process,
+verify no approval writer is running before removing its stale lock and
+retrying; do not remove another writer's lock.
+
 The approved Layer 2 scope and limitations still apply: regex-only web/HTML,
 no web token policy across its missing local `DESIGN.md` boundary, only the
 narrow native target rule, and no binary/rendered/WCAG completeness claims.

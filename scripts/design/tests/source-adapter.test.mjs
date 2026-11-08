@@ -48,7 +48,7 @@ test('comment masking retains UTF-16 offsets, newlines and live strings/template
   assert.equal(masked.length, source.length);
   assert.deepEqual([...masked.matchAll(/\r?\n/g)].map(match => match.index),
     [...source.matchAll(/\r?\n/g)].map(match => match.index));
-  assert.ok(masked.includes('https://example.com'));
+  assert.equal(masked.split('\n')[2], 'const url="https://example.com";');
   assert.ok(masked.includes('/[/*]/'));
   assert.ok(masked.includes('`<img>`'));
   assert.equal(imageFindings(source)[0].line, 5);

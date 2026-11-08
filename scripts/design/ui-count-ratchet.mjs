@@ -196,18 +196,41 @@ export function approveBaseline({ root = repositoryRoot, ceiling } = {}) {
     throw new Error('Proposed baseline provenance is not reproducible.');
   }
   const destination = path.join(root, allowancePath);
-  if (fs.existsSync(destination)) {
-    const existing = parseJson(fs.readFileSync(destination), 'existing allowance');
-    if (!Number.isSafeInteger(existing.ceiling) || existing.ceiling < 0 ||
-      existing.schemaVersion !== 1 || existing.mode !== 'total-unsuppressed-count') {
-      throw new Error('Cannot refresh a malformed existing allowance.');
+  const lockPath = `${destination}.lock`;
+  const lock = fs.openSync(lockPath, 'wx');
+  const temporary = `${destination}.${crypto.randomUUID()}.tmp`;
+  let temporaryCreated = false;
+  try {
+    let existingBytes;
+    try {
+      existingBytes = fs.readFileSync(destination);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
     }
-    if (ceiling > existing.ceiling) throw new Error('Refresh cannot increase the approved ceiling.');
+    if (existingBytes !== undefined) {
+      const existing = parseJson(existingBytes, 'existing allowance');
+      if (!Number.isSafeInteger(existing.ceiling) || existing.ceiling < 0 ||
+        existing.schemaVersion !== 1 || existing.mode !== 'total-unsuppressed-count') {
+        throw new Error('Cannot refresh a malformed existing allowance.');
+      }
+      if (ceiling > existing.ceiling) throw new Error('Refresh cannot increase the approved ceiling.');
+    }
+    const policy = { schemaVersion: 1, mode: 'total-unsuppressed-count', baseline: baselinePath,
+      baselineSha256: digest(bytes), ceiling, snapshot };
+    const descriptor = fs.openSync(temporary, 'wx');
+    temporaryCreated = true;
+    try {
+      fs.writeFileSync(descriptor, `${JSON.stringify(policy, null, 2)}\n`);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    fs.renameSync(temporary, destination);
+    return policy;
+  } finally {
+    if (temporaryCreated) fs.rmSync(temporary, { force: true });
+    fs.closeSync(lock);
+    fs.unlinkSync(lockPath);
   }
-  const policy = { schemaVersion: 1, mode: 'total-unsuppressed-count', baseline: baselinePath,
-    baselineSha256: digest(bytes), ceiling, snapshot };
-  fs.writeFileSync(destination, `${JSON.stringify(policy, null, 2)}\n`);
-  return policy;
 }
 
 function main() {

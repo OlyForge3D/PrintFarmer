@@ -21,19 +21,19 @@ jobs:
       statuses: write
     steps:
       - name: Check out trusted default-branch tooling and allowance
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node without installing repository packages
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: '24'
 
       - name: Mark exact-head count evidence pending
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
         env:
           TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
@@ -82,7 +82,7 @@ jobs:
 
       - name: Record exact-head count result
         if: always()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
         env:
           TARGET_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TRUSTED_BASE_SHA: ${{ steps.snapshot.outputs.trusted_base }}
@@ -126,7 +126,7 @@ jobs:
 
       - name: Preserve full scope and finding evidence
         if: always() && steps.snapshot.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ui-count-ratchet-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/ui-count-ratchet.json

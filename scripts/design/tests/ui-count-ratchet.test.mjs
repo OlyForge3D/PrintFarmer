@@ -212,6 +212,30 @@ test('CLI returns a failing count result with complete evidence and refuses ambi
   }
 });
 
+test('approval refuses a concurrent writer without changing its allowance or removing its lock', t => {
+  const f = fixture(t);
+  const destination = path.join(f.directory, allowancePath);
+  const original = fs.readFileSync(destination);
+  const lock = `${destination}.lock`;
+  fs.writeFileSync(lock, 'Other approval owns this lock', { flag: 'wx' });
+  assert.throws(() => approveBaseline({ root: f.directory, ceiling: f.policy.ceiling }), { code: 'EEXIST' });
+  assert.deepEqual(fs.readFileSync(destination), original);
+  assert.equal(fs.readFileSync(lock, 'utf8'), 'Other approval owns this lock');
+});
+
+test('approval preserves malformed allowances, propagates read errors and releases only its own lock', t => {
+  const f = fixture(t);
+  const destination = path.join(f.directory, allowancePath);
+  f.write(allowancePath, '{"schemaVersion":2}');
+  assert.throws(() => approveBaseline({ root: f.directory, ceiling: f.policy.ceiling }), /malformed/);
+  assert.equal(fs.readFileSync(destination, 'utf8'), '{"schemaVersion":2}');
+  assert.deepEqual(fs.readdirSync(path.dirname(destination)), ['config.json', 'ui-count-ceiling.json']);
+  fs.unlinkSync(destination);
+  fs.mkdirSync(destination);
+  assert.throws(() => approveBaseline({ root: f.directory, ceiling: f.policy.ceiling }), { code: 'EISDIR' });
+  assert.deepEqual(fs.readdirSync(path.dirname(destination)), ['config.json', 'ui-count-ceiling.json']);
+});
+
 test('trusted CI workflow uses no PR checkout/install, binds statuses to head and leaves changed-file checks intact', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/ui-count-ratchet.yml'), 'utf8');
   const parsed = yaml.load(workflow);
