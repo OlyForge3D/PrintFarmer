@@ -130,9 +130,9 @@ final class UITestBootstrapTests: XCTestCase {
 
     func test_catalogRoot_emptyRegistryDoesNotSeedServer() throws {
         let defaults = try makeEphemeralDefaults()
-        let bundle = UITestBootstrap.makeBundle(arguments: [
+        let bundle = UITestBootstrap.makeBundle(defaults: defaults, arguments: [
             "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-first-server"
-        ], defaults: defaults)
+        ])
         XCTAssertTrue(bundle.serverRegistry.servers.isEmpty)
         XCTAssertNil(bundle.serverRegistry.activeServerID)
     }
@@ -140,9 +140,9 @@ final class UITestBootstrapTests: XCTestCase {
     func test_catalogRoot_loadingAndSnapshotSurviveRestore() async throws {
         for state in ["loading", "snapshot"] {
             let defaults = try makeEphemeralDefaults()
-            let bundle = UITestBootstrap.makeBundle(arguments: [
+            let bundle = UITestBootstrap.makeBundle(defaults: defaults, arguments: [
                 "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-\(state)"
-            ], defaults: defaults)
+            ])
             await bundle.authViewModel.restoreSession()
             XCTAssertTrue(bundle.authViewModel.hasCheckedAuth)
             XCTAssertTrue(bundle.authViewModel.isAuthenticated)
@@ -181,7 +181,7 @@ final class UITestBootstrapTests: XCTestCase {
                          "--uitesting-app-store-screenshots", "--uitesting-catalog-read-only",
                          "--uitesting-catalog-history"]
         let date = try XCTUnwrap(UITestBootstrap.appStoreScreenshotDate(in: arguments))
-        let bundle = UITestBootstrap.makeBundle(arguments: arguments, defaults: try makeEphemeralDefaults())
+        let bundle = UITestBootstrap.makeBundle(defaults: try makeEphemeralDefaults(), arguments: arguments)
         let history = try await bundle.services.jobAnalyticsService.getHistory(
             limit: nil, offset: nil, sortBy: nil, statuses: "Completed", dateStart: nil, dateEnd: nil
         )
