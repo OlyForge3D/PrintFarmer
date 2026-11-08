@@ -14,11 +14,20 @@
   "testTargets": [
     {
       "parallelizable": false,
-      "selectedTests": ["CatalogVisualAccessibilityUITests"],
+      "selectedTests": ["CatalogVisualAccessibilityUITests", "CatalogRootVisualAccessibilityUITests"],
       "target": {
         "containerPath": "container:PrintFarmer.xcodeproj",
         "identifier": "F7060002000000000000D001",
         "name": "PrintFarmerUITests"
+      }
+    },
+    {
+      "parallelizable": false,
+      "selectedTests": ["UITestBootstrapTests"],
+      "target": {
+        "containerPath": "container:PrintFarmer.xcodeproj",
+        "identifier": "AFC2BA1C050C049765D60160",
+        "name": "PrintFarmerTests"
       }
     }
   ],

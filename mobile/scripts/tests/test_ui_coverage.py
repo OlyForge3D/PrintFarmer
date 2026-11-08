@@ -25,15 +25,18 @@ class CoverageReportTests(unittest.TestCase):
         self.root = Path(self.directory.name)
 
     def candidate(self, scenario="01-farm"):
+        profile = {**self.catalog["renderProfile"],
+                   **self.catalog.get("scenarioProfileOverrides", {}).get(scenario, {})}
         image = self.root / f"image-{scenario}.png"
         image.write_bytes(b"synthetic-image-contract-test-not-native-evidence")
         receipt = self.root / f"receipt-{scenario}.json"
         receipt.write_text(json.dumps({
             "scenarioId": scenario, "audit": "passed",
             "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
-            "appearance": "dark", "contentSize": "UICTContentSizeCategoryL",
+            "appearance": profile["appearance"], "themeMode": profile["themeMode"],
+            "contentSize": profile["contentSize"],
             "runtime": "26.5", "device": "iPhone17,3",
-            "locale": "en_US", "orientation": "portrait",
+            "locale": "en_US", "orientation": profile["orientation"],
         }), encoding="utf-8")
         return {f"catalog.{scenario}.json": receipt, f"catalog.{scenario}.png": image}
 
@@ -116,10 +119,30 @@ class CoverageReportTests(unittest.TestCase):
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
         captures = re.findall(r'try capture\("([^"]+)"\)', source)
         self.assertEqual(set(MODULE.validate_catalog(self.catalog)), set(captures))
-        self.assertEqual(len(captures), 21)
+        self.assertEqual(len(captures), 52)
         self.assertIn("try app.performAccessibilityAudit(for: .all)", source)
         self.assertIn('auditIssues.append("\\(issue.compactDescription): \\(issue.detailedDescription)")', source)
         self.assertIn("XCTAssertTrue(catalogAuditFailures.isEmpty", source)
+
+    def test_scenario_profiles_are_strict_and_cannot_change_environment_pins(self):
+        for scenario in self.catalog["scenarioProfileOverrides"]:
+            result = MODULE.report(self.catalog, self.candidate(scenario), "iPhone", "a" * 40)
+            self.assertEqual(result["scenarioResults"][scenario]["status"], "awaiting-human-golden")
+        attachments = self.candidate("51-viewport-landscape")
+        receipt = MODULE.read_json(attachments["catalog.51-viewport-landscape.json"])
+        receipt["orientation"] = "portrait"
+        attachments["catalog.51-viewport-landscape.json"].write_text(json.dumps(receipt), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "orientation"):
+            MODULE.report(self.catalog, attachments, "iPhone", "a" * 40)
+        for overrides in ({"runtime": "27.0"}, {"orientation": "other"}, {"themeMode": "automatic"}):
+            malformed = copy.deepcopy(self.catalog)
+            malformed["scenarioProfileOverrides"]["51-viewport-landscape"] = overrides
+            with self.assertRaisesRegex(ValueError, "environment pins"):
+                MODULE.validate_catalog(malformed)
+        malformed = copy.deepcopy(self.catalog)
+        malformed["scenarioProfileOverrides"]["99-not-mapped"] = {"appearance": "light"}
+        with self.assertRaisesRegex(ValueError, "mapped scenario"):
+            MODULE.validate_catalog(malformed)
 
     def test_cli_reports_explicit_blockers_and_rejects_missing_adapter_images(self):
         output = self.root / "report.json"
@@ -171,6 +194,41 @@ class CoverageReportTests(unittest.TestCase):
         self.assertEqual(summary["pendingHumanGoldens"], len(scenarios) - 1)
         self.assertEqual(summary["fullyCoveredRows"], 0)
 
+    def test_cli_merges_exports_and_rejects_cross_export_duplicates(self):
+        directories = []
+        for index, scenario in enumerate(("01-farm", "22-login")):
+            directory = self.root / f"export-{index}"
+            directory.mkdir()
+            manifest = []
+            for name, path in self.candidate(scenario).items():
+                (directory / path.name).write_bytes(path.read_bytes())
+                kind = "receipt" if name.endswith(".json") else "image"
+                manifest.append({
+                    "suggestedHumanReadableName": f"catalog-{kind}-{scenario}",
+                    "exportedFileName": path.name,
+                    "isAssociatedWithFailure": False,
+                })
+            (directory / "manifest.json").write_text(json.dumps([{"attachments": manifest}]))
+            directories.append(directory)
+        output = self.root / "merged-report.json"
+        command = [
+            sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
+            "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
+            "--approvals", str(MOBILE / "ui-coverage/approved-goldens.json"),
+            "--family", "iPhone", "--head", "a" * 40,
+            "--metadata-directory", str(self.metadata()), "--output", str(output),
+        ]
+        result = subprocess.run(command + [
+            "--attachments", str(directories[0]), "--attachments", str(directories[1]),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(MODULE.read_json(output)["summary"]["exercisedScenarios"], 2)
+        result = subprocess.run(command + [
+            "--attachments", str(directories[0]), "--attachments", str(directories[0]),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Duplicate native attachments across exports", result.stderr)
+
     def test_attachment_path_traversal_and_duplicates_are_rejected(self):
         with self.assertRaises(ValueError):
             MODULE.safe_file(self.root, "../outside.png")
@@ -210,8 +268,37 @@ class CoverageReportTests(unittest.TestCase):
         default = MODULE.read_json(MOBILE / "PrintFarmer.xctestplan")
         self.assertEqual(store["testTargets"][0]["selectedTests"], ["AppStoreScreenshotUITests"])
         self.assertEqual(catalog["testTargets"][0]["selectedTests"],
-                         ["CatalogVisualAccessibilityUITests"])
+                         ["CatalogVisualAccessibilityUITests", "CatalogRootVisualAccessibilityUITests"])
+        self.assertEqual(catalog["testTargets"][1]["selectedTests"], ["UITestBootstrapTests"])
+        self.assertEqual(catalog["testTargets"][1]["target"], default["testTargets"][0]["target"])
+        workflow = (MOBILE.parent / ".github/workflows/ios-ui-coverage.yml").read_text()
+        self.assertIn("build-for-testing", workflow)
+        self.assertIn("test-without-building", workflow)
+        self.assertEqual(workflow.count("-testPlan CatalogVisualAccessibility"), 3)
+        operator_capture = workflow.split("        id: capture\n")[1].split("      - name:")[0]
+        root_capture = workflow.split("        id: capture_root\n")[1].split("      - name:")[0]
+        for capture in (operator_capture, root_capture):
+            self.assertIn("timeout-minutes: 25", capture)
+            self.assertIn("test-without-building", capture)
+        self.assertIn("-only-testing:PrintFarmerUITests/CatalogVisualAccessibilityUITests",
+                      operator_capture)
+        self.assertIn("-only-testing:PrintFarmerTests/UITestBootstrapTests", operator_capture)
+        self.assertNotIn("CatalogRootVisualAccessibilityUITests", operator_capture)
+        self.assertIn("-only-testing:PrintFarmerUITests/CatalogRootVisualAccessibilityUITests",
+                      root_capture)
+        self.assertNotIn("-only-testing:PrintFarmerUITests/CatalogVisualAccessibilityUITests",
+                         root_capture)
+        self.assertIn("steps.capture.outcome == 'failure'", root_capture)
+        self.assertIn("--attachments build/ui-coverage/attachments", workflow)
+        self.assertIn("--attachments build/ui-coverage/root-attachments", workflow)
+        for target, classes in (
+            ("PrintFarmerUITests", catalog["testTargets"][0]["selectedTests"]),
+            ("PrintFarmerTests", catalog["testTargets"][1]["selectedTests"]),
+        ):
+            for name in classes:
+                self.assertIn(f"-only-testing:{target}/{name}", workflow)
         self.assertIn("CatalogVisualAccessibilityUITests", default["testTargets"][1]["skippedTests"])
+        self.assertIn("CatalogRootVisualAccessibilityUITests", default["testTargets"][1]["skippedTests"])
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
         store_class = source.split("final class AppStoreScreenshotUITests:")[1].split("@MainActor")[0]
         self.assertNotIn("testCaptureCatalog", store_class)
@@ -219,7 +306,8 @@ class CoverageReportTests(unittest.TestCase):
         import re
         # Lexical placement guard, not a Swift compiler or XCTest discovery test.
         code = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', "", source)
-        for name in ("AppStoreScreenshotUITests", "CatalogVisualAccessibilityUITests"):
+        for name in ("AppStoreScreenshotUITests", "CatalogVisualAccessibilityUITests",
+                     "CatalogRootVisualAccessibilityUITests"):
             declaration = re.search(rf"\bfinal class {name}\b", code)
             self.assertIsNotNone(declaration)
             prefix = code[:declaration.start()]

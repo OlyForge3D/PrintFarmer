@@ -9,9 +9,14 @@ import Foundation
 
 final class DemoPartsInventoryService: PartsInventoryServiceProtocol, @unchecked Sendable {
 
-    private static let now = Date()
+    private static let defaultDate = Date()
+    private let now: Date
 
-    private static let sampleBin = BinResponse(
+    init(fixtureDate: Date? = nil) {
+        self.now = fixtureDate ?? Self.defaultDate
+    }
+
+    private var sampleBin: BinResponse { BinResponse(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!,
         code: "BIN-A1",
         name: "Shelf A1",
@@ -20,9 +25,9 @@ final class DemoPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
         isActive: true,
         createdAt: now,
         updatedAt: now
-    )
+    ) }
 
-    private static let sampleParts: [PartInventoryResponse] = [
+    private var sampleParts: [PartInventoryResponse] { [
         PartInventoryResponse(
             id: UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!,
             sku: "BRKT-01",
@@ -55,54 +60,54 @@ final class DemoPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
             createdAt: now,
             updatedAt: now
         ),
-    ]
+    ] }
 
     func listParts(includeInactive: Bool) async throws -> [PartInventoryResponse] {
-        Self.sampleParts
+        sampleParts
     }
 
     func resolvePartByBarcode(_ sku: String) async throws -> PartInventoryResponse {
-        guard let match = Self.sampleParts.first(where: { $0.sku.caseInsensitiveCompare(sku) == .orderedSame }) else {
+        guard let match = sampleParts.first(where: { $0.sku.caseInsensitiveCompare(sku) == .orderedSame }) else {
             throw NetworkError.notFound
         }
         return match
     }
 
     func listBins(includeInactive: Bool) async throws -> [BinResponse] {
-        [Self.sampleBin]
+        [sampleBin]
     }
 
     func resolveBinByBarcode(_ code: String) async throws -> BinResponse {
-        guard Self.sampleBin.code.caseInsensitiveCompare(code) == .orderedSame else {
+        guard sampleBin.code.caseInsensitiveCompare(code) == .orderedSame else {
             throw NetworkError.notFound
         }
-        return Self.sampleBin
+        return sampleBin
     }
 
     func registerBin(code: String, name: String?, location: String?) async throws -> BinResponse {
-        Self.sampleBin
+        sampleBin
     }
 
     func adjustPart(sku: String, request: AdjustPartInventoryRequest) async throws -> PartAdjustmentResponse {
         PartAdjustmentResponse(
             id: UUID(),
-            partInventoryId: Self.sampleParts.first?.id ?? UUID(),
+            partInventoryId: sampleParts.first?.id ?? UUID(),
             sku: sku,
-            binId: Self.sampleBin.id,
-            binCode: request.binCode ?? Self.sampleBin.code,
+            binId: sampleBin.id,
+            binCode: request.binCode ?? sampleBin.code,
             delta: request.delta,
-            resultingBalance: max(0, (Self.sampleParts.first(where: { $0.sku == sku })?.onHand ?? 0) + request.delta),
+            resultingBalance: max(0, (sampleParts.first(where: { $0.sku == sku })?.onHand ?? 0) + request.delta),
             reason: request.reason,
             printJobId: request.jobId,
             operationKey: request.operationKey,
             notes: request.notes,
             userId: "demo",
-            createdAt: Self.now
+            createdAt: now
         )
     }
 
     func reorderCandidates() async throws -> [ReorderCandidateResponse] {
-        Self.sampleParts
+        sampleParts
             .filter(\.needsReorder)
             .map {
                 ReorderCandidateResponse(
@@ -123,9 +128,9 @@ final class DemoPartsInventoryService: PartsInventoryServiceProtocol, @unchecked
     func harvestJob(jobId: UUID, request: HarvestJobRequest) async throws -> HarvestJobResponse {
         HarvestJobResponse(
             printJobId: jobId,
-            harvestedAt: Self.now,
-            binId: Self.sampleBin.id,
-            binCode: request.binCode ?? Self.sampleBin.code,
+            harvestedAt: now,
+            binId: sampleBin.id,
+            binCode: request.binCode ?? sampleBin.code,
             alreadyHarvested: false,
             adjustments: [],
             outputs: []

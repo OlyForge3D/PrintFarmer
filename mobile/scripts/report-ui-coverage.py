@@ -46,6 +46,18 @@ def validate_catalog(catalog):
         raise ValueError("Scenario IDs must belong to exactly one row")
     if any(not re.fullmatch(r"\d{2}-[a-z-]+", value) for value in scenarios):
         raise ValueError("Unsafe scenario ID")
+    allowed_overrides = {
+        "appearance": {"light", "dark"},
+        "themeMode": {"light", "dark", "system"},
+        "contentSize": {"UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"},
+        "orientation": {"portrait", "landscape"},
+    }
+    for scenario, overrides in catalog.get("scenarioProfileOverrides", {}).items():
+        if scenario not in scenarios or not isinstance(overrides, dict) or not overrides:
+            raise ValueError("Profile override needs a mapped scenario and explicit fields")
+        for field, value in overrides.items():
+            if field not in allowed_overrides or not isinstance(value, str) or value not in allowed_overrides[field]:
+                raise ValueError("Profile override cannot change environment pins or use unknown values")
     return scenarios
 
 
@@ -109,6 +121,8 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
     results = {}
     approvals = approvals or {}
     for scenario in scenarios:
+        scenario_profile = {**expected_profile,
+                            **catalog.get("scenarioProfileOverrides", {}).get(scenario, {})}
         receipt_path = attachments.get(f"catalog.{scenario}.json")
         image_path = attachments.get(f"catalog.{scenario}.png")
         if receipt_path is None or image_path is None:
@@ -118,8 +132,8 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
         digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
         if receipt["scenarioId"] != scenario or receipt["sha256"] != digest:
             raise ValueError(f"Mismatched native receipt/image: {scenario}")
-        for field in ("appearance", "contentSize", "runtime", "locale", "orientation"):
-            if receipt[field] != expected_profile[field]:
+        for field in ("appearance", "themeMode", "contentSize", "runtime", "locale", "orientation"):
+            if receipt[field] != scenario_profile[field]:
                 raise ValueError(f"Unexpected native {field} for {scenario}")
         if not receipt["device"].startswith(family):
             raise ValueError(f"Unexpected simulator device for {scenario}")
@@ -137,7 +151,7 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
         if approved is not None:
             if not approved["reviewedBy"] or not re.fullmatch(r"[0-9a-f]{40}", approved["sourceSha"]):
                 raise ValueError("Golden approval needs human review attribution and source SHA")
-            if approved["profile"] != expected_profile:
+            if approved["profile"] != scenario_profile:
                 raise ValueError("Golden approval profile differs from pinned rendering")
             if golden_directory is None:
                 raise ValueError("Golden approval needs its retained human-reviewed PNG")
@@ -169,7 +183,8 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
         entries.append(row)
     return {
         "schemaVersion": 1, "source": {**catalog["source"], "testedHead": head},
-        "renderProfile": {**expected_profile, "family": family}, "entries": entries,
+        "renderProfile": {**expected_profile, "family": family},
+        "scenarioProfileOverrides": catalog.get("scenarioProfileOverrides", {}), "entries": entries,
         "scenarioResults": results,
         "summary": {
             "inventoriedRows": len(entries), "fullyCoveredRows": 0,
@@ -186,7 +201,7 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=Path("ui-coverage/catalog.json"))
-    parser.add_argument("--attachments", type=Path)
+    parser.add_argument("--attachments", type=Path, action="append", default=[])
     parser.add_argument("--metadata-directory", type=Path)
     parser.add_argument("--approvals", type=Path, default=Path("ui-coverage/approved-goldens.json"))
     parser.add_argument("--goldens", type=Path, default=Path("ui-coverage/goldens"))
@@ -195,7 +210,13 @@ def main():
     parser.add_argument("--blocked-reason")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    attachments = exported_attachments(args.attachments) if args.attachments else {}
+    attachments = {}
+    for directory in args.attachments:
+        exported = exported_attachments(directory)
+        duplicates = attachments.keys() & exported.keys()
+        if duplicates:
+            parser.error(f"Duplicate native attachments across exports: {sorted(duplicates)}")
+        attachments.update(exported)
     if not args.attachments and not args.blocked_reason:
         parser.error("No native attachments: an explicit blocker is required")
     catalog = read_json(args.catalog)

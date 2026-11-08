@@ -566,7 +566,7 @@ The in-repository mobile client is licensed under the
 
 `ui-coverage/catalog.json` preserves all 37 iOS row IDs from the shared web
 inventory using the same entry schema. This is **not full state coverage**:
-21 capture scenarios target 17 broad rows; 20 rows have no adapter and explicit
+52 capture scenarios target 36 broad rows; the retired server-switcher row has no adapter and explicit
 fixture, reachability or state-inventory blockers. New adapters are candidates,
 not native execution evidence. Even a matched golden
 does not promote an entire broad row to covered. See each row's `reason`.
@@ -574,13 +574,40 @@ does not promote an entire broad row to covered. See each row's `reason`.
 The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
 the approved Xcode/runtime resolver, and the existing isolated UI-test
 bootstrap. It selects only
-`PrintFarmerUITests/CatalogVisualAccessibilityUITests`
-in its own test plan. The default plan skips both capture classes; the App Store
+`PrintFarmerUITests/CatalogVisualAccessibilityUITests` and
+`PrintFarmerUITests/CatalogRootVisualAccessibilityUITests`
+in its own test plan, in separate bounded invocations on each device family.
+The operator invocation also runs `PrintFarmerTests/UITestBootstrapTests`.
+Each invocation retains its own result bundle and log; the reporter merges
+distinct receipts and rejects duplicate scenario artifacts across exports.
+An export failure cannot hide the other invocation's retained evidence.
+The default plan skips all three capture classes; the App Store
 plan still selects only the legacy class and receives seven unique store images.
 It never contacts real printers or approves baselines. Captures use synthetic
-fixtures, a fixed date, portrait, dark appearance, normal Large text, English,
-and stable system chrome on separate iPhone/iPad hosts. The existing App Store
+fixtures, a fixed date, English and stable system chrome on separate iPhone/iPad
+hosts. The base profile is portrait, dark appearance and normal Large text.
+Explicit `scenarioProfileOverrides` add light, system-with-light-device,
+largest accessibility text and landscape captures; they cannot override the
+pinned toolchain, runtime or locale. Idle instrument and chamber-sensor captures
+inspect synthetic controls without dispatching motion or temperature commands.
+The existing App Store
 capture selector remains available without the additional accessibility audit.
+Root captures follow the production unauthenticated route gates for login,
+all three onboarding pages, and the local-network explanation. They do not
+sign in, request an OS permission, or change a real server.
+The existing cold-offline bootstrap also exercises the cached read-only Farm
+and its idle offline-write review destination, without replaying any write.
+DEBUG-only `--uitesting` plus `--uitesting-catalog-root` fixtures hold the
+production splash, backend-loading and snapshot-pending surfaces, or leave
+the ephemeral server registry empty. A synthetic `.invalid` certificate
+request renders the existing trust sheet and is cancelled, never accepted;
+it bypasses TLS verification and does not create a certificate pin.
+Parts and completed-history captures additionally require
+`--uitesting-catalog-read-only` and exactly one parts/history selector under
+the existing visual-acceptance and App Store test gates. Only those launches
+replace the relevant services with fixed-date, no-network demo data; the
+legacy seven-image capture remains unchanged. Harvest and adjustment forms
+are inspected, never submitted.
 
 Native candidates run XCTest's `.all` accessibility audit against settled
 screens, collect **every** finding into the scenario receipt, then require a
@@ -589,10 +616,12 @@ each test explicitly fails after collecting its implemented screens, and the
 reporter also fails on any failed-audit receipt. This avoids stopping the
 whole catalog at the first known defect. Separate navigation groups allow
 remaining tests to run if one destination cannot be reached. An audit failure,
+unsettled screen (retained as diagnostic frames/tree, not accepted evidence),
 missing adapter receipt/image, wrong rendering profile, or changed approved
 golden fails the candidate check. A successful audit is **not VoiceOver
-interaction certification**, and this profile does not cover the full
-Dynamic Type, light/system appearance, keyboard or rotation axes.
+interaction certification**. Dedicated appearance, largest-text and landscape
+captures exercise selected axis states, not the full screen/state matrix,
+system-dark variants, VoiceOver traversal or physical-keyboard behavior.
 
 The check retains screenshots, hashed JSON receipts, host/Xcode/runtime/device
 metadata, `.xcresult`, build/test logs and runner timing/events for three days.
@@ -616,7 +645,8 @@ candidate and its metadata, retain the selected PNG under `ui-coverage/goldens`,
 then add a record to `ui-coverage/approved-goldens.json` keyed by
 `<SIMULATOR_MODEL_IDENTIFIER>.<scenarioId>`. Each record needs a plain `file`
 name, PNG `sha256`, human `reviewedBy`, full captured `sourceSha`, and `profile`
-equal to the catalog's pinned `renderProfile`. The reporter verifies the
+equal to the catalog's pinned `renderProfile` merged with that scenario's
+`scenarioProfileOverrides`, if present. The reporter verifies the
 retained file hash before comparing; it never writes PNGs or approval records.
 Attribution in a file is self-attested, not independent authentication of a
 human: repository review must enforce the human-only approval rule. The empty
