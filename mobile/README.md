@@ -573,7 +573,9 @@ does not promote an entire broad row to covered. See each row's `reason`.
 The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
 the approved Xcode/runtime resolver, and the existing isolated UI-test
 bootstrap. It selects only
-`PrintFarmerUITests/AppStoreScreenshotUITests/testCaptureCatalogWithAccessibilityAudits`.
+`PrintFarmerUITests/CatalogVisualAccessibilityUITests/testCaptureCatalogWithAccessibilityAudits`
+in its own test plan. The default plan skips both capture classes; the App Store
+plan still selects only the legacy class and receives seven unique store images.
 It never contacts real printers or approves baselines. Captures use synthetic
 fixtures, a fixed date, portrait, dark appearance, normal Large text, English,
 and stable system chrome on separate iPhone/iPad hosts. The existing App Store

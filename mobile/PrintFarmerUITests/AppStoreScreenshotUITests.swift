@@ -3,8 +3,8 @@ import UIKit
 import CryptoKit
 
 @MainActor
-final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
-    private var catalogCapture = false
+class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
+    var capturesCatalog: Bool { false }
     override var waitsForNavigationReadiness: Bool { true }
     override var additionalLaunchArguments: [String] {
         [
@@ -17,12 +17,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
         ]
     }
 
-    func testCaptureCatalogWithAccessibilityAudits() throws {
-        catalogCapture = true
-        try testCaptureStoreScreens()
-    }
-
-    func testCaptureStoreScreens() throws {
+    func captureScreens() throws {
         XCUIDevice.shared.orientation = .portrait
         let card = app.buttons["farm-card-10000000-0001-0000-0000-000000000001"]
         XCTAssertTrue(card.waitForExistence(timeout: 10))
@@ -38,6 +33,22 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                 stateCard.waitForExistence(timeout: 5) && stateCard.isHittable,
                 "The Farm store image must show the \(label) card state."
             )
+        }
+
+        @MainActor
+        final class AppStoreScreenshotUITests: ScreenshotCaptureUITestCase {
+            func testCaptureStoreScreens() throws {
+                try captureScreens()
+            }
+        }
+
+        @MainActor
+        final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
+            override var capturesCatalog: Bool { true }
+
+            func testCaptureCatalogWithAccessibilityAudits() throws {
+                try captureScreens()
+            }
         }
         try capture("01-farm")
 
@@ -141,7 +152,7 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                 unknown.count, 0,
                 "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
             )
-            if catalogCapture {
+            if capturesCatalog {
                 try app.performAccessibilityAudit(for: .all)
             }
             let confirmed = XCUIScreen.main.screenshot()
@@ -149,13 +160,9 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                 identicalFrames = 0
                 continue
             }
-            let attachment = XCTAttachment(screenshot: confirmed)
-            attachment.name = "app-store-\(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            if catalogCapture {
+            if capturesCatalog {
                 let catalogImage = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
-                catalogImage.name = "catalog.\(name).png"
+                catalogImage.name = "catalog-image-\(name)"
                 catalogImage.lifetime = .keepAlways
                 add(catalogImage)
                 let receipt: [String: String] = [
@@ -164,6 +171,8 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                     "sha256": SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
                     "appearance": "dark",
                     "contentSize": "UICTContentSizeCategoryL",
+                    "locale": Locale.current.identifier,
+                    "orientation": XCUIDevice.shared.orientation == .portrait ? "portrait" : "other",
                     "device": ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "unknown",
                     "runtime": UIDevice.current.systemVersion,
                 ]
@@ -171,9 +180,14 @@ final class AppStoreScreenshotUITests: PrintFarmerUITestCase {
                     data: try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]),
                     uniformTypeIdentifier: "public.json"
                 )
-                receiptAttachment.name = "catalog.\(name).json"
+                receiptAttachment.name = "catalog-receipt-\(name)"
                 receiptAttachment.lifetime = .keepAlways
                 add(receiptAttachment)
+            } else {
+                let attachment = XCTAttachment(screenshot: confirmed)
+                attachment.name = "app-store-\(name)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
             }
             return
         }

@@ -63,7 +63,14 @@ jobs:
         run: |
           set -euo pipefail
           sw_vers | tee build/ui-coverage/host.txt
-          test -d /Applications/Xcode_26.6.app
+          if [ ! -d /Applications/Xcode_26.6.app ]; then
+            echo "::error::Pinned Xcode 26.6 is unavailable on this hosted macos-26 image."
+            python3 scripts/report-ui-coverage.py \
+              --family "$IOS_SIMULATOR_DEVICE_FAMILY" --head "$(git rev-parse HEAD)" \
+              --blocked-reason "Hosted macos-26 image lacks /Applications/Xcode_26.6.app; native execution blocked." \
+              --output build/ui-coverage/report.json
+            exit 1
+          fi
           sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version | tee build/ui-coverage/xcode.txt
           test "$(head -n 1 build/ui-coverage/xcode.txt)" = "Xcode 26.6"
@@ -83,7 +90,7 @@ jobs:
             '.devicetypes[] | select(.identifier == $id) | .name')"
           xcrun simctl create "$name" "$device" "$runtime"
           export IOS_SIMULATOR_DEVICE_PREFERENCE="$name"
-          ../scripts/ci/resolve-ios-simulator.sh
+          ../scripts/ci/resolve-ios-simulator.sh --udid > build/ui-coverage/simulator-udid.txt
           xcrun simctl list runtimes -j > build/ui-coverage/runtimes.json
           xcrun simctl list devices available -j > build/ui-coverage/devices.json
       - name: Boot isolated hosted simulator and stabilize system chrome
@@ -97,6 +104,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+            -testPlan CatalogVisualAccessibility \
             -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
@@ -106,12 +114,13 @@ jobs:
         run: |
           set -o pipefail
           python3 scripts/run-tests.py -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+            -testPlan CatalogVisualAccessibility -testLanguage en -testRegion US \
             -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
             -parallel-testing-enabled NO -disable-concurrent-destination-testing \
             -test-timeouts-enabled YES -maximum-test-execution-time-allowance 240 \
             CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO test-without-building \
-            -only-testing:PrintFarmerUITests/AppStoreScreenshotUITests/testCaptureCatalogWithAccessibilityAudits \
+            -only-testing:PrintFarmerUITests/CatalogVisualAccessibilityUITests/testCaptureCatalogWithAccessibilityAudits \
             -resultBundlePath build/ui-coverage/Candidates.xcresult \
             2>&1 | tee build/ui-coverage/test.log
       - name: Export native receipts and images
@@ -124,6 +133,7 @@ jobs:
         run: |
           python3 scripts/report-ui-coverage.py --family "$IOS_SIMULATOR_DEVICE_FAMILY" \
             --head "$(git rev-parse HEAD)" --attachments build/ui-coverage/attachments \
+            --metadata-directory build/ui-coverage \
             --output build/ui-coverage/report.json
           echo "::warning::This is partial candidate evidence, not full 37-row coverage. Missing goldens require human review."
       - name: Retain evidence and blockers

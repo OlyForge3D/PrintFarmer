@@ -25,6 +25,7 @@
       "parallelizable" : true,
       "skippedTests" : [
         "AppStoreScreenshotUITests",
+        "CatalogVisualAccessibilityUITests",
         "PrinterSensorsLiveBackendUITests"
       ],
       "target" : {

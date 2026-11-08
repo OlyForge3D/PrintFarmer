@@ -7,6 +7,20 @@ from pathlib import Path
 import re
 import sys
 
+INVENTORY_IDS = frozenset("""
+ios.launch-splash ios.first-server ios.onboarding ios.local-network-permission
+ios.login ios.backend-gate ios.snapshot-activation ios.certificate-trust
+ios.farm-dashboard ios.printer-detail ios.queue-job-list ios.job-history
+ios.job-detail ios.filament-spool-inventory ios.add-spool ios.parts-inventory
+ios.part-lookup ios.selected-part ios.notifications ios.account ios.settings
+ios.servers ios.server-editor ios.server-switcher ios.offline-queue ios.scan-flow
+ios.qr-scanner ios.barcode-intake ios.nfc-write ios.spool-picker ios.bin-scan-result
+ios.harvest-sheet ios.navigation-tabs ios.appearance-axis
+ios.viewport-accessibility-axis ios.native-alerts ios.native-inline-panels
+""".split())
+SOURCE_SNAPSHOT = "fce568d72a78600ecb845749a6f0bf6544d7b5d8"
+SOURCE_HASH = "c19d17d5a6f18898126127fd766e0d2fed14fe7c5142443906ac61155b2373ee"
+
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -17,8 +31,10 @@ def validate_catalog(catalog):
         raise ValueError("Unsupported catalog schema")
     entries = catalog["entries"]
     ids = [entry["id"] for entry in entries]
-    if len(ids) != 37 or len(set(ids)) != len(ids):
-        raise ValueError("Expected exactly 37 unique iOS inventory rows")
+    if len(ids) != 37 or set(ids) != INVENTORY_IDS:
+        raise ValueError("Expected the exact 37 pinned iOS inventory identities")
+    if catalog["source"]["snapshot"] != SOURCE_SNAPSHOT or catalog["source"]["sha256"] != SOURCE_HASH:
+        raise ValueError("Inventory provenance metadata differs from supplied source pin")
     scenarios = []
     for entry in entries:
         if entry["platform"] != "ios" or not re.fullmatch(r"ios\.[a-z-]+", entry["id"]):
@@ -50,12 +66,39 @@ def exported_attachments(directory):
     for test in manifest:
         for attachment in test["attachments"]:
             name = attachment["suggestedHumanReadableName"]
-            if not name.startswith("catalog."):
+            match = re.fullmatch(
+                r"catalog-(image|receipt)-(\d{2}-[a-z-]+)"
+                r"(?:_\d+_[0-9A-Fa-f-]{36})?(?:\.(?:png|json))?", name
+            )
+            if match is None:
                 continue
-            if name in result:
-                raise ValueError(f"Duplicate catalog attachment: {name}")
-            result[name] = safe_file(directory, attachment["exportedFileName"])
+            extension = "png" if match[1] == "image" else "json"
+            key = f"catalog.{match[2]}.{extension}"
+            if key in result or attachment["isAssociatedWithFailure"]:
+                raise ValueError(f"Duplicate or failed catalog attachment: {name}")
+            result[key] = safe_file(directory, attachment["exportedFileName"])
     return result
+
+
+def native_profile(directory, catalog, family, head):
+    if (directory / "source-sha.txt").read_text().strip() != head:
+        raise ValueError("Native evidence belongs to a different source SHA")
+    xcode = (directory / "xcode.txt").read_text().splitlines()
+    profile = catalog["renderProfile"]
+    if xcode != [f"Xcode {profile['xcode']}", f"Build version {profile['xcodeBuild']}"]:
+        raise ValueError("Native evidence has an unapproved Xcode toolchain")
+    runtime_id = "com.apple.CoreSimulator.SimRuntime.iOS-" + profile["runtime"].replace(".", "-")
+    runtimes = read_json(directory / "runtimes.json")["runtimes"]
+    runtime = [row for row in runtimes if row["identifier"] == runtime_id]
+    if len(runtime) != 1 or not runtime[0]["isAvailable"] or runtime[0]["buildversion"] != profile["runtimeBuild"]:
+        raise ValueError("Native evidence has an unapproved simulator runtime")
+    udid = (directory / "simulator-udid.txt").read_text().strip()
+    devices = read_json(directory / "devices.json")["devices"].get(runtime_id, [])
+    selected = [row for row in devices if row["udid"] == udid]
+    if len(selected) != 1 or not selected[0]["isAvailable"] or not selected[0]["name"].startswith(family):
+        raise ValueError("Native evidence has an unavailable or wrong-family destination")
+    return {"xcode": profile["xcode"], "xcodeBuild": profile["xcodeBuild"],
+            "runtimeBuild": runtime[0]["buildversion"], "simulatorUdid": udid}
 
 
 def report(catalog, attachments, family, head, blocked_reason=None, approvals=None, golden_directory=None):
@@ -75,7 +118,7 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
         digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
         if receipt["scenarioId"] != scenario or receipt["sha256"] != digest:
             raise ValueError(f"Mismatched native receipt/image: {scenario}")
-        for field in ("appearance", "contentSize", "runtime"):
+        for field in ("appearance", "contentSize", "runtime", "locale", "orientation"):
             if receipt[field] != expected_profile[field]:
                 raise ValueError(f"Unexpected native {field} for {scenario}")
         if not receipt["device"].startswith(family):
@@ -126,6 +169,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=Path("ui-coverage/catalog.json"))
     parser.add_argument("--attachments", type=Path)
+    parser.add_argument("--metadata-directory", type=Path)
     parser.add_argument("--approvals", type=Path, default=Path("ui-coverage/approved-goldens.json"))
     parser.add_argument("--goldens", type=Path, default=Path("ui-coverage/goldens"))
     parser.add_argument("--family", choices=("iPhone", "iPad"), required=True)
@@ -136,8 +180,17 @@ def main():
     attachments = exported_attachments(args.attachments) if args.attachments else {}
     if not args.attachments and not args.blocked_reason:
         parser.error("No native attachments: an explicit blocker is required")
-    result = report(read_json(args.catalog), attachments, args.family, args.head,
+    catalog = read_json(args.catalog)
+    validate_catalog(catalog)
+    metadata = None
+    if args.attachments:
+        if args.metadata_directory is None:
+            parser.error("Native attachments require retained toolchain/destination/source metadata")
+        metadata = native_profile(args.metadata_directory, catalog, args.family, args.head)
+    result = report(catalog, attachments, args.family, args.head,
                     args.blocked_reason, read_json(args.approvals), args.goldens)
+    if metadata:
+        result["nativeEnvironment"] = metadata
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], sort_keys=True))
