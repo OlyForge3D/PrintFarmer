@@ -12,6 +12,9 @@ MOBILE = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("report_ui_coverage", MOBILE / "scripts/report-ui-coverage.py")
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+DEVICE_SPEC = importlib.util.spec_from_file_location("select_ui_device", MOBILE / "scripts/select-ui-coverage-device.py")
+DEVICE_MODULE = importlib.util.module_from_spec(DEVICE_SPEC)
+DEVICE_SPEC.loader.exec_module(DEVICE_MODULE)
 
 
 class CoverageReportTests(unittest.TestCase):
@@ -181,6 +184,27 @@ class CoverageReportTests(unittest.TestCase):
             prefix = code[:declaration.start()]
             self.assertEqual(prefix.count("{") - prefix.count("}"), 0,
                              f"{name} must be at file scope for XCTest discovery")
+
+    def test_simulator_selector_ignores_legacy_last_entries(self):
+        inventory = {"devicetypes": [
+            {"name": "iPhone 15", "productFamily": "iPhone", "identifier": "modern-phone"},
+            {"name": "iPad Pro 13-inch (M5)", "productFamily": "iPad", "identifier": "modern-pad"},
+            {"name": "iPod touch (7th generation)", "productFamily": "iPhone", "identifier": "legacy-ipod"},
+            {"name": "iPad mini 4", "productFamily": "iPad", "identifier": "legacy-ipad"},
+        ]}
+        for family, preference, expected in [
+            ("iPhone", "iPhone 15,iPhone 16", "modern-phone"),
+            ("iPad", "iPad Pro 13-inch (M5)", "modern-pad"),
+        ]:
+            selected = DEVICE_MODULE.select_device(inventory, family, preference)
+            self.assertEqual(selected["identifier"], expected)
+            result = subprocess.run([sys.executable, str(MOBILE / "scripts/select-ui-coverage-device.py"),
+                                     "--family", family, "--preferences", preference],
+                                    input=json.dumps(inventory), capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["identifier"], expected)
+        with self.assertRaisesRegex(ValueError, "No installed"):
+            DEVICE_MODULE.select_device(inventory, "iPhone", "iPhone does not exist")
 
     def test_human_approval_mismatch_is_a_regression_not_rebaseline(self):
         (self.root / "golden.png").write_bytes(b"human-reviewed-contract-fixture")
