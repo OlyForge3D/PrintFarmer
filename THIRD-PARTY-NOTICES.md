@@ -39,6 +39,16 @@ See `docs/MARKETING_CAPTURES.md` for exact blob identities and provenance limits
 PrintFarmer does not relicense PrusaSlicer. Upstream notices shipped with the
 binary or source distribution must remain intact.
 
+## Design detection tooling
+
+Impeccable by Paul Bakaus ([impeccable.style](https://impeccable.style)) supplies
+the vendored deterministic web design detector used by development hooks and CI.
+It is licensed under Apache-2.0, copyright 2025 Paul Bakaus. The bundled
+`scripts/design/vendor/impeccable/` tree preserves upstream license and notice
+texts; its integrity manifest records the exact copied files and digests.
+PrintFarmer's CI integration and native SwiftUI companion rules are separate
+PrintFarmer code. The tooling is not a third-party design approval service.
+
 ## Icons and user-interface assets
 
 | Component | Distributed form | License | Upstream |

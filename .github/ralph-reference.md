@@ -130,6 +130,18 @@ leave it for a human. Dependabot and other bot PRs fall here.
 
 **Squad evidence:** For each `squad`-labelled PR, including drafts requiring recovery, run:
 
+UI feature work starts with Impeccable `shape` under the
+[automatic design ceremony](../.squad/ceremonies.md). UI-touching PRs additionally
+need a read-only `design-reviewer` critique/audit verdict at the current head.
+Use the shared classifier in `scripts/design/ui-paths.mjs`, including previous
+paths of renamed files. Missing or stale design evidence routes to that reviewer,
+not to an unrelated code panel member. Design rejections route actionable findings
+to the author, with prior findings retained during delta-only rereview.
+The design verdict supplements the canonical risk quorum and is self-attested;
+authenticated owner authority and required CI remain unchanged. See
+[automatic UI design gates](../docs/CI.md#automatic-ui-design-gates) for detector
+limits, justified exceptions, and native source-review coverage.
+
 ```bash
 node scripts/ci/verify-squad-verdict.mjs \
   --repo <owner>/<repository> \
