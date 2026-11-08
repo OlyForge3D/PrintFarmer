@@ -581,8 +581,12 @@ fixtures, a fixed date, portrait, dark appearance, normal Large text, English,
 and stable system chrome on separate iPhone/iPad hosts. The existing App Store
 capture selector remains available without the additional accessibility audit.
 
-Native candidates run XCTest's unfiltered `.all` accessibility audit against
-settled screens, then require a confirming identical frame. An audit failure,
+Native candidates run XCTest's `.all` accessibility audit against settled
+screens, collect **every** finding into the scenario receipt, then require a
+confirming identical frame. Findings are handled for reporting, not waived:
+the test explicitly fails after collecting all implemented screens, and the
+reporter also fails on any failed-audit receipt. This avoids stopping the
+whole catalog at the first known defect. An audit failure,
 missing adapter receipt/image, wrong rendering profile, or changed approved
 golden fails the candidate check. A successful audit is **not VoiceOver
 interaction certification**, and this profile does not cover the full

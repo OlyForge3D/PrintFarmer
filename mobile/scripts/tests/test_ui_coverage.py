@@ -25,9 +25,9 @@ class CoverageReportTests(unittest.TestCase):
         self.root = Path(self.directory.name)
 
     def candidate(self, scenario="01-farm"):
-        image = self.root / "image.png"
+        image = self.root / f"image-{scenario}.png"
         image.write_bytes(b"synthetic-image-contract-test-not-native-evidence")
-        receipt = self.root / "receipt.json"
+        receipt = self.root / f"receipt-{scenario}.json"
         receipt.write_text(json.dumps({
             "scenarioId": scenario, "audit": "passed",
             "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
@@ -79,13 +79,19 @@ class CoverageReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "appearance"):
             MODULE.report(self.catalog, attachments, "iPhone", "a" * 40)
 
-    def test_failed_audit_is_rejected(self):
+    def test_failed_audit_is_reported_without_certifying_row(self):
         attachments = self.candidate()
         receipt = MODULE.read_json(attachments["catalog.01-farm.json"])
         receipt["audit"] = "failed"
+        receipt["auditIssues"] = "Dynamic Type font sizes are partially unsupported"
         attachments["catalog.01-farm.json"].write_text(json.dumps(receipt), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "audit"):
-            MODULE.report(self.catalog, attachments, "iPhone", "a" * 40)
+        result = MODULE.report(self.catalog, attachments, "iPhone", "a" * 40)
+        self.assertEqual(result["scenarioResults"]["01-farm"]["status"], "accessibility-failure")
+        self.assertEqual(result["summary"]["failedRows"], 1)
+        self.assertEqual(result["summary"]["failedAuditScenarios"], 1)
+        self.assertEqual(result["summary"]["exercisedScenarios"], 1)
+        self.assertEqual(result["summary"]["fullyCoveredRows"], 0)
+        self.assertIn(receipt["auditIssues"], result["entries"][8]["reason"])
 
     def test_catalog_requires_all_rows_and_unique_scenarios(self):
         malformed = copy.deepcopy(self.catalog)
@@ -112,6 +118,8 @@ class CoverageReportTests(unittest.TestCase):
         self.assertEqual(set(MODULE.validate_catalog(self.catalog)), set(captures))
         self.assertEqual(len(captures), 7)
         self.assertIn("try app.performAccessibilityAudit(for: .all)", source)
+        self.assertIn('auditIssues.append("\\(issue.compactDescription): \\(issue.detailedDescription)")', source)
+        self.assertIn("XCTAssertTrue(catalogAuditFailures.isEmpty", source)
 
     def test_cli_reports_explicit_blockers_and_rejects_missing_adapter_images(self):
         output = self.root / "report.json"
@@ -129,6 +137,39 @@ class CoverageReportTests(unittest.TestCase):
                                 capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(MODULE.read_json(output)["summary"]["exercisedScenarios"], 0)
+
+    def test_failed_audit_makes_cli_red_even_when_all_images_and_receipts_exist(self):
+        manifest = []
+        scenarios = MODULE.validate_catalog(self.catalog)
+        for scenario in scenarios:
+            attachments = self.candidate(scenario)
+            if scenario == "01-farm":
+                receipt_path = attachments[f"catalog.{scenario}.json"]
+                receipt = MODULE.read_json(receipt_path)
+                receipt.update(audit="failed", auditIssues="Dynamic Type partially unsupported")
+                receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            for kind, extension in (("image", "png"), ("receipt", "json")):
+                manifest.append({
+                    "suggestedHumanReadableName": f"catalog-{kind}-{scenario}",
+                    "exportedFileName": attachments[f"catalog.{scenario}.{extension}"].name,
+                    "isAssociatedWithFailure": False,
+                })
+        (self.root / "manifest.json").write_text(json.dumps([{"attachments": manifest}]))
+        output = self.root / "failed-audit-report.json"
+        result = subprocess.run([
+            sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
+            "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
+            "--approvals", str(MOBILE / "ui-coverage/approved-goldens.json"),
+            "--family", "iPhone", "--head", "a" * 40,
+            "--attachments", str(self.root), "--metadata-directory", str(self.metadata()),
+            "--output", str(output),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        summary = MODULE.read_json(output)["summary"]
+        self.assertEqual(summary["exercisedScenarios"], 7)
+        self.assertEqual(summary["failedAuditScenarios"], 1)
+        self.assertEqual(summary["pendingHumanGoldens"], 6)
+        self.assertEqual(summary["fullyCoveredRows"], 0)
 
     def test_attachment_path_traversal_and_duplicates_are_rejected(self):
         with self.assertRaises(ValueError):

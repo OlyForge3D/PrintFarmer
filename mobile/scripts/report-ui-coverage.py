@@ -123,8 +123,15 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
                 raise ValueError(f"Unexpected native {field} for {scenario}")
         if not receipt["device"].startswith(family):
             raise ValueError(f"Unexpected simulator device for {scenario}")
+        if receipt["audit"] == "failed":
+            if not receipt["auditIssues"]:
+                raise ValueError(f"Failed audit needs concrete findings for {scenario}")
+            results[scenario] = {"status": "accessibility-failure", "sha256": digest,
+                                 "device": receipt["device"], "image": image_path.name,
+                                 "audit": "failed", "reason": receipt["auditIssues"]}
+            continue
         if receipt["audit"] != "passed":
-            raise ValueError(f"Accessibility audit did not pass for {scenario}")
+            raise ValueError(f"Invalid accessibility audit status for {scenario}")
         approved = approvals.get(f"{receipt['device']}.{scenario}")
         status = "awaiting-human-golden"
         if approved is not None:
@@ -145,8 +152,17 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
         row = dict(entry)
         exercised = [value for value in row["scenarioIds"] if results[value]["status"] != "blocked"]
         # A handful of candidates cannot certify all states of a broad inventory row.
-        row["evidenceFlags"] = [f"native-candidate:{value}" for value in exercised]
-        if exercised:
+        failed = [value for value in exercised if results[value]["status"] == "accessibility-failure"]
+        row["evidenceFlags"] = [
+            f"native-audit-failed:{value}" if value in failed else f"native-candidate:{value}"
+            for value in exercised
+        ]
+        if failed:
+            row["disposition"] = "failed"
+            row["reason"] = "Native accessibility failures: " + "; ".join(
+                f"{value}: {results[value]['reason']}" for value in failed
+            ) + " " + row["reason"]
+        elif exercised:
             row["disposition"] = "partial-exercised"
         elif blocked_reason:
             row["reason"] = f"{blocked_reason} {row['reason']}"
@@ -159,7 +175,9 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
             "inventoriedRows": len(entries), "fullyCoveredRows": 0,
             "partiallyExercisedRows": sum(row["disposition"] == "partial-exercised" for row in entries),
             "blockedRows": sum(row["disposition"] == "blocked" for row in entries),
+            "failedRows": sum(row["disposition"] == "failed" for row in entries),
             "exercisedScenarios": sum(value["status"] != "blocked" for value in results.values()),
+            "failedAuditScenarios": sum(value["status"] == "accessibility-failure" for value in results.values()),
             "pendingHumanGoldens": sum(value["status"] == "awaiting-human-golden" for value in results.values()),
         },
     }
@@ -194,7 +212,7 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], sort_keys=True))
-    if args.attachments and any(value["status"] in ("blocked", "visual-regression")
+    if args.attachments and any(value["status"] in ("blocked", "visual-regression", "accessibility-failure")
                                 for value in result["scenarioResults"].values()):
         print("Native adapter evidence incomplete or approved golden differs.", file=sys.stderr)
         return 1

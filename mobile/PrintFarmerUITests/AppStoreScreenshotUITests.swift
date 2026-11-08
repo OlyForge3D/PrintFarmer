@@ -5,6 +5,7 @@ import CryptoKit
 @MainActor
 class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
     var capturesCatalog: Bool { false }
+    private(set) var catalogAuditFailures: [String] = []
     override var waitsForNavigationReadiness: Bool { true }
     override var additionalLaunchArguments: [String] {
         [
@@ -137,8 +138,14 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
                 unknown.count, 0,
                 "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
             )
+            var auditIssues: [String] = []
             if capturesCatalog {
-                try app.performAccessibilityAudit(for: .all)
+                // Handle every finding in the receipt; the catalog test fails
+                // after all screens so one defect cannot hide later audits.
+                try app.performAccessibilityAudit(for: .all) { issue in
+                    auditIssues.append("\(issue.compactDescription): \(issue.detailedDescription)")
+                    return true
+                }
             }
             let confirmed = XCUIScreen.main.screenshot()
             guard confirmed.pngRepresentation == data else {
@@ -152,7 +159,8 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
                 add(catalogImage)
                 let receipt: [String: String] = [
                     "scenarioId": name,
-                    "audit": "passed",
+                    "audit": auditIssues.isEmpty ? "passed" : "failed",
+                    "auditIssues": auditIssues.joined(separator: "\n"),
                     "sha256": SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
                     "appearance": "dark",
                     "contentSize": "UICTContentSizeCategoryL",
@@ -168,6 +176,7 @@ class ScreenshotCaptureUITestCase: PrintFarmerUITestCase {
                 receiptAttachment.name = "catalog-receipt-\(name)"
                 receiptAttachment.lifetime = .keepAlways
                 add(receiptAttachment)
+                catalogAuditFailures.append(contentsOf: auditIssues.map { "\(name): \($0)" })
             } else {
                 let attachment = XCTAttachment(screenshot: confirmed)
                 attachment.name = "app-store-\(name)"
@@ -193,5 +202,6 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
 
     func testCaptureCatalogWithAccessibilityAudits() throws {
         try captureScreens()
+        XCTAssertTrue(catalogAuditFailures.isEmpty, catalogAuditFailures.joined(separator: "\n"))
     }
 }
