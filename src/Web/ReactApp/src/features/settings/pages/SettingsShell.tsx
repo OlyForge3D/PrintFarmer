@@ -997,6 +997,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         queryText?: string;
         replace?: boolean;
         scopeId?: string;
+        focusSection?: boolean;
       },
     ) => {
       const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, options?.scopeId ?? activeScope);
@@ -1025,7 +1026,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             subPageId: subToUse,
           }
         : null;
-      shouldFocusSectionRef.current = true;
+      shouldFocusSectionRef.current = options?.focusSection ?? true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('scope', target.scopeId);
@@ -1065,6 +1066,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleSubPageChange = useCallback(
     (subPageId: string) => {
       const doNavigate = () => {
+        if (isAdminRoute) {
+          executeCategoryChange(activeCategory, subPageId, { focusSection: false });
+          return;
+        }
         shouldFocusSectionRef.current = true;
         liveWorkspaceQueryRef.current = '';
         explicitCategoryQueryOverrideRef.current = null;
@@ -1086,7 +1091,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         doNavigate();
       }
     },
-    [activeCategory, activeScope, isDirty, setSearchParams],
+    [activeCategory, activeScope, executeCategoryChange, isAdminRoute, isDirty, setSearchParams],
   );
 
   const handleSelectDestination = useCallback(
@@ -1615,10 +1620,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       );
     }
     if (!canAccessActiveTab) {
+      // A wholly denied category has no permitted sub-pages, so recovery
+      // offers the other categories this user may open instead.
+      const recoveryOptions = visibleSubPages.length > 0
+        ? visibleSubPages.map((subPage) => ({ key: subPage.id, label: subPage.label, categoryId: currentCategory.id, subPageId: subPage.id }))
+        : accessibleCategories
+          .filter((category) => category.id !== currentCategory.id)
+          .map((category) => ({ key: category.id, label: category.label, categoryId: category.id, subPageId: category.subPages[0]?.id }));
       return (
         <SettingsSection>
           <div className="py-8 text-center text-pf-text-secondary">
             <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
+            {isAdminRoute && recoveryOptions.length > 0 && (
+              <nav aria-label="Available settings sections" className="mt-4 flex flex-wrap justify-center gap-2">
+                {recoveryOptions.map((option) => (
+                  <Button key={option.key} variant="subtle" onClick={() => handleCategoryChange(option.categoryId, option.subPageId)}>
+                    {option.label}
+                  </Button>
+                ))}
+              </nav>
+            )}
           </div>
         </SettingsSection>
       );
@@ -1639,10 +1660,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
+  }, [accessibleCategories, activeSubPageLabel, canAccessActiveTab, currentCategory, handleCategoryChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
 
-  const pageTitle = currentScopeMeta?.label ?? 'Settings';
-  const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
+  const pageTitle = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.label
+    : currentScopeMeta?.label ?? 'Settings';
+  const pageDescription = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.description
+    : currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = !isAuthLoading
     && accessibleCategories.length > 0
@@ -1687,19 +1712,32 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </HeaderActions>
   );
 
-  const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;
+  const showSubTabs = !hasNoMatches && canAccessActiveTab && visibleSubPages.length > 1;
+  // Admin pages title the category in the H1, so the content heading names the
+  // sub-page instead. With a single permitted sub-page there is no tab to show
+  // it, so the heading becomes visible.
+  const contentHeading = isAdminRoute && accessibleCategories.length === 0
+    ? 'Configuration'
+    : isAdminRoute && canAccessActiveTab && activeSubPageLabel
+      ? activeSubPageLabel
+      : currentCategory.label;
+  const showVisibleSubPageHeading = isAdminRoute
+    && !showSubTabs
+    && canAccessActiveTab
+    && contentHeading !== currentCategory.label;
   const subTabs = showSubTabs ? (
-      <div className="border-b border-pf-border px-4 pt-4 md:px-6">
+      <nav aria-label={`${currentCategory.label} settings pages`} className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={visibleSubPages}
           activeSubPage={activeSubPage}
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
-          isFiltering={isFiltering}
-          ariaLabel={`${currentCategory.label} settings`}
+          isFiltering={isFiltering && !isAdminRoute}
+          ariaLabel={`${currentCategory.label} sub-pages`}
           searchQuery={query}
+          wrap={isAdminRoute}
         />
-      </div>
+      </nav>
     ) : null;
 
   return (
@@ -1709,6 +1747,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <SettingsFooterSlotContext.Provider value={footerSlot}>
           <PageTemplate
             title={pageTitle}
+            titleWrap
             subtitle={pageDescription}
             showHeader
             fill
@@ -1754,8 +1793,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
-                  <SettingsSidebar
+                <div className={`flex flex-1 min-h-0 flex-col${isAdminRoute ? '' : ' md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]'}`}>
+                  {!isAdminRoute && <SettingsSidebar
                     categories={accessibleCategories}
                     activeScope={effectiveScope}
                     activeCategory={effectiveCategory}
@@ -1767,9 +1806,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     matchingCategoryIds={matchingCategoryIds}
                     isFiltering={isFiltering}
                     searchQuery={query}
-                  />
+                  />}
 
-                  <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
+                  <div className={`relative flex min-h-0 flex-1 flex-col${isAdminRoute ? '' : ' border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border'}`}>
                     <p className="sr-only" aria-live="polite">
                       {sectionAnnouncement}
                     </p>
@@ -1781,9 +1820,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                           id="settings-content-heading"
                           ref={sectionHeadingRef}
                           tabIndex={-1}
-                          className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                          className={showVisibleSubPageHeading
+                            ? 'mb-4 w-fit rounded-md px-1 py-0.5 text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
+                            : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:px-1 focus-visible:py-0.5 focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
                         >
-                          {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
+                          {contentHeading}
                         </h2>
 
                         <SettingsContentTransition key={renderedContentKey} className="relative">
