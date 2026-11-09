@@ -610,8 +610,15 @@ legacy seven-image capture remains unchanged. Harvest and adjustment forms
 are inspected, never submitted.
 
 Native candidates run XCTest's `.all` accessibility audit against settled
-screens, collect **every** finding into the scenario receipt, then require a
-confirming identical frame. Findings are handled for reporting, not waived:
+screens, collect **every** finding into the scenario receipt, then require the
+original PNG bytes to settle again before a confirming identical frame.
+Initial settling and post-audit restoration each have a 20-second budget and
+require three consecutive identical comparisons; the audit runs once per
+candidate, not repeatedly during its temporary Dynamic Type changes.
+Restoration failures retain their audit findings as diagnostics, not receipts.
+The four held root states run as independent tests: an animated splash cannot
+hide first-server, backend-loading or snapshot-activation results.
+Findings are handled for reporting, not waived:
 each test explicitly fails after collecting its implemented screens, and the
 reporter also fails on any failed-audit receipt. This avoids stopping the
 whole catalog at the first known defect. Separate navigation groups allow

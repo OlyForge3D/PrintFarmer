@@ -144,6 +144,31 @@ class CoverageReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mapped scenario"):
             MODULE.validate_catalog(malformed)
 
+    def test_catalog_restoration_and_root_isolation_source_guards(self):
+        # Lexical regression guards only; native execution must prove frame stability.
+        source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
+        capture = source.split("    func capture(_ name: String) throws {")[1].split("\n@MainActor")[0]
+        self.assertIn("if capturesCatalog && auditedFrame == nil", capture)
+        self.assertIn("if let auditedFrame, data != auditedFrame { continue }", capture)
+        self.assertIn("guard identicalFrames >= 3 else { continue }", capture)
+        self.assertIn("guard confirmed.pngRepresentation == data else", capture)
+        restoration = capture.split("auditedFrame = data\n")[1].split("\n            }")[0]
+        self.assertIn("deadline = ProcessInfo.processInfo.systemUptime + 20", restoration)
+        self.assertIn("identicalFrames = 0", restoration)
+        self.assertIn("continue", restoration)
+        self.assertIn('issues.name = "catalog-unsettled-\\(name)-audit-issues"', capture)
+        root = source.split("final class CatalogRootVisualAccessibilityUITests:")[1]
+        for method, scenario in [
+            ("testCaptureLaunchSplash", "33-launch-splash"),
+            ("testCaptureFirstServer", "34-first-server"),
+            ("testCaptureBackendLoading", "35-backend-loading"),
+            ("testCaptureSnapshotActivation", "36-snapshot-activation"),
+        ]:
+            body = root.split(f"    func {method}() throws {{")[1].split("\n    }")[0]
+            self.assertIn(f'try capture("{scenario}")', body)
+            self.assertEqual(body.count("try capture("), 1)
+        self.assertNotIn("testCaptureHeldRootStates", root)
+
     def test_cli_reports_explicit_blockers_and_rejects_missing_adapter_images(self):
         output = self.root / "report.json"
         command = [sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),

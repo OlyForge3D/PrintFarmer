@@ -129,10 +129,12 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
     /// Waits for a settled frame, asserts on that rendering, then attaches it only if
     /// a confirming frame is byte-identical, so the assertions cover the exact image.
     func capture(_ name: String) throws {
-        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        var deadline = ProcessInfo.processInfo.systemUptime + 20
         var previous: Data?
         var penultimate: Data?
         var identicalFrames = 0
+        var auditedFrame: Data?
+        var auditIssues: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
             let data = XCUIScreen.main.screenshot().pngRepresentation
@@ -140,6 +142,7 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
             penultimate = previous
             previous = data
             guard identicalFrames >= 3 else { continue }
+            if let auditedFrame, data != auditedFrame { continue }
             // Store images must never show an unresolved status (whole word, any case).
             if !capturesCatalog {
                 let unknown = app.descendants(matching: .any)
@@ -149,14 +152,20 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
                     "Store screen \(name) shows unknown text: \(unknown.allElementsBoundByIndex.map(\.label))"
                 )
             }
-            var auditIssues: [String] = []
-            if capturesCatalog {
+            if capturesCatalog && auditedFrame == nil {
                 // Handle every finding in the receipt; the catalog test fails
                 // after all screens so one defect cannot hide later audits.
                 try app.performAccessibilityAudit(for: .all) { issue in
                     auditIssues.append("\(issue.compactDescription): \(issue.detailedDescription)")
                     return true
                 }
+                // The audit changes Dynamic Type temporarily. Require the original
+                // bytes to settle again, without re-running the audit during restoration.
+                auditedFrame = data
+                deadline = ProcessInfo.processInfo.systemUptime + 20
+                identicalFrames = 0
+                previous = nil
+                continue
             }
             let confirmed = XCUIScreen.main.screenshot()
             guard confirmed.pngRepresentation == data else {
@@ -214,8 +223,15 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
             tree.name = "catalog-unsettled-\(name)-accessibility-tree"
             tree.lifetime = .keepAlways
             add(tree)
+            if !auditIssues.isEmpty {
+                let issues = XCTAttachment(string: auditIssues.joined(separator: "\n"))
+                issues.name = "catalog-unsettled-\(name)-audit-issues"
+                issues.lifetime = .keepAlways
+                add(issues)
+            }
         }
-        XCTFail("Store screen \(name) did not settle within 20 seconds.")
+        let stage = auditedFrame == nil ? "initial rendering" : "restoration of the audited rendering"
+        XCTFail("Store screen \(name) did not settle within 20 seconds for \(stage).")
     }
 }
 
@@ -611,20 +627,26 @@ final class CatalogRootVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try capture("28-offline-write-review")
     }
 
-    func testCaptureHeldRootStates() throws {
+    func testCaptureLaunchSplash() throws {
         relaunchCatalogRoot("splash")
         XCTAssertTrue(app.descendants(matching: .any)["launchSplash"].waitForExistence(timeout: 10))
         try capture("33-launch-splash")
+    }
 
+    func testCaptureFirstServer() throws {
         relaunchCatalogRoot("first-server")
         XCTAssertTrue(app.staticTexts["Add Your First Server"].waitForExistence(timeout: 10))
         try capture("34-first-server")
+    }
 
+    func testCaptureBackendLoading() throws {
         relaunchCatalogRoot("loading")
         XCTAssertTrue(app.descendants(matching: .any)["backendConnectionGate"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Connecting to services..."].exists)
         try capture("35-backend-loading")
+    }
 
+    func testCaptureSnapshotActivation() throws {
         relaunchCatalogRoot("snapshot")
         XCTAssertTrue(app.descendants(matching: .any)["snapshotActivationPendingView"].waitForExistence(timeout: 10))
         try capture("36-snapshot-activation")
