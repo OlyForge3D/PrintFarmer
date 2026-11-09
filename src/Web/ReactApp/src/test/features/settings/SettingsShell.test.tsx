@@ -757,6 +757,20 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'External Services' })).toHaveFocus();
   });
 
+  it('lands cross-category recovery on the first permitted sub-page, not the first registered one', async () => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === 'webhooks' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=users&sub=accounts');
+    const recoveryNav = screen.getByRole('navigation', { name: 'Available settings sections' });
+    expect(within(recoveryNav).getAllByRole('button').map((option) => option.textContent)).toEqual(['Integrations']);
+    fireEvent.click(within(recoveryNav).getByRole('button', { name: 'Integrations' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('tab=integrations');
+      expect(screen.getByTestId('location-search')).toHaveTextContent('sub=webhooks');
+    });
+    expect(screen.queryByText(/don't have permission to view/)).not.toBeInTheDocument();
+  });
+
   it.each([
     ['general', 'farm', ['Farm Defaults', 'System Config', 'Automation & Costs']],
     ['slicing', 'defaults', ['Defaults', 'Bed Types', 'Slicer Profiles']],

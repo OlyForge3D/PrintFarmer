@@ -1822,7 +1822,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                           tabIndex={-1}
                           className={showVisibleSubPageHeading
                             ? 'mb-4 w-fit rounded-md px-1 py-0.5 text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
-                            : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
+                            : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:px-1 focus-visible:py-0.5 focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
                         >
                           {contentHeading}
                         </h2>
