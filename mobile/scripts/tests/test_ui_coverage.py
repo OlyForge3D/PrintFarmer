@@ -60,9 +60,11 @@ class CoverageReportTests(unittest.TestCase):
         self.assertEqual(result["summary"]["fullyCoveredRows"], 0)
         self.assertTrue(all("No approved macOS host." in row["reason"] for row in result["entries"]))
 
-    def test_candidate_never_auto_approves_golden_or_whole_row(self):
+    def test_temporary_candidate_does_not_certify_whole_row(self):
         result = MODULE.report(self.catalog, self.candidate(), "iPhone", "a" * 40)
-        self.assertEqual(result["scenarioResults"]["01-farm"]["status"], "awaiting-human-golden")
+        self.assertEqual(result["scenarioResults"]["01-farm"]["status"], "captured-audit-passed")
+        self.assertEqual(result["summary"]["passedAuditScenarios"], 1)
+        self.assertNotIn("pendingHumanGoldens", result["summary"])
         self.assertEqual(result["summary"]["partiallyExercisedRows"], 1)
         self.assertEqual(result["summary"]["fullyCoveredRows"], 0)
 
@@ -127,7 +129,7 @@ class CoverageReportTests(unittest.TestCase):
     def test_scenario_profiles_are_strict_and_cannot_change_environment_pins(self):
         for scenario in self.catalog["scenarioProfileOverrides"]:
             result = MODULE.report(self.catalog, self.candidate(scenario), "iPhone", "a" * 40)
-            self.assertEqual(result["scenarioResults"][scenario]["status"], "awaiting-human-golden")
+            self.assertEqual(result["scenarioResults"][scenario]["status"], "captured-audit-passed")
         attachments = self.candidate("51-viewport-landscape")
         receipt = MODULE.read_json(attachments["catalog.51-viewport-landscape.json"])
         receipt["orientation"] = "portrait"
@@ -180,7 +182,6 @@ class CoverageReportTests(unittest.TestCase):
         output = self.root / "report.json"
         command = [sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
                    "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
-                   "--approvals", str(MOBILE / "ui-coverage/approved-goldens.json"),
                    "--family", "iPhone", "--head", "a" * 40, "--output", str(output)]
         result = subprocess.run(command + ["--blocked-reason", "No native host."],
                                 capture_output=True, text=True, check=False)
@@ -214,7 +215,6 @@ class CoverageReportTests(unittest.TestCase):
         result = subprocess.run([
             sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
             "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
-            "--approvals", str(MOBILE / "ui-coverage/approved-goldens.json"),
             "--family", "iPhone", "--head", "a" * 40,
             "--attachments", str(self.root), "--metadata-directory", str(self.metadata()),
             "--output", str(output),
@@ -223,7 +223,7 @@ class CoverageReportTests(unittest.TestCase):
         summary = MODULE.read_json(output)["summary"]
         self.assertEqual(summary["exercisedScenarios"], len(scenarios))
         self.assertEqual(summary["failedAuditScenarios"], 1)
-        self.assertEqual(summary["pendingHumanGoldens"], len(scenarios) - 1)
+        self.assertEqual(summary["passedAuditScenarios"], len(scenarios) - 1)
         self.assertEqual(summary["fullyCoveredRows"], 0)
 
     def test_cli_merges_exports_and_rejects_cross_export_duplicates(self):
@@ -246,7 +246,6 @@ class CoverageReportTests(unittest.TestCase):
         command = [
             sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
             "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
-            "--approvals", str(MOBILE / "ui-coverage/approved-goldens.json"),
             "--family", "iPhone", "--head", "a" * 40,
             "--metadata-directory", str(self.metadata()), "--output", str(output),
         ]
@@ -386,17 +385,33 @@ class CoverageReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No installed"):
             DEVICE_MODULE.select_device(inventory, "iPhone", "iPhone does not exist")
 
-    def test_human_approval_mismatch_is_a_regression_not_rebaseline(self):
-        (self.root / "golden.png").write_bytes(b"human-reviewed-contract-fixture")
-        golden_digest = hashlib.sha256((self.root / "golden.png").read_bytes()).hexdigest()
-        approval = {"iPhone17,3.01-farm": {
-            "reviewedBy": "human-review-required", "sourceSha": "b" * 40,
-            "sha256": golden_digest, "profile": self.catalog["renderProfile"], "file": "golden.png",
-        }}
-        result = MODULE.report(self.catalog, self.candidate(), "iPhone", "a" * 40,
-                               approvals=approval, golden_directory=self.root)
-        self.assertEqual(result["scenarioResults"]["01-farm"]["status"], "visual-regression")
-        self.assertEqual(approval["iPhone17,3.01-farm"]["sha256"], golden_digest)
+    def test_all_valid_temporary_artifacts_pass_without_baselines(self):
+        manifest = []
+        scenarios = MODULE.validate_catalog(self.catalog)
+        for scenario in scenarios:
+            attachments = self.candidate(scenario)
+            for kind, extension in (("image", "png"), ("receipt", "json")):
+                manifest.append({
+                    "suggestedHumanReadableName": f"catalog-{kind}-{scenario}",
+                    "exportedFileName": attachments[f"catalog.{scenario}.{extension}"].name,
+                    "isAssociatedWithFailure": False,
+                })
+        (self.root / "manifest.json").write_text(json.dumps([{"attachments": manifest}]))
+        output = self.root / "passed-audit-report.json"
+        result = subprocess.run([
+            sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),
+            "--catalog", str(MOBILE / "ui-coverage/catalog.json"),
+            "--family", "iPhone", "--head", "a" * 40,
+            "--attachments", str(self.root), "--metadata-directory", str(self.metadata()),
+            "--output", str(output),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        summary = MODULE.read_json(output)["summary"]
+        self.assertEqual(summary["passedAuditScenarios"], len(scenarios))
+        self.assertEqual(summary["failedAuditScenarios"], 0)
+        self.assertEqual(summary["fullyCoveredRows"], 0)
+        self.assertNotIn("pendingHumanGoldens", summary)
+        self.assertFalse((MOBILE / "ui-coverage/approved-goldens.json").exists())
 
 
 if __name__ == "__main__":

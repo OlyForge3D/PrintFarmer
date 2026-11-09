@@ -113,13 +113,12 @@ def native_profile(directory, catalog, family, head):
             "runtimeBuild": runtime[0]["buildversion"], "simulatorUdid": udid}
 
 
-def report(catalog, attachments, family, head, blocked_reason=None, approvals=None, golden_directory=None):
+def report(catalog, attachments, family, head, blocked_reason=None):
     scenarios = validate_catalog(catalog)
     if family not in ("iPhone", "iPad") or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise ValueError("Report needs an explicit device family and full source SHA")
     expected_profile = catalog["renderProfile"]
     results = {}
-    approvals = approvals or {}
     for scenario in scenarios:
         scenario_profile = {**expected_profile,
                             **catalog.get("scenarioProfileOverrides", {}).get(scenario, {})}
@@ -146,20 +145,7 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
             continue
         if receipt["audit"] != "passed":
             raise ValueError(f"Invalid accessibility audit status for {scenario}")
-        approved = approvals.get(f"{receipt['device']}.{scenario}")
-        status = "awaiting-human-golden"
-        if approved is not None:
-            if not approved["reviewedBy"] or not re.fullmatch(r"[0-9a-f]{40}", approved["sourceSha"]):
-                raise ValueError("Golden approval needs human review attribution and source SHA")
-            if approved["profile"] != scenario_profile:
-                raise ValueError("Golden approval profile differs from pinned rendering")
-            if golden_directory is None:
-                raise ValueError("Golden approval needs its retained human-reviewed PNG")
-            golden = safe_file(golden_directory, approved["file"])
-            if hashlib.sha256(golden.read_bytes()).hexdigest() != approved["sha256"]:
-                raise ValueError("Retained golden differs from human approval hash")
-            status = "golden-matched" if approved["sha256"] == digest else "visual-regression"
-        results[scenario] = {"status": status, "sha256": digest, "device": receipt["device"],
+        results[scenario] = {"status": "captured-audit-passed", "sha256": digest, "device": receipt["device"],
                              "image": image_path.name, "audit": "passed"}
     entries = []
     for entry in catalog["entries"]:
@@ -193,7 +179,7 @@ def report(catalog, attachments, family, head, blocked_reason=None, approvals=No
             "failedRows": sum(row["disposition"] == "failed" for row in entries),
             "exercisedScenarios": sum(value["status"] != "blocked" for value in results.values()),
             "failedAuditScenarios": sum(value["status"] == "accessibility-failure" for value in results.values()),
-            "pendingHumanGoldens": sum(value["status"] == "awaiting-human-golden" for value in results.values()),
+            "passedAuditScenarios": sum(value["status"] == "captured-audit-passed" for value in results.values()),
         },
     }
 
@@ -203,8 +189,6 @@ def main():
     parser.add_argument("--catalog", type=Path, default=Path("ui-coverage/catalog.json"))
     parser.add_argument("--attachments", type=Path, action="append", default=[])
     parser.add_argument("--metadata-directory", type=Path)
-    parser.add_argument("--approvals", type=Path, default=Path("ui-coverage/approved-goldens.json"))
-    parser.add_argument("--goldens", type=Path, default=Path("ui-coverage/goldens"))
     parser.add_argument("--family", choices=("iPhone", "iPad"), required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--blocked-reason")
@@ -226,16 +210,15 @@ def main():
         if args.metadata_directory is None:
             parser.error("Native attachments require retained toolchain/destination/source metadata")
         metadata = native_profile(args.metadata_directory, catalog, args.family, args.head)
-    result = report(catalog, attachments, args.family, args.head,
-                    args.blocked_reason, read_json(args.approvals), args.goldens)
+    result = report(catalog, attachments, args.family, args.head, args.blocked_reason)
     if metadata:
         result["nativeEnvironment"] = metadata
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], sort_keys=True))
-    if args.attachments and any(value["status"] in ("blocked", "visual-regression", "accessibility-failure")
+    if args.attachments and any(value["status"] in ("blocked", "accessibility-failure")
                                 for value in result["scenarioResults"].values()):
-        print("Native adapter evidence incomplete or approved golden differs.", file=sys.stderr)
+        print("Native adapter evidence incomplete or accessibility audit failed.", file=sys.stderr)
         return 1
     return 0
 

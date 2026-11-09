@@ -568,8 +568,8 @@ The in-repository mobile client is licensed under the
 inventory using the same entry schema. This is **not full state coverage**:
 52 capture scenarios target 36 broad rows; the retired server-switcher row has no adapter and explicit
 fixture, reachability or state-inventory blockers. New adapters are candidates,
-not native execution evidence. Even a matched golden
-does not promote an entire broad row to covered. See each row's `reason`.
+not native execution evidence. A captured image and passing audit
+do not promote an entire broad row to covered. See each row's `reason`.
 
 The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
 the approved Xcode/runtime resolver, and the existing isolated UI-test
@@ -583,7 +583,7 @@ distinct receipts and rejects duplicate scenario artifacts across exports.
 An export failure cannot hide the other invocation's retained evidence.
 The default plan skips all three capture classes; the App Store
 plan still selects only the legacy class and receives seven unique store images.
-It never contacts real printers or approves baselines. Captures use synthetic
+It never contacts real printers or creates screenshot baselines. Captures use synthetic
 fixtures, a fixed date, English and stable system chrome on separate iPhone/iPad
 hosts. The base profile is portrait, dark appearance and normal Large text.
 Explicit `scenarioProfileOverrides` add light, system-with-light-device,
@@ -626,8 +626,8 @@ reporter also fails on any failed-audit receipt. This avoids stopping the
 whole catalog at the first known defect. Separate navigation groups allow
 remaining tests to run if one destination cannot be reached. An audit failure,
 unsettled screen (retained as diagnostic frames/tree, not accepted evidence),
-missing adapter receipt/image, wrong rendering profile, or changed approved
-golden fails the candidate check. A successful audit is **not VoiceOver
+missing adapter receipt/image or wrong rendering profile fails the candidate
+check. A successful audit is **not VoiceOver
 interaction certification**. Dedicated appearance, largest-text and landscape
 captures exercise selected axis states, not the full screen/state matrix,
 system-dark variants, VoiceOver traversal or physical-keyboard behavior.
@@ -641,11 +641,13 @@ and 25-minute step. The 131-minute family job reserves at least 20 minutes
 beyond the explicit setup/build/capture step budgets for checkout, simulator
 startup, exports, reporting and artifact upload. Audit, settling and failure
 rules are unchanged.
-`report.json` separates blocked rows, partially exercised rows, native
-scenarios and pending human goldens. Missing goldens are non-blocking
-`awaiting-human-golden`, never an automatic baseline pass. No branch-protection
-configuration is changed. A green candidate check cannot establish readiness
-or completion of the full inventory.
+`report.json` separates blocked rows, partially exercised rows and native
+scenarios with passed or failed audits. Valid temporary image/receipt pairs
+with passing audits are `captured-audit-passed`, not visual-regression
+certification. This new catalog has no committed PNG baselines or golden-approval
+gate; screenshots are temporary evidence only. Existing unrelated screenshot
+tests are unchanged. No branch-protection configuration is changed. A green
+candidate check cannot establish readiness or completion of the full inventory.
 
 On Windows, reporting contracts can be checked without pretending to run iOS:
 
@@ -655,18 +657,6 @@ python -m unittest discover -s scripts/tests -p 'test_ui_coverage.py' -v
 python scripts/report-ui-coverage.py --family iPhone --head <full-source-sha> `
   --blocked-reason "No approved macOS simulator available." --output build/report.json
 ```
-
-Human-only golden acceptance is a separate reviewed change: inspect the native
-candidate and its metadata, retain the selected PNG under `ui-coverage/goldens`,
-then add a record to `ui-coverage/approved-goldens.json` keyed by
-`<SIMULATOR_MODEL_IDENTIFIER>.<scenarioId>`. Each record needs a plain `file`
-name, PNG `sha256`, human `reviewedBy`, full captured `sourceSha`, and `profile`
-equal to the catalog's pinned `renderProfile` merged with that scenario's
-`scenarioProfileOverrides`, if present. The reporter verifies the
-retained file hash before comparing; it never writes PNGs or approval records.
-Attribution in a file is self-attested, not independent authentication of a
-human: repository review must enforce the human-only approval rule. The empty
-approval file deliberately approves nothing.
 
 Standard hosted runner compute is currently free for this public repository;
 larger runners and artifact storage have different billing rules. See

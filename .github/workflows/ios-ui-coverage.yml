@@ -164,7 +164,7 @@ jobs:
         run: |
           xcrun xcresulttool export attachments --path build/ui-coverage/RootCandidates.xcresult \
             --output-path build/ui-coverage/root-attachments
-      - name: Report candidates without approving missing goldens
+      - name: Report temporary candidates and accessibility findings
         if: ${{ !cancelled() && (steps.export.outcome == 'success' || steps.export_root.outcome == 'success') }}
         env:
           OPERATOR_EXPORT: ${{ steps.export.outcome }}
@@ -181,7 +181,7 @@ jobs:
             --head "$(git rev-parse HEAD)" "${attachments[@]}" \
             --metadata-directory build/ui-coverage \
             --output build/ui-coverage/report.json
-          echo "::warning::This is partial candidate evidence, not full 37-row coverage. Missing goldens require human review."
+          echo "::warning::This is partial candidate evidence, not full 37-row coverage. Screenshots are temporary artifacts, not visual-regression baselines."
       - name: Preserve specific native setup blockers
         if: ${{ failure() && steps.capture.outcome == 'skipped' }}
         env:
