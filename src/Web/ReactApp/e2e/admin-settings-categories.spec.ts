@@ -134,7 +134,8 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       await page.keyboard.press('Enter');
       await expect(page).toHaveURL(/sub=connections/);
       await expect(page.getByText(/don't have permission to view/)).toHaveCount(0);
-      await expect(page.getByRole('heading', { level: 2, name: 'Integrations' })).toBeFocused();
+      await expect(page.getByRole('heading', { level: 2, name: 'External Services' })).toBeFocused();
+      await expect(page.getByRole('heading', { level: 2, name: 'Integrations' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Save Telegram Settings' })).toBeVisible();
       const screenshot = testInfo.outputPath('delegated-recovery.png');
       await page.screenshot({ path: screenshot, fullPage: true });
