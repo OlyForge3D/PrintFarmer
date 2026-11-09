@@ -509,15 +509,15 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('link', { name: 'Admin Control Center' }));
-    fireEvent.click(await screen.findByRole('link', { name: /Farm & Admin Settings/i }));
+    fireEvent.click(await screen.findByRole('link', { name: /^General/ }));
 
     await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings'));
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
-    expect(screen.getAllByRole('heading', { level: 1, name: 'Farm & Admin Settings' })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { level: 1, name: 'General' })).toHaveLength(1);
     expect(await screen.findByTestId('farm-settings-section')).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole('button', { name: /System Config/i }));
+    fireEvent.click(await screen.findByRole('tab', { name: /System Config/i }));
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system'));
     await screen.findByLabelText('Retention Days');
     expect(screen.queryByRole('heading', { level: 1, name: 'User Settings' })).not.toBeInTheDocument();
@@ -578,7 +578,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     grantOnly('power_monitors:admin');
     const powerView = renderWorkspace('/admin');
     expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute('href', '/admin/power-monitors');
-    expect(screen.queryByRole('link', { name: /Farm & Admin Settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-hub-settings')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: /Power Monitors/i }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Power Monitors' })).toBeInTheDocument();
     powerView.unmount();

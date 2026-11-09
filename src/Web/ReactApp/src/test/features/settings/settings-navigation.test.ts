@@ -6,6 +6,7 @@ import {
   buildSettingsCommandItems,
   getFuzzyMatchIndices,
   getFuzzyResult,
+  getSettingsCategoryDestinations,
   groupRankedResults,
   KIND_SECTION_ORDER,
   normalizeSearchQuery,
@@ -19,6 +20,45 @@ import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
 import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
+
+describe('getSettingsCategoryDestinations', () => {
+  it('uses the existing seven system categories and never adds personal settings', () => {
+    const cards = getSettingsCategoryDestinations({ hasRole: () => true, hasPermission: () => true });
+    expect(cards.map(card => card.label)).toEqual([
+      'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Users', 'Data',
+    ]);
+    expect(cards.every(card => card.icon && card.description)).toBe(true);
+    expect(new Set(cards.map(card => card.path)).size).toBe(7);
+  });
+
+  it.each([
+    ['system_settings', ['general.farm', 'slicing.defaults', 'integrations.connections']],
+    ['roles', ['users.roles']],
+    ['users', ['users.accounts']],
+    ['printers', ['hardware.printer-groups']],
+    ['nfc_devices', ['hardware.nfc']],
+    ['bed_type', ['slicing.bed-types']],
+    ['telegram', ['integrations.connections']],
+    ['quota', ['quotas.']],
+    ['tags', ['data.tags']],
+    ['catalog', []],
+    ['power_monitors', []],
+    ['locations', []],
+  ])('routes a %s-only delegate directly to their first authorized leaf', (resource, expected) => {
+    const cards = getSettingsCategoryDestinations({
+      hasRole: () => false,
+      hasPermission: (r, action) => r === resource && action === 'admin',
+    });
+    expect(cards.map(card => {
+      const params = new URLSearchParams(card.path.split('?')[1]);
+      return `${params.get('tab')}.${params.get('sub') ?? ''}`;
+    })).toEqual(expected);
+  });
+
+  it('does not invent a settings category for a user with no grants', () => {
+    expect(getSettingsCategoryDestinations({ hasRole: () => false, hasPermission: () => false })).toEqual([]);
+  });
+});
 
 describe('resolveSettingsNavigationTarget', () => {
   it('resolves the new appearance subtab without redirect aliases', () => {

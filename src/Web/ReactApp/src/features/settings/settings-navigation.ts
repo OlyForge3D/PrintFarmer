@@ -17,6 +17,7 @@ import type {
   AdminDestinationGroup,
 } from '@/features/admin/registry/adminDestinations';
 import { ADMIN_DESTINATION_GROUPS } from '@/features/admin/registry/adminDestinations';
+import { canAccessSettingsTab, getDestinationForTab, type AdminDestinationAccess } from '@/features/admin/registry/adminDestinations';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
 import {
   DEFAULT_SCOPE,
@@ -298,6 +299,31 @@ function createScopeBreadcrumb(scopeId: SettingsScopeId): string {
 
 export function getSettingsCategoryIcon(categoryId: string): SettingsCategoryIcon {
   return SETTINGS_CATEGORY_ICONS[categoryId] ?? GearIcon;
+}
+
+export function getSettingsCategoryDestinations(access: AdminDestinationAccess): AdminDestination[] {
+  return SETTINGS_CATEGORIES
+    .filter((category) => category.scopeId === 'system')
+    .flatMap((category) => {
+      const firstSubPage = category.subPages.find((subPage) =>
+        canAccessSettingsTab(category.id, subPage.id, access));
+      if (category.subPages.length > 0 ? !firstSubPage : !canAccessSettingsTab(category.id, undefined, access)) {
+        return [];
+      }
+      return [{
+        id: `settings-${category.id}`,
+        kind: 'configuration' as const,
+        label: category.label,
+        description: category.description,
+        path: buildSettingsPath({
+          scopeId: 'system',
+          categoryId: category.id,
+          subPageId: firstSubPage?.id,
+        }),
+        icon: getSettingsCategoryIcon(category.id),
+        group: getDestinationForTab(category.id, firstSubPage?.id)?.group ?? 'general',
+      }];
+    });
 }
 
 const TAB_SHORTHANDS: Record<string, { categoryId: string; subPageId?: string }> = {

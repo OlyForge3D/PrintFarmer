@@ -1641,8 +1641,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     );
   }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
 
-  const pageTitle = currentScopeMeta?.label ?? 'Settings';
-  const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
+  const pageTitle = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.label
+    : currentScopeMeta?.label ?? 'Settings';
+  const pageDescription = isAdminRoute && accessibleCategories.length > 0
+    ? currentCategory.description
+    : currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = !isAuthLoading
     && accessibleCategories.length > 0
@@ -1687,7 +1691,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </HeaderActions>
   );
 
-  const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;
+  const showSubTabs = !hasNoMatches && visibleSubPages.length > 1;
   const subTabs = showSubTabs ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
@@ -1695,7 +1699,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           activeSubPage={activeSubPage}
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
-          isFiltering={isFiltering}
+          isFiltering={isFiltering && !isAdminRoute}
           ariaLabel={`${currentCategory.label} settings`}
           searchQuery={query}
         />
@@ -1709,6 +1713,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <SettingsFooterSlotContext.Provider value={footerSlot}>
           <PageTemplate
             title={pageTitle}
+            titleWrap
             subtitle={pageDescription}
             showHeader
             fill
@@ -1754,8 +1759,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
-                  <SettingsSidebar
+                <div className={`flex flex-1 min-h-0 flex-col${isAdminRoute ? '' : ' md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]'}`}>
+                  {!isAdminRoute && <SettingsSidebar
                     categories={accessibleCategories}
                     activeScope={effectiveScope}
                     activeCategory={effectiveCategory}
@@ -1767,9 +1772,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     matchingCategoryIds={matchingCategoryIds}
                     isFiltering={isFiltering}
                     searchQuery={query}
-                  />
+                  />}
 
-                  <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
+                  <div className={`relative flex min-h-0 flex-1 flex-col${isAdminRoute ? '' : ' border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border'}`}>
                     <p className="sr-only" aria-live="polite">
                       {sectionAnnouncement}
                     </p>
