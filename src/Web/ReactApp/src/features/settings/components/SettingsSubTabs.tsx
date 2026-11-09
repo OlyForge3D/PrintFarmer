@@ -51,9 +51,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
                 id={subPage.id}
                 className={isMatching ? 'bg-pf-bg-1 !text-pf-text-primary' : ''}
               >
-                <span aria-label={subPage.label}>
-                  <SettingsMatchText text={subPage.label} query={searchQuery} />
-                </span>
+                <SettingsMatchText text={subPage.label} query={searchQuery} />
               </Tabs.Tab>
             );
           })}

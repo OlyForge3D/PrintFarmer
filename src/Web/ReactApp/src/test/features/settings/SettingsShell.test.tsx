@@ -733,7 +733,10 @@ describe('SettingsShell', () => {
     await userEvent.setup().keyboard('{Enter}');
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(`sub=${sub}`));
     expect(screen.queryByText(/don't have permission to view/)).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: category === 'hardware' ? 'Hardware' : 'Integrations' })).toHaveFocus();
+    const heading = screen.getByRole('heading', { level: 2, name: label });
+    expect(heading).toHaveFocus();
+    // A lone permitted sub-page has no tab to name it, so the heading shows it.
+    expect(heading.classList.contains('sr-only')).toBe(screen.queryByRole('tablist') !== null);
   });
 
   it.each([
@@ -1028,7 +1031,7 @@ describe('SettingsShell', () => {
 
     expect(screen.queryByRole('button', { name: /Settings section:/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Settings categories' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tablist', { name: 'General settings' })).toBeInTheDocument();
+    expect(screen.getByRole('tablist', { name: 'General sub-pages' })).toBeInTheDocument();
   });
 });
 

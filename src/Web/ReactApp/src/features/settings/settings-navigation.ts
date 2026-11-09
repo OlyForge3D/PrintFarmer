@@ -8,6 +8,7 @@ import {
   NetworkIcon,
   ServerIcon,
   ShieldIcon,
+  TagIcon,
   UsersIcon,
   WrenchIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -283,7 +284,7 @@ export const SETTINGS_CATEGORY_ICONS: Record<string, SettingsCategoryIcon> = {
   quotas: DatabaseIcon,
   operations: ServerIcon,
   users: UsersIcon,
-  data: DatabaseIcon,
+  data: TagIcon,
 };
 
 export const SETTINGS_SUBPAGE_ICONS: Record<string, SettingsCategoryIcon> = {

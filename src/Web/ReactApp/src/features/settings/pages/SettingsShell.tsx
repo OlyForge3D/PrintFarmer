@@ -1706,6 +1706,18 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const showSubTabs = !hasNoMatches && canAccessActiveTab && visibleSubPages.length > 1;
+  // Admin pages title the category in the H1, so the content heading names the
+  // sub-page instead. With a single permitted sub-page there is no tab to show
+  // it, so the heading becomes visible.
+  const contentHeading = isAdminRoute && accessibleCategories.length === 0
+    ? 'Configuration'
+    : isAdminRoute && canAccessActiveTab && activeSubPageLabel
+      ? activeSubPageLabel
+      : currentCategory.label;
+  const showVisibleSubPageHeading = isAdminRoute
+    && !showSubTabs
+    && canAccessActiveTab
+    && contentHeading !== currentCategory.label;
   const subTabs = showSubTabs ? (
       <nav aria-label={`${currentCategory.label} settings pages`} className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
@@ -1714,7 +1726,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
           isFiltering={isFiltering && !isAdminRoute}
-          ariaLabel={`${currentCategory.label} settings`}
+          ariaLabel={`${currentCategory.label} sub-pages`}
           searchQuery={query}
           wrap={isAdminRoute}
         />
@@ -1801,9 +1813,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                           id="settings-content-heading"
                           ref={sectionHeadingRef}
                           tabIndex={-1}
-                          className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                          className={showVisibleSubPageHeading
+                            ? 'mb-4 w-fit rounded-md text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
+                            : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
                         >
-                          {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
+                          {contentHeading}
                         </h2>
 
                         <SettingsContentTransition key={renderedContentKey} className="relative">
