@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { assertApprovedGolden, validateApprovalDocument, validateCatalog } from './policy.mjs';
+import { assertApprovedGolden, assertCleanSourceCommit, validateApprovalDocument, validateCatalog } from './policy.mjs';
 import { loadInventorySources, validateInventoryCoverage } from './inventory-contract.mjs';
 
 const catalog = JSON.parse(await readFile(new URL('./catalog.json', import.meta.url), 'utf8'));
@@ -84,6 +84,7 @@ test('the checked-in pending approval artifact cannot authorize a golden', () =>
       () => assertApprovedGolden({
         approval,
         sourceSha256: catalog.source.sha256,
+        sourceCommit: 'a'.repeat(40),
         renderProfileId: catalog.renderProfile.id,
         baselineExists: false,
       }),
@@ -91,6 +92,21 @@ test('the checked-in pending approval artifact cannot authorize a golden', () =>
       approval.id,
     );
   }
+});
+
+test('visual comparisons require an exact source commit and a clean working tree', () => {
+  assert.doesNotThrow(() => assertCleanSourceCommit({
+    sourceCommit: 'a'.repeat(40),
+    workingTreeStatus: '',
+  }));
+  assert.throws(() => assertCleanSourceCommit({
+    sourceCommit: 'a'.repeat(7),
+    workingTreeStatus: '',
+  }), /full source commit SHA/);
+  assert.throws(() => assertCleanSourceCommit({
+    sourceCommit: 'a'.repeat(40),
+    workingTreeStatus: '?? review-context.md',
+  }), /clean working tree/);
 });
 
 test('catalog mutations that silently drop coverage rows are rejected', () => {
@@ -122,18 +138,21 @@ test('approval mutations cannot authorize stale or incomplete evidence', () => {
   assert.throws(() => assertApprovedGolden({
     approval: approved,
     sourceSha256: '0'.repeat(64),
+    sourceCommit: 'a'.repeat(40),
     renderProfileId: catalog.renderProfile.id,
     baselineExists: true,
   }), /stale/);
   assert.throws(() => assertApprovedGolden({
     approval: approved,
     sourceSha256: catalog.source.sha256,
+    sourceCommit: 'c'.repeat(40),
     renderProfileId: catalog.renderProfile.id,
     baselineExists: false,
-  }), /missing/);
+  }), /stale for the exact source commit/);
   assert.throws(() => assertApprovedGolden({
     approval: approved,
     sourceSha256: catalog.source.sha256,
+    sourceCommit: 'a'.repeat(40),
     renderProfileId: catalog.renderProfile.id,
     baselineExists: true,
     baselineSha256: 'c'.repeat(64),
@@ -141,6 +160,7 @@ test('approval mutations cannot authorize stale or incomplete evidence', () => {
   assert.doesNotThrow(() => assertApprovedGolden({
     approval: approved,
     sourceSha256: catalog.source.sha256,
+    sourceCommit: 'a'.repeat(40),
     renderProfileId: catalog.renderProfile.id,
     baselineExists: true,
     baselineSha256: 'b'.repeat(64),
@@ -148,6 +168,7 @@ test('approval mutations cannot authorize stale or incomplete evidence', () => {
   assert.throws(() => assertApprovedGolden({
     approval: { ...approved, baselineSha256: undefined },
     sourceSha256: catalog.source.sha256,
+    sourceCommit: 'a'.repeat(40),
     renderProfileId: catalog.renderProfile.id,
     baselineExists: true,
     baselineSha256: 'b'.repeat(64),

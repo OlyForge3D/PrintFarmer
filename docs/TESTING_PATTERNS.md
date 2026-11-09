@@ -18,19 +18,22 @@ npm run test:ui-coverage:candidate
 npm run test:ui-coverage:visual
 ```
 
-The catalog test checks stable IDs, explicit dispositions, and one approval
-record per candidate. Candidate tests capture attachments under Playwright's
-test-results directory, use synthetic read-only app responses, load the pinned
-local theme fonts, and run axe WCAG 2.2 A/AA rules. These scans are a
-machine-detected defect check, not WCAG conformance or runtime-completeness
-certification.
+The catalog test checks stable IDs, explicit dispositions, one approval record
+per candidate, and the clean source-commit contract. Candidate tests capture
+attachments under Playwright's test-results directory, use synthetic read-only
+app responses, load the pinned local theme fonts, and run axe WCAG 2.2 A/AA
+rules. These scans are a machine-detected defect check, not WCAG conformance or
+runtime-completeness certification.
 
 Candidate images are never baselines. The visual gate uses
 `toHaveScreenshot` with `updateSnapshots: 'none'` and fails closed unless the
 matching approval record has been reviewed, includes an approver/time/source
-SHA, matches the inventory and render-profile IDs, and points to a checked-in
-image. Human approval must compare the candidate against the actual product
-contract; do not approve a screenshot merely because the test produced it.
+commit, matches the exact clean Git commit, inventory and render-profile IDs,
+and points to the exact checked-in image resolved by Playwright. The visual
+gate refuses to run from a dirty working tree so a review cannot accidentally
+approve code that is not represented by the source commit. Human approval must
+compare the candidate against the actual product contract; do not approve a
+screenshot merely because the test produced it.
 Current approval records are pending, so the visual gate is intentionally
 blocked until reviewed baselines exist.
 

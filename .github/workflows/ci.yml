@@ -577,6 +577,10 @@ jobs:
         working-directory: src/Web/ReactApp
         run: npm ci
 
+      - name: Test UI coverage catalog
+        working-directory: src/Web/ReactApp
+        run: npm run test:ui-coverage:catalog
+
       - name: Lint frontend
         working-directory: src/Web/ReactApp
         run: npm run lint

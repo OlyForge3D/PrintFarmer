@@ -57,15 +57,27 @@ export function validateApprovalDocument(approvals, catalog, scenarioIds) {
   return errors;
 }
 
-export function assertApprovedGolden({ approval, sourceSha256, renderProfileId, baselineExists, baselineSha256 }) {
+export function assertCleanSourceCommit({ sourceCommit, workingTreeStatus }) {
+  if (!/^[0-9a-f]{40}$/i.test(sourceCommit ?? '')) {
+    throw new Error('Visual gate requires a full source commit SHA.');
+  }
+  if (workingTreeStatus !== '') {
+    throw new Error('Visual gate requires a clean working tree at the source commit.');
+  }
+}
+
+export function assertApprovedGolden({ approval, sourceSha256, sourceCommit, renderProfileId, baselineExists, baselineSha256 }) {
   if (!approval || approval.status !== 'approved') {
     throw new Error('Golden is pending human review; candidate screenshots are not comparison baselines.');
   }
   if (!approval.approvedBy || !approval.approvedAt || !/^[0-9a-f]{40}$/i.test(approval.approvedSourceSha ?? '')) {
-    throw new Error('Golden approval must name a reviewer, timestamp, and exact 40-character source SHA.');
+    throw new Error('Golden approval must name a reviewer, timestamp, and exact 40-character source commit.');
   }
   if (!/^[0-9a-f]{64}$/i.test(approval.baselineSha256 ?? '')) {
     throw new Error('Golden approval must pin the exact baseline PNG SHA-256 digest.');
+  }
+  if (sourceCommit !== approval.approvedSourceSha) {
+    throw new Error('Golden approval is stale for the exact source commit.');
   }
   if (sourceSha256 !== approval.sourceInventorySha256 || renderProfileId !== approval.renderProfileId) {
     throw new Error('Golden approval is stale for the current inventory or rendering profile.');

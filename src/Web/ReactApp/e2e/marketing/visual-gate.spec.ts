@@ -1,14 +1,26 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertAccessibility, assertNoScenarioNetworkViolations, assertPinnedFonts, assertRenderingEnvironment, prepareVisualScene } from './visual-test-helpers';
 import { captureOrigin } from './fixtures';
 import { visualScenes } from './visual-scenes';
-import { assertApprovedGolden } from '../ui-coverage/policy.mjs';
+import { assertApprovedGolden, assertCleanSourceCommit } from '../ui-coverage/policy.mjs';
 
 const appRoot = fileURLToPath(new URL('../..', import.meta.url));
+const repositoryRoot = resolve(appRoot, '../../..');
+const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+  cwd: repositoryRoot,
+  encoding: 'utf8',
+}).trim();
+const workingTreeStatus = execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+  cwd: repositoryRoot,
+  encoding: 'utf8',
+}).trimEnd();
+assertCleanSourceCommit({ sourceCommit, workingTreeStatus });
+
 type RenderCatalog = {
   source: { sha256: string };
   renderProfile: { id: string; os: string; browser: string };
@@ -58,11 +70,12 @@ for (const scene of visualScenes) {
         renderProfileId: approvalDocument.renderProfileId,
       },
       sourceSha256: catalog.source.sha256,
+      sourceCommit,
       renderProfileId: catalog.renderProfile.id,
       baselineExists: baselineBytes !== undefined,
       baselineSha256: baselineBytes && createHash('sha256').update(baselineBytes).digest('hex'),
     });
-    expect(baselinePath).toBe(resolve(testInfo.snapshotDir, basename(approval!.baseline)));
+    expect(baselinePath).toBe(testInfo.snapshotPath(basename(approval!.baseline)));
 
     const sceneContext = scene.coarsePointer
       ? await browser.newContext({
