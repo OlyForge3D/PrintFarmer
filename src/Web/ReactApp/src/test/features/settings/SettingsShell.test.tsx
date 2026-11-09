@@ -733,6 +733,7 @@ describe('SettingsShell', () => {
     await userEvent.setup().keyboard('{Enter}');
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(`sub=${sub}`));
     expect(screen.queryByText(/don't have permission to view/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: category === 'hardware' ? 'Hardware' : 'Integrations' })).toHaveFocus();
   });
 
   it.each([

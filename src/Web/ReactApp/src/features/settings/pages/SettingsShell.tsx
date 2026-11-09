@@ -1627,7 +1627,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             {isAdminRoute && visibleSubPages.length > 0 && (
               <nav aria-label="Available settings sections" className="mt-4 flex flex-wrap justify-center gap-2">
                 {visibleSubPages.map((subPage) => (
-                  <Button key={subPage.id} variant="subtle" onClick={() => handleSubPageChange(subPage.id)}>
+                  <Button key={subPage.id} variant="subtle" onClick={() => handleCategoryChange(currentCategory.id, subPage.id)}>
                     {subPage.label}
                   </Button>
                 ))}
@@ -1653,7 +1653,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, handleSubPageChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, handleCategoryChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
 
   const pageTitle = isAdminRoute && accessibleCategories.length > 0
     ? currentCategory.label
