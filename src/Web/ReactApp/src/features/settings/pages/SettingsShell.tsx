@@ -997,6 +997,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         queryText?: string;
         replace?: boolean;
         scopeId?: string;
+        focusSection?: boolean;
       },
     ) => {
       const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, options?.scopeId ?? activeScope);
@@ -1025,7 +1026,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             subPageId: subToUse,
           }
         : null;
-      shouldFocusSectionRef.current = true;
+      shouldFocusSectionRef.current = options?.focusSection ?? true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('scope', target.scopeId);
@@ -1065,6 +1066,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleSubPageChange = useCallback(
     (subPageId: string) => {
       const doNavigate = () => {
+        if (isAdminRoute) {
+          executeCategoryChange(activeCategory, subPageId, { focusSection: false });
+          return;
+        }
         shouldFocusSectionRef.current = true;
         liveWorkspaceQueryRef.current = '';
         explicitCategoryQueryOverrideRef.current = null;
@@ -1086,7 +1091,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         doNavigate();
       }
     },
-    [activeCategory, activeScope, isDirty, setSearchParams],
+    [activeCategory, activeScope, executeCategoryChange, isAdminRoute, isDirty, setSearchParams],
   );
 
   const handleSelectDestination = useCallback(
@@ -1619,6 +1624,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <SettingsSection>
           <div className="py-8 text-center text-pf-text-secondary">
             <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
+            {isAdminRoute && visibleSubPages.length > 0 && (
+              <nav aria-label="Available settings sections" className="mt-4 flex flex-wrap justify-center gap-2">
+                {visibleSubPages.map((subPage) => (
+                  <Button key={subPage.id} variant="subtle" onClick={() => handleSubPageChange(subPage.id)}>
+                    {subPage.label}
+                  </Button>
+                ))}
+              </nav>
+            )}
           </div>
         </SettingsSection>
       );
@@ -1639,7 +1653,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, handleSubPageChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
 
   const pageTitle = isAdminRoute && accessibleCategories.length > 0
     ? currentCategory.label
@@ -1691,7 +1705,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </HeaderActions>
   );
 
-  const showSubTabs = !hasNoMatches && visibleSubPages.length > 1;
+  const showSubTabs = !hasNoMatches && canAccessActiveTab && visibleSubPages.length > 1;
   const subTabs = showSubTabs ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
@@ -1702,6 +1716,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           isFiltering={isFiltering && !isAdminRoute}
           ariaLabel={`${currentCategory.label} settings`}
           searchQuery={query}
+          wrap={isAdminRoute}
         />
       </div>
     ) : null;

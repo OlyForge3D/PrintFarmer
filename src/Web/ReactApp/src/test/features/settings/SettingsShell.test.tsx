@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, screen, waitFor } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -682,6 +683,56 @@ describe('SettingsShell', () => {
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
+  });
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])(
+    'preserves search through system sub-tabs (dirty: %s, just typed: %s)', async (dirty, justTyped) => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=farm&q=default');
+    if (dirty) fireEvent.click(screen.getByTestId('make-dirty-btn'));
+    if (justTyped) {
+      const input = screen.getByRole('combobox', { name: 'Search all settings' });
+      fireEvent.change(input, { target: { value: 'slicer' } });
+    }
+    fireEvent.click(screen.getByRole('tab', { name: 'System Config' }));
+    if (dirty) {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
+    }
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+      expect(screen.getByTestId('location-search')).toHaveTextContent(`q=${justTyped ? 'slicer' : 'default'}`);
+    });
+  });
+
+  it('keeps keyboard focus on system tabs through consecutive arrow selections', async () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=farm');
+    const user = userEvent.setup();
+    screen.getByRole('tab', { name: 'Farm Defaults' }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'System Config' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: 'System Config' })).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Automation & Costs' })).toHaveFocus();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=automation');
+    await user.keyboard('{Home}');
+    expect(screen.getByRole('tab', { name: 'Farm Defaults' })).toHaveFocus();
+  });
+
+  it.each([
+    ['nfc_devices', 'hardware', 'printer-groups', 'NFC Bindings', 'nfc-bindings'],
+    ['telegram', 'integrations', 'webhooks', 'External Services', 'connections'],
+  ])('offers keyboard recovery from denied leaves to %s permitted sections', async (resource, category, deniedSub, label, sub) => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === resource && action === 'admin';
+    renderSettings(`/admin/settings?scope=system&tab=${category}&sub=${deniedSub}`);
+    expect(screen.getByText(/don't have permission to view/)).toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    const recovery = within(screen.getByRole('navigation', { name: 'Available settings sections' }))
+      .getByRole('button', { name: label });
+    recovery.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(`sub=${sub}`));
+    expect(screen.queryByText(/don't have permission to view/)).not.toBeInTheDocument();
   });
 
   it.each([

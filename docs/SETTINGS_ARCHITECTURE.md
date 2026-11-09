@@ -79,7 +79,7 @@ opens its first accessible sub-page, using the existing per-destination grants.
 | General / `general` | Farm (`farm`), System (`system`), Automation (`automation`) |
 | Slicing / `slicing` | Defaults (`defaults`), Bed Types (`bed-types`), Slicer Profiles (`profiles`) |
 | Hardware / `hardware` | NFC Devices (`nfc`), Printer Groups (`printer-groups`), NFC Bindings (`nfc-bindings`), Custom Fields (`custom-fields`) |
-| Integrations / `integrations` | Connections (`connections`), Webhooks (`webhooks`) |
+| Integrations / `integrations` | External Services (`connections`), Webhooks (`webhooks`) |
 | Quotas / `quotas` | Quota management (no sub-page) |
 | Users / `users` | Accounts (`accounts`), Roles (`roles`) |
 | Data / `data` | Tags (`tags`) |
@@ -115,7 +115,10 @@ their separate device-token authentication contract.
 ## Responsive Navigation
 
 System category pages use the same focused sub-tab control at desktop and mobile
-widths, without a cross-category drawer. Personal settings retain their existing
+widths, wrapping labels onto additional rows rather than hiding destinations
+offscreen. Sub-tab selection retains system workspace search and keyboard focus.
+Denied deep links offer buttons for the permitted sections, including a sole
+permitted section. Personal settings retain their existing
 category navigation. Search retains keyboard selection and match highlighting.
 
 ## Safe Draft Transitions & Partial Saves

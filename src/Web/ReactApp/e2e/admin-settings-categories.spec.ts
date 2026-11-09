@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mountRoutedToolbarPage } from './fixtures/toolbar-routed';
+import { mountRoutedToolbarPage, toolbarRouteUser } from './fixtures/toolbar-routed';
 import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 
 const seeds: Record<string, unknown> = {
@@ -88,6 +88,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
           await expect(tabs).toHaveCount(0);
         } else {
           await expect(tabs.getByRole('tab')).toHaveCount(category.tabs);
+          for (const tab of await tabs.getByRole('tab').all()) {
+            await expect(tab).toBeInViewport({ ratio: 1 });
+          }
         }
         await expect(page.locator('main nav[aria-label="Settings categories"]')).toHaveCount(0);
         const back = page.getByRole('link', { name: /Admin Control Center/ }).first();
@@ -101,5 +104,41 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
       });
     }
+
+    test('system arrow navigation retains focus and workspace search', async ({ page }) => {
+      const requests = await mountRoutedToolbarPage(
+        page, '/admin/settings?scope=system&tab=general&sub=farm&q=default', seeds,
+      );
+      const farm = page.getByRole('tab', { name: 'Farm Defaults' });
+      await farm.focus();
+      await page.keyboard.press('ArrowRight');
+      const system = page.getByRole('tab', { name: 'System Config' });
+      await expect(system).toBeFocused();
+      await expect(system).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('ArrowRight');
+      await expect(page.getByRole('tab', { name: 'Automation & Costs' })).toBeFocused();
+      await expect(page).toHaveURL(/sub=automation/);
+      await expect(page).toHaveURL(/q=default/);
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
+
+    test('a sole-permitted integration leaf has keyboard recovery from a denied link', async ({ page }, testInfo) => {
+      const requests = await mountRoutedToolbarPage(
+        page, '/admin/settings?scope=system&tab=integrations&sub=webhooks',
+        { ...seeds, '/api/auth/me': { ...toolbarRouteUser, roles: ['farm_user'], permissions: ['telegram:admin'] } },
+      );
+      await expect(page.getByText(/don't have permission to view/)).toBeVisible();
+      const recovery = page.getByRole('navigation', { name: 'Available settings sections' })
+        .getByRole('button', { name: 'External Services' });
+      await recovery.focus();
+      await page.keyboard.press('Enter');
+      await expect(page).toHaveURL(/sub=connections/);
+      await expect(page.getByText(/don't have permission to view/)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Save Telegram Settings' })).toBeVisible();
+      const screenshot = testInfo.outputPath('delegated-recovery.png');
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await testInfo.attach('Delegated recovery', { path: screenshot, contentType: 'image/png' });
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
   });
 }

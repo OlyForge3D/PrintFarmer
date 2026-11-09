@@ -11,6 +11,7 @@ interface SettingsSubTabsProps {
   isFiltering?: boolean;
   ariaLabel?: string;
   searchQuery?: string;
+  wrap?: boolean;
 }
 
 export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
@@ -21,6 +22,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
   isFiltering = false,
   ariaLabel = 'Settings sub-pages',
   searchQuery,
+  wrap = false,
 }) => {
   const visibleSubPages = useMemo(() => {
     if (!isFiltering || !matchingSubPageIds) {
@@ -38,7 +40,7 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
     <div className="relative mt-4">
       <Tabs activeTab={activeSubPage} onTabChange={onSubPageChange}>
         <Tabs.List
-          className="border-b border-pf-border bg-transparent !p-0 px-4 overflow-x-auto"
+          className={`border-b border-pf-border bg-transparent !p-0 px-4 ${wrap ? 'flex-wrap' : 'overflow-x-auto'}`}
           aria-label={ariaLabel}
         >
           {visibleSubPages.map((subPage) => {
@@ -49,7 +51,9 @@ export const SettingsSubTabs: React.FC<SettingsSubTabsProps> = ({
                 id={subPage.id}
                 className={isMatching ? 'bg-pf-bg-1 !text-pf-text-primary' : ''}
               >
-                <SettingsMatchText text={subPage.label} query={searchQuery} />
+                <span aria-label={subPage.label}>
+                  <SettingsMatchText text={subPage.label} query={searchQuery} />
+                </span>
               </Tabs.Tab>
             );
           })}
