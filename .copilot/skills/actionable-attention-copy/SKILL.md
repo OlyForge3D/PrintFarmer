@@ -18,7 +18,8 @@ Use this when a frontend surface shows a status like `Attention`, `Needs attenti
 
 ## Examples
 - `src/Web/ReactApp/src/features/printers/utils/failureDetectionStatus.ts`
-- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringOverlay.tsx`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionMonitoringBadge.tsx`
+- `src/Web/ReactApp/src/features/printers/components/FailureDetectionStatusModal.tsx`
 - `src/Web/ReactApp/src/features/cameras/utils/cameraAttention.ts`
 - `src/Web/ReactApp/src/features/cameras/pages/CamerasPage.tsx`
 - `src/Web/ReactApp/src/test/features/cameras/cameraAttention.test.ts`
