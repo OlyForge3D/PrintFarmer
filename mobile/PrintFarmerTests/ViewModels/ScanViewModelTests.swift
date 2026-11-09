@@ -267,9 +267,44 @@ final class ScanViewModelTests: XCTestCase {
             XCTAssertNil(viewModel.pendingOutcome, code)
             XCTAssertNil(viewModel.pendingDeepLinkDestination, code)
             XCTAssertNil(viewModel.errorMessage, code)
-            XCTAssertFalse(spoolService.listSpoolsCalled, "unknown \(code) must not be looked up as a spool ID")
+            XCTAssertEqual(
+                spoolService.listSpoolsCalled, QRCodeParser.parse(trimmed) != nil,
+                "a numeric unknown \(code) checks for an existing spool before intake"
+            )
             XCTAssertEqual(viewModel.recentScans.first?.title, "New spool barcode", code)
         }
+    }
+
+    @MainActor
+    func testUnmappedGtinThatIsAlsoAnExistingSpoolIdOpensTheSpoolNotIntake() async {
+        // Regression: a numeric spool QR whose value is also a valid GTIN
+        // must keep opening the existing spool when no filament is mapped.
+        let (viewModel, barcodeService, spoolService) = makeSubject()
+        barcodeService.filamentToResolve = nil
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 850078714923)], totalCount: 1)
+
+        await viewModel.dispatch("850078714923")
+
+        XCTAssertEqual(viewModel.pendingDeepLinkDestination, .spoolDetail(id: 850078714923))
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "an existing spool must not be offered for new-spool intake")
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty)
+        XCTAssertTrue(barcodeService.importCalls.isEmpty)
+    }
+
+    @MainActor
+    func testUnmappedGtinSpoolLookupFailureSurfacesErrorWithoutOfferingIntake() async {
+        let (viewModel, barcodeService, spoolService) = makeSubject()
+        barcodeService.filamentToResolve = nil
+        spoolService.errorToThrow = NetworkError.serverError(500)
+
+        await viewModel.dispatch("850078714923")
+
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "an unverified spool ID must fail closed, not open intake")
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertNil(viewModel.pendingOutcome)
     }
 
     @MainActor

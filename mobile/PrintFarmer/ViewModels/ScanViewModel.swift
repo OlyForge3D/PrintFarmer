@@ -240,6 +240,16 @@ final class ScanViewModel {
                 recordRecentScan(icon: "cylinder", title: filament.name ?? filament.material ?? "Spool", subtitle: "Spool barcode")
                 pendingSpoolBarcode = trimmed
             } else if filament == nil, isProductBarcode {
+                // A numeric spool QR can also be GTIN-shaped; an existing
+                // spool with that ID keeps precedence over new-spool intake.
+                if let spoolId = QRCodeParser.parse(trimmed) {
+                    guard let exists = await existingSpoolLookup(id: spoolId) else { return }
+                    if exists {
+                        recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+                        pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+                        return
+                    }
+                }
                 // An unknown product barcode reuses Barcode Intake, which
                 // asks the operator to map it to a filament (persisting the
                 // GTIN server-side) before importing a spool.
@@ -284,24 +294,31 @@ final class ScanViewModel {
     /// to `.spoolDetail` — such a payload NEVER falls back to raw barcode
     /// registration; it either routes or surfaces an explicit error.
     private func routeToSpoolIfExists(id: Int, subtitle: String) async {
+        guard let exists = await existingSpoolLookup(id: id) else { return }
+        if exists {
+            recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
+            pendingDeepLinkDestination = .spoolDetail(id: id)
+        } else {
+            errorMessage = "Spool #\(id) was not found on this server."
+        }
+    }
+
+    /// Returns whether spool `id` exists on the active server, or nil after
+    /// surfacing an error (or when the view retired) so callers fail closed.
+    private func existingSpoolLookup(id: Int) async -> Bool? {
         guard let spoolService else {
             errorMessage = "Spool service not available"
-            return
+            return nil
         }
-
         do {
             let exists = try await spoolService.spoolExists(id: id)
-            guard isViewActive else { return }
-            if exists {
-                recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
-                pendingDeepLinkDestination = .spoolDetail(id: id)
-            } else {
-                errorMessage = "Spool #\(id) was not found on this server."
-            }
+            guard isViewActive else { return nil }
+            return exists
         } catch {
-            guard isViewActive else { return }
+            guard isViewActive else { return nil }
             logger.warning("Spool existence lookup failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
