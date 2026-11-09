@@ -210,9 +210,16 @@ final class ScanViewModel {
         // as a raw barcode. A bare positive-integer code is deliberately NOT
         // treated as structured (see `QRCodeParser.parseStructured`) since
         // genuine EAN/UPC barcodes are also numeric.
-        if let url = URL(string: trimmed),
-           case .spoolDetail(let id) = DeepLinkHandler.parse(url: url) {
-            await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+        if let url = URL(string: trimmed), let destination = DeepLinkHandler.parse(url: url) {
+            if case .spoolDetail(let id) = destination {
+                await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+            } else {
+                // Recognized non-spool links (e.g. printer UUIDs) must never
+                // reach barcode resolution: the server's GTIN normalizer
+                // strips non-digits, so their digits could match a product.
+                recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
+                pendingOutcome = .unknownCode(trimmed)
+            }
             return
         }
         if let spoolId = QRCodeParser.parseStructured(trimmed) {
@@ -228,10 +235,11 @@ final class ScanViewModel {
         do {
             let filament = try await barcodeIntakeService.resolveFilament(barcode: trimmed)
             guard isViewActive else { return }
-            if let filament {
+            let isProductBarcode = Self.isSupportedProductBarcode(trimmed)
+            if let filament, isProductBarcode {
                 recordRecentScan(icon: "cylinder", title: filament.name ?? filament.material ?? "Spool", subtitle: "Spool barcode")
                 pendingSpoolBarcode = trimmed
-            } else if Self.isSupportedProductBarcode(trimmed) {
+            } else if filament == nil, isProductBarcode {
                 // An unknown product barcode reuses Barcode Intake, which
                 // asks the operator to map it to a filament (persisting the
                 // GTIN server-side) before importing a spool.
@@ -249,10 +257,12 @@ final class ScanViewModel {
         }
     }
 
-    /// Mirrors the server's `GtinNormalizer` for scanned codes: digits with
+    /// A stricter subset of the server's `GtinNormalizer`: digits with only
     /// optional space/dash separators forming a GTIN-8/12/13/14 with a valid
-    /// GS1 mod-10 check digit. Only these values can be persisted as a
-    /// filament barcode mapping by `POST /api/spoolman/barcodes`.
+    /// GS1 mod-10 check digit. The server strips any non-digit, so this
+    /// narrower shape keeps arbitrary text from being treated as a product
+    /// barcode. Only such values are offered for persistence through
+    /// `POST /api/spoolman/barcodes`.
     nonisolated static func isSupportedProductBarcode(_ code: String) -> Bool {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 64,

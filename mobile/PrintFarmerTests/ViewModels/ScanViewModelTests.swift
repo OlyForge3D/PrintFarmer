@@ -59,7 +59,7 @@ final class ScanViewModelTests: XCTestCase {
 
     @MainActor
     func testDispatchPrinterDeepLinkIsNotRoutedFromSpoolScanner() async {
-        let (viewModel, _, spoolService) = makeSubject()
+        let (viewModel, barcodeService, spoolService) = makeSubject()
 
         await viewModel.dispatch("printfarmer://printer/\(UUID().uuidString)/ready")
 
@@ -68,7 +68,42 @@ final class ScanViewModelTests: XCTestCase {
         guard case .unknownCode = viewModel.pendingOutcome else {
             return XCTFail("Expected .unknownCode outcome for a non-spool code")
         }
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "non-spool deep links must never reach barcode resolution")
         XCTAssertFalse(spoolService.listSpoolsCalled)
+    }
+
+    @MainActor
+    func testPrinterDeepLinkWhoseDigitsFormAKnownGtinNeverOpensIntake() async {
+        // The server's GTIN normalizer strips non-digits; this printer UUID's
+        // digits are the valid, mapped UPC-A 850078714923.
+        let (viewModel, barcodeService, spoolService) = makeSubject()
+        barcodeService.filamentToResolve = makeFilament(id: 9, name: "PETG Blue")
+
+        await viewModel.dispatch("printfarmer://printer/85007871-4923-aaaa-aaaa-aaaaaaaaaaaa")
+
+        guard case .unknownCode = viewModel.pendingOutcome else {
+            return XCTFail("Expected .unknownCode outcome for a printer link")
+        }
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "a printer link must never create a spool")
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
+        XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty)
+        XCTAssertTrue(barcodeService.importCalls.isEmpty)
+        XCTAssertFalse(spoolService.listSpoolsCalled)
+    }
+
+    @MainActor
+    func testNonProductCodeResolvedByPermissiveServerDoesNotOpenIntake() async {
+        let (viewModel, barcodeService, _) = makeSubject()
+        barcodeService.filamentToResolve = makeFilament(id: 9, name: "PETG Blue")
+
+        await viewModel.dispatch("LOT/850078714923")
+
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "only supported product barcodes may open intake")
+        guard case .unknownCode = viewModel.pendingOutcome else {
+            return XCTFail("Expected .unknownCode outcome for a non-product code")
+        }
+        XCTAssertTrue(barcodeService.importCalls.isEmpty)
     }
 
     // MARK: - Structured spool QR/deep-link recognition with active-server existence confirmation
