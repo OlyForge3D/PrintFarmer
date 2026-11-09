@@ -106,6 +106,7 @@ describe('CustomFieldsAdminPage shared admin patterns', () => {
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: 'Add Field' }));
+    expect(screen.getByRole('checkbox', { name: 'Required' })).toBeInTheDocument();
     await user.type(screen.getByLabelText(/^Field Name/), 'Build Plate Code');
 
     expect(screen.getByLabelText(/^Field Key/)).toHaveValue('build-plate-code');

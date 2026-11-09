@@ -18,16 +18,80 @@ const worker = {
 
 export const toolbarAdminSeeds: Record<string, unknown> = {
   '/api/printers': [printer],
-  '/api/settings/metadata': [{
-    key: 'General', className: 'GeneralSettings', displayName: 'Farm identity',
-    description: 'Farm identity and defaults.', group: 'General', order: 1,
-    properties: [{
-      name: 'farmName', type: 'String', attributes: [],
-      display: { name: 'Farm name', inputType: 'Text' },
-    }],
-  }],
-  '/api/settings/groups': [{ key: 'General', displayName: 'General', order: 1 }],
-  '/api/settings': { General: { farmName: 'Fixture farm' } },
+  '/api/settings/metadata': [
+    {
+      key: 'General', className: 'GeneralSettings', displayName: 'Farm identity',
+      description: 'Farm identity and defaults.', group: 'General', order: 1,
+      properties: [{
+        name: 'farmName', type: 'String', attributes: [],
+        display: { name: 'Farm name', inputType: 'Text' },
+      }],
+    },
+    {
+      key: 'System', className: 'SystemSettings', displayName: 'System settings',
+      description: 'Network discovery configuration.', group: 'System', order: 2,
+      properties: [
+        {
+          name: 'discoveryEnabled', type: 'Boolean', attributes: [],
+          display: { name: 'Network discovery enabled', inputType: 'Boolean' },
+        },
+        {
+          name: 'discoverySubnets', type: 'String[]', attributes: [],
+          display: { name: 'Discovery subnets', inputType: 'Subnet', isMulti: true },
+        },
+      ],
+    },
+    {
+      key: 'Operations', className: 'OperationsSettings', displayName: 'Automation settings',
+      description: 'Automated cost calculation defaults.', group: 'Operations', order: 3,
+      properties: [{
+        name: 'enableAutomaticCostCalculation', type: 'Boolean', attributes: [],
+        display: { name: 'Automatic cost calculation', inputType: 'Boolean' },
+      }],
+    },
+    {
+      key: 'Slicing', className: 'SlicingSettings', displayName: 'Slicer defaults',
+      description: 'Default slicing parameters.', group: 'Slicing', order: 4,
+      properties: [{
+        name: 'defaultInfillDensity', type: 'Number', attributes: [],
+        display: { name: 'Default infill density', inputType: 'Number', unit: '%' },
+      }],
+    },
+    {
+      key: 'Integrations', className: 'IntegrationSettings', displayName: 'Integration defaults',
+      description: 'External service connection defaults.', group: 'Integrations', order: 5,
+      properties: [{
+        name: 'defaultConnectionTimeoutSeconds', type: 'Number', attributes: [],
+        display: { name: 'Default connection timeout', inputType: 'Number', unit: 'seconds' },
+      }],
+    },
+  ],
+  '/api/settings/groups': [
+    { key: 'General', displayName: 'General', order: 1 },
+    { key: 'System', displayName: 'System', order: 2 },
+    { key: 'Operations', displayName: 'Operations', order: 3 },
+    { key: 'Slicing', displayName: 'Slicing', order: 4 },
+    { key: 'Integrations', displayName: 'Integrations', order: 5 },
+  ],
+  '/api/settings': {
+    General: { farmName: 'Fixture farm' },
+    System: { discoveryEnabled: true, discoverySubnets: ['192.0.2.0/24'] },
+    Operations: { enableAutomaticCostCalculation: true },
+    Slicing: { defaultInfillDensity: 20 },
+    Integrations: { defaultConnectionTimeoutSeconds: 30 },
+  },
+  '/api/settings/security/password-policy': {
+    minLength: 8,
+    requireUppercase: false,
+    requireLowercase: false,
+    requireDigit: false,
+    requireSymbol: false,
+  },
+  '/api/spoolman/config': { baseUrl: '' },
+  '/api/admin/integrations/home-assistant/settings': { enabled: false, baseUrl: '', tokenMasked: '' },
+  '/api/admin/integrations/telegram/settings': {
+    enabled: false, chatId: '', botTokenMasked: '', includeSnapshots: false,
+  },
   '/api/settings/farm': {
     electricityRatePerKwh: 0.15, defaultMachineHourlyRate: 1,
     averagePrinterWattage: 150, canWrite: true, rowVersion: 'fixture',
@@ -119,6 +183,36 @@ export const toolbarAdminSeeds: Record<string, unknown> = {
   }],
   '/api/workers/': [worker],
   '/api/workers/by-status/Online': [worker],
+  '/api/bed-types': [],
+  '/api/nfc-devices': [],
+  '/api/nfc/bindings': [],
+  '/api/printer-groups': [],
+  '/api/custom-fields/definitions': [],
+  '/api/webhooks': [],
+  '/api/webhooks/event-types': [],
+  '/api/admin/roles': [],
+  '/api/admin/permissions/catalog': { resources: [] },
+  '/api/quotas': [],
+  '/api/users': [],
+  '/api/users/roles': [],
+  '/api/tags': [],
+  '/api/3d-models': [],
+  '/api/gcode-files/query': { files: [], totalCount: 0, page: 1, pageSize: 50 },
+  '/api/slicer/profiles/library-hierarchy': { byHierarchy: {} },
+  '/api/slicer/profiles/extended': {
+    processProfiles: [],
+    filamentProfiles: [],
+    machineProfiles: [],
+  },
+  '/api/slicer/profiles/custom': {
+    profiles: [], totalCount: 0, machineProfileCount: 0, processProfileCount: 0, filamentProfileCount: 0,
+  },
+  '/api/slicers/engines': [],
+  '/api/3d-models/picker': [],
+  '/api/printers/demo-1/details': {
+    id: 'demo-1', name: 'Atlas', backend: 'Moonraker',
+    modelName: 'Elegoo Centauri Carbon', manufacturerName: 'Elegoo',
+  },
   '/api/slice/my-jobs': [],
   '/api/admin/security/login-audit': {
     items: Array.from({ length: 50 }, (_, index) => ({
@@ -163,6 +257,41 @@ export const toolbarAdminStates = [
   { name: 'settings-passkeys', path: '/settings', tab: 'Passkeys', ready: 'Fixture security key', filtersDisclosureCount: 0 },
   { name: 'admin-hub', path: '/admin', ready: 'Database', filtersDisclosureCount: 0 },
   { name: 'admin-farm-settings', path: '/admin/settings', ready: 'Electricity', filtersDisclosureCount: 0 },
+  {
+    name: 'admin-system-settings',
+    path: '/admin/settings?tab=general&sub=system&field=System.discoverySubnets',
+    ready: 'Discovery subnets',
+    filtersDisclosureCount: 0,
+  },
+  {
+    name: 'admin-automation-settings',
+    path: '/admin/settings?tab=general&sub=automation&field=Operations.enableAutomaticCostCalculation',
+    ready: 'Automatic cost calculation',
+    filtersDisclosureCount: 0,
+  },
+  {
+    name: 'admin-slicing-defaults',
+    path: '/admin/settings?tab=slicing&sub=defaults&field=Slicing.defaultInfillDensity',
+    ready: 'Default infill density',
+    filtersDisclosureCount: 0,
+  },
+  {
+    name: 'admin-connections',
+    path: '/admin/settings?tab=integrations&sub=connections&field=Integrations.defaultConnectionTimeoutSeconds',
+    ready: 'Default connection timeout',
+    filtersDisclosureCount: 0,
+  },
+  { name: 'admin-user-accounts', path: '/admin/settings?tab=users&sub=accounts', ready: 'No users found', filtersDisclosureCount: 0 },
+  { name: 'admin-tags', path: '/admin/settings?tab=data&sub=tags', ready: 'No tags created yet', filtersDisclosureCount: 0 },
+  { name: 'admin-slicer-profiles', path: '/admin/settings?tab=slicing&sub=profiles', ready: 'Showing 0 profile(s)', filtersDisclosureCount: 0 },
+  { name: 'admin-bed-types', path: '/admin/settings?tab=slicing&sub=bed-types', ready: 'No bed types configured', filtersDisclosureCount: 0 },
+  { name: 'admin-nfc-devices', path: '/admin/settings?tab=hardware&sub=nfc', ready: 'No NFC devices registered', filtersDisclosureCount: 0 },
+  { name: 'admin-nfc-bindings', path: '/admin/settings?tab=hardware&sub=nfc-bindings', ready: 'No NFC tags have been bound yet', filtersDisclosureCount: 0 },
+  { name: 'admin-printer-groups', path: '/admin/settings?tab=hardware&sub=printer-groups', ready: 'No printer groups yet', filtersDisclosureCount: 0 },
+  { name: 'admin-custom-fields', path: '/admin/settings?tab=hardware&sub=custom-fields', ready: 'No printer custom fields', filtersDisclosureCount: 0 },
+  { name: 'admin-webhooks', path: '/admin/settings?tab=integrations&sub=webhooks', ready: 'No webhooks configured', filtersDisclosureCount: 0 },
+  { name: 'admin-roles', path: '/admin/settings?tab=users&sub=roles', ready: 'No roles yet', filtersDisclosureCount: 0 },
+  { name: 'admin-quotas', path: '/admin/settings?tab=quotas', ready: 'No quotas configured yet', filtersDisclosureCount: 0 },
   { name: 'admin-status', path: '/admin/status', ready: 'fixture-host', filtersDisclosureCount: 0 },
   { name: 'admin-workers', path: '/admin/workers', ready: 'Fixture worker', filtersDisclosureCount: 1 },
   { name: 'admin-worker-jobs', path: '/admin/workers?workerTab=jobs', ready: 'New Slice Job', filtersDisclosureCount: 0 },

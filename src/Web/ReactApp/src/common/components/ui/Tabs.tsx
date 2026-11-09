@@ -80,6 +80,7 @@ export interface TabProps {
   disabled?: boolean;
   icon?: React.ReactNode;
   className?: string;
+  ariaControls?: boolean;
   onFocus?: React.FocusEventHandler<HTMLButtonElement>;
   onPointerEnter?: React.PointerEventHandler<HTMLButtonElement>;
 }
@@ -90,6 +91,7 @@ const Tab: React.FC<TabProps> = ({
   disabled = false,
   icon,
   className,
+  ariaControls = true,
   onFocus,
   onPointerEnter,
 }) => {
@@ -142,7 +144,7 @@ const Tab: React.FC<TabProps> = ({
       id={`tab-${id}`}
       data-tab-id={id}
       aria-selected={isActive}
-      aria-controls={`panel-${id}`}
+      aria-controls={ariaControls && isActive ? `panel-${id}` : undefined}
       tabIndex={disabled ? -1 : isActive ? 0 : -1}
       disabled={disabled}
       onClick={() => !disabled && setActiveTab(id)}

@@ -50,7 +50,7 @@ function getStatusIndicator(printer: PrinterMaintenanceStatus): {
     return { color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15', label: 'In Maintenance' };
   }
   if (printer.criticalAlerts > 0) {
-    return { color: 'text-pf-error', bgColor: 'bg-pf-error/10', label: 'Critical' };
+    return { color: 'text-pf-error-text', bgColor: 'bg-pf-error/10', label: 'Critical' };
   }
   if (printer.highAlerts > 0) {
     return { color: 'text-pf-warning', bgColor: 'bg-pf-warning/10', label: 'Needs Attention' };
@@ -78,7 +78,6 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         hover:border-pf-accent/50 hover:shadow-md transition-all duration-200
         focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg-0
       `}
-      aria-label={`${printer.printerName} - ${status.label}`}
     >
       {/* Header with status indicator */}
       <div className="flex items-start justify-between mb-3">
@@ -128,7 +127,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {hasAlerts && (
           <div className="flex items-center gap-1">
             {printer.criticalAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error rounded-sm">
+              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error-text rounded-sm">
                 {printer.criticalAlerts}
               </span>
             )}

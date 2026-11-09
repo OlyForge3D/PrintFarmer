@@ -801,7 +801,7 @@ export function Layout() {
           className={clsx(
             'flex h-9 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
             isActive
-              ? 'bg-pf-accent-bg/18 text-pf-accent'
+              ? 'bg-pf-accent-bg/18 text-pf-accent-text'
               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
           )}
         >
@@ -825,7 +825,7 @@ export function Layout() {
         className={clsx(
           'group flex items-center rounded-sm border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
           isActive
-            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent-text'
             : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
         )}
       >
@@ -1032,6 +1032,7 @@ export function Layout() {
               className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
               title={isConnected ? 'Connected' : 'Disconnected'}
               aria-label={isConnected ? 'Connected' : 'Disconnected'}
+              role="status"
             />
           </div>
 

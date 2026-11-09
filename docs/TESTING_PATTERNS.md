@@ -2,6 +2,49 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## UI visual and accessibility coverage
+
+`src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles Layer 1 inventory
+rows to executable candidate scenarios, explicit unverified coverage, or
+platform blockers. Its source SHA binds the catalog to the transferred
+inventory; the row count is not a count of every route alias, modal caller, or
+state/theme/viewport combination.
+
+From `src/Web/ReactApp`, run:
+
+```bash
+npm run test:ui-coverage:catalog
+npm run test:ui-coverage:candidate
+npm run test:ui-coverage:visual
+```
+
+The catalog test checks stable IDs, explicit dispositions, and one approval
+record per candidate. Candidate tests capture attachments under Playwright's
+test-results directory, use synthetic read-only app responses, load the pinned
+local theme fonts, and run axe WCAG 2.2 A/AA rules. These scans are a
+machine-detected defect check, not WCAG conformance or runtime-completeness
+certification.
+
+Candidate images are never baselines. The visual gate uses
+`toHaveScreenshot` with `updateSnapshots: 'none'` and fails closed unless the
+matching approval record has been reviewed, includes an approver/time/source
+SHA, matches the inventory and render-profile IDs, and points to a checked-in
+image. Human approval must compare the candidate against the actual product
+contract; do not approve a screenshot merely because the test produced it.
+Current approval records are pending, so the visual gate is intentionally
+blocked until reviewed baselines exist.
+
+The inventory contains 138 rows: 98 web, 3 public-site, and 37 native iOS.
+Executable candidates currently cover 97 web rows and all 3 public-site rows;
+the remaining web row, OrcaImportWizard, is blocked. The candidate catalog
+contains 165 executable scene candidates, all pending human review. These are
+sampled candidates, not every route alias or state/theme/viewport combination;
+unrepresented web states and overlays remain explicitly unverified. Native
+entries remain blocked until the approved Xcode 26.6 / iOS 26.5 runner is
+available. Tests use no production accounts, secrets, printer commands, profile
+mutations, or real hardware. This is a first executable slice, not a completed
+full-coverage gate.
+
 ## TestEmulator sensor fixtures
 
 The in-process TestEmulator backend exposes seven stable sensor IDs through the

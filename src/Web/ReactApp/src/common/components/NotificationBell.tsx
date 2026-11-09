@@ -24,12 +24,14 @@ export function NotificationBell({ buttonClassName }: NotificationBellProps) {
           buttonClassName
         )}
         title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}` : 'Notifications'}
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
+        aria-label={unreadCount > 0
+          ? `Notifications, ${unreadCount} unread notification${unreadCount !== 1 ? 's' : ''}`
+          : 'Notifications'}
       >
-        <BellIcon className="h-5 w-5" />
+        <span aria-hidden="true"><BellIcon className="h-5 w-5" /></span>
         {unreadCount > 0 && (
           // Count badge: circle at one digit, pill at two or three.
-          <span data-pf-radius="full" className="absolute -top-1 -right-1 bg-pf-accent-bg text-[var(--pf-on-accent)] text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center leading-none">
+          <span aria-hidden="true" data-pf-radius="full" className="absolute -top-1 -right-1 bg-pf-accent-bg text-[var(--pf-on-accent)] text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center leading-none">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}

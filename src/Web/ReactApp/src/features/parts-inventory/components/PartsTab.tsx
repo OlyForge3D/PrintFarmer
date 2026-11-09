@@ -184,7 +184,7 @@ export function PartsTab() {
                       {part.needsReorder && (
                         <Badge variant="warning" size="sm">
                           <span className="inline-flex items-center gap-1">
-                            <AlertIcon className="w-3 h-3" ariaLabel="" />
+                            <AlertIcon className="w-3 h-3" ariaLabel="Reorder required" />
                             Reorder
                           </span>
                         </Badge>

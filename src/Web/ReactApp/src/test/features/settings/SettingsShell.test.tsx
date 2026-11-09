@@ -501,6 +501,16 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('connects the active settings sub-page tab to its tab panel', () => {
+    renderSettings('/settings?scope=user&tab=profile&sub=preferences', 'user');
+
+    const activeTab = screen.getByRole('tab', { name: 'Preferences' });
+    const panel = screen.getByRole('tabpanel');
+
+    expect(activeTab).toHaveAttribute('aria-controls', panel.id);
+    expect(panel).toHaveAttribute('aria-labelledby', activeTab.id);
+  });
+
   it('separates Appearance from Preferences without changing the default URL', () => {
     renderSettings('/settings?scope=user&tab=profile&sub=preferences', 'user');
     expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();

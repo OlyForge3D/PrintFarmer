@@ -49,10 +49,10 @@ export function ForgotPasswordPage() {
             <div className="flex items-center gap-2">
               <PrintFarmerLogo size={32} className="mr-2" />
               <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-              <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+              <h1 className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
                 <EmailIcon className="h-5 w-5 mr-2" />
                 Reset Email Sent
-              </span>
+              </h1>
             </div>
             <Button
               type="button"
@@ -100,10 +100,10 @@ export function ForgotPasswordPage() {
           <div className="flex items-center gap-2">
             <PrintFarmerLogo size={32} className="mr-2" />
             <span className="text-xl font-bold tracking-tight text-pf-accent">PRINTFARMER</span>
-            <span className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
+            <h1 className="text-xl font-semibold text-pf-text-primary flex items-center ml-3">
               <EmailIcon className="h-5 w-5 mr-2" />
               Forgot Password
-            </span>
+            </h1>
           </div>
           <Button
             type="button"

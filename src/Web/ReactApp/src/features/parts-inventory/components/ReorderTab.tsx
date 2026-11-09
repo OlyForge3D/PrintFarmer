@@ -104,7 +104,7 @@ export function ReorderTab({ onOpenSkusTab }: ReorderTabProps) {
                     size="sm"
                   >
                     <span className="inline-flex items-center gap-1">
-                      <AlertIcon className="w-3 h-3" ariaLabel="" />
+                      <AlertIcon className="w-3 h-3" ariaLabel="Stock warning" />
                       {candidate.onHand <= 0 ? 'Out of stock' : 'Below reorder pt'}
                     </span>
                   </Badge>

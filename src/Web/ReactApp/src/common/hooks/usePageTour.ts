@@ -75,6 +75,7 @@ export function usePageTour({
     }
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const targetsWithoutExpanded = new WeakSet<Element>();
 
     const config: Config = {
       showProgress: true,
@@ -84,6 +85,16 @@ export function usePageTour({
       stageRadius: 8,
       popoverClass: 'pf-tour-popover',
       steps: buildDriverSteps(),
+      onHighlightStarted: (element) => {
+        if (element && !element.hasAttribute('aria-expanded')) {
+          targetsWithoutExpanded.add(element);
+        }
+      },
+      onHighlighted: (element) => {
+        if (element && targetsWithoutExpanded.has(element)) {
+          element.removeAttribute('aria-expanded');
+        }
+      },
       onDestroyed: () => {
         setHasSeenTour(true);
         setTourSeen(tourId, true);

@@ -17,7 +17,7 @@ const alertStyles: Record<AlertType, string> = {
   success: 'bg-pf-success-bg border-pf-success text-pf-text-primary',
   error: 'bg-pf-error-bg border-pf-error-border text-pf-error-text',
   info: 'bg-pf-accent-bg border-pf-accent text-pf-text-primary',
-  warning: 'bg-pf-warning border-pf-warning text-pf-warning-text'
+  warning: 'bg-pf-warning-bg border-pf-warning-border text-pf-warning-text'
 };
 
 export const Alert: React.FC<AlertProps> = ({
