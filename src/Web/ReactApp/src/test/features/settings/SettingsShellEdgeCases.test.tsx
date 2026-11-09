@@ -181,8 +181,9 @@ describe('SettingsShell edge cases', () => {
   it('resolves unified configuration deep links that include both tab and sub params', () => {
     renderSettings('/admin/settings?scope=system&tab=users&sub=roles');
 
-    expect(getCategoryButton('Roles & Permissions')).toHaveAttribute('aria-current', 'page');
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Users' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Roles & Permissions' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('navigation', { name: 'Settings categories' })).not.toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=roles');

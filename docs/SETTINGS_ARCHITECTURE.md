@@ -46,7 +46,7 @@ The settings routes share one engine with route-locked scopes:
 | Route | Scope | Access | Rendered by |
 |---|---|---|---|
 | `/settings` | `user` | Authenticated | SettingsShell, personal content only |
-| `/admin/settings` | `system` | Per-destination grants | SettingsShell, Farm & Admin Settings |
+| `/admin/settings` | `system` | Per-destination grants | SettingsShell, focused settings category |
 | `/admin` | None | Authenticated, destinations filtered | AdminControlCenterPage |
 | `/admin/status` | None | `system_settings:admin` | SystemStatusPage |
 | `/admin/workers` | None | `dispatch-settings:manage` | WorkerManagementPage |
@@ -55,9 +55,9 @@ The settings routes share one engine with route-locked scopes:
 | `/admin/power-monitors` | None | `power_monitors:admin` | PowerMonitorSettingsPage |
 
 Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings`
-operates under `system` scope with unified grouped direct-leaf navigation,
-single-pane mounting (no horizontal settings sub-tabs or scope switcher),
-accessible mobile drawer navigation, persistent cross-group workspace search,
+operates under `system` scope with one focused category and its accessible sub-tabs,
+single-pane mounting (no cross-category sidebar or scope switcher),
+persistent cross-category workspace search,
 in-memory draft transition safety, and single page-level save presentation.
 Its header search placeholder includes the platform's command-palette shortcut
 (`Ctrl K`, or `⌘K` on macOS), without a redundant Search settings button.
@@ -68,27 +68,34 @@ without clearing its query; other editable fields retain their existing key hand
 Personal `/settings` (`user` scope) remains a separate profile workspace with
 category and sub-tab navigation.
 
-## Grouped Direct-Leaf Navigation & Single-Pane Mounting
+## Category Cards & Single-Pane Mounting
 
-Under `/admin/settings` (`system` scope), settings navigation is organized into 8 display groups consuming `adminDestinations.ts`:
+The Admin Control Center exposes the seven existing `system` categories as cards.
+Labels, descriptions and icons come from the settings category registry; each card
+opens its first accessible sub-page, using the existing per-destination grants.
 
-1. **Farm**: Farm Defaults (`gen-farm`)
-2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`). Cameras is no longer an admin destination; it is the top-level `/cameras` page (`?view=all|location|printer`, #3332).
-4. **Automation & costs**: Automation & Costs (`auto-costs`)
-5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
-6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
-7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`), Quotas (`quotas`)
-8. **System**: System Config (`gen-system`)
+| Card / `tab` | Existing sub-pages / `sub` |
+|---|---|
+| General / `general` | Farm (`farm`), System (`system`), Automation (`automation`) |
+| Slicing / `slicing` | Defaults (`defaults`), Bed Types (`bed-types`), Slicer Profiles (`profiles`) |
+| Hardware / `hardware` | NFC Devices (`nfc`), Printer Groups (`printer-groups`), NFC Bindings (`nfc-bindings`), Custom Fields (`custom-fields`) |
+| Integrations / `integrations` | External Services (`connections`), Webhooks (`webhooks`) |
+| Quotas / `quotas` | Quota management (no sub-page) |
+| Users / `users` | Accounts (`accounts`), Roles (`roles`) |
+| Data / `data` | Tags (`tags`) |
 
-In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
+Each category page names the category in its one page-level heading and offers
+a back link to the Admin Control Center. Only its permission-filtered sub-tabs
+are shown; exactly one content page mounts at a time. The tabs stay available
+during search. Global search and the command palette retain cross-category
+deep links, including `q` and section-qualified `field` targets.
 
-The desktop sidebar is capped at the available frame height and scrolls
-independently of the settings content. Short lists retain their natural height.
-Destinations below People & access, including **System → System Config**, remain
-reachable by scrolling or keyboard navigation.
+Locations, Catalog and Power Monitors remain standalone destinations in the
+admin hub and search, not new settings-shell sub-pages. The global sidebar,
+user-menu links and pinned destinations keep their existing routes.
+Personal preferences remain under `/settings`, not these category cards.
 
-Printer-file discovery controls live under **System Config → Files → Printer
+Printer-file discovery controls live under **General → System → Files → Printer
 file index** (`/admin/settings?scope=system&tab=general&sub=system`).
 They remain subject to `system_settings:admin`; the On printers tab does not
 carry a separate discovery-settings shortcut.
@@ -105,12 +112,14 @@ missing record. Linking or assigning an inaccessible or missing printer returns
 a uniform 403 without changing records. Firmware heartbeat and scan routes retain
 their separate device-token authentication contract.
 
-## Mobile Grouped Navigation
+## Responsive Navigation
 
-Mobile navigation renders a labeled grouped dropdown control (`<nav aria-label="Settings categories">`) containing all accessible display groups and leaves:
-
-- **Escape Key & Focus Restoration**: Pressing Escape or selecting a destination closes the drawer and restores focus to the mobile control trigger.
-- **Accessibility**: Includes proper ARIA expanded states, list semantics, and high-contrast match highlighting for search queries.
+System category pages use the same focused sub-tab control at desktop and mobile
+widths, wrapping labels onto additional rows rather than hiding destinations
+offscreen. Sub-tab selection retains system workspace search and keyboard focus.
+Denied deep links offer buttons for the permitted sections, including a sole
+permitted section. Personal settings retain their existing
+category navigation. Search retains keyboard selection and match highlighting.
 
 ## Safe Draft Transitions & Partial Saves
 
@@ -689,7 +698,7 @@ Consequences, all enforced by tests:
 - **The settings workspace is not a second admin directory.**
   `getSettingsGroupedDestinations` returns only destinations embedded under
   `/admin/settings`. Catalog, Locations and Power Monitors carry a `settingsGroup` for
-  classification but render their own pages, so the sidebar no longer lists them.
+  classification but render their own pages, not settings category sub-tabs.
 - **One authorized exception, and it is a recovery affordance, not a directory.** A
   delegate whose only configuration grant is one of those standalone destinations can
   still open the settings shell but has no category to render. `SettingsShell` shows the
