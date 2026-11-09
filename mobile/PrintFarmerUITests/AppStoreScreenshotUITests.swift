@@ -465,7 +465,10 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
         try tapRequired(job)
         try require(app.buttons["jobDetail.harvestToInventory"])
         try capture("18-job-detail")
-        try tapRequired(app.buttons["jobDetail.harvestToInventory"])
+        let harvest = app.buttons["jobDetail.harvestToInventory"]
+        let detail = app.scrollViews.containing(.button, identifier: "jobDetail.harvestToInventory").firstMatch
+        for _ in 0..<4 where !harvest.isHittable { detail.swipeUp() }
+        try tapRequired(harvest)
         try require(app.navigationBars["Harvest Plate"])
         try require(app.textFields["harvest.binCode"])
         try require(app.buttons["harvest.submit"])

@@ -122,10 +122,10 @@ jobs:
             build-for-testing 2>&1 | tee build/ui-coverage/build.log
       - name: Capture isolated native candidates and audit accessibility
         id: capture
-        timeout-minutes: 25
+        timeout-minutes: 36
         run: |
           set -o pipefail
-          python3 scripts/run-tests.py -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+          python3 scripts/run-tests.py --invocation-timeout 2100 -- -project PrintFarmer.xcodeproj -scheme PrintFarmer \
             -testPlan CatalogVisualAccessibility -testLanguage en -testRegion US \
             -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \

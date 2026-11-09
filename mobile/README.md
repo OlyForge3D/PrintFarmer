@@ -607,7 +607,9 @@ Parts and completed-history captures additionally require
 the existing visual-acceptance and App Store test gates. Only those launches
 replace the relevant services with fixed-date, no-network demo data; the
 legacy seven-image capture remains unchanged. Harvest and adjustment forms
-are inspected, never submitted.
+are inspected, never submitted. After capturing job detail, the collector
+scrolls its containing sheet at most four times to reveal the harvest action;
+the normal hittability check still fails if it cannot be reached.
 
 Native candidates run XCTest's `.all` accessibility audit against settled
 screens, collect **every** finding into the scenario receipt, then require the
@@ -632,6 +634,11 @@ system-dark variants, VoiceOver traversal or physical-keyboard behavior.
 
 The check retains screenshots, hashed JSON receipts, host/Xcode/runtime/device
 metadata, `.xcresult`, build/test logs and runner timing/events for three days.
+The operator capture invocation has a 2100-second ceiling inside a 36-minute
+step: the 1440-second default truncated a measured iPhone run before bundle
+finalization. Root capture retains the default 1440-second invocation ceiling
+and 25-minute step. Both remain bounded by the 120-minute family job, with
+unchanged audit, settling and failure rules.
 `report.json` separates blocked rows, partially exercised rows, native
 scenarios and pending human goldens. Missing goldens are non-blocking
 `awaiting-human-golden`, never an automatic baseline pass. No branch-protection

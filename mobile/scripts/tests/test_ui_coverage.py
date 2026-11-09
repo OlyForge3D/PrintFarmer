@@ -310,8 +310,11 @@ class CoverageReportTests(unittest.TestCase):
         operator_capture = workflow.split("        id: capture\n")[1].split("      - name:")[0]
         root_capture = workflow.split("        id: capture_root\n")[1].split("      - name:")[0]
         for capture in (operator_capture, root_capture):
-            self.assertIn("timeout-minutes: 25", capture)
             self.assertIn("test-without-building", capture)
+        self.assertIn("timeout-minutes: 36", operator_capture)
+        self.assertIn("scripts/run-tests.py --invocation-timeout 2100 --", operator_capture)
+        self.assertIn("timeout-minutes: 25", root_capture)
+        self.assertNotIn("--invocation-timeout", root_capture)
         self.assertIn("-only-testing:PrintFarmerUITests/CatalogVisualAccessibilityUITests",
                       operator_capture)
         self.assertIn("-only-testing:PrintFarmerTests/UITestBootstrapTests", operator_capture)
@@ -332,6 +335,15 @@ class CoverageReportTests(unittest.TestCase):
         self.assertIn("CatalogVisualAccessibilityUITests", default["testTargets"][1]["skippedTests"])
         self.assertIn("CatalogRootVisualAccessibilityUITests", default["testTargets"][1]["skippedTests"])
         source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
+        # Lexical navigation guard, not native proof of visibility or successful scrolling.
+        history_capture = source.split("    func testCaptureHistoryJobAndHarvest()")[1].split("    func ")[0]
+        self.assertIn('app.scrollViews.containing(.button, identifier: "jobDetail.harvestToInventory")',
+                      history_capture)
+        self.assertIn("for _ in 0..<4 where !harvest.isHittable { detail.swipeUp() }", history_capture)
+        self.assertLess(history_capture.index('capture("18-job-detail")'),
+                        history_capture.index("detail.swipeUp()"))
+        self.assertLess(history_capture.index("detail.swipeUp()"),
+                        history_capture.index("tapRequired(harvest)"))
         store_class = source.split("final class AppStoreScreenshotUITests:")[1].split("@MainActor")[0]
         self.assertNotIn("testCaptureCatalog", store_class)
         self.assertIn("testCaptureStoreScreens", store_class)
