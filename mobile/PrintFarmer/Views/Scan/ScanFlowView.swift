@@ -4,9 +4,10 @@ import SwiftUI
 ///
 /// The underlying dispatcher and scanner service are unchanged, so camera
 /// permission is still requested only after the operator taps the primary Scan
-/// control. Printer and spool deep links dismiss this sheet and continue in
-/// their owning tab; bin, part, barcode-intake, and unrecognized results remain
-/// in-place sheets.
+/// control. The mobile app manages spools only, so every scan resolves to a
+/// spool: existing spools dismiss this sheet and open in the Filament tab,
+/// while product barcodes (known or new), NFC new-spool data, and unrecognized
+/// codes remain in-place sheets.
 struct ScanFlowView: View {
     let externalScanRequestID: UUID?
 
@@ -20,21 +21,8 @@ struct ScanFlowView: View {
         self.externalScanRequestID = externalScanRequestID
     }
 
-    private var partsInventoryEnabled: Bool {
-        services.capabilitiesService.resolved.printedPartsInventoryEnabled
-    }
-
-    private var scanDescription: String {
-        partsInventoryEnabled
-            ? "Scan a printer, bin, part, or spool code. PrintFarmer figures out what it is."
-            : "Scan a printer or spool code. PrintFarmer figures out what it is."
-    }
-
-    private var scanHint: String {
-        partsInventoryEnabled
-            ? "Scans a printer, bin, part, or spool code and opens the matching screen."
-            : "Scans a printer or spool code and opens the matching screen."
-    }
+    private let scanDescription = "Scan a spool label or filament barcode. New barcodes can be added as spools."
+    private let scanHint = "Scans a spool label or filament barcode and opens the spool, or offers to add a new spool."
 
     var body: some View {
         NavigationStack {
@@ -82,19 +70,8 @@ struct ScanFlowView: View {
                 content: { outcome in
                     Group {
                         switch outcome {
-                        case .bin(let bin):
-                            if partsInventoryEnabled {
-                                BinScanResultView(bin: bin)
-                            }
-                        case .part(let part):
-                            if partsInventoryEnabled {
-                                PartScanResultView(part: part)
-                            }
                         case .unknownCode(let code):
-                            UnrecognizedScanView(
-                                code: code,
-                                printedPartsInventoryEnabled: partsInventoryEnabled
-                            )
+                            UnrecognizedScanView(code: code)
                         case .newSpool(let data):
                             AddSpoolView(scannedData: data)
                         }
@@ -125,10 +102,8 @@ struct ScanFlowView: View {
             .task {
                 viewModel.configure(
                     scanner: services.barcodeScannerService,
-                    partsInventoryService: services.partsInventoryService,
                     barcodeIntakeService: services.barcodeIntakeService,
                     spoolService: services.spoolService,
-                    printedPartsInventoryEnabled: partsInventoryEnabled,
                     waitForScannerPresentation: {
                         #if canImport(UIKit)
                         await ScanPresentationReadiness.waitUntilReady()
@@ -147,9 +122,6 @@ struct ScanFlowView: View {
             }
             .onChange(of: externalScanRequestID) {
                 startExternalScanIfNeeded()
-            }
-            .onChange(of: partsInventoryEnabled) { _, isEnabled in
-                viewModel.setPrintedPartsInventoryEnabled(isEnabled)
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
@@ -220,10 +192,10 @@ struct ScanFlowView: View {
             }
             .disabled(viewModel.isScanning)
             .accessibilityLabel("Scan NFC tag")
-            .accessibilityHint("Reads a printer or filament spool tag.")
+            .accessibilityHint("Reads a filament spool tag.")
             .accessibilityIdentifier("scan.nfc")
             Label(
-                "Read a printer or spool tag, or wave near a printer tag to open it from iOS.",
+                "Read a spool tag to open the spool or add a new one.",
                 systemImage: "wave.3.right"
             )
             .font(.footnote)
@@ -231,12 +203,6 @@ struct ScanFlowView: View {
             .accessibilityIdentifier("scan.nfc.hint")
         } header: {
             Text("NFC Tags")
-        } footer: {
-            Text(
-                partsInventoryEnabled
-                    ? "iOS handles NFC printer tags automatically. Bins and parts use QR/barcode only."
-                    : "iOS handles NFC printer tags automatically."
-            )
         }
     }
 
@@ -276,14 +242,11 @@ struct ScanFlowView: View {
 
 private struct UnrecognizedScanView: View {
     let code: String
-    let printedPartsInventoryEnabled: Bool
 
     @Environment(\.dismiss) private var dismiss
 
     private var description: String {
-        printedPartsInventoryEnabled
-            ? "\"\(code)\" didn't match a printer, bin, part, or known spool barcode."
-            : "\"\(code)\" didn't match a printer or known spool barcode."
+        "\"\(code)\" isn't a spool label or a filament product barcode (UPC/EAN/GTIN)."
     }
 
     var body: some View {
