@@ -1620,15 +1620,22 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       );
     }
     if (!canAccessActiveTab) {
+      // A wholly denied category has no permitted sub-pages, so recovery
+      // offers the other categories this user may open instead.
+      const recoveryOptions = visibleSubPages.length > 0
+        ? visibleSubPages.map((subPage) => ({ key: subPage.id, label: subPage.label, categoryId: currentCategory.id, subPageId: subPage.id }))
+        : accessibleCategories
+          .filter((category) => category.id !== currentCategory.id)
+          .map((category) => ({ key: category.id, label: category.label, categoryId: category.id, subPageId: category.subPages[0]?.id }));
       return (
         <SettingsSection>
           <div className="py-8 text-center text-pf-text-secondary">
             <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
-            {isAdminRoute && visibleSubPages.length > 0 && (
+            {isAdminRoute && recoveryOptions.length > 0 && (
               <nav aria-label="Available settings sections" className="mt-4 flex flex-wrap justify-center gap-2">
-                {visibleSubPages.map((subPage) => (
-                  <Button key={subPage.id} variant="subtle" onClick={() => handleCategoryChange(currentCategory.id, subPage.id)}>
-                    {subPage.label}
+                {recoveryOptions.map((option) => (
+                  <Button key={option.key} variant="subtle" onClick={() => handleCategoryChange(option.categoryId, option.subPageId)}>
+                    {option.label}
                   </Button>
                 ))}
               </nav>
@@ -1653,7 +1660,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, handleCategoryChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
+  }, [accessibleCategories, activeSubPageLabel, canAccessActiveTab, currentCategory, handleCategoryChange, isAdminRoute, isAuthLoading, renderedContentKey, visibleSubPages]);
 
   const pageTitle = isAdminRoute && accessibleCategories.length > 0
     ? currentCategory.label
@@ -1814,7 +1821,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                           ref={sectionHeadingRef}
                           tabIndex={-1}
                           className={showVisibleSubPageHeading
-                            ? 'mb-4 w-fit rounded-md text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
+                            ? 'mb-4 w-fit rounded-md px-1 py-0.5 text-lg font-semibold leading-none text-pf-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'
                             : 'sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent'}
                         >
                           {contentHeading}

@@ -739,6 +739,24 @@ describe('SettingsShell', () => {
     expect(heading.classList.contains('sr-only')).toBe(screen.queryByRole('tablist') !== null);
   });
 
+  it('offers keyboard recovery from a wholly denied category to permitted categories only', async () => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === 'telegram' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=users&sub=accounts');
+    expect(screen.getByText(/don't have permission to view/)).toBeInTheDocument();
+    const recoveryNav = screen.getByRole('navigation', { name: 'Available settings sections' });
+    const options = within(recoveryNav).getAllByRole('button');
+    expect(options.map((option) => option.textContent)).toEqual(['Integrations']);
+    options[0].focus();
+    await userEvent.setup().keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search')).toHaveTextContent('tab=integrations');
+      expect(screen.getByTestId('location-search')).toHaveTextContent('sub=connections');
+    });
+    expect(screen.queryByText(/don't have permission to view/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'External Services' })).toHaveFocus();
+  });
+
   it.each([
     ['general', 'farm', ['Farm Defaults', 'System Config', 'Automation & Costs']],
     ['slicing', 'defaults', ['Defaults', 'Bed Types', 'Slicer Profiles']],
