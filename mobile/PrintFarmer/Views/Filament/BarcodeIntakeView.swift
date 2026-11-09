@@ -5,11 +5,12 @@ struct BarcodeIntakeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = BarcodeIntakeViewModel()
 
-    /// A code already resolved by the unified scan station (#714) as a
-    /// known spool barcode. When set, this view auto-processes it once on
-    /// appearance instead of waiting for another manual "Scan Next" tap —
-    /// this reuses the existing intake flow as-is rather than duplicating
-    /// its resolve/import logic in `ScanViewModel`.
+    /// A product barcode handed off by the shared scanner — either already
+    /// mapped to a filament or an unknown valid GTIN. When set, this view
+    /// auto-processes it once on appearance: known barcodes import a spool,
+    /// and unknown ones present the mapping flow so the operator chooses (or
+    /// creates) the filament before the barcode is saved and a spool imported.
+    /// This reuses the intake flow rather than duplicating it in `ScanViewModel`.
     var initialBarcode: String?
 
     init(initialBarcode: String? = nil) {
