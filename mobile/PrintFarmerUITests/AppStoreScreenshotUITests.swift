@@ -211,7 +211,7 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
             return
         }
         if capturesCatalog {
-            for (label, data) in [("previous", penultimate), ("last", previous)] {
+            for (label, data) in [("audited", auditedFrame), ("previous", penultimate), ("last", previous)] {
                 if let data {
                     let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
                     attachment.name = "catalog-unsettled-\(name)-\(label)"
@@ -229,6 +229,10 @@ class ScreenshotCaptureUITestCase: QueueUITestBase {
                 issues.lifetime = .keepAlways
                 add(issues)
             }
+            let stage = auditedFrame == nil ? "initial rendering" : "restoration of the audited rendering"
+            catalogAuditFailures.append(contentsOf: auditIssues.map { "\(name): \($0)" })
+            catalogAuditFailures.append("\(name) did not settle within 20 seconds for \(stage).")
+            return
         }
         let stage = auditedFrame == nil ? "initial rendering" : "restoration of the audited rendering"
         XCTFail("Store screen \(name) did not settle within 20 seconds for \(stage).")

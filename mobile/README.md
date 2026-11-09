@@ -617,7 +617,10 @@ original PNG bytes to settle again before a confirming identical frame.
 Initial settling and post-audit restoration each have a 20-second budget and
 require three consecutive identical comparisons; the audit runs once per
 candidate, not repeatedly during its temporary Dynamic Type changes.
-Restoration failures retain their audit findings as diagnostics, not receipts.
+Settling failures retain the pre-audit image (when available), final two
+frames, accessibility tree and audit findings as diagnostics, not receipts.
+They join the test's failure ledger so later scenes are still attempted;
+the test fails in teardown and the reporter rejects the missing receipt.
 The four held root states run as independent tests: an animated splash cannot
 hide first-server, backend-loading or snapshot-activation results.
 Findings are handled for reporting, not waived:

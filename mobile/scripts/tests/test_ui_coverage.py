@@ -159,6 +159,15 @@ class CoverageReportTests(unittest.TestCase):
         self.assertIn("identicalFrames = 0", restoration)
         self.assertIn("continue", restoration)
         self.assertIn('issues.name = "catalog-unsettled-\\(name)-audit-issues"', capture)
+        failure = capture.split('for (label, data) in [("audited", auditedFrame)')[1]
+        self.assertIn('("previous", penultimate), ("last", previous)', failure)
+        catalog_failure = failure.split('\n        }\n        let stage')[0]
+        self.assertIn('catalogAuditFailures.append(contentsOf: auditIssues.map', catalog_failure)
+        self.assertIn('catalogAuditFailures.append("\\(name) did not settle', catalog_failure)
+        self.assertIn("\n            return", catalog_failure)
+        self.assertNotIn("XCTFail", catalog_failure)
+        self.assertNotIn("catalog-receipt-", catalog_failure)
+        self.assertIn('XCTFail("Store screen', failure)
         root = source.split("final class CatalogRootVisualAccessibilityUITests:")[1]
         for method, scenario in [
             ("testCaptureLaunchSplash", "33-launch-splash"),
