@@ -221,7 +221,7 @@ remain required hosted CI evidence, not a claimed local pass.
 | `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites + restore-free `validate-compliance.mjs --skip-nuget`; no .NET restore. |
 | `dependency-compliance` | `want_dependency_compliance`: any .NET input, npm manifest/lockfile, or `compliance` bucket changed OR full-safe | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — NuGet and npm dependency-license/provenance inventory, including stale npm license-text fallbacks (`LICENSE_POLICY_STALE`). See #1395, #3150. |
 | `dotnet-format`         | any .NET input changed OR full-safe (same as `want_dotnet_build`) | Asserts SDK >= 10.0.200, restores, then runs `dotnet format ./farm-web.sln --verify-no-changes --no-restore`. Runs in parallel with `dotnet-build`. See #2978. |
-| `frontend`              | React or `compliance` inputs changed OR full-safe            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
+| `frontend`              | React, `site/`, or `compliance` inputs changed OR full-safe   | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`; coverage first runs the zero-diagnostic test gate, application typecheck, and source-coverage guards through `pretest:coverage`. |
 | `dotnet-build`          | any .NET input changed OR full-safe                          | Restores/builds once, explicitly builds IntegrationTests when selected, and uploads one compressed tarball per selected project. |
 | `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | Restores runner-local project metadata, downloads its compiled project, then runs `has-pending-model-changes --no-build`. |
 | `dotnet-test`           | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per project/shard; downloads the archive keyed by `matrix.project`, then executes the test DLL directly. |
@@ -297,7 +297,7 @@ classify.
 
 | Bucket and exact path selector | Frontend | .NET build | .NET tests | Migration drift | Full-safe |
 | --- | :---: | :---: | --- | --- | :---: |
-| `frontend`: `src/Web/**` | ✓ | | | | |
+| `frontend`: `src/Web/**`, `site/**` | ✓ | | | | |
 | `wire_contract`: `fixtures/wire-contracts/manifest.json`, `fixtures/wire-contracts/api/**/*.json` | | ✓ | `Farm.Web.Api.Tests` | | |
 | `api`: `src/api/**` | | ✓ | `Farm.Web.Api.Tests`, `Farm.Slicer.Module.Tests`, `Farm.Web.IntegrationTests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests` | `AppPg`, `AppSqlServer` | |
 | `infra`: `src/infra/**` | | ✓ | `Farm.Infrastructure.Tests`, `Farm.Slicer.Module.Tests`, `Farm.OrcaSlicer.Worker.Tests`, `Farm.Modules.SmartPlug.Tests`, `Farm.Modules.PrintQueue.Tests`, `Farm.Modules.Maintenance.Tests`, `Farm.Modules.Calibration.Tests`, `Farm.Modules.Devices.Tests`, `Farm.Modules.Gcode.Tests`, `Farm.Modules.Identity.Tests`, `Farm.Modules.Inventory.Tests`, `Farm.Modules.Administration.Tests`, `Farm.Modules.Observability.Tests`, `Farm.Modules.Printers.Tests`, `Farm.Backend.Plugins.Tests` | `AppPg`, `AppSqlServer` | |

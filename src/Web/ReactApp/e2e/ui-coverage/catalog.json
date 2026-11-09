@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "source": {
-    "artifact": "notes/printfarmer-ui-inventory-layer1.md",
+    "artifact": "unavailable (original notes/printfarmer-ui-inventory-layer1.md was not transferred)",
     "snapshot": "fce568d72a78600ecb845749a6f0bf6544d7b5d8",
     "sha256": "C19D17D5A6F18898126127FD766E0D2FED14FE7C5142443906AC61155B2373EE"
   },
@@ -170,8 +170,8 @@
     { "id": "ios.native-alerts", "platform": "ios", "kind": "overlay-family", "inventoryRow": "Native alerts/dialogs from server, printer, job, scan, bin, part, and harvest flows", "evidenceFlags": ["V", "U"], "disposition": "unverified", "reason": "Owned by separate iOS track; excluded from web coverage totals and gates. No eligible macOS simulator runner; every listed alert remains mapped to this blocked row, not certified." },
     { "id": "ios.native-inline-panels", "platform": "ios", "kind": "overlay-family", "inventoryRow": "Instrument controls, sensors, emergency stop, guided/expert, multi-toolhead and camera panels", "evidenceFlags": ["V", "U"], "disposition": "unverified", "reason": "Owned by separate iOS track; excluded from web coverage totals and gates. No eligible macOS simulator runner; component declarations do not establish visual/runtime coverage." },
 
-    { "id": "site.landing", "platform": "site", "kind": "static-page", "inventoryRow": "site/index.html landing page and anchors", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.landing.dark.desktop"], "reason": "Single viewport and dark appearance candidate; no baseline has human approval." },
-    { "id": "site.privacy", "platform": "site", "kind": "static-page", "inventoryRow": "site/privacy/index.html", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.privacy.dark.mobile", "site.privacy.light.mobile"], "reason": "Two appearance candidates at one mobile viewport; no baseline has human approval." },
-    { "id": "site.image-notices", "platform": "site", "kind": "static-page", "inventoryRow": "site/image-notices.html image credits", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.image-notices.dark.desktop"], "reason": "Single viewport and dark appearance candidate; no baseline has human approval." }
+    { "id": "site.landing", "platform": "site", "kind": "static-page", "inventoryRow": "site/index.html landing page and anchors", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.landing.dark.desktop"], "reason": "Single desktop viewport and dark appearance candidate." },
+    { "id": "site.privacy", "platform": "site", "kind": "static-page", "inventoryRow": "site/privacy/index.html", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.privacy.dark.mobile", "site.privacy.light.mobile"], "reason": "Two appearance candidates at one mobile viewport." },
+    { "id": "site.image-notices", "platform": "site", "kind": "static-page", "inventoryRow": "site/image-notices.html image credits", "evidenceFlags": ["V", "U"], "disposition": "candidate", "scenarioIds": ["site.image-notices.dark.desktop"], "reason": "Single desktop viewport and dark appearance candidate." }
   ]
 }

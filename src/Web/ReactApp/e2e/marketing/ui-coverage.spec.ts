@@ -16,7 +16,7 @@ test('executable Playwright scenarios exactly match catalog candidates', () => {
 });
 
 for (const scene of visualScenes) {
-  test(`candidate ${scene.id} (not a golden)`, async ({ page, context, browser }, testInfo) => {
+  test(`candidate ${scene.id}`, async ({ page, context, browser }, testInfo) => {
     testInfo.annotations.push({ type: 'scenario-id', description: scene.id });
     const sceneContext = scene.coarsePointer
       ? await browser.newContext({
@@ -42,6 +42,12 @@ for (const scene of visualScenes) {
           Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - document.documentElement.clientWidth,
         );
         expect(horizontalOverflow, 'The 200%-equivalent CSS viewport must not introduce horizontal overflow').toBeLessThanOrEqual(1);
+      }
+      if (scene.viewport.width === 320) {
+        const horizontalOverflow = await scenePage.evaluate(() =>
+          Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - document.documentElement.clientWidth,
+        );
+        expect(horizontalOverflow, 'The 320px CSS viewport must not introduce horizontal overflow').toBeLessThanOrEqual(1);
       }
       await saveCandidate(scenePage, testInfo, scene.id);
       await assertAccessibility(scenePage);

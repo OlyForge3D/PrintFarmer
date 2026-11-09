@@ -37,7 +37,6 @@
     "test:e2e:monolith-smoke": "playwright test e2e/monolith-smoke/ --project=chromium --workers=1",
     "test:ui-coverage:catalog": "node --test e2e/ui-coverage/catalog-check.mjs",
     "test:ui-coverage:candidate": "playwright test --config=e2e/marketing/playwright.config.ts e2e/marketing/ui-coverage.spec.ts",
-    "test:ui-coverage:visual": "playwright test --config=e2e/marketing/playwright.config.ts e2e/marketing/visual-gate.spec.ts",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:test": "node ./scripts/typecheck-tests.mjs",
     "typecheck:app": "node ./scripts/typecheck-app.mjs",

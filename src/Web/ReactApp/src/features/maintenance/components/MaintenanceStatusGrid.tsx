@@ -128,22 +128,26 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
           <div className="flex items-center gap-1">
             {printer.criticalAlerts > 0 && (
               <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error-text rounded-sm">
-                {printer.criticalAlerts}
+                <span className="sr-only">Critical alerts: {printer.criticalAlerts}</span>
+                <span aria-hidden="true">{printer.criticalAlerts}</span>
               </span>
             )}
             {printer.highAlerts > 0 && (
               <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
-                {printer.highAlerts}
+                <span className="sr-only">High alerts: {printer.highAlerts}</span>
+                <span aria-hidden="true">{printer.highAlerts}</span>
               </span>
             )}
             {printer.mediumAlerts > 0 && (
               <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
-                {printer.mediumAlerts}
+                <span className="sr-only">Medium alerts: {printer.mediumAlerts}</span>
+                <span aria-hidden="true">{printer.mediumAlerts}</span>
               </span>
             )}
             {printer.lowAlerts > 0 && (
               <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
-                {printer.lowAlerts}
+                <span className="sr-only">Low alerts: {printer.lowAlerts}</span>
+                <span aria-hidden="true">{printer.lowAlerts}</span>
               </span>
             )}
           </div>

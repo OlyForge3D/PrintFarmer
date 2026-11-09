@@ -4,49 +4,52 @@ This document captures common patterns and best practices discovered during test
 
 ## UI visual and accessibility coverage
 
-`src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles Layer 1 inventory
-rows to executable candidate scenarios, explicit unverified coverage, or
-platform blockers. Its source SHA binds the catalog to the transferred
-inventory; the row count is not a count of every route alias, modal caller, or
-state/theme/viewport combination.
-
-From `src/Web/ReactApp`, run:
+`src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles inventory rows to
+executable candidate scenarios, explicit unverified coverage, or platform
+blockers. The original transferred Layer 1 inventory note is unavailable, so
+the catalog's historical snapshot and SHA-256 are retained as unverified
+provenance metadata; they are not independently recomputed or bound to an
+available artifact. The catalog check instead validates current coverage
+against routes, settings, static pages, and curated surfaces in the source via
+`e2e/ui-coverage/inventory-contract.mjs`. The row count is not a count of every
+route alias, modal caller, or state/theme/viewport combination.
 
 ```bash
 npm run test:ui-coverage:catalog
 npm run test:ui-coverage:candidate
-npm run test:ui-coverage:visual
 ```
 
-The catalog test checks stable IDs, explicit dispositions, one approval record
-per candidate, and the clean source-commit contract. Candidate tests capture
-attachments under Playwright's test-results directory, use synthetic read-only
-app responses, load the pinned local theme fonts, and run axe WCAG 2.2 A/AA
-rules. These scans are a machine-detected defect check, not WCAG conformance or
-runtime-completeness certification.
+The frontend CI job validates the catalog; the separate
+`UI coverage candidates (Windows Chromium)` job runs the candidate suite.
+Candidate screenshots are attached to Playwright results and uploaded as a
+short-retention CI artifact for inspection; they are not committed baselines
+and do not gate changes through pixel comparisons.
 
-Candidate images are never baselines. The visual gate uses
-`toHaveScreenshot` with `updateSnapshots: 'none'` and fails closed unless the
-matching approval record has been reviewed, includes an approver/time/source
-commit, matches the exact clean Git commit, inventory and render-profile IDs,
-and points to the exact checked-in image resolved by Playwright. The visual
-gate refuses to run from a dirty working tree so a review cannot accidentally
-approve code that is not represented by the source commit. Human approval must
-compare the candidate against the actual product contract; do not approve a
-screenshot merely because the test produced it.
-Current approval records are pending, so the visual gate is intentionally
-blocked until reviewed baselines exist.
+The catalog test checks stable IDs and explicit dispositions, and verifies
+source-derived inventory coverage. Candidate tests capture full-page screenshots
+under Playwright's `test-results` directory, use synthetic read-only app
+responses, load the pinned local theme fonts, and run axe WCAG 2.2 A/AA rules.
+They also retain the 320px and 200%-equivalent horizontal-overflow checks and
+explicit light/dark, high-contrast, and system-contrast scenes. These are
+machine-detected checks, not WCAG conformance or runtime-completeness
+certification.
+
+Pixel-diff regression detection against committed PNG baselines is intentionally
+not provided. Screenshot artifacts are evidence for inspection only; their
+presence does not prove visual correctness, exercise every interaction, or
+approve a change. The historical catalog hash is not independently verified
+because its original source note is unavailable; current inventory coverage is
+instead checked against source-derived inputs.
 
 The inventory contains 138 rows: 98 web, 3 public-site, and 37 native iOS.
 Executable candidates currently cover 97 web rows and all 3 public-site rows;
 the remaining web row, OrcaImportWizard, is blocked. The candidate catalog
-contains 165 executable scene candidates, all pending human review. These are
-sampled candidates, not every route alias or state/theme/viewport combination;
-unrepresented web states and overlays remain explicitly unverified. Native
-entries remain blocked until the approved Xcode 26.6 / iOS 26.5 runner is
-available. Tests use no production accounts, secrets, printer commands, profile
-mutations, or real hardware. This is a first executable slice, not a completed
-full-coverage gate.
+contains 165 executable scenes. These are sampled candidates, not every route
+alias or state/theme/viewport combination; unrepresented web states and overlays
+remain explicitly unverified. Native entries remain unverified until the
+approved Xcode 26.6 / iOS 26.5 runner is available. Tests use no production
+accounts, secrets, printer commands, profile mutations, or real hardware. This
+is a first executable slice, not a completed full-coverage gate.
 
 ## TestEmulator sensor fixtures
 
