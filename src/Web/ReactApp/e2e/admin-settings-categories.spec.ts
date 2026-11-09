@@ -64,6 +64,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       const screenshot = testInfo.outputPath('control-center.png');
       await page.screenshot({ path: screenshot, fullPage: true });
       await testInfo.attach('Control Center', { path: screenshot, contentType: 'image/png' });
+      const cards = page.getByTestId('admin-hub-settings');
+      await cards.scrollIntoViewIfNeeded();
+      const cardsScreenshot = testInfo.outputPath('settings-cards.png');
+      await cards.screenshot({ path: cardsScreenshot });
+      await testInfo.attach('Settings category cards', { path: cardsScreenshot, contentType: 'image/png' });
       expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
     });
 
