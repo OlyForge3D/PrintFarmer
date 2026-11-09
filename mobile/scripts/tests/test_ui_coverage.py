@@ -304,6 +304,13 @@ class CoverageReportTests(unittest.TestCase):
         self.assertEqual(catalog["testTargets"][1]["selectedTests"], ["UITestBootstrapTests"])
         self.assertEqual(catalog["testTargets"][1]["target"], default["testTargets"][0]["target"])
         workflow = (MOBILE.parent / ".github/workflows/ios-ui-coverage.yml").read_text()
+        family_job = workflow.split("  candidates:\n")[1]
+        job_budget = int(family_job.split("    timeout-minutes: ")[1].splitlines()[0])
+        step_budgets = [
+            int(line.split(": ")[1]) for line in family_job.splitlines()
+            if line.startswith("        timeout-minutes: ")
+        ]
+        self.assertGreaterEqual(job_budget - sum(step_budgets), 20)
         self.assertIn("build-for-testing", workflow)
         self.assertIn("test-without-building", workflow)
         self.assertEqual(workflow.count("-testPlan CatalogVisualAccessibility"), 3)

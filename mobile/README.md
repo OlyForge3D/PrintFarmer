@@ -637,8 +637,10 @@ metadata, `.xcresult`, build/test logs and runner timing/events for three days.
 The operator capture invocation has a 2100-second ceiling inside a 36-minute
 step: the 1440-second default truncated a measured iPhone run before bundle
 finalization. Root capture retains the default 1440-second invocation ceiling
-and 25-minute step. Both remain bounded by the 120-minute family job, with
-unchanged audit, settling and failure rules.
+and 25-minute step. The 131-minute family job reserves at least 20 minutes
+beyond the explicit setup/build/capture step budgets for checkout, simulator
+startup, exports, reporting and artifact upload. Audit, settling and failure
+rules are unchanged.
 `report.json` separates blocked rows, partially exercised rows, native
 scenarios and pending human goldens. Missing goldens are non-blocking
 `awaiting-human-golden`, never an automatic baseline pass. No branch-protection

@@ -34,7 +34,7 @@ jobs:
     name: iOS capture and accessibility (${{ matrix.family }})
     needs: contract
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 131
     strategy:
       fail-fast: false
       max-parallel: 1
