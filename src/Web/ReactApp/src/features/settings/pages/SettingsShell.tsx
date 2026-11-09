@@ -1707,7 +1707,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const showSubTabs = !hasNoMatches && canAccessActiveTab && visibleSubPages.length > 1;
   const subTabs = showSubTabs ? (
-      <div className="border-b border-pf-border px-4 pt-4 md:px-6">
+      <nav aria-label={`${currentCategory.label} settings pages`} className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={visibleSubPages}
           activeSubPage={activeSubPage}
@@ -1718,7 +1718,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           searchQuery={query}
           wrap={isAdminRoute}
         />
-      </div>
+      </nav>
     ) : null;
 
   return (
