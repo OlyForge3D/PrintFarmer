@@ -61,7 +61,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         await expect(link).toHaveCount(1);
         await expect(link).toContainText(category.title);
       }
-      await testInfo.attach('Control Center', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+      const screenshot = testInfo.outputPath('control-center.png');
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await testInfo.attach('Control Center', { path: screenshot, contentType: 'image/png' });
       expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
     });
 
@@ -88,7 +90,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         await back.focus();
         await expect(back).toBeFocused();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        await testInfo.attach(category.title, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+        const screenshot = testInfo.outputPath(`${category.id}.png`);
+        await page.screenshot({ path: screenshot, fullPage: true });
+        await testInfo.attach(category.title, { path: screenshot, contentType: 'image/png' });
         expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
       });
     }
