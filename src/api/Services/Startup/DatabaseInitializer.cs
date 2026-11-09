@@ -117,14 +117,12 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
             // Note: Toolhead default components are now resolved within SeedComponentModelsAsync
             // via ResolveToolheadDefaultComponentsFromYamlAsync which reads defaults from toolheads.yaml
-
             _logger.LogInformation("[DB] Successfully seeded from YAML files");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[DB] Failed to seed from YAML files, falling back to hardcoded seed data: {Message}", ex.Message);
         }
-
     }
 
     private async Task SeedAuthenticationDataAsync()
