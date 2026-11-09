@@ -169,6 +169,13 @@ class CoverageReportTests(unittest.TestCase):
             self.assertEqual(body.count("try capture("), 1)
         self.assertNotIn("testCaptureHeldRootStates", root)
 
+    def test_account_navigation_selects_button_not_toolbar_wrapper(self):
+        # The iPad toolbar exposes the identifier on both Other and Button nodes.
+        source = (MOBILE / "PrintFarmerUITests/AppStoreScreenshotUITests.swift").read_text(encoding="utf-8")
+        body = source.split("    private func openAccount() throws {")[1].split("\n    }")[0]
+        self.assertIn('try tapRequired(app.buttons["navigation.account"].firstMatch)', body)
+        self.assertNotIn("descendants(matching: .any)", body)
+
     def test_cli_reports_explicit_blockers_and_rejects_missing_adapter_images(self):
         output = self.root / "report.json"
         command = [sys.executable, str(MOBILE / "scripts/report-ui-coverage.py"),

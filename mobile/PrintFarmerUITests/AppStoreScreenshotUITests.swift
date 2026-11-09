@@ -531,7 +531,7 @@ final class CatalogVisualAccessibilityUITests: ScreenshotCaptureUITestCase {
 
     private func openAccount() throws {
         XCUIDevice.shared.orientation = .portrait
-        try tapRequired(app.descendants(matching: .any)["navigation.account"])
+        try tapRequired(app.buttons["navigation.account"].firstMatch)
         try require(app.navigationBars["Account"])
     }
 
