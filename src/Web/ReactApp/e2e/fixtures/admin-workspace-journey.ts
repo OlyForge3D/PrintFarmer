@@ -18,7 +18,9 @@ export async function assertAdminWorkspaceBoundaries(page: Page) {
   await expect(page.getByRole('link', { name: 'Admin Control Center', exact: true })).toHaveAttribute('href', '/admin');
 
   await page.goto('/admin/settings?scope=system');
-  await expect(page.getByRole('heading', { level: 1, name: 'System', exact: true })).toHaveCount(1);
+  await expect(page).toHaveURL(/\/admin\/settings\?scope=system&tab=system$/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+  await expect(page.getByRole('heading', { level: 1, name: 'System', exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Search all settings' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Search all settings' })).toHaveAttribute(
     'placeholder',

@@ -6,7 +6,7 @@
  * fixture: the attention-first hub is reachable, the worker jobs URL is owned
  * by WorkerManagementPage's `workerTab`, standalone Power Monitors remains a
  * configuration destination outside the settings shell, and personal settings
- * stays separate from Farm & Admin Settings.
+ * stays separate from the category-titled admin settings workspace.
  */
 import { test } from './fixtures/monolith-setup';
 import { assertAdminWorkspaceBoundaries } from '../fixtures/admin-workspace-journey';
