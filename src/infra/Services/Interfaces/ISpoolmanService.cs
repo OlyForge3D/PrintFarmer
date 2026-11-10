@@ -98,6 +98,21 @@ public interface ISpoolmanService
     Task<SpoolmanSpoolDto?> GetSpoolByIdAsync(int spoolId, CancellationToken ct);
 
     /// <summary>
+    /// Resolves an NFC tag UID through Spoolman's persistent tag mapping.
+    /// </summary>
+    Task<SpoolmanTagScanResultDto> ScanTagAsync(SpoolmanTagScanRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Associates an NFC tag UID with a Spoolman spool.
+    /// </summary>
+    Task LinkTagToSpoolAsync(int spoolId, string uid, CancellationToken ct);
+
+    /// <summary>
+    /// Removes an NFC tag UID association from a Spoolman spool.
+    /// </summary>
+    Task UnlinkTagFromSpoolAsync(int spoolId, string uid, CancellationToken ct);
+
+    /// <summary>
     /// Creates a new spool in Spoolman. Returns the created spool with its ID.
     /// </summary>
     Task<SpoolmanSpoolDto> CreateSpoolInSpoolmanAsync(SpoolmanSpoolRequest request, CancellationToken ct);

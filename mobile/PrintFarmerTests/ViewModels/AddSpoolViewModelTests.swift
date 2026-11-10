@@ -302,6 +302,35 @@ final class AddSpoolViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.extruderTempC, 230)
     }
 
+    func testPrefilledFilamentLinkLocksSelectionAndCreatesSpoolForLinkedFilament() async {
+        let scannedData = ScannedSpoolData(
+            material: "PETG",
+            colorHex: "#FF0000",
+            vendor: "Hatchbox",
+            weight: 750,
+            diameter: 1.75,
+            temperature: 230,
+            spoolmanId: nil,
+            filamentId: 900
+        )
+        viewModel.prefill(from: scannedData)
+        viewModel.filaments = [
+            SpoolmanFilament(
+                id: 42, name: "PLA", material: "PLA", colorHex: nil,
+                vendor: nil, density: nil, diameter: nil, weight: nil,
+                spoolWeight: nil, price: nil, settingsExtruderTemp: nil,
+                settingsBedTemp: nil, articleNumber: nil, gtin: nil,
+                comment: nil, multiColorHexes: nil, externalId: nil
+            )
+        ]
+        mockService.spoolToReturn = makeTestSpool(id: 1)
+
+        XCTAssertTrue(viewModel.isFilamentSelectionLocked)
+        await viewModel.saveSpool()
+
+        XCTAssertEqual(mockService.createSpoolCalledWith?.filamentId, 900)
+    }
+
     func testPrefillSkipsNilFields() {
         let scannedData = ScannedSpoolData(
             material: nil, colorHex: nil, vendor: nil,

@@ -180,6 +180,7 @@
 		A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */; };
 		A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */; };
 		A5DAEF79F0E6036756BD6A96 /* SpoolInventoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9A3AD3F5C5DD33CAF7C6CB /* SpoolInventoryView.swift */; };
+		E1F7A8B9C0D1E2F3A4B5C6D8 /* NFCTagLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F7A8B9C0D1E2F3A4B5C6D7 /* NFCTagLinkView.swift */; };
 		A70A710000000000A0000001 /* AttentionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000001 /* AttentionModels.swift */; };
 		A70A710000000000A0000002 /* AttentionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000002 /* AttentionServiceProtocol.swift */; };
 		A70A710000000000A0000003 /* AttentionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000003 /* AttentionService.swift */; };
@@ -436,6 +437,7 @@
 		F1A7B8C9D0E1F2A3B4C5D6E7 /* SpoolPickerViewModelScanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B8C9D0E1F2A3B4C5D6E7F8 /* SpoolPickerViewModelScanTests.swift */; };
 		F1C3D4E5F6A7B8C9D0E1F2A3 /* NFCTagParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParserTests.swift */; };
 		F1C9D0E1F2A3B4C5D6E7F8A9 /* MockSpoolService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D0E1F2A3B4C5D6E7F8A9B0 /* MockSpoolService.swift */; };
+		E8C3A6B10000000000000001 /* NFCTagLinkViewSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C3A6B10000000000000002 /* NFCTagLinkViewSnapshotTests.swift */; };
 		F1E5F6A7B8C9D0E1F2A3B4C5 /* MockScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F6A7B8C9D0E1F2A3B4C5D6 /* MockScannerService.swift */; };
 		F2A1B2C3D4E5F6A7B8C9D0E1 /* AddSpoolViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B1C2D3E4F5A6B7C8D9E0F1 /* AddSpoolViewModelTests.swift */; };
 		F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D1E2F3A4B5C6D7E8F9A0B1 /* SpoolInventoryViewModelTests.swift */; };
@@ -582,6 +584,7 @@
 		AF7870000000000000000020 /* OfflineWriteAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteAdapterTests.swift; path = PrintFarmerTests/Services/OfflineWriteAdapterTests.swift; sourceTree = SOURCE_ROOT; };
 		007F057316513D6585B3D53A /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		013F7A319FAE93072F4272D2 /* AddSpoolView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSpoolView.swift; sourceTree = "<group>"; };
+		E1F7A8B9C0D1E2F3A4B5C6D7 /* NFCTagLinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NFCTagLinkView.swift; sourceTree = "<group>"; };
 		016588B049630508F9B77403 /* LoginViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModelTests.swift; sourceTree = "<group>"; };
 		03EF6ADCC3760C1BFE7D60FB /* SpoolPickerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolPickerViewModel.swift; sourceTree = "<group>"; };
 		051CF8A25906AE585EC15D70 /* JobAnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobAnalyticsModels.swift; sourceTree = "<group>"; };
@@ -857,6 +860,7 @@
 		F1B8C9D0E1F2A3B4C5D6E7F8 /* SpoolPickerViewModelScanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolPickerViewModelScanTests.swift; sourceTree = "<group>"; };
 		F1D0E1F2A3B4C5D6E7F8A9B0 /* MockSpoolService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSpoolService.swift; sourceTree = "<group>"; };
 		F1D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NFCTagParserTests.swift; sourceTree = "<group>"; };
+		E8C3A6B10000000000000002 /* NFCTagLinkViewSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NFCTagLinkViewSnapshotTests.swift; sourceTree = "<group>"; };
 		F1F6A7B8C9D0E1F2A3B4C5D6 /* MockScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockScannerService.swift; sourceTree = "<group>"; };
 		F2B1C2D3E4F5A6B7C8D9E0F1 /* AddSpoolViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSpoolViewModelTests.swift; sourceTree = "<group>"; };
 		F2D1E2F3A4B5C6D7E8F9A0B1 /* SpoolInventoryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolInventoryViewModelTests.swift; sourceTree = "<group>"; };
@@ -968,6 +972,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 			isa = PBXGroup;
 			children = (
 				013F7A319FAE93072F4272D2 /* AddSpoolView.swift */,
+				E1F7A8B9C0D1E2F3A4B5C6D7 /* NFCTagLinkView.swift */,
 				BC2000000000000000000007 /* BarcodeIntakeView.swift */,
 				E1F6A7B8C9D0E1F2A3B4C5D6 /* NFCWriteView.swift */,
 				E1B2C3D4E5F6A7B8C9D0E1F2 /* QRScannerView.swift */,
@@ -1375,6 +1380,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				A2B6286100000000000000B1 /* JogSubgroupTests.swift */,
 				D1A6C200000000000000F003 /* PrinterDetailControlsSnapshotTests.swift */,
 				D1A6C200000000000000F011 /* PrinterSensorsSnapshotTests.swift */,
+				E8C3A6B10000000000000002 /* NFCTagLinkViewSnapshotTests.swift */,
 				F25190000000000000000004 /* PrinterFilamentSectionTests.swift */,
 				F25220000000000000000002 /* PrinterDetailPanelsTests.swift */,
 				A78220000000000000000005 /* ShiftTaskViewPresentationTests.swift */,
@@ -1926,6 +1932,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				A1C5DEF1234567890ABC0021 /* PreheatSubgroupTests.swift in Sources */,
 				D1A6C200000000000000F002 /* PrinterDetailControlsSnapshotTests.swift in Sources */,
 				D1A6C200000000000000F010 /* PrinterSensorsSnapshotTests.swift in Sources */,
+				E8C3A6B10000000000000001 /* NFCTagLinkViewSnapshotTests.swift in Sources */,
 				F25190000000000000000104 /* PrinterFilamentSectionTests.swift in Sources */,
 				F25190000000000000000103 /* PrinterFilamentPresentationTests.swift in Sources */,
 				3259A1020000000000000001 /* PrinterDetailSpoolLookupTests.swift in Sources */,
@@ -2121,6 +2128,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				5B82756AC8306EB8A20E68EE /* SpoolServiceProtocol.swift in Sources */,
 				A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */,
 				A5DAEF79F0E6036756BD6A96 /* SpoolInventoryView.swift in Sources */,
+				E1F7A8B9C0D1E2F3A4B5C6D8 /* NFCTagLinkView.swift in Sources */,
 				4FFB267499981D7206071A85 /* AddSpoolView.swift in Sources */,
 				264690BE3784294A9AADB33B /* SpoolPickerViewModel.swift in Sources */,
 				3F2B3B9AEAE8DF4B91541072 /* SpoolInventoryViewModel.swift in Sources */,
