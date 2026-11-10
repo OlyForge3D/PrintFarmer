@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { Button, Input } from '@/common/components/ui';
 import { PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import type { SettingValue } from '@/common/components/SettingsPagelet';
+import type { SettingFieldControlProps, SettingValue } from '@/common/components/SettingsPagelet';
+import { FarmTimeZoneControl } from './FarmTimeZoneControl';
 
 /**
  * Context passed to a section renderer's `extension` so it can read the working
@@ -15,6 +16,7 @@ export interface SectionRendererContext {
 }
 
 export interface SectionRenderer {
+  fieldRenderers?: Record<string, ComponentType<SettingFieldControlProps>>;
   /**
    * Optional bespoke UI rendered inside the section's card body, after the
    * metadata-driven fields. Use this when a section has state that isn't a flat
@@ -194,6 +196,9 @@ function renderMaterialPriceDefaults({ values, onChange }: SectionRendererContex
  * pagelet — that regresses the whole point of this indirection.
  */
 export const sectionRendererRegistry: Record<string, SectionRenderer> = {
+  FarmIdentity: {
+    fieldRenderers: { timeZone: FarmTimeZoneControl },
+  },
   SlicerSettings: {
     extension: renderPerEngine,
   },
