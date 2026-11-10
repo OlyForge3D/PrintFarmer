@@ -83,7 +83,8 @@ public sealed class DatabaseMigrationTests
             "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
-            "20261106201513_AddObicoPrintRouting");
+            "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -821,7 +822,8 @@ public sealed class DatabaseMigrationTests
             "20261104185036_AddBedClearEvaluations",
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
-            "20261106201513_AddObicoPrintRouting");
+            "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1387,6 +1389,7 @@ public sealed class DatabaseMigrationTests
                 "20261104222340_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201434_AddObicoPrintRouting",
+                "20261110024722_AddScanCodeAliases",
             ]
             :
             [
@@ -1435,6 +1438,7 @@ public sealed class DatabaseMigrationTests
                 "20261104222359_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201456_AddObicoPrintRouting",
+                "20261110024727_AddScanCodeAliases",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
