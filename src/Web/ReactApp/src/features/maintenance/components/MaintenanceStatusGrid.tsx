@@ -82,7 +82,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       {/* Header with status indicator */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className={`p-2 rounded-lg ${status.bgColor}`}>
+          <div aria-hidden="true" className={`p-2 rounded-lg ${status.bgColor}`}>
             <PrinterIcon className={`h-5 w-5 ${status.color}`} aria-hidden="true" />
           </div>
           <div className="min-w-0">
@@ -90,10 +90,11 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
               {printer.printerName}
             </h4>
             <p className="text-xs text-pf-text-tertiary flex items-center gap-1">
-              <CircleIcon 
-                className={`h-2 w-2 ${printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary'}`} 
-                aria-hidden="true"
-              />
+              <span aria-hidden="true">
+                <CircleIcon
+                  className={`h-2 w-2 ${printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary'}`}
+                />
+              </span>
               {printer.isOnline ? 'Online' : 'Offline'}
             </p>
           </div>
@@ -111,14 +112,18 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       <div className="flex items-center justify-between">
         {hasAlerts ? (
           <div className="flex items-center gap-2">
-            <AlertCircleIcon className={`h-4 w-4 ${status.color}`} aria-hidden="true" />
+            <span aria-hidden="true">
+              <AlertCircleIcon className={`h-4 w-4 ${status.color}`} />
+            </span>
             <span className="text-sm text-pf-text-secondary">
               {printer.activeAlertCount} alert{printer.activeAlertCount !== 1 ? 's' : ''}
             </span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <CheckCircleIcon className="h-4 w-4 text-pf-success" aria-hidden="true" />
+            <span aria-hidden="true">
+              <CheckCircleIcon className="h-4 w-4 text-pf-success" />
+            </span>
             <span className="text-sm text-pf-text-secondary">Healthy</span>
           </div>
         )}
@@ -126,28 +131,32 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {/* Severity breakdown badges */}
         {hasAlerts && (
           <div className="flex items-center gap-1">
+            <span className="sr-only">
+              {[
+                printer.criticalAlerts > 0 ? `Critical alerts: ${printer.criticalAlerts}` : '',
+                printer.highAlerts > 0 ? `High alerts: ${printer.highAlerts}` : '',
+                printer.mediumAlerts > 0 ? `Medium alerts: ${printer.mediumAlerts}` : '',
+                printer.lowAlerts > 0 ? `Low alerts: ${printer.lowAlerts}` : '',
+              ].filter(Boolean).join('; ')}
+            </span>
             {printer.criticalAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error-text rounded-sm">
-                <span className="sr-only">Critical alerts: {printer.criticalAlerts}</span>
-                <span aria-hidden="true">{printer.criticalAlerts}</span>
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error-text rounded-sm">
+                {printer.criticalAlerts}
               </span>
             )}
             {printer.highAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
-                <span className="sr-only">High alerts: {printer.highAlerts}</span>
-                <span aria-hidden="true">{printer.highAlerts}</span>
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
+                {printer.highAlerts}
               </span>
             )}
             {printer.mediumAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
-                <span className="sr-only">Medium alerts: {printer.mediumAlerts}</span>
-                <span aria-hidden="true">{printer.mediumAlerts}</span>
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
+                {printer.mediumAlerts}
               </span>
             )}
             {printer.lowAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
-                <span className="sr-only">Low alerts: {printer.lowAlerts}</span>
-                <span aria-hidden="true">{printer.lowAlerts}</span>
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
+                {printer.lowAlerts}
               </span>
             )}
           </div>
