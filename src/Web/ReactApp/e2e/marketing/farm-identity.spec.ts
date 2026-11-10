@@ -46,6 +46,13 @@ for (const viewport of [
         if (route.request().method() === 'POST') {
           const draft = route.request().postDataJSON();
           expect(draft.rowVersion).toBe(identity.rowVersion);
+          if (draft.timeZone === 'Invalid/Timezone') {
+            await route.fulfill({ status: 400, json: {
+              message: 'Please correct the timezone.',
+              errors: { 'FarmIdentity.timeZone': 'Enter a valid IANA timezone.' },
+            } });
+            return;
+          }
           identity = { farmName: draft.farmName, timeZone: draft.timeZone, rowVersion: 'saved' };
         }
         await route.fulfill({ json: identity });
@@ -90,7 +97,16 @@ for (const viewport of [
     expect(violations).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`farm-identity-${viewport.width}.png`), fullPage: true });
 
+    await page.getByRole('searchbox', { name: 'Filter timezones' }).fill('NoMatchingCity');
+    await expect(page.getByRole('status').filter({ hasText: 'No matching timezones.' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`farm-identity-no-match-${viewport.width}.png`), fullPage: true });
     await page.getByRole('button', { name: 'Enter timezone manually' }).click();
+    const manualTimezone = page.getByRole('textbox', { name: 'Farm timezone' });
+    await manualTimezone.fill('Invalid/Timezone');
+    await page.getByRole('button', { name: /save/i }).click();
+    await expect(manualTimezone).toHaveAttribute('aria-invalid', 'true');
+    await expect(manualTimezone).toHaveAccessibleDescription(/Enter a valid IANA timezone\./);
+    await page.screenshot({ path: testInfo.outputPath(`farm-identity-invalid-${viewport.width}.png`), fullPage: true });
     await page.getByRole('textbox', { name: 'Farm timezone' }).fill('US/Pacific');
     await checkTargetSize(page.getByRole('textbox', { name: 'Farm timezone' }), 'Manual timezone input');
     await checkTargetSize(page.getByRole('button', { name: 'Choose from timezone list' }), 'List entry toggle');

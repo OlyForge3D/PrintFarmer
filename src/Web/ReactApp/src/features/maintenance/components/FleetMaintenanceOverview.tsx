@@ -64,9 +64,9 @@ interface SeverityBadgeProps {
 
 const severityColors: Record<SeverityBadgeProps['variant'], string> = {
   critical: 'bg-pf-error/10 text-pf-error-text border-pf-error/30',
-  high: 'bg-pf-warning/10 text-pf-warning border-pf-warning/30',
-  medium: 'bg-pf-warning/10 text-pf-warning border-pf-warning/30',
-  low: 'bg-pf-accent-bg/15 text-pf-accent border-pf-accent/30',
+  high: 'bg-pf-warning/10 text-pf-warning-text border-pf-warning/30',
+  medium: 'bg-pf-warning/10 text-pf-warning-text border-pf-warning/30',
+  low: 'bg-pf-accent-bg/15 text-pf-accent-text border-pf-accent/30',
 };
 
 function SeverityBadge({ label, count, variant }: SeverityBadgeProps) {
