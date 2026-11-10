@@ -1238,6 +1238,49 @@ public class SpoolmanController(
         }
     }
 
+    /// <summary>Checks all referencing spools, including archived spools, before confirmation.</summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpGet("filaments/{id:int}/delete-preview")]
+    [ProducesResponseType(typeof(SpoolmanFilamentDeletePreview), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<SpoolmanFilamentDeletePreview>> PreviewFilamentDeleteAsync(int id, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await spoolman.PreviewFilamentDeleteAsync(id, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking spools before deleting filament {Id}", id);
+            return BadRequest(new { message = $"Cannot check filament deletion: {ex.Message}" });
+        }
+    }
+
+    /// <summary>Permanently deletes exactly the confirmed archived spools, then the filament.</summary>
+    [RequirePermission("spoolman", "admin")]
+    [HttpPost("filaments/{id:int}/delete-confirmed")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmFilamentDeleteAsync(
+        int id, [FromBody] SpoolmanConfirmFilamentDeleteRequest request, CancellationToken ct)
+    {
+        if (request?.ArchivedSpoolIds is null)
+        {
+            return BadRequest(new { message = "An explicit archived spool ID list is required. Review the deletion confirmation again." });
+        }
+
+        try
+        {
+            await spoolman.DeleteFilamentWithArchivedSpoolsAsync(id, request.ArchivedSpoolIds, ct);
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting filament {Id} with confirmed archived spools", id);
+            return BadRequest(new { message = $"Delete failed: {ex.Message}" });
+        }
+    }
+
     /// <summary>
     /// Bulk-deletes multiple filaments from Spoolman.
     /// Accepts a JSON body with an array of filament IDs.

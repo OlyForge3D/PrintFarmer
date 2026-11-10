@@ -212,6 +212,12 @@ public interface ISpoolmanService
     /// </summary>
     Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct);
 
+    /// <summary>Reads all referencing spools, including archived spools, without deleting anything.</summary>
+    Task<SpoolmanFilamentDeletePreview> PreviewFilamentDeleteAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>Deletes only explicitly confirmed archived spools, then the filament, after fresh checks.</summary>
+    Task DeleteFilamentWithArchivedSpoolsAsync(int filamentId, int[] archivedSpoolIds, CancellationToken ct);
+
     /// <summary>
     /// Bulk-deletes multiple filaments from Spoolman. Returns success/error counts.
     /// </summary>

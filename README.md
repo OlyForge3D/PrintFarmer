@@ -64,6 +64,15 @@ is in Maintenance's Settings tab. Cost/rate overrides stay with their owning
 records; [settings navigation and save boundaries](./docs/SETTINGS_ARCHITECTURE.md#category-cards--single-pane-mounting)
 describe the canonical destinations.
 
+### Filament deletion
+
+Filaments with active spools cannot be deleted. For archived-only spools,
+the web confirmation shows how many archived spools will be permanently removed
+with the filament and warns about NFC binding removal. Bulk deletion never removes spools;
+it reports which filaments must be reviewed individually. See the
+[filament deletion contract](./docs/API_REFERENCE.md#spoolman-filament-deletion)
+for confirmation, concurrency and partial-failure behavior.
+
 ### Moonraker temperature and sensor controls
 
 The primary Hotend follows the active physical tool; additional extruders retain
