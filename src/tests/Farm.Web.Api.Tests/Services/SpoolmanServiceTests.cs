@@ -17,6 +17,156 @@ namespace Farm.Web.Api.Tests.Services;
 public class SpoolmanServiceTests
 {
     [Fact]
+    public async Task ScanTagAsync_NormalizesUidAndParsesSpoolMatch()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        string? requestBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/api/v1/tag/scan", request.RequestUri!.AbsolutePath);
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"matched_spool_id":7,"matched_filament_id":null,"spool":{"id":7,"name":"PLA","material":"PLA"},"filament":null,"created":false}""",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService service = new SpoolmanService(
+            http,
+            settings.Object,
+            logger.Object,
+            Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanTagScanResultDto result = await service.ScanTagAsync(
+            new SpoolmanTagScanRequest("e0:04-02 12"),
+            CancellationToken.None);
+
+        Assert.Equal("""{"uid":"E0040212","create":false}""", requestBody);
+        Assert.Equal(7, result.MatchedSpoolId);
+        Assert.Equal(7, result.Spool?.Id);
+        Assert.Null(result.MatchedFilamentId);
+    }
+
+    [Fact]
+    public async Task LinkAndUnlinkTagAsync_UseSpoolmanTagEndpointsAndNormalizeUid()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        List<(HttpMethod Method, string Path, string? Body)> requests = [];
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(request =>
+        {
+            requests.Add((
+                request.Method,
+                request.RequestUri!.AbsolutePath,
+                request.Content?.ReadAsStringAsync().GetAwaiter().GetResult()));
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService service = new SpoolmanService(
+            http,
+            settings.Object,
+            logger.Object,
+            Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        await service.LinkTagToSpoolAsync(12, "e0:04:02:12", CancellationToken.None);
+        await service.UnlinkTagFromSpoolAsync(12, "e0:04:02:12", CancellationToken.None);
+
+        Assert.Collection(
+            requests,
+            link =>
+            {
+                Assert.Equal(HttpMethod.Post, link.Method);
+                Assert.Equal("/api/v1/spool/12/tag", link.Path);
+                Assert.Equal("""{"uid":"E0040212"}""", link.Body);
+            },
+            unlink =>
+            {
+                Assert.Equal(HttpMethod.Delete, unlink.Method);
+                Assert.Equal("/api/v1/spool/12/tag/E0040212", unlink.Path);
+            });
+    }
+
+    [Fact]
+    public async Task ScanTagAsync_ExplainsWhenConnectedSpoolmanDoesNotSupportTagApi()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("""{"detail":"Not Found"}""", Encoding.UTF8, "application/json")
+        });
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService service = new SpoolmanService(
+            http,
+            settings.Object,
+            logger.Object,
+            Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanApiException error = await Assert.ThrowsAsync<SpoolmanApiException>(
+            () => service.ScanTagAsync(new SpoolmanTagScanRequest("E0040212"), CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, error.StatusCode);
+        Assert.Contains("does not support NFC tag APIs", error.Message);
+    }
+
+    [Fact]
+    public async Task LinkTagToSpoolAsync_PreservesResourceNotFoundInsteadOfReportingUnsupportedApi()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("""{"detail":"Spool not found"}""", Encoding.UTF8, "application/json")
+        });
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService service = new SpoolmanService(
+            http,
+            settings.Object,
+            logger.Object,
+            Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanApiException error = await Assert.ThrowsAsync<SpoolmanApiException>(
+            () => service.LinkTagToSpoolAsync(12, "E0040212", CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.NotFound, error.StatusCode);
+        Assert.Contains("Spool not found", error.Message);
+        Assert.DoesNotContain("does not support NFC tag APIs", error.Message);
+    }
+
+    [Fact]
+    public async Task ScanTagAsync_ReportsUnavailableWhenSpoolmanIsNotConfigured()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        // Returning null is intentional for the not-configured scenario.
+#pragma warning disable CS8603 // Possible null reference return
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(() => (SpoolmanSettings?)null);
+#pragma warning restore CS8603 // Possible null reference return
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler();
+        using HttpClient http = new HttpClient(handler);
+        SpoolmanService service = new SpoolmanService(
+            http,
+            settings.Object,
+            logger.Object,
+            Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard());
+
+        SpoolmanApiException error = await Assert.ThrowsAsync<SpoolmanApiException>(
+            () => service.ScanTagAsync(new SpoolmanTagScanRequest("E0040212"), CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, error.StatusCode);
+        Assert.Contains("not configured", error.Message);
+    }
+
+    [Fact]
     public async Task ListSpoolsAsync_ReturnsEmpty_WhenNotConfigured()
     {
         Mock<ISettingsService> settings = new Mock<ISettingsService>();

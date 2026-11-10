@@ -14,6 +14,9 @@ protocol SpoolServiceProtocol: Sendable {
     func listVendors() async throws -> [SpoolmanVendor]
     func listMaterials() async throws -> [SpoolmanMaterial]
     func listAvailableMaterials() async throws -> [String]
+    func scanTag(uid: String, format: String?, payloadB64: String?) async throws -> SpoolmanTagScanResponse
+    func linkTag(uid: String, toSpoolID spoolID: Int) async throws
+    func unlinkTag(uid: String, fromSpoolID spoolID: Int) async throws
 }
 
 // Convenience overloads

@@ -40,6 +40,7 @@ enum OfflineWriteReplayClassifier {
         // Transient — offline / server-side hiccup. Idempotent replay is safe.
         case .noConnection, .timeout, .serverUnreachable, .transportError,
              .serverError, .invalidResponse, .invalidURL, .staleServerResponse,
+             .serverErrorMessage,
              .decodingFailed, .insecureTransportBlocked, .certificateChanged,
              .certificateNotTrusted:
             return .retryable

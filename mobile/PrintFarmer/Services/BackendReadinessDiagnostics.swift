@@ -160,7 +160,7 @@ enum BackendReadinessDiagnostics {
         case .unauthorized, .authFailed, .forbidden, .notFound, .featureDisabled,
              .methodNotAllowed, .conflict, .partsInventoryConflict,
              .preconditionFailed, .preconditionRequired, .clientError,
-             .serverError, .unexpectedStatus:
+             .serverError, .serverErrorMessage, .unexpectedStatus:
             return transportClassification(detail: "unclassified HTTP failure")
         }
     }
@@ -183,6 +183,7 @@ enum BackendReadinessDiagnostics {
             428
         case .clientError(let statusCode, _),
              .serverError(let statusCode),
+             .serverErrorMessage(let statusCode, _),
              .unexpectedStatus(let statusCode):
             statusCode
         case .invalidURL, .invalidResponse, .noConnection, .timeout,

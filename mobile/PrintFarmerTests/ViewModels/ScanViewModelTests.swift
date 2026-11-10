@@ -22,6 +22,32 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testNFCLinkToMissingSpoolKeepsExplicitErrorInsteadOfBarcodeIntake() async {
+        let (viewModel, barcodeService, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: 77,
+            matchedFilamentId: nil,
+            spool: nil,
+            filament: nil,
+            created: false
+        )
+        let tag = ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: nil
+        )
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        XCTAssertEqual(viewModel.errorMessage, "Spool #77 was not found on this server.")
+        XCTAssertNil(viewModel.pendingOutcome, "a stale NFC link never becomes barcode-driven creation")
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
+    }
+
+    @MainActor
     func testNFCPrinterTagIsRejectedAsNotASpoolTag() async {
         let (viewModel, barcodeService, spoolService) = makeSubject()
         await runNFCScan(.printerId(UUID()), viewModel: viewModel)
@@ -55,6 +81,55 @@ final class ScanViewModelTests: XCTestCase {
         await runNFCScan(.error(.notSupported), viewModel: failed)
         XCTAssertNotNil(failed.errorMessage)
         XCTAssertNil(failed.pendingDeepLinkDestination)
+    }
+
+    @MainActor
+    func testNFCFilamentLinkCreatesSpoolIntakeForLinkedFilamentWithoutRelinkingUID() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        let filament = makeFilament(id: 42, name: "PETG Blue")
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: nil,
+            matchedFilamentId: filament.id,
+            spool: nil,
+            filament: filament,
+            created: false
+        )
+        let tag = ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: nil
+        )
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        guard case .newSpool(let data) = viewModel.pendingOutcome else {
+            return XCTFail("A filament-linked UID should open spool intake")
+        }
+        XCTAssertEqual(data.filamentId, filament.id)
+        XCTAssertEqual(spoolService.tagScanCalledWith?.uid, tag.uid)
+        XCTAssertNil(spoolService.linkedTag, "the existing filament UID binding must remain unchanged")
+    }
+
+    @MainActor
+    func testUnknownNFCTagOnlyOffersExplicitLinkAndDoesNotMutateSpoolman() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        let tag = ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: nil
+        )
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        guard case .unknownNFCTag(let unresolvedTag, nil) = viewModel.pendingOutcome else {
+            return XCTFail("An unknown UID should offer explicit linking")
+        }
+        XCTAssertEqual(unresolvedTag.uid, tag.uid)
+        XCTAssertEqual(spoolService.tagScanCalledWith?.uid, tag.uid)
+        XCTAssertNil(spoolService.createSpoolCalledWith)
+        XCTAssertNil(spoolService.linkedTag)
     }
 
     @MainActor
