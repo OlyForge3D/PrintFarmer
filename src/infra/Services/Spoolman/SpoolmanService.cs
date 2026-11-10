@@ -1227,6 +1227,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 await DeleteSpoolFromSpoolmanAsync(spoolId, ct);
                 deleted.Add(spoolId);
                 remaining.Remove(spoolId);
+                await WaitForDeletedSpoolsAsync(filamentId, remaining, deleted, ct);
             }
 
             await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
@@ -1248,6 +1249,43 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         if (!confirmedIds.SetEquals(preview.ArchivedSpoolIds))
         {
             throw new InvalidOperationException("The filament's spool list changed. Refresh and review the deletion confirmation again.");
+        }
+    }
+
+    private async Task WaitForDeletedSpoolsAsync(
+        int filamentId, HashSet<int> remainingIds, List<int> deletedIds, CancellationToken ct)
+    {
+        using var visibility = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        visibility.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            int delayMilliseconds = 100;
+            while (true)
+            {
+                SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, visibility.Token);
+                EnsureNoActiveSpools(preview);
+                HashSet<int> visibleIds = [.. preview.ArchivedSpoolIds];
+                if (!remainingIds.IsSubsetOf(visibleIds)
+                    || visibleIds.Any(id => !remainingIds.Contains(id) && !deletedIds.Contains(id)))
+                {
+                    throw new InvalidOperationException("The filament's spool list changed. Refresh and review the deletion confirmation again.");
+                }
+
+                if (remainingIds.SetEquals(visibleIds))
+                {
+                    return;
+                }
+
+                // Older Spoolman versions acknowledge DELETE before committing its transaction.
+                // Retry only stale references to acknowledged deletions, never new or active spools.
+                await Task.Delay(TimeSpan.FromMilliseconds(delayMilliseconds), visibility.Token);
+                delayMilliseconds = Math.Min(delayMilliseconds * 2, 1000);
+            }
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "Spoolman did not confirm visibility of the acknowledged spool deletions within 5 seconds. Refresh inventory before retrying.", ex);
         }
     }
 

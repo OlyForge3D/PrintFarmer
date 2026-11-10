@@ -104,6 +104,11 @@ All deletion and preview routes require `spoolman:admin`.
 - Active spools always block deletion, with their count. A changed spool set
   requires a fresh preview and confirmation. Remaining references are checked
   before every delete; newly discovered spools are never added to consent.
+- After each acknowledged spool deletion, fresh reference reads wait up to
+  five seconds for that deletion to become visible in older Spoolman versions.
+  Only stale references to acknowledged deletions are retried, with bounded
+  backoff; active, new or missing remaining spools stop the operation immediately.
+  Non-convergence reports the acknowledged partial outcome instead of continuing.
 - `DELETE /api/spoolman/filaments/{id}` and
   `DELETE /api/spoolman/filaments/bulk` never cascade to spools. Bulk results
   contain per-filament reasons for skipped/failed items. Delete archived-only

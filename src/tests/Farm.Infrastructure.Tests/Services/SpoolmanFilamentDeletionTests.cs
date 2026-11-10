@@ -78,7 +78,116 @@ public sealed class SpoolmanFilamentDeletionTests
         await Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [2, 1], CancellationToken.None);
 
         Assert.Equal(["/api/v1/spool/2", "/api/v1/spool/1", "/api/v1/filament/10"], handler.Deletes);
+        Assert.Equal(6, handler.Reads.Count);
+    }
+
+    [Fact]
+    public async Task DeleteFilamentWithArchivedSpoolsAsync_DelayedDeletionVisibility_WaitsWithoutRepeatingDeletes()
+    {
+        using var handler = new SpoolmanHandler { StaleReadsAfterDelete = 2 };
+        handler.Spools.AddRange([(1, true), (2, true)]);
+        using var http = new HttpClient(handler);
+
+        await Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [1, 2], CancellationToken.None);
+
+        Assert.Equal(["/api/v1/spool/1", "/api/v1/spool/2", "/api/v1/filament/10"], handler.Deletes);
+        Assert.Equal(10, handler.Reads.Count);
+        Assert.Empty(handler.Spools);
+    }
+
+    [Fact]
+    public async Task DeleteFilamentWithArchivedSpoolsAsync_DeletionNeverVisible_StopsWithPrecisePartialOutcome()
+    {
+        using var handler = new SpoolmanHandler { StaleReadsAfterDelete = int.MaxValue };
+        handler.Spools.AddRange([(1, true), (2, true)]);
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [1, 2], CancellationToken.None));
+
+        Assert.Contains("within 5 seconds", error.Message);
+        Assert.Contains("Confirmed deleted archived spool IDs: 1.", error.Message);
+        Assert.Equal(["/api/v1/spool/1"], handler.Deletes);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteFilamentWithArchivedSpoolsAsync_NewSpoolWhileWaiting_StopsImmediately(bool archived)
+    {
+        using var handler = new SpoolmanHandler { StaleReadsAfterDelete = 2 };
+        handler.Spools.AddRange([(1, true), (2, true)]);
+        handler.BeforeRead = read =>
+        {
+            if (read == 3)
+            {
+                handler.Spools.Add((3, archived));
+            }
+        };
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [1, 2], CancellationToken.None));
+
+        Assert.Contains(archived ? "spool list changed" : "active spool", error.Message);
+        Assert.Contains("Confirmed deleted archived spool IDs: 1.", error.Message);
+        Assert.Equal(3, handler.Reads.Count);
+        Assert.Equal(["/api/v1/spool/1"], handler.Deletes);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteFilamentWithArchivedSpoolsAsync_RemainingSpoolChangesWhileWaiting_Stops(bool unarchived)
+    {
+        using var handler = new SpoolmanHandler { StaleReadsAfterDelete = 3 };
+        handler.Spools.AddRange([(1, true), (2, true)]);
+        handler.BeforeRead = read =>
+        {
+            if (read == 4)
+            {
+                if (unarchived)
+                {
+                    handler.Spools[1] = (2, false);
+                }
+                else
+                {
+                    handler.Spools.RemoveAll(s => s.Id == 2);
+                }
+            }
+        };
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [1, 2], CancellationToken.None));
+
+        Assert.Contains(unarchived ? "active spool" : "spool list changed", error.Message);
         Assert.Equal(4, handler.Reads.Count);
+        Assert.Equal(["/api/v1/spool/1"], handler.Deletes);
+    }
+
+    [Fact]
+    public async Task DeleteFilamentWithArchivedSpoolsAsync_CancelledVisibilityWait_ReportsPartialOutcomeWithoutContinuing()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new SpoolmanHandler { StaleReadsAfterDelete = 3 };
+        handler.Spools.AddRange([(1, true), (2, true)]);
+        handler.BeforeRead = read =>
+        {
+            if (read == 3)
+            {
+                cancellation.Cancel();
+            }
+        };
+        using var http = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Service(http).DeleteFilamentWithArchivedSpoolsAsync(10, [1, 2], cancellation.Token));
+
+        Assert.Contains("Confirmed deleted archived spool IDs: 1.", error.Message);
+        Assert.DoesNotContain("within 5 seconds", error.Message);
+        Assert.IsAssignableFrom<OperationCanceledException>(error.InnerException);
+        Assert.Equal(["/api/v1/spool/1"], handler.Deletes);
     }
 
     [Theory]
@@ -233,6 +342,8 @@ public sealed class SpoolmanFilamentDeletionTests
         public string? FailingDelete { get; init; }
         public string? ReadBody { get; init; }
         public string? TotalCount { get; init; }
+        public int StaleReadsAfterDelete { get; init; }
+        private readonly Dictionary<int, int> _pendingDeletes = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -241,6 +352,18 @@ public sealed class SpoolmanFilamentDeletionTests
             {
                 Reads.Add(uri);
                 BeforeRead?.Invoke(Reads.Count);
+                foreach (int id in _pendingDeletes.Keys.ToArray())
+                {
+                    if (_pendingDeletes[id] == 0)
+                    {
+                        Spools.RemoveAll(s => s.Id == id);
+                        _pendingDeletes.Remove(id);
+                    }
+                    else
+                    {
+                        _pendingDeletes[id]--;
+                    }
+                }
                 string json = ReadBody ?? JsonSerializer.Serialize(Spools.Select(s => new
                 {
                     id = s.Id,
@@ -272,7 +395,14 @@ public sealed class SpoolmanFilamentDeletionTests
             if (uri.AbsolutePath.StartsWith("/api/v1/spool/", StringComparison.Ordinal))
             {
                 int id = int.Parse(uri.Segments[^1], System.Globalization.CultureInfo.InvariantCulture);
-                Spools.RemoveAll(s => s.Id == id);
+                if (StaleReadsAfterDelete > 0)
+                {
+                    _pendingDeletes[id] = StaleReadsAfterDelete;
+                }
+                else
+                {
+                    Spools.RemoveAll(s => s.Id == id);
+                }
             }
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
         }
