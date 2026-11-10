@@ -20,10 +20,14 @@ final class ScanViewModel {
         /// Manual spool creation offered from an unrecognized non-GTIN code.
         /// The code is never persisted: only valid GTINs can be mapped.
         case addSpoolManually(String)
+        /// A structured spool link or ID whose spool is absent from the
+        /// active server. It offers manual creation only, never GTIN intake.
+        case missingSpool(id: Int, code: String)
 
         var id: String {
             switch self {
             case .unknownCode(let code): "unknown-\(code)"
+            case .missingSpool(let id, _): "missing-spool-\(id)"
             case .newSpool: "new-spool"
             case .addSpoolManually(let code): "manual-\(code)"
             }
@@ -128,7 +132,7 @@ final class ScanViewModel {
             case .printerId:
                 errorMessage = Self.notSpoolTagMessage
             case .spoolId(let id):
-                await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+                await routeToSpoolIfExists(id: id, code: "Spool #\(id)", subtitle: "Spool #\(id)")
             case .newSpoolData(let data):
                 pendingOutcome = .newSpool(data)
             case .cancelled:
@@ -226,7 +230,7 @@ final class ScanViewModel {
         // genuine EAN/UPC barcodes are also numeric.
         if let url = URL(string: trimmed), let destination = DeepLinkHandler.parse(url: url) {
             if case .spoolDetail(let id) = destination {
-                await routeToSpoolIfExists(id: id, subtitle: "Spool #\(id)")
+                await routeToSpoolIfExists(id: id, code: trimmed, subtitle: "Spool #\(id)")
             } else {
                 // Recognized non-spool links (e.g. printer UUIDs) must never
                 // reach barcode resolution: the server's GTIN normalizer
@@ -237,7 +241,7 @@ final class ScanViewModel {
             return
         }
         if let spoolId = QRCodeParser.parseStructured(trimmed) {
-            await routeToSpoolIfExists(id: spoolId, subtitle: "Spool #\(spoolId)")
+            await routeToSpoolIfExists(id: spoolId, code: trimmed, subtitle: "Spool #\(spoolId)")
             return
         }
 
@@ -265,6 +269,18 @@ final class ScanViewModel {
             return
         }
 
+        // A numeric spool QR can also be a valid GTIN. An existing spool with
+        // that ID keeps precedence over Barcode Intake, mapped or not, so it
+        // is checked before filament resolution.
+        if let spoolId = QRCodeParser.parse(trimmed) {
+            guard let exists = await existingSpoolLookup(id: spoolId) else { return }
+            if exists {
+                recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
+                pendingDeepLinkDestination = .spoolDetail(id: spoolId)
+                return
+            }
+        }
+
         do {
             let filament = try await barcodeIntakeService.resolveFilament(barcode: trimmed)
             guard isViewActive else { return }
@@ -272,16 +288,6 @@ final class ScanViewModel {
                 recordRecentScan(icon: "cylinder", title: filament.name ?? filament.material ?? "Spool", subtitle: "Spool barcode")
                 pendingSpoolBarcode = trimmed
                 return
-            }
-            // A numeric spool QR can also be GTIN-shaped; an existing
-            // spool with that ID keeps precedence over new-spool intake.
-            if let spoolId = QRCodeParser.parse(trimmed) {
-                guard let exists = await existingSpoolLookup(id: spoolId) else { return }
-                if exists {
-                    recordRecentScan(icon: "cylinder", title: "Spool", subtitle: "Spool #\(spoolId)")
-                    pendingDeepLinkDestination = .spoolDetail(id: spoolId)
-                    return
-                }
             }
             // An unknown product barcode reuses Barcode Intake, which
             // asks the operator to map it to a filament (persisting the
@@ -320,13 +326,14 @@ final class ScanViewModel {
     /// server before routing to `.spoolDetail` — such a payload NEVER falls
     /// back to raw barcode registration; it either routes or surfaces an
     /// explicit error.
-    private func routeToSpoolIfExists(id: Int, subtitle: String) async {
+    private func routeToSpoolIfExists(id: Int, code: String, subtitle: String) async {
         guard let exists = await existingSpoolLookup(id: id) else { return }
         if exists {
             recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
             pendingDeepLinkDestination = .spoolDetail(id: id)
         } else {
-            errorMessage = "Spool #\(id) was not found on this server."
+            recordRecentScan(icon: "questionmark.circle", title: "Spool not found", subtitle: subtitle)
+            pendingOutcome = .missingSpool(id: id, code: code)
         }
     }
 
@@ -377,10 +384,17 @@ final class ScanViewModel {
     /// map it; any other code opens manual creation and is never written
     /// to the GTIN mapping. Nothing is created until the user saves.
     func addSpool(fromUnrecognized code: String) {
-        guard case .unknownCode(let pending) = pendingOutcome, pending == code else { return }
-        deferredAddSpool = Self.isSupportedProductBarcode(code) && barcodeIntakeService != nil
-            ? .intake(code)
-            : .manual(code)
+        switch pendingOutcome {
+        case .unknownCode(let pending) where pending == code:
+            deferredAddSpool = Self.isSupportedProductBarcode(code) && barcodeIntakeService != nil
+                ? .intake(code)
+                : .manual(code)
+        case .missingSpool(_, let pending) where pending == code:
+            // A structured spool payload is never a product barcode.
+            deferredAddSpool = .manual(code)
+        default:
+            return
+        }
         pendingOutcome = nil
     }
 

@@ -40,7 +40,10 @@ The mobile app is not a second web console.
   that is neither a GTIN nor an existing spool ID) is reported as
   unrecognized with an **Add Spool** action that opens manual spool creation;
   such codes are never written to the GTIN mapping, so they are not
-  remembered for future scans. A scan never dead-ends.
+  remembered for future scans. A spool link, ID or NFC tag for a spool that
+  is not on the server shows **Spool Not Found** with the same **Add Spool**
+  action (manual creation only). An existing spool ID wins over a GTIN
+  mapping with the same digits. A scan never dead-ends.
 - **Account avatar**: notifications, Settings, Servers and offline activity.
 
 iPhone has exactly three tabs: Farm, Queue and Filament. Regular-width iPad
