@@ -1,0 +1,25 @@
+{
+  "sourceSha": "6448d8f6398b80298fca37385fd9dd787906f2f5",
+  "afterRealApiProcessRestart": {
+    "code": "X0022Z40I1",
+    "state": "Found",
+    "alias": {
+      "id": 4,
+      "code": "X0022Z40I1",
+      "filamentId": 42,
+      "createdAt": "2026-11-10T17:20:15.965374",
+      "updatedAt": "2026-11-10T17:20:15.965374",
+      "filament": {
+        "id": 42,
+        "name": "PLA explicitly chosen",
+        "material": "PLA",
+        "colorHex": "#303030",
+        "vendor": "Fixture Vendor",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spoolWeight": 200
+      }
+    }
+  }
+}

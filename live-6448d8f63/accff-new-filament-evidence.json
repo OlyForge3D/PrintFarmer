@@ -1,0 +1,30 @@
+{
+  "sourceSha": "accff067bbe2c7c03742c1f4f753821df7c2371d",
+  "lookup": {
+    "code": "X0022Z40I1",
+    "state": "Found",
+    "alias": {
+      "id": 3,
+      "code": "X0022Z40I1",
+      "filamentId": 44,
+      "createdAt": "2026-11-10T17:18:55.222544",
+      "updatedAt": "2026-11-10T17:18:55.222544",
+      "filament": {
+        "id": 44,
+        "name": "FNSKU new filament",
+        "material": "PLA",
+        "colorHex": "#10B981",
+        "vendor": "Fixture Vendor",
+        "density": 1.24,
+        "diameter": 1.75,
+        "weight": 1000,
+        "spoolWeight": 200
+      }
+    }
+  },
+  "spool": {
+    "id": 604,
+    "filamentId": 44
+  },
+  "upstream": "loopback Spoolman protocol fixture"
+}
