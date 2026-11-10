@@ -22,6 +22,14 @@ writes require `system_settings:admin`. Authenticated users can read this sectio
 through `GET /api/settings/FarmIdentity`; saves use the existing revision-checked
 `POST /api/settings/FarmIdentity` contract.
 
+The timezone dropdown lists the browser's IANA zones plus `UTC`. Filter by region
+or city (spaces also match underscores); the current value and UTC remain
+selectable while filtering. Saved aliases keep their exact identifier, even
+when absent from the browser list. **Enter timezone manually** handles other
+server-supported IANA IDs; browsers without timezone enumeration show manual
+entry and an explanation instead. The server still validates every saved value:
+a browser-listed zone may be rejected by an older server timezone database.
+
 The name appears in desktop/mobile web headers and the mobile navigation drawer
 (not the browser title or native iOS app). The header's **Farm time** clock uses
 the configured zone, labels its IANA ID and current UTC offset, and follows DST

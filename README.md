@@ -28,8 +28,8 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 
 ## ✨ Key Features
 
-**Farm Identity** - Customize the farm name and IANA timezone from Admin Control
-Center. Desktop/mobile web headers show the name and a DST-aware farm-local
+**Farm Identity** - Customize the farm name and choose an IANA timezone from a
+filterable dropdown in Admin Control Center. Desktop/mobile web headers show the name and a DST-aware farm-local
 clock; existing schedules and UTC planning hours are unchanged.
 
 ✅ **Multi-Printer Dashboard** - Manage unlimited 3D printers from a single interface  
