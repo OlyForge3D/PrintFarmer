@@ -1131,6 +1131,131 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     /// <inheritdoc/>
     public async Task DeleteFilamentFromSpoolmanAsync(int filamentId, CancellationToken ct)
     {
+        SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, ct);
+        EnsureNoActiveSpools(preview);
+        if (preview.ArchivedSpoolIds.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"This filament has {preview.ArchivedSpoolIds.Length} archived spool(s). Delete it individually to review and confirm permanent deletion of those spools.");
+        }
+
+        await DeleteFilamentCoreAsync(filamentId, ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDeletePreview> PreviewFilamentDeleteAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new InvalidOperationException("Spoolman is not configured.");
+        }
+
+        // Spoolman's unbounded list defaults to excluding archived spools. Never use the
+        // display cache or a failed-read-as-empty fallback to authorize a destructive action.
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}{SpoolApiPath}?filament.id={filamentId}&allow_archived=true";
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+        using HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"check spools for filament {filamentId}", cts.Token);
+        using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cts.Token));
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("Could not verify the filament's spools. Refresh and try again; nothing was deleted.");
+        }
+
+        HashSet<int> ids = [];
+        List<int> archived = [];
+        int activeCount = 0;
+        foreach (JsonElement spool in doc.RootElement.EnumerateArray())
+        {
+            if (spool.ValueKind != JsonValueKind.Object
+                || !spool.TryGetProperty("id", out JsonElement id) || !id.TryGetInt32(out int spoolId)
+                || spoolId <= 0 || !ids.Add(spoolId)
+                || !spool.TryGetProperty("filament", out JsonElement filament)
+                || filament.ValueKind != JsonValueKind.Object
+                || !filament.TryGetProperty("id", out JsonElement reference)
+                || !reference.TryGetInt32(out int referenceId) || referenceId != filamentId)
+            {
+                throw new InvalidOperationException("Spoolman returned unexpected spool references. Refresh and try again; nothing was deleted.");
+            }
+
+            if (spool.TryGetProperty("archived", out JsonElement flag) && flag.ValueKind == JsonValueKind.True)
+            {
+                archived.Add(spoolId);
+            }
+            else
+            {
+                activeCount++;
+            }
+        }
+
+        if (response.Headers.TryGetValues("X-Total-Count", out IEnumerable<string>? totals)
+            && (!int.TryParse(string.Join(",", totals), out int total) || total != ids.Count))
+        {
+            throw new InvalidOperationException("Spoolman returned an incomplete spool list. Cannot safely delete this filament.");
+        }
+
+        return new SpoolmanFilamentDeletePreview(activeCount, [.. archived.Order()]);
+    }
+
+    /// <inheritdoc/>
+    public async Task DeleteFilamentWithArchivedSpoolsAsync(int filamentId, int[] archivedSpoolIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(archivedSpoolIds);
+        HashSet<int> remaining = [.. archivedSpoolIds];
+        if (remaining.Count != archivedSpoolIds.Length || remaining.Any(id => id <= 0))
+        {
+            throw new ArgumentException("Confirmed archived spool IDs must be unique positive IDs.", nameof(archivedSpoolIds));
+        }
+
+        await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+        List<int> deleted = [];
+        try
+        {
+            foreach (int spoolId in archivedSpoolIds)
+            {
+                // Other clients can change Spoolman between requests. Recheck the entire
+                // remaining set before each delete, never expand the confirmed set.
+                await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+                await DeleteSpoolFromSpoolmanAsync(spoolId, ct);
+                deleted.Add(spoolId);
+                remaining.Remove(spoolId);
+            }
+
+            await CheckConfirmedSpoolsAsync(filamentId, remaining, ct);
+            await DeleteFilamentCoreAsync(filamentId, ct);
+        }
+        catch (Exception ex)
+        {
+            string deletedIds = deleted.Count == 0 ? "none" : string.Join(", ", deleted);
+            throw new InvalidOperationException(
+                $"Deletion incomplete for filament {filamentId}. Confirmed deleted archived spool IDs: {deletedIds}. "
+                + $"Filament deletion was not confirmed. Refresh inventory before retrying; a timed-out request may have completed in Spoolman. {ex.Message}", ex);
+        }
+    }
+
+    private async Task CheckConfirmedSpoolsAsync(int filamentId, HashSet<int> confirmedIds, CancellationToken ct)
+    {
+        SpoolmanFilamentDeletePreview preview = await PreviewFilamentDeleteAsync(filamentId, ct);
+        EnsureNoActiveSpools(preview);
+        if (!confirmedIds.SetEquals(preview.ArchivedSpoolIds))
+        {
+            throw new InvalidOperationException("The filament's spool list changed. Refresh and review the deletion confirmation again.");
+        }
+    }
+
+    private static void EnsureNoActiveSpools(SpoolmanFilamentDeletePreview preview)
+    {
+        if (preview.ActiveSpoolCount > 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot delete this filament: {preview.ActiveSpoolCount} active spool(s) still reference it. Move or archive those spools first.");
+        }
+    }
+
+    private async Task DeleteFilamentCoreAsync(int filamentId, CancellationToken ct)
+    {
         SpoolmanConfigDto? cfg = GetConfig();
         if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
         {
@@ -1143,8 +1268,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         cts.CancelAfter(TimeSpan.FromSeconds(15));
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
-        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"delete filament {filamentId}. Check for newly added spools and review Spoolman's logs", cts.Token);
     }
 
     /// <inheritdoc/>
@@ -1761,8 +1886,8 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         cts.CancelAfter(TimeSpan.FromSeconds(15));
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Delete, url);
-        HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        using HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
+        await EnsureSpoolmanSuccessAsync(response, $"delete spool {spoolId}", cts.Token);
     }
 
     /// <inheritdoc/>

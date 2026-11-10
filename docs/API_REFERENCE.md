@@ -90,6 +90,37 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 > python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912 --apply
 > ```
 
+## Spoolman Filament Deletion
+
+All deletion and preview routes require `spoolman:admin`.
+
+- `GET /api/spoolman/filaments/{id}/delete-preview` reads fresh references,
+  including archived spools, and returns
+  `{ "activeSpoolCount": 0, "archivedSpoolIds": [12, 14] }`. It deletes nothing.
+- `POST /api/spoolman/filaments/{id}/delete-confirmed` accepts
+  `{ "archivedSpoolIds": [12, 14] }` as explicit consent to permanently delete
+  exactly those archived spools, then the filament. An empty array confirms
+  that no spool deletion is authorized; a missing array is rejected.
+- Active spools always block deletion, with their count. A changed spool set
+  requires a fresh preview and confirmation. Remaining references are checked
+  before every delete; newly discovered spools are never added to consent.
+- `DELETE /api/spoolman/filaments/{id}` and
+  `DELETE /api/spoolman/filaments/bulk` never cascade to spools. Bulk results
+  contain per-filament reasons for skipped/failed items. Delete archived-only
+  filaments individually to review the permanent-deletion confirmation.
+
+Archived spools can be absent from the normal inventory view while still
+preventing Spoolman from deleting their filament. The web confirmation shows
+the archived count and warns that their NFC tag bindings are removed too;
+Spoolman owns this cascade. Filament NFC bindings are also removed.
+
+Spoolman's individual REST deletes are **not a transaction**. Other clients can
+still change a spool between a check and its delete. Do not edit the same
+inventory concurrently during deletion. If an operation fails after deleting
+some spools, the error lists the confirmed deleted spool IDs and warns that the
+filament's deletion was not confirmed. Refresh before retrying: a timed-out
+upstream request may have completed even without an acknowledgement.
+
 ## Spoolman Barcode Diagnostics
 
 - `GET /api/spoolman/barcodes/scan-logs?limit=` returns recent barcode scan

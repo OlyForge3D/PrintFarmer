@@ -367,6 +367,26 @@ public class SpoolmanBarcodeEndpointTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("GET", "/api/spoolman/filaments/10/delete-preview")]
+    [InlineData("POST", "/api/spoolman/filaments/10/delete-confirmed")]
+    [InlineData("DELETE", "/api/spoolman/filaments/10")]
+    [InlineData("DELETE", "/api/spoolman/filaments/bulk")]
+    public async Task FilamentDeletion_WithoutSpoolmanAdminPermission_ReturnsForbidden(string method, string path)
+    {
+        await using CustomWebApplicationFactory factory = new(new Dictionary<string, string?> { ["Security:DevModeBypassAuth"] = "false" });
+        await factory.ResetDataAsync();
+        using HttpClient client = await factory.CreateAuthenticatedClientAsync("filament-delete-user", "delete-user@example.com");
+        using var request = new HttpRequestMessage(new HttpMethod(method), path)
+        {
+            Content = JsonContent.Create(new { archivedSpoolIds = Array.Empty<int>(), filamentIds = new[] { 10 } }),
+        };
+
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     private static SpoolmanFilamentDto CreateFilament(int id, string? articleNumber, string? gtin = null)
         => new(
             Id: id,

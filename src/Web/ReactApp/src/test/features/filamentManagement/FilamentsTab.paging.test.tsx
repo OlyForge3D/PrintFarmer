@@ -31,12 +31,16 @@ vi.mock('@/common/hooks/useUrlFilterState', () => ({
 // ── API client ────────────────────────────────────────────────────────────────
 
 const mockGetFilamentsPaged = vi.fn();
+const mockPreviewDelete = vi.fn();
+const mockDeleteFilament = vi.fn();
+const mockBulkDelete = vi.fn();
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     getFilamentsPaged: (...args: unknown[]) => mockGetFilamentsPaged(...args),
     getFilamentFilterOptions: vi.fn().mockResolvedValue({ materials: [], vendors: [] }),
     getSpoolmanConfig: vi.fn().mockResolvedValue({}),
+    previewFilamentDelete: (...args: unknown[]) => mockPreviewDelete(...args),
   },
 }));
 
@@ -45,8 +49,8 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/common/hooks/useApi', () => ({
   useExportSpoolmanFilamentsCsv: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useImportSpoolmanFilamentsCsv: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useDeleteFilament: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useBulkDeleteFilaments: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteFilament: () => ({ mutateAsync: mockDeleteFilament, isPending: false }),
+  useBulkDeleteFilaments: () => ({ mutateAsync: mockBulkDelete, isPending: false }),
 }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -59,8 +63,14 @@ vi.mock('@/common/utils/colorFamilies', () => ({
 // Avoids import chains that require contexts not present in unit tests.
 
 vi.mock('@/features/filamentManagement/components/FilamentCard', () => ({
-  FilamentCard: ({ filament }: { filament: { name?: string } }) =>
-    `<div data-testid="filament-card">${filament.name}</div>`,
+  FilamentCard: ({ filament, onDelete, onToggleSelect }: {
+    filament: { id: number; name?: string };
+    onDelete: (filament: { id: number; name?: string }) => void;
+    onToggleSelect: (id: number) => void;
+  }) => <div data-testid="filament-card">{filament.name}
+    <button onClick={() => onDelete(filament)}>Delete {filament.name}</button>
+    <button onClick={() => onToggleSelect(filament.id)}>Select {filament.name}</button>
+  </div>,
 }));
 
 vi.mock('@/features/filamentManagement/components/ColorFamilySelect', () => ({
@@ -92,7 +102,8 @@ vi.mock('@/common/components/skeletons/Skeleton', () => ({
 }));
 
 vi.mock('@/common/components/modals/Modal', () => ({
-  Modal: ({ children }: { children: React.ReactNode }) => children,
+  Modal: ({ children, isOpen, footer }: { children: React.ReactNode; isOpen: boolean; footer?: React.ReactNode }) =>
+    isOpen ? <div role="dialog">{children}{footer}</div> : null,
 }));
 
 vi.mock('@/common/components/ui', async (importOriginal) => ({
@@ -115,6 +126,7 @@ vi.mock('@/common/components/ui/Checkbox', () => ({
 
 import React from 'react';
 import { FilamentsTab } from '@/features/filamentManagement/components/FilamentsTab';
+import { toast } from 'sonner';
 
 function makeFilament(id: number, name = `Filament ${id}`) {
   return { id, name, material: 'PLA', vendor: 'Bambu', colorHex: '#FFFFFF' };
@@ -136,6 +148,107 @@ describe('FilamentsTab — server-side paging', () => {
       sortField: 'name', sortDir: 'asc', page: 1,
     });
     mockGetFilamentsPaged.mockResolvedValue({ items: [], totalCount: 0 });
+    mockPreviewDelete.mockResolvedValue({ activeSpoolCount: 0, archivedSpoolIds: [] });
+    mockDeleteFilament.mockResolvedValue(undefined);
+    mockBulkDelete.mockResolvedValue({ updatedCount: 0, errorCount: 0, errors: [] });
+  });
+
+  it('reviews archived spool count and NFC bindings before sending exact explicit consent', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1, 'Red PLA')], totalCount: 1 });
+    mockPreviewDelete.mockResolvedValue({ activeSpoolCount: 0, archivedSpoolIds: [4, 8] });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Red PLA' }));
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByText('2 archived spools')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('permanently delete');
+    expect(dialog).toHaveTextContent('NFC tag bindings');
+    expect(dialog).toHaveTextContent('cannot be undone');
+    expect(mockDeleteFilament).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete filament and spools' }));
+    await waitFor(() => expect(mockDeleteFilament).toHaveBeenCalledWith({ id: 1, archivedSpoolIds: [4, 8] }));
+  });
+
+  it('does not delete any spools when archived-spool confirmation is cancelled', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockPreviewDelete.mockResolvedValue({ activeSpoolCount: 0, archivedSpoolIds: [4] });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    expect(await screen.findByText('1 archived spool')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(mockDeleteFilament).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('blocks deletion with the active-spool count even if archived spools also exist', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockPreviewDelete.mockResolvedValue({ activeSpoolCount: 3, archivedSpoolIds: [4] });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('3 active spools');
+    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    expect(mockDeleteFilament).not.toHaveBeenCalled();
+  });
+
+  it('disables destructive confirmation while the fresh spool check is pending', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockPreviewDelete.mockReturnValue(new Promise(() => {}));
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Checking active and archived spools');
+    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+  });
+
+  it('fails closed and surfaces a plain ApiError when spool verification fails', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockPreviewDelete.mockRejectedValue({ statusCode: 400, message: 'Spoolman is unavailable. Try again.' });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Spoolman is unavailable. Try again.');
+    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    expect(mockDeleteFilament).not.toHaveBeenCalled();
+  });
+
+  it('deletes a truly empty filament with an explicit empty spool list', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    expect(await screen.findByText(/This filament has no spools/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete', exact: true }));
+    await waitFor(() => expect(mockDeleteFilament).toHaveBeenCalledWith({ id: 1, archivedSpoolIds: [] }));
+  });
+
+  it('preserves the server reason in the error toast and forces a new confirmation after failure', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockDeleteFilament.mockRejectedValue({ statusCode: 400, message: 'The spool list changed. Review confirmation again.' });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
+    expect(await screen.findByText(/This filament has no spools/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete', exact: true }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'Failed to delete filament: The spool list changed. Review confirmation again.', { duration: 10000 },
+    ));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('warns bulk deletion never cascades and shows per-filament failure reasons', async () => {
+    mockGetFilamentsPaged.mockResolvedValue({ items: [makeFilament(1)], totalCount: 1 });
+    mockBulkDelete.mockResolvedValue({
+      updatedCount: 0, errorCount: 1, errors: ['Filament 1: Has 2 archived spools. Delete individually.'],
+    });
+    render(<FilamentsTab />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Select Filament 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Filaments with active or archived spools will be skipped');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete', exact: true }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'Deleted 0, failed 1. Filament 1: Has 2 archived spools. Delete individually.', { duration: 10000 },
+    ));
+    expect(mockBulkDelete).toHaveBeenCalledWith([1]);
+    expect(mockDeleteFilament).not.toHaveBeenCalled();
   });
 
   it('calls getFilamentsPaged on mount (not the old getFilaments)', async () => {
