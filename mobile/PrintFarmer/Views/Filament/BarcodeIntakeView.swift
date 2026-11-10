@@ -82,7 +82,8 @@ struct BarcodeIntakeView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(Color.pfAccent)
+                        .tint(Color.pfButtonPrimary)
+                        .foregroundStyle(Color.pfButtonPrimaryText)
                         .disabled(viewModel.isBusy)
                         .accessibilityIdentifier("barcodeIntake.aliasAddSpool")
                         .accessibilityLabel("Add another spool of \(match.filament.name ?? "this filament")")
@@ -146,7 +147,11 @@ struct BarcodeIntakeView: View {
                         spoolService: services.spoolService,
                         onSelectFilament: { filament in
                             let succeeded = await viewModel.importUnknownBarcode(with: filament)
-                            return succeeded ? nil : viewModel.errorMessage ?? "Import failed. Please try again."
+                            guard !succeeded else { return nil }
+                            return SelectionFailure(
+                                message: viewModel.errorMessage ?? "Import failed. Please try again.",
+                                canRetry: !viewModel.spoolOutcomeUncertain
+                            )
                         }
                     )
                     .interactiveDismissDisabled(viewModel.isBusy)
@@ -167,13 +172,19 @@ struct BarcodeIntakeView: View {
     }
 }
 
+private struct SelectionFailure {
+    let message: String
+    /// False when the spool may already exist, so retrying could duplicate it.
+    let canRetry: Bool
+}
+
 private struct UnknownBarcodeView: View {
     let barcode: String
     /// True for a non-GTIN code (e.g. an FNSKU) that is remembered in
     /// PrintFarmer rather than written to the filament's GTIN.
     let remembersCode: Bool
     let spoolService: any SpoolServiceProtocol
-    let onSelectFilament: @MainActor (SpoolmanFilament) async -> String?
+    let onSelectFilament: @MainActor (SpoolmanFilament) async -> SelectionFailure?
 
     @Environment(\.dismiss) private var dismiss
     @State private var filaments: [SpoolmanFilament] = []
@@ -183,6 +194,11 @@ private struct UnknownBarcodeView: View {
     @State private var isLoading = false
     @State private var isSaving = false
     @State private var errorMessage: String?
+    /// The existing filament whose remember/import failed; offered for Retry.
+    @State private var failedSelection: SpoolmanFilament?
+    /// Set when the spool may already have been added; selection and Retry
+    /// are disabled so a second tap can't create a duplicate.
+    @State private var outcomeUncertain = false
     @State private var showCreateForm = false
     /// A filament already created in this sheet; reused on retry so a failed
     /// remember/import never creates a duplicate filament.
@@ -239,10 +255,26 @@ private struct UnknownBarcodeView: View {
                         Text(errorMessage)
                             .font(.caption)
                             .foregroundStyle(Color.pfError)
+                            .accessibilityIdentifier("mapBarcode.error")
+                        if outcomeUncertain {
+                            Button("Done") { dismiss() }
+                                .accessibilityIdentifier("mapBarcode.uncertainDone")
+                        } else if let failedSelection, !showCreateForm {
+                            Button {
+                                selectFilament(failedSelection)
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+                            .disabled(isSaving)
+                            .accessibilityLabel("Retry adding spool")
+                            .accessibilityIdentifier("mapBarcode.retry")
+                        }
                     }
                 }
 
-                if showCreateForm {
+                if outcomeUncertain {
+                    EmptyView()
+                } else if showCreateForm {
                     createFilamentSection
                 } else {
                     Section {
@@ -462,10 +494,14 @@ private struct UnknownBarcodeView: View {
     }
 
     private func selectFilament(_ filament: SpoolmanFilament) {
+        guard !isSaving else { return }
         isSaving = true
+        errorMessage = nil
         Task { @MainActor in
-            if let importError = await onSelectFilament(filament) {
-                errorMessage = importError
+            if let failure = await onSelectFilament(filament) {
+                errorMessage = failure.message
+                outcomeUncertain = !failure.canRetry
+                failedSelection = failure.canRetry ? filament : nil
                 isSaving = false
             } else {
                 isSaving = false
@@ -517,8 +553,9 @@ private struct UnknownBarcodeView: View {
     }
 
     private func finishSelecting(_ filament: SpoolmanFilament) async {
-        if let importError = await onSelectFilament(filament) {
-            errorMessage = importError
+        if let failure = await onSelectFilament(filament) {
+            errorMessage = failure.message
+            outcomeUncertain = !failure.canRetry
             isSaving = false
         } else {
             isSaving = false

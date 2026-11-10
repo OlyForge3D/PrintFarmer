@@ -278,6 +278,8 @@ private struct UnrecognizedScanView: View {
                     Label("Add Spool", systemImage: "plus.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Color.pfButtonPrimary)
+                .foregroundStyle(Color.pfButtonPrimaryText)
                 .accessibilityIdentifier("scan.unrecognized.addSpool")
             }
             .navigationTitle(message == nil ? "Unrecognized" : "Not Found")

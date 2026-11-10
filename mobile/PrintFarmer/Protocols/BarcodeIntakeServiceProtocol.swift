@@ -28,10 +28,12 @@ protocol BarcodeIntakeServiceProtocol: Sendable {
     func createSpool(filamentId: Int) async throws -> SpoolmanSpool
 }
 
+/// The server serializes enums as PascalCase strings (`JsonStringEnumConverter`
+/// without a naming policy), so the raw values must match exactly.
 enum ScanCodeAliasLookupState: String, Codable, Sendable {
-    case found
-    case notRemembered
-    case filamentMissing
+    case found = "Found"
+    case notRemembered = "NotRemembered"
+    case filamentMissing = "FilamentMissing"
 }
 
 struct ScanCodeAlias: Codable, Sendable {

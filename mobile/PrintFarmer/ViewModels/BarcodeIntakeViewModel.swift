@@ -14,6 +14,10 @@ final class BarcodeIntakeViewModel {
     /// Set when a lookup or write failed for a reason other than a genuine
     /// miss; the view offers Retry instead of creating anything.
     private(set) var retryAction: RetryAction?
+    /// Set when spool creation failed in a way that may still have created the
+    /// spool (timeout, lost connection, 5xx, unreadable response). Retry is
+    /// withheld so the user can't add a duplicate spool.
+    private(set) var spoolOutcomeUncertain = false
     var isBusy = false
     var errorMessage: String?
     var isViewActive = true
@@ -37,6 +41,23 @@ final class BarcodeIntakeViewModel {
         "That code can't be used for spool intake. Use Add Spool to create this spool manually."
     static let aliasConflictMessage =
         "This code is already remembered for a different filament. Nothing was added."
+    static let spoolOutcomeUncertainMessage =
+        "The spool may have been added. Check your spools before adding it again."
+
+    /// True only when the request definitely did not create anything on the
+    /// server, so it is safe to retry a non-idempotent spool creation.
+    nonisolated static func isDefiniteFailure(_ error: Error) -> Bool {
+        guard let networkError = error as? NetworkError else { return false }
+        switch networkError {
+        case .invalidURL, .unauthorized, .forbidden, .notFound, .featureDisabled,
+             .methodNotAllowed, .conflict, .partsInventoryConflict, .preconditionFailed,
+             .preconditionRequired, .clientError, .serverUnreachable, .authFailed,
+             .insecureTransportBlocked, .certificateChanged, .certificateNotTrusted:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Maximum length the server accepts for a remembered code.
     nonisolated static let maxRememberedCodeLength = 128
@@ -57,6 +78,14 @@ final class BarcodeIntakeViewModel {
         return !trimmed.unicodeScalars.contains {
             CharacterSet.controlCharacters.contains($0) || $0.properties.generalCategory == .format
         }
+    }
+
+    /// A rememberable code that is not a PrintFarmer app link; internal
+    /// printer/job QR links must never be remembered as filament codes.
+    static func isRememberableScan(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isRememberableCode(trimmed) else { return false }
+        return URL(string: trimmed).flatMap(DeepLinkHandler.parse(url:)) == nil
     }
 
     nonisolated static func isNumericShaped(_ value: String) -> Bool {
@@ -130,7 +159,7 @@ final class BarcodeIntakeViewModel {
         // (Code 128/39 text, a non-spool QR) must never be resolved or mapped
         // as a GTIN. It uses the separate exact-match alias store instead.
         guard ScanViewModel.isSupportedProductBarcode(trimmed) else {
-            if Self.isRememberableCode(trimmed) {
+            if Self.isRememberableScan(trimmed) {
                 await lookupAlias(trimmed, service: barcodeService)
             } else {
                 errorMessage = Self.notProductBarcodeMessage
@@ -166,7 +195,7 @@ final class BarcodeIntakeViewModel {
     @discardableResult
     func importUnknownBarcode(filamentId: Int) async -> Bool {
         guard let barcode = pendingUnknownBarcode else { return false }
-        if Self.isRememberableCode(barcode) {
+        if Self.isRememberableScan(barcode) {
             return await rememberAndAddSpool(code: barcode, filamentId: filamentId)
         }
         guard ScanViewModel.isSupportedProductBarcode(barcode) else {
@@ -201,7 +230,7 @@ final class BarcodeIntakeViewModel {
     /// Adds another spool of the remembered filament after the user confirms.
     @discardableResult
     func confirmAliasMatch() async -> Bool {
-        guard let match = pendingAliasMatch, let barcodeService else { return false }
+        guard !isBusy, let match = pendingAliasMatch, let barcodeService else { return false }
         isBusy = true
         errorMessage = nil
         retryAction = nil
@@ -214,7 +243,43 @@ final class BarcodeIntakeViewModel {
             return true
         } catch {
             logger.warning("Remembered-code spool creation failed: \(error.localizedDescription)")
-            fail(error, retry: .addAliasSpool(code: match.code, filamentId: match.filament.id))
+            if Self.isDefiniteFailure(error) {
+                fail(error, retry: .addAliasSpool(code: match.code, filamentId: match.filament.id))
+            } else {
+                pendingAliasMatch = nil
+                failUncertain()
+            }
+            return false
+        }
+    }
+
+    /// Retries only spool creation; the remembered code is already saved.
+    @discardableResult
+    private func addAliasSpool(code: String, filamentId: Int) async -> Bool {
+        guard !isBusy else { return false }
+        guard let barcodeService else {
+            errorMessage = "Barcode intake service not available"
+            return false
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let spool = try await barcodeService.createSpool(filamentId: filamentId)
+            importedThisSession.insert(spool, at: 0)
+            if let match = pendingAliasMatch, match.filament.id == filamentId {
+                lastResolvedFilament = match.filament
+            }
+            pendingUnknownBarcode = nil
+            pendingAliasMatch = nil
+            return true
+        } catch {
+            logger.warning("Remembered-code spool retry failed: \(error.localizedDescription)")
+            if Self.isDefiniteFailure(error) {
+                fail(error, retry: .addAliasSpool(code: code, filamentId: filamentId))
+            } else {
+                pendingAliasMatch = nil
+                failUncertain()
+            }
             return false
         }
     }
@@ -234,9 +299,11 @@ final class BarcodeIntakeViewModel {
         switch action {
         case .lookup(let code):
             await handleScannedBarcode(code)
-        case .remember(let code, let filamentId), .addAliasSpool(let code, let filamentId):
+        case .remember(let code, let filamentId):
             pendingUnknownBarcode = code
             await rememberAndAddSpool(code: code, filamentId: filamentId)
+        case .addAliasSpool(let code, let filamentId):
+            await addAliasSpool(code: code, filamentId: filamentId)
         }
     }
 
@@ -244,11 +311,13 @@ final class BarcodeIntakeViewModel {
         pendingUnknownBarcode = nil
         errorMessage = nil
         retryAction = nil
+        spoolOutcomeUncertain = false
     }
 
     func clearError() {
         errorMessage = nil
         retryAction = nil
+        spoolOutcomeUncertain = false
     }
 
     private func lookupAlias(_ code: String, service: any BarcodeIntakeServiceProtocol) async {
@@ -302,7 +371,11 @@ final class BarcodeIntakeViewModel {
             return true
         } catch {
             logger.warning("Spool creation after remembering code failed: \(error.localizedDescription)")
-            fail(error, retry: .addAliasSpool(code: code, filamentId: alias.filamentId))
+            if Self.isDefiniteFailure(error) {
+                fail(error, retry: .addAliasSpool(code: code, filamentId: alias.filamentId))
+            } else {
+                failUncertain()
+            }
             return false
         }
     }
@@ -310,5 +383,12 @@ final class BarcodeIntakeViewModel {
     private func fail(_ error: Error, retry: RetryAction) {
         errorMessage = error.localizedDescription
         retryAction = retry
+        spoolOutcomeUncertain = false
+    }
+
+    private func failUncertain() {
+        errorMessage = Self.spoolOutcomeUncertainMessage
+        retryAction = nil
+        spoolOutcomeUncertain = true
     }
 }

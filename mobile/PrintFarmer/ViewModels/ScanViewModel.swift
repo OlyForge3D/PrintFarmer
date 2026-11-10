@@ -261,7 +261,7 @@ final class ScanViewModel {
                     return
                 }
             }
-            if barcodeIntakeService != nil, BarcodeIntakeViewModel.isRememberableCode(trimmed) {
+            if barcodeIntakeService != nil, BarcodeIntakeViewModel.isRememberableScan(trimmed) {
                 guard isViewActive else { return }
                 recordRecentScan(icon: "plus.circle", title: "Spool code", subtitle: trimmed)
                 pendingSpoolBarcode = trimmed

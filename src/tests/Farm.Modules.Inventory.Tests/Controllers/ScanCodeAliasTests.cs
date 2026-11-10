@@ -13,6 +13,7 @@ using Farm.Modules.Inventory.Controllers;
 using Farm.Web.Api.Tests;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -199,6 +200,59 @@ public class ScanCodeAliasTests
 
         Assert.Equal(ScanCodeAliasSaveStatus.Replaced, (await service.SaveAsync(Fnsku, 43, null, CancellationToken.None)).Status);
         Assert.Equal(43, (await service.LookupAsync(Fnsku, CancellationToken.None)).Filament!.Id);
+        Assert.Equal(1, await database.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(43, ScanCodeAliasSaveStatus.AlreadyMapped)]
+    [InlineData(44, ScanCodeAliasSaveStatus.Conflict)]
+    public async Task Service_ConcurrentReplacementOfStaleAlias_NeverOverwritesTheWinner(
+        int concurrentFilamentId,
+        ScanCodeAliasSaveStatus expected)
+    {
+        using TempSqliteDatabase database = await TempSqliteDatabase.CreateAsync();
+        Mock<ISpoolmanService> spoolman = SpoolmanWith(CreateFilament(42), CreateFilament(43), CreateFilament(44));
+        ScanCodeAliasService service = database.CreateService(spoolman);
+        _ = await service.SaveAsync(Fnsku, 42, null, CancellationToken.None);
+
+        // Filament 42 is deleted. While this client checks it, another client replaces the
+        // dead link first.
+        spoolman.Setup(s => s.FindFilamentByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                using AppDbContext other = database.CreateContext();
+                other.ScanCodeAliases.Single().FilamentId = concurrentFilamentId;
+                _ = other.SaveChanges();
+                return null;
+            });
+
+        ScanCodeAliasSaveResult result = await service.SaveAsync(Fnsku, 43, "late-user", CancellationToken.None);
+
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(concurrentFilamentId, result.Alias!.FilamentId);
+        await using AppDbContext db = database.CreateContext();
+        ScanCodeAlias stored = await db.ScanCodeAliases.SingleAsync();
+        Assert.Equal(concurrentFilamentId, stored.FilamentId);
+        Assert.NotEqual("late-user", stored.CreatedByUserId);
+    }
+
+    [Theory]
+    [InlineData(42, ScanCodeAliasSaveStatus.AlreadyMapped)]
+    [InlineData(43, ScanCodeAliasSaveStatus.Conflict)]
+    public async Task Service_ConcurrentFirstSaveLosingUniqueIndex_ReportsTheWinner(
+        int concurrentFilamentId,
+        ScanCodeAliasSaveStatus expected)
+    {
+        using TempSqliteDatabase database = await TempSqliteDatabase.CreateAsync();
+        Mock<ISpoolmanService> spoolman = SpoolmanWith(CreateFilament(42), CreateFilament(43));
+        var race = new InsertBeforeSaveInterceptor(database, concurrentFilamentId);
+        ScanCodeAliasService service = database.CreateService(spoolman, race);
+
+        ScanCodeAliasSaveResult result = await service.SaveAsync(Fnsku, 42, null, CancellationToken.None);
+
+        Assert.True(race.Fired);
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(concurrentFilamentId, result.Alias!.FilamentId);
         Assert.Equal(1, await database.CountAsync());
     }
 
@@ -420,6 +474,31 @@ public class ScanCodeAliasTests
             Gtin: null,
             ExternalId: null);
 
+    /// <summary>
+    /// Simulates another client inserting the same code between this client's existence check
+    /// and its insert, so the insert loses the unique index.
+    /// </summary>
+    private sealed class InsertBeforeSaveInterceptor(TempSqliteDatabase database, int filamentId) : SaveChangesInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Fired)
+            {
+                Fired = true;
+                await using AppDbContext other = database.CreateContext();
+                _ = other.ScanCodeAliases.Add(new ScanCodeAlias { Code = Fnsku, FilamentId = filamentId });
+                _ = await other.SaveChangesAsync(cancellationToken);
+            }
+
+            return result;
+        }
+    }
+
     /// <summary>File-backed SQLite database migrated with the shipped SQLite migrations.</summary>
     private sealed class TempSqliteDatabase : IDisposable
     {
@@ -435,16 +514,17 @@ public class ScanCodeAliasTests
             return database;
         }
 
-        public AppDbContext CreateContext()
+        public AppDbContext CreateContext(params IInterceptor[] interceptors)
             => new(new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(ConnectionString, sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
+                .AddInterceptors(interceptors)
                 .Options);
 
-        public ScanCodeAliasService CreateService(Mock<ISpoolmanService> spoolman)
+        public ScanCodeAliasService CreateService(Mock<ISpoolmanService> spoolman, params IInterceptor[] interceptors)
         {
             Mock<IDbContextFactory<AppDbContext>> factory = new();
             factory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
-                .Returns(() => Task.FromResult(CreateContext()));
+                .Returns(() => Task.FromResult(CreateContext(interceptors)));
             return new ScanCodeAliasService(factory.Object, spoolman.Object, NullLogger<ScanCodeAliasService>.Instance);
         }
 

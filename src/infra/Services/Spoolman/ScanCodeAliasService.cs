@@ -83,11 +83,29 @@ public class ScanCodeAliasService(
                 "Replacing scan-code alias {AliasId}: filament {OldFilamentId} no longer exists",
                 existing.Id,
                 existing.FilamentId);
-            existing.FilamentId = filamentId;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.CreatedByUserId = Truncate(userId);
-            _ = await db.SaveChangesAsync(ct);
-            return new(ScanCodeAliasSaveStatus.Replaced, existing, filament, null);
+
+            // Compare-and-swap on the stale filament ID so two clients replacing the same dead
+            // link can't silently overwrite each other: only one swap succeeds.
+            int staleFilamentId = existing.FilamentId;
+            int aliasId = existing.Id;
+            DateTime replacedAt = DateTime.UtcNow;
+            string? replacedBy = Truncate(userId);
+            int updated = await db.ScanCodeAliases
+                .Where(a => a.Id == aliasId && a.FilamentId == staleFilamentId)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(a => a.FilamentId, filamentId)
+                        .SetProperty(a => a.UpdatedAt, replacedAt)
+                        .SetProperty(a => a.CreatedByUserId, replacedBy),
+                    ct);
+            if (updated == 0)
+            {
+                logger.LogInformation("Concurrent scan-code alias replacement detected for alias {AliasId}", aliasId);
+                return await ResolveConcurrentWinnerAsync(normalized, filamentId, filament, ct);
+            }
+
+            ScanCodeAlias? replaced = await FindAsync(normalized, ct);
+            return new(ScanCodeAliasSaveStatus.Replaced, replaced, filament, null);
         }
 
         DateTime now = DateTime.UtcNow;
@@ -109,20 +127,30 @@ public class ScanCodeAliasService(
         {
             // A concurrent save won the unique index; report whatever it stored.
             logger.LogInformation(ex, "Concurrent scan-code alias save detected");
-            ScanCodeAlias? winner = await FindAsync(normalized, ct);
-            if (winner is null)
+            if (await FindAsync(normalized, ct) is null)
             {
                 throw;
             }
 
-            return winner.FilamentId == filamentId
-                ? new(ScanCodeAliasSaveStatus.AlreadyMapped, winner, filament, null)
-                : new(
-                    ScanCodeAliasSaveStatus.Conflict,
-                    winner,
-                    null,
-                    $"Code is already remembered for filament {winner.FilamentId}.");
+            return await ResolveConcurrentWinnerAsync(normalized, filamentId, filament, ct);
         }
+    }
+
+    private async Task<ScanCodeAliasSaveResult> ResolveConcurrentWinnerAsync(
+        string code,
+        int filamentId,
+        SpoolmanFilamentDto filament,
+        CancellationToken ct)
+    {
+        ScanCodeAlias? winner = await FindAsync(code, ct)
+            ?? throw new InvalidOperationException($"Scan-code alias for '{code}' disappeared during a concurrent save.");
+        return winner.FilamentId == filamentId
+            ? new(ScanCodeAliasSaveStatus.AlreadyMapped, winner, filament, null)
+            : new(
+                ScanCodeAliasSaveStatus.Conflict,
+                winner,
+                null,
+                $"Code is already remembered for filament {winner.FilamentId}.");
     }
 
     private async Task<ScanCodeAlias?> FindAsync(string code, CancellationToken ct)

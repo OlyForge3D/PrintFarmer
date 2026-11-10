@@ -433,20 +433,23 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.filamentsById = [8: makeFilament(id: 8)]
         service.spoolToCreate = makeSpool(id: 74, filamentId: 8)
         await viewModel.handleScannedBarcode("X0022Z40I1")
-        service.createSpoolError = NetworkError.serverError(502)
+        // A definite failure: the request never reached the server.
+        service.createSpoolError = NetworkError.serverUnreachable
 
         let added = await viewModel.importUnknownBarcode(filamentId: 8)
 
         XCTAssertFalse(added)
         XCTAssertEqual(viewModel.retryAction, .addAliasSpool(code: "X0022Z40I1", filamentId: 8))
+        XCTAssertFalse(viewModel.spoolOutcomeUncertain)
         XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 8, "the code stays remembered")
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
 
         service.createSpoolError = nil
         await viewModel.retry()
-        XCTAssertEqual(service.aliasSaveCalls.map(\.filamentId), [8, 8], "re-saving the same link is idempotent")
+        XCTAssertEqual(service.aliasSaveCalls.map(\.filamentId), [8], "retry only adds the spool; the alias is not re-saved")
         XCTAssertEqual(service.createSpoolCalls, [8, 8])
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [74], "exactly one spool was created")
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
     }
 
     @MainActor
@@ -455,7 +458,7 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
         service.filamentsById = [8: makeFilament(id: 8)]
         service.spoolToCreate = makeSpool(id: 75, filamentId: 8)
-        service.createSpoolError = NetworkError.serverError(503)
+        service.createSpoolError = NetworkError.serverUnreachable
         await viewModel.handleScannedBarcode("X0022Z40I1")
 
         let added = await viewModel.confirmAliasMatch()
@@ -465,6 +468,83 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.createSpoolError = nil
         await viewModel.retry()
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [75])
+        XCTAssertEqual(service.createSpoolCalls, [8, 8])
+        XCTAssertTrue(service.aliasSaveCalls.isEmpty, "retrying a confirmation never writes the alias (admin-only)")
+        XCTAssertNil(viewModel.pendingUnknownBarcode, "retry never presents the Remember sheet")
+        XCTAssertNil(viewModel.pendingAliasMatch, "the confirmation card is cleared so it can't add a second spool")
+        XCTAssertEqual(viewModel.lastResolvedFilament?.id, 8)
+    }
+
+    @MainActor
+    func testUncertainSpoolCreationAfterConfirmationWithholdsRetry() async {
+        let uncertain: [Error] = [
+            NetworkError.timeout,
+            NetworkError.noConnection,
+            NetworkError.serverError(502),
+            NetworkError.transportError(URLError(.badServerResponse)),
+        ]
+        for error in uncertain {
+            let (viewModel, service) = makeSubject()
+            service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+            service.createSpoolError = error
+            await viewModel.handleScannedBarcode("X0022Z40I1")
+
+            let added = await viewModel.confirmAliasMatch()
+
+            XCTAssertFalse(added, "\(error)")
+            XCTAssertNil(viewModel.retryAction, "the spool may exist; retry could duplicate it: \(error)")
+            XCTAssertTrue(viewModel.spoolOutcomeUncertain, "\(error)")
+            XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.spoolOutcomeUncertainMessage)
+            XCTAssertNil(viewModel.pendingAliasMatch, "Add Spool is withdrawn: \(error)")
+            let again = await viewModel.confirmAliasMatch()
+            XCTAssertFalse(again)
+            XCTAssertEqual(service.createSpoolCalls, [8], "exactly one create attempt: \(error)")
+        }
+    }
+
+    @MainActor
+    func testUncertainSpoolCreationAfterRememberingWithholdsRetry() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentsById = [8: makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        service.createSpoolError = NetworkError.timeout
+
+        let added = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(added)
+        XCTAssertNil(viewModel.retryAction)
+        XCTAssertTrue(viewModel.spoolOutcomeUncertain)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.spoolOutcomeUncertainMessage)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 8, "the code is remembered so a rescan offers the filament")
+        XCTAssertEqual(service.createSpoolCalls, [8])
+
+        viewModel.skipUnknownBarcode()
+        XCTAssertFalse(viewModel.spoolOutcomeUncertain)
+    }
+
+    @MainActor
+    func testConfirmWhileBusyCreatesNothing() async {
+        let (viewModel, service) = makeSubject()
+        service.aliases = ["X0022Z40I1": makeFilament(id: 8)]
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        viewModel.isBusy = true
+
+        let added = await viewModel.confirmAliasMatch()
+
+        XCTAssertFalse(added)
+        XCTAssertTrue(service.createSpoolCalls.isEmpty)
+        XCTAssertNotNil(viewModel.pendingAliasMatch)
+    }
+
+    @MainActor
+    func testAppLinkIsNeverOfferedAsRememberedCode() async {
+        let (viewModel, service) = makeSubject()
+
+        await viewModel.handleScannedBarcode("printfarmer://printer/\(UUID().uuidString)/ready")
+
+        XCTAssertTrue(service.aliasLookups.isEmpty)
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.notProductBarcodeMessage)
     }
 
     @MainActor

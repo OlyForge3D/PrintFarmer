@@ -75,6 +75,48 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         attachScreenshot(named: "fnsku-first-scan-create-filament")
     }
 
+    func testFnskuRememberFailureShowsRetryInTheSheetAndRetryAddsOneSpool() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "alias-save-unreachable",
+        ])
+        openScanAndScan()
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
+        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
+        XCTAssertTrue(filament.waitForExistence(timeout: 8))
+        filament.tap()
+
+        let retry = app.buttons["mapBarcode.retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 8), "a definite failure offers a labelled Retry in the sheet")
+        XCTAssertEqual(retry.label, "Retry adding spool")
+        XCTAssertTrue(app.navigationBars["Remember Code"].exists, "the sheet stays open after a failed save")
+        attachScreenshot(named: "fnsku-remember-failure-retry")
+        retry.tap()
+
+        XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "retry adds exactly one spool")
+        XCTAssertFalse(app.navigationBars["Remember Code"].exists)
+    }
+
+    func testFnskuUncertainSpoolOutcomeWithholdsRetry() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "spool-create-timeout",
+        ])
+        openScanAndScan()
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
+        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
+        XCTAssertTrue(filament.waitForExistence(timeout: 8))
+        filament.tap()
+
+        let done = app.buttons["mapBarcode.uncertainDone"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["mapBarcode.retry"].exists, "a spool that may exist is never retried")
+        XCTAssertFalse(app.buttons["mapBarcode.showCreate"].exists, "filament choices are withdrawn")
+        attachScreenshot(named: "fnsku-uncertain-outcome")
+        done.tap()
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForNonExistence(timeout: 8))
+    }
+
     func testAppLinkThatIsNotASpoolOffersManualAddSpool() {
         relaunchAppForTest(additionalArguments: [
             "--uitesting-scan-code", "printfarmer://printer/00000000-0000-0000-0000-000000000001/ready"

@@ -149,3 +149,6 @@ The shipped cases are:
 | Map/Remember Code existing filament row | `mapBarcode.filament.<filament-id>` |
 | Map/Remember Code show create form | `mapBarcode.showCreate` |
 | Map/Remember Code create submit | `mapBarcode.create` |
+| Map/Remember Code save error message | `mapBarcode.error` |
+| Map/Remember Code retry after a definite failure | `mapBarcode.retry` |
+| Map/Remember Code done after an uncertain spool outcome | `mapBarcode.uncertainDone` |

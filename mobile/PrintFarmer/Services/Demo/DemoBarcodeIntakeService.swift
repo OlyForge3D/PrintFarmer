@@ -3,6 +3,21 @@ import Foundation
 // MARK: - Demo Barcode Intake Service
 
 final class DemoBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked Sendable {
+    /// UI-test fault injection for the remembered-code failure paths.
+    enum Fault: String {
+        /// The first alias save fails before reaching the server (definite, retryable).
+        case aliasSaveUnreachable = "alias-save-unreachable"
+        /// Every spool creation times out (outcome unknown, never retried).
+        case spoolCreateTimeout = "spool-create-timeout"
+    }
+
+    private let fault: Fault?
+    private var aliasSaveFailed = false
+
+    init(fault: Fault? = nil) {
+        self.fault = fault
+    }
+
     private let demoFilament = SpoolmanFilament(
         id: 1,
         name: "Prusament PLA",
@@ -47,12 +62,19 @@ final class DemoBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
     }
 
     func saveCodeAlias(code: String, filamentId: Int) async throws -> ScanCodeAlias {
+        let failNow = lock.withLock {
+            guard fault == .aliasSaveUnreachable, !aliasSaveFailed else { return false }
+            aliasSaveFailed = true
+            return true
+        }
+        if failNow { throw NetworkError.serverUnreachable }
         lock.withLock { aliases[code] = filamentId }
         return ScanCodeAlias(id: 1, code: code, filamentId: filamentId, filament: demoFilament)
     }
 
     func createSpool(filamentId: Int) async throws -> SpoolmanSpool {
-        try await importSpool(barcode: "", fields: SpoolImportFields())
+        if fault == .spoolCreateTimeout { throw NetworkError.timeout }
+        return try await importSpool(barcode: "", fields: SpoolImportFields())
     }
 
     func importSpool(barcode: String, fields: SpoolImportFields) async throws -> SpoolmanSpool {
