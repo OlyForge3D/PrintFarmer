@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { assertAdminWorkspaceBoundaries } from './fixtures/admin-workspace-journey';
 import { mountRoutedToolbarPage, toolbarRouteUser } from './fixtures/toolbar-routed';
 import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 
@@ -121,6 +122,12 @@ const categories = [
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px focused admin categories`, () => {
     test.use({ viewport, reducedMotion: 'reduce' });
+
+    test('monolith admin-workspace journey uses canonical category headings', async ({ page }) => {
+      const requests = await mountRoutedToolbarPage(page, '/admin', seeds);
+      await assertAdminWorkspaceBoundaries(page);
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
 
     test('Control Center exposes purpose-specific category destinations', async ({ page }, testInfo) => {
       const requests = await mountRoutedToolbarPage(page, '/admin', seeds);
