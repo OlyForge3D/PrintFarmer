@@ -74,6 +74,14 @@ struct ScanFlowView: View {
                             UnrecognizedScanView(code: code)
                         case .newSpool(let data):
                             AddSpoolView(scannedData: data)
+                        case .unknownNFCTag(let tag, let data):
+                            NFCTagLinkView(
+                                uid: tag.uid,
+                                scannedData: data,
+                                spoolService: services.spoolService
+                            ) { spool in
+                                viewModel.completeNFCTagLink(to: spool)
+                            }
                         }
                     }
                     .onAppear { viewModel.resultPresentationDidAppear() }
