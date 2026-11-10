@@ -44,12 +44,14 @@ card, table row, or details sidebar. Administrators with `printers:admin` can
 also select printers and use the same action in bulk. **Expect online** reverses
 the acknowledgement. Bulk updates report successes and per-printer failures
 separately; refresh and review a conflicting revision before trying it again.
+Table monitoring actions keep the selection for review and explicit reversal.
 
 The acknowledgement persists across server restarts. It excludes only expected
 shutdowns from connectivity warnings and the Admin Center health denominator;
 printers remain visible and truthfully offline, with a neutral **Expected
 offline** label. This is not a power command, maintenance mode, or dispatch
-setting, and it does not pause jobs or rewrite schedules.
+setting, and it does not pause jobs or rewrite schedules. A known offline
+printer can be acknowledged independently of its Enabled or maintenance setting.
 
 Only a known offline printer without active/assigned work can be acknowledged.
 Active-print disconnects, unknown/error states, and provider/service failures
@@ -72,6 +74,9 @@ and resource access, returns the updated `expectedOfflineSinceUtc` and
 revision, and `412` for a conflict. Read DTOs expose the nullable UTC timestamp;
 null means expected online. The authorized `printermonitoringchanged` SignalR
 event invalidates printer and attention projections.
+Monitoring changes (including automatic reconnect clearing) advance the printer
+revision. An edit form opened earlier can therefore require a refresh before save;
+the revision check deliberately prevents overwriting newer operator intent.
 
 ### Files Page
 `/files` separates owned local assets from files observed on printers.

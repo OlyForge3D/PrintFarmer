@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { mountRoutedToolbarPage } from './fixtures/toolbar-routed';
 import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 
@@ -6,7 +6,7 @@ const since = '2026-10-30T12:00:00Z';
 const printers = Array.from({ length: 4 }, (_, index) => ({
   id: `00000000-0000-0000-0000-${String(index).padStart(12, '0')}`,
   name: ['Fixture CoreXY', 'Fixture shutdown A', 'Fixture shutdown B', 'Fixture unexpected'][index],
-  backend: 'Moonraker', isEnabled: true, isOnline: index === 0,
+  backend: 'Moonraker', isEnabled: index !== 3, isOnline: index === 0,
   state: index === 0 ? 'Idle' : 'Offline', rowVersion: 'Zml4dHVyZQ==',
   expectedOfflineSinceUtc: index === 1 || index === 2 ? since : null,
 }));
@@ -26,6 +26,15 @@ const overview = {
     actionLabel: 'Open printer', actionRoute: `/printers/${printers[3].id}`,
   })),
 };
+
+async function expectMobileMonitoringTargets(page: Page) {
+  if (page.viewportSize()!.width >= 640) return;
+  for (const button of await page.getByRole('button', { name: /^(Mark expected offline|Expect online)$/ }).all()) {
+    const bounds = await button.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  }
+}
 
 test('compact operational issues preserve counts, critical errors and keyboard disclosures', async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
@@ -84,6 +93,8 @@ test('printer monitoring remains neutral and supports reviewed reversible bulk a
     '/api/printers/camera-urls': [],
     '/api/printers/backend-capabilities': [],
     '/api/printers/summary': rows,
+    [`/api/printers/${rows[3].id}`]: rows[3],
+    [`/api/printers/${rows[3].id}/details`]: rows[3],
     '/api/auto-dispatch/status': [],
     '/api/locations': [],
     '/api/tags': [],
@@ -100,6 +111,7 @@ test('printer monitoring remains neutral and supports reviewed reversible bulk a
   });
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Mark expected offline', exact: true })).toHaveCount(1);
+  await expectMobileMonitoringTargets(page);
   await page.getByText('Expected offline', { exact: true }).first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('printers-monitoring.png'), fullPage: true });
   const unexpected = page.getByRole('row').filter({ hasText: 'Fixture unexpected' });
@@ -121,7 +133,21 @@ test('printer monitoring remains neutral and supports reviewed reversible bulk a
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(1);
   await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 15_000 });
   await page.getByText('Expected offline', { exact: true }).scrollIntoViewIfNeeded();
+  await expectMobileMonitoringTargets(page);
   await page.screenshot({ path: testInfo.outputPath('printers-compact-monitoring.png'), fullPage: true });
+  const compact = page.getByRole('article').filter({ hasText: 'Fixture unexpected' });
+  await compact.getByRole('button', { name: 'Open details sidebar', exact: true }).click();
+  const sidebar = page.getByRole('complementary', { name: 'Fixture unexpected details', exact: true });
+  await expect(sidebar.getByRole('button', { name: 'Expect online', exact: true })).toBeVisible();
+  await expectMobileMonitoringTargets(page);
+  await sidebar.getByRole('button', { name: 'Expect online', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('printers-sidebar-monitoring.png'), fullPage: true });
+  await sidebar.getByRole('button', { name: 'Close sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Detailed Cards', exact: true }).click();
+  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(1);
+  await expectMobileMonitoringTargets(page);
+  await page.getByText('Expected offline', { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('printers-detailed-monitoring.png'), fullPage: true });
   expect(requests.errors).toEqual([]);
   expect(requests.external).toEqual([]);
   expect(requests.writes).toEqual([]);

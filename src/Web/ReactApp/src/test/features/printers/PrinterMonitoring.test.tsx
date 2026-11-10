@@ -42,6 +42,13 @@ describe('Expected offline monitoring controls', () => {
     await waitFor(() => expect(apiClient.setPrinterExpectedOffline).toHaveBeenCalledWith('1', true, 'revision'));
   });
 
+  it('keeps acknowledgement independent from enablement and maintenance', async () => {
+    const { Wrapper } = wrapper();
+    render(<PrinterMonitoringControl printer={printer('1', { isEnabled: false, inMaintenance: true })} />, { wrapper: Wrapper });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Mark expected offline' }));
+    await waitFor(() => expect(apiClient.setPrinterExpectedOffline).toHaveBeenCalledWith('1', true, 'revision'));
+  });
+
   it('offers neutral status and explicit reversal without printer-admin permission', () => {
     auth.allowed = false;
     const { Wrapper } = wrapper();

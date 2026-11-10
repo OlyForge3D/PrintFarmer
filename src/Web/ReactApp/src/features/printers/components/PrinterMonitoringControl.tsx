@@ -7,7 +7,7 @@ export function PrinterMonitoringControl({ printer }: { printer: Printer }) {
   const { hasPermission } = useAuth();
   const monitoring = usePrinterMonitoring();
   const expectedOffline = !!printer.expectedOfflineSinceUtc;
-  const knownOffline = !printer.isOnline && printer.isEnabled !== false
+  const knownOffline = !printer.isOnline
     && (!printer.state || ['offline', 'disconnected', 'unreachable'].includes(printer.state.toLowerCase()));
   if (!expectedOffline && !knownOffline) return null;
 
@@ -18,6 +18,8 @@ export function PrinterMonitoringControl({ printer }: { printer: Printer }) {
         <Button
           variant="subtle"
           size="sm"
+          control
+          className="min-h-11 min-w-11 sm:min-h-0 pointer-coarse:min-h-11"
           loading={monitoring.isPending}
           disabled={monitoring.isPending || !printer.rowVersion}
           title={expectedOffline

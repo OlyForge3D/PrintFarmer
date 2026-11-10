@@ -40,11 +40,13 @@ public sealed class PrinterMonitoringControllerTests : IClassFixture<PrinterMoni
         }
     }
 
-    [Fact]
-    public async Task Intent_PersistsAcrossRequestsAndCanBeReversedWithoutChangingDispatch()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Intent_PersistsAcrossRequestsAndCanBeReversedWithoutChangingDispatch(bool isEnabled)
     {
         using HttpClient client = await _factory.CreateAdminClientAsync();
-        Guid id = await SeedAsync();
+        Guid id = await SeedAsync(isEnabled);
         Cache.UpdateStatus(new PrinterStatusDto(id, false, "Offline"));
         HttpResponseMessage response = await PutAsync(client, id, true);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -55,7 +57,7 @@ public sealed class PrinterMonitoringControllerTests : IClassFixture<PrinterMoni
         {
             Printer printer = await scope.ServiceProvider.GetRequiredService<AppDbContext>().Printers.SingleAsync(value => value.Id == id);
             printer.ExpectedOfflineSinceUtc.Should().NotBeNull();
-            printer.IsEnabled.Should().BeTrue();
+            printer.IsEnabled.Should().Be(isEnabled);
             printer.InMaintenance.Should().BeFalse();
         }
 
@@ -150,7 +152,7 @@ public sealed class PrinterMonitoringControllerTests : IClassFixture<PrinterMoni
         return await client.SendAsync(request);
     }
 
-    private async Task<Guid> SeedAsync()
+    private async Task<Guid> SeedAsync(bool isEnabled = true)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -163,7 +165,7 @@ public sealed class PrinterMonitoringControllerTests : IClassFixture<PrinterMoni
             Model = model,
             ServerUrl = $"http://synthetic-{Guid.NewGuid():N}.invalid:1",
             Backend = (int)PrinterBackend.PrusaLink,
-            IsEnabled = true,
+            IsEnabled = isEnabled,
         };
         db.Printers.Add(printer);
         await db.SaveChangesAsync();
