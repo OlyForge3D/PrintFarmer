@@ -103,7 +103,10 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {/* Maintenance mode indicator */}
         {printer.inMaintenance && (
           <div className="shrink-0" title="In maintenance mode">
-            <WrenchIcon className="h-4 w-4 text-pf-accent" aria-hidden="true" />
+            <span aria-hidden="true">
+              <WrenchIcon className="h-4 w-4 text-pf-accent" />
+            </span>
+            <span className="sr-only">In Maintenance</span>
           </div>
         )}
       </div>

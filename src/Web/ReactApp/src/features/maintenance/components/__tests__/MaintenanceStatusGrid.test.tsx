@@ -26,12 +26,31 @@ describe('MaintenanceStatusGrid', () => {
       total: 0,
       name: 'Test printer Online Healthy',
     },
-  ])('exposes the complete card name: $name', ({ counts, total, name }) => {
+    {
+      counts: [0, 0, 0, 0],
+      total: 0,
+      inMaintenance: true,
+      name: 'Test printer Online In Maintenance Healthy',
+    },
+    {
+      counts: [0, 0, 0, 0],
+      total: 0,
+      isOnline: false,
+      inMaintenance: true,
+      name: 'Test printer Offline In Maintenance Healthy',
+    },
+    {
+      counts: [1, 2, 0, 0],
+      total: 3,
+      inMaintenance: true,
+      name: 'Test printer Online In Maintenance 3 alerts Critical alerts: 1; High alerts: 2',
+    },
+  ])('exposes the complete card name: $name', ({ counts, total, name, isOnline = true, inMaintenance = false }) => {
     const printer: PrinterMaintenanceStatus = {
       printerId: 'printer-1',
       printerName: 'Test printer',
-      isOnline: true,
-      inMaintenance: false,
+      isOnline,
+      inMaintenance,
       activeAlertCount: total,
       criticalAlerts: counts[0],
       highAlerts: counts[1],
