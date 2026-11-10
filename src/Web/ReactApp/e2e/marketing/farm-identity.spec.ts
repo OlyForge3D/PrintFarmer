@@ -56,7 +56,7 @@ for (const viewport of [
     await page.getByRole('button', { name: /save/i }).click();
     const header = page.locator('header:visible').first();
     await expect(header.getByText('Workshop North', { exact: true })).toBeVisible();
-    await expect(header.getByLabel('Farm time (America/Los_Angeles)', { exact: true })).toHaveText('03:00 GMT-7');
+    await expect(header.getByLabel('Farm time: 03:00 GMT-7 (America/Los_Angeles)', { exact: true })).toHaveText('03:00 GMT-7');
     expect(await header.locator('time').evaluate(element => {
       const time = element.getBoundingClientRect();
       const container = element.parentElement!.getBoundingClientRect();

@@ -50,6 +50,20 @@ describe('farm identity branding', () => {
     expect(after).toContain('GMT-8');
   });
 
+  it('announces the time, offset and IANA zone at both repeated fall-back instants', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-01T08:30:00Z'));
+    vi.mocked(useFarmIdentity).mockReturnValue({
+      data: { farmName: 'Workshop', timeZone: 'America/Los_Angeles' },
+      error: null,
+    } as ReturnType<typeof useFarmIdentity>);
+    const { container } = render(<FarmIdentityBrand />);
+    expect(container.querySelector('time')).toHaveAccessibleName('Farm time: 01:30 GMT-7 (America/Los_Angeles)');
+    vi.setSystemTime(new Date('2026-11-01T09:30:00Z'));
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(container.querySelector('time')).toHaveAccessibleName('Farm time: 01:30 GMT-8 (America/Los_Angeles)');
+  });
+
   it('reports read failures without claiming a configured farm time', () => {
     vi.mocked(useFarmIdentity).mockReturnValue({
       data: undefined,

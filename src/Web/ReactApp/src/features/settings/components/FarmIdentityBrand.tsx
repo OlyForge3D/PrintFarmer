@@ -29,7 +29,7 @@ export function FarmIdentityBrand() {
         ) : (
           <div title={`Farm time (${identity.timeZone})`} className="truncate text-xs text-pf-text-secondary">
             <span className="hidden lg:inline">Farm time: </span>
-            <time aria-label={`Farm time (${identity.timeZone})`} dateTime={now.toISOString()}>{farmTime}</time>
+            <time aria-label={`Farm time: ${farmTime} (${identity.timeZone})`} dateTime={now.toISOString()}>{farmTime}</time>
             <span className="hidden lg:inline"> ({identity.timeZone})</span>
           </div>
         )

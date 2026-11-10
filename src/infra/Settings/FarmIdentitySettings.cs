@@ -32,8 +32,8 @@ public class FarmIdentitySettings : IAppSetting, IValidatableSetting
         }
 
         if (string.IsNullOrWhiteSpace(TimeZone) ||
-            (TimeZone != "UTC" && !TimeZoneInfo.TryConvertIanaIdToWindowsId(TimeZone, out _)) ||
-            !TimeZoneInfo.TryFindSystemTimeZoneById(TimeZone, out _))
+            !TimeZoneInfo.TryFindSystemTimeZoneById(TimeZone, out TimeZoneInfo? zone) ||
+            (TimeZone != "UTC" && !zone.HasIanaId))
         {
             throw new ValidationException(
                 new ValidationResult("Choose a valid IANA timezone, such as America/Los_Angeles, Europe/London, or UTC.", [nameof(TimeZone)]),
