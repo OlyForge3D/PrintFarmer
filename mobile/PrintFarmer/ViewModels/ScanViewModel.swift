@@ -24,6 +24,9 @@ final class ScanViewModel {
         /// active server. It offers manual creation only, never GTIN intake.
         case missingSpool(id: Int, code: String)
         case unknownNFCTag(ScannedNFCTag, ScannedSpoolData?)
+        /// An NFC tag that points to a spool absent from the active server.
+        /// It offers relinking or creating a spool, never barcode intake.
+        case staleNFCLink(ScannedNFCTag, spoolID: Int)
 
         var id: String {
             switch self {
@@ -32,6 +35,7 @@ final class ScanViewModel {
             case .newSpool: "new-spool"
             case .addSpoolManually(let code): "manual-\(code)"
             case .unknownNFCTag(let tag, _): "nfc-\(tag.uid)"
+            case .staleNFCLink(let tag, let spoolID): "nfc-stale-\(tag.uid)-\(spoolID)"
             }
         }
     }
@@ -134,7 +138,11 @@ final class ScanViewModel {
             case .printerId:
                 errorMessage = Self.notSpoolTagMessage
             case .spoolId(let id):
-                await routeToSpoolIfExists(id: id, code: "Spool #\(id)", subtitle: "Spool #\(id)")
+                await routeToSpoolIfExists(
+                    id: id,
+                    subtitle: "Spool #\(id)",
+                    ifMissing: .missingSpool(id: id, code: "Spool #\(id)")
+                )
             case .newSpoolData(let data):
                 pendingOutcome = .newSpool(data)
             case .nfcTag(let tag):
@@ -160,7 +168,11 @@ final class ScanViewModel {
             )
             guard isViewActive else { return }
             if let spoolID = response.matchedSpoolId {
-                await routeToSpoolIfExists(id: spoolID, subtitle: "NFC-linked spool #\(spoolID)")
+                await routeToSpoolIfExists(
+                    id: spoolID,
+                    subtitle: "NFC-linked spool #\(spoolID)",
+                    ifMissing: .staleNFCLink(tag, spoolID: spoolID)
+                )
                 return
             }
             if let responseFilament = response.filament {
@@ -190,7 +202,11 @@ final class ScanViewModel {
             if let legacy = tag.legacyContent {
                 switch legacy {
                 case .spoolId(let id):
-                    await routeToSpoolIfExists(id: id, subtitle: "NFC spool #\(id)")
+                    await routeToSpoolIfExists(
+                        id: id,
+                        subtitle: "NFC spool #\(id)",
+                        ifMissing: .staleNFCLink(tag, spoolID: id)
+                    )
                 case .printerId:
                     errorMessage = Self.notSpoolTagMessage
                 case .newSpoolData(let data):
@@ -207,7 +223,16 @@ final class ScanViewModel {
         }
     }
 
-    func completeNFCTagLink(to spool: SpoolmanSpool) {
+    /// Accepts a link only while that tag's result is still presented, so a
+    /// completion arriving after Cancel never navigates or replaces a newer
+    /// result.
+    func completeNFCTagLink(uid: String, to spool: SpoolmanSpool) {
+        guard isViewActive, !hasFinishedNavigation else { return }
+        switch pendingOutcome {
+        case .unknownNFCTag(let tag, _) where tag.uid == uid: break
+        case .staleNFCLink(let tag, _) where tag.uid == uid: break
+        default: return
+        }
         recordRecentScan(icon: "wave.3.right", title: "NFC tag linked", subtitle: "Spool #\(spool.id)")
         pendingOutcome = nil
         pendingDeepLinkDestination = .spoolDetail(id: spool.id)
@@ -300,7 +325,11 @@ final class ScanViewModel {
         // genuine EAN/UPC barcodes are also numeric.
         if let url = URL(string: trimmed), let destination = DeepLinkHandler.parse(url: url) {
             if case .spoolDetail(let id) = destination {
-                await routeToSpoolIfExists(id: id, code: trimmed, subtitle: "Spool #\(id)")
+                await routeToSpoolIfExists(
+                    id: id,
+                    subtitle: "Spool #\(id)",
+                    ifMissing: .missingSpool(id: id, code: trimmed)
+                )
             } else {
                 // Recognized non-spool links (e.g. printer UUIDs) must never
                 // reach barcode resolution: the server's GTIN normalizer
@@ -311,7 +340,11 @@ final class ScanViewModel {
             return
         }
         if let spoolId = QRCodeParser.parseStructured(trimmed) {
-            await routeToSpoolIfExists(id: spoolId, code: trimmed, subtitle: "Spool #\(spoolId)")
+            await routeToSpoolIfExists(
+                id: spoolId,
+                subtitle: "Spool #\(spoolId)",
+                ifMissing: .missingSpool(id: spoolId, code: trimmed)
+            )
             return
         }
 
@@ -396,18 +429,16 @@ final class ScanViewModel {
     /// server before routing to `.spoolDetail` — such a payload NEVER falls
     /// back to raw barcode registration; it either routes or surfaces an
     /// explicit error.
-    /// NFC callers pass no `code`: a stale NFC link keeps its explicit error
-    /// rather than offering barcode-driven spool creation.
-    private func routeToSpoolIfExists(id: Int, code: String? = nil, subtitle: String) async {
+    /// A missing spool always yields a recovery outcome: barcode callers
+    /// offer manual creation and NFC callers offer relinking the tag UID.
+    private func routeToSpoolIfExists(id: Int, subtitle: String, ifMissing missing: ScanOutcome) async {
         guard let exists = await existingSpoolLookup(id: id) else { return }
         if exists {
             recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
             pendingDeepLinkDestination = .spoolDetail(id: id)
-        } else if let code {
-            recordRecentScan(icon: "questionmark.circle", title: "Spool not found", subtitle: subtitle)
-            pendingOutcome = .missingSpool(id: id, code: code)
         } else {
-            errorMessage = "Spool #\(id) was not found on this server."
+            recordRecentScan(icon: "questionmark.circle", title: "Spool not found", subtitle: subtitle)
+            pendingOutcome = missing
         }
     }
 
