@@ -81,7 +81,7 @@ export function RecentPrintsWidget({ maxPrints = 5, className = '' }: RecentPrin
                   entry.status === 'Completed'
                     ? 'bg-pf-success/10 text-pf-success' 
                     : entry.status === 'Failed' 
-                    ? 'bg-pf-error/10 text-pf-error'
+                    ? 'bg-pf-error/10 text-pf-error-text'
                     : 'bg-pf-border-medium text-pf-text-secondary'
                 }`}>
                   {entry.status}

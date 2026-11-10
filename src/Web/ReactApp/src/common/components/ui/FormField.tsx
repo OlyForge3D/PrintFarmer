@@ -41,7 +41,7 @@ export const FormField: React.FC<FormFieldProps> = ({
       <div className={clsx('flex flex-col gap-1', inline && 'flex-1')}>
         {children}
         {helper && !error && (
-          <div id={helperId} className="text-xs text-pf-text-muted leading-relaxed">{helper}</div>
+          <div id={helperId} className="text-xs text-pf-text-secondary leading-relaxed">{helper}</div>
         )}
         {error && (
           <div id={errorId} className="text-xs text-pf-error-text" role="alert">{error}</div>

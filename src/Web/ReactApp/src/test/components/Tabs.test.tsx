@@ -43,6 +43,45 @@ describe('Tabs', () => {
       // Content 2 should not be visible (hidden)
       expect(screen.queryByText('Content 2')).not.toBeInTheDocument();
     });
+
+    it('only points the selected tab at its rendered panel', () => {
+      render(
+        <Tabs defaultTab="tab1">
+          <Tabs.List>
+            <Tabs.Tab id="tab1">Tab 1</Tabs.Tab>
+            <Tabs.Tab id="tab2">Tab 2</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panels>
+            <Tabs.Panel id="tab1">Content 1</Tabs.Panel>
+            <Tabs.Panel id="tab2">Content 2</Tabs.Panel>
+          </Tabs.Panels>
+        </Tabs>
+      );
+
+      const tab1 = screen.getByRole('tab', { name: 'Tab 1' });
+      const tab2 = screen.getByRole('tab', { name: 'Tab 2' });
+      expect(tab1).toHaveAttribute('aria-controls', 'panel-tab1');
+      expect(document.getElementById(tab1.getAttribute('aria-controls')!)).toBeInTheDocument();
+      expect(tab2).not.toHaveAttribute('aria-controls');
+
+      fireEvent.click(tab2);
+
+      expect(tab1).not.toHaveAttribute('aria-controls');
+      expect(tab2).toHaveAttribute('aria-controls', 'panel-tab2');
+      expect(document.getElementById(tab2.getAttribute('aria-controls')!)).toBeInTheDocument();
+    });
+
+    it('can omit panel controls for tabs that navigate outside the local tab set', () => {
+      render(
+        <Tabs activeTab="accounts">
+          <Tabs.List>
+            <Tabs.Tab id="accounts" ariaControls={false}>Accounts</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+      );
+
+      expect(screen.getByRole('tab', { name: 'Accounts' })).not.toHaveAttribute('aria-controls');
+    });
   });
 
   describe('Tab Switching', () => {

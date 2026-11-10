@@ -327,8 +327,8 @@ function WebhookFormModal({ webhook, eventTypes, onClose, onSubmit, isSubmitting
  <Input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={isEdit ? '(unchanged)' : 'Optional secret'} />
  </FormField>
 
- <FormField label="Max Consecutive Failures" helper="Webhook is auto-disabled after this many failures.">
- <Input type="number" min={1} max={100} value={maxFailures} onChange={(e) => setMaxFailures(Number(e.target.value))} />
+ <FormField label="Max Consecutive Failures" htmlFor="webhook-max-failures" helper="Webhook is auto-disabled after this many failures.">
+ <Input id="webhook-max-failures" type="number" min={1} max={100} value={maxFailures} onChange={(e) => setMaxFailures(Number(e.target.value))} />
  </FormField>
 
  <fieldset>

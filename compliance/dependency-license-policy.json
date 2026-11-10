@@ -25,6 +25,7 @@
     "MIT AND ISC",
     "MIT-0",
     "MPL-2.0",
+    "OFL-1.1",
     "PostgreSQL",
     "Unlicense",
     "Zlib",
@@ -399,6 +400,16 @@
     ]
   },
   "reviewedEvidence": [
+    {
+      "ecosystem": "npm",
+      "observedLicense": "OFL-1.1",
+      "approvedExpression": "OFL-1.1",
+      "evidence": "The lockfile-integrity-pinned @fontsource/{chakra-petch,dm-mono,ibm-plex-sans,inter,jetbrains-mono,merriweather-sans,nunito-sans,rajdhani,space-grotesk}@5.3.0 packages each include a LICENSE with the font authors' copyright notice and SIL Open Font License 1.1. Exact-version license links and usage boundaries are recorded in THIRD-PARTY-NOTICES.md.",
+      "reviewer": "Copilot App",
+      "reviewDate": "2026-11-10",
+      "reviewAfter": "2027-11-10",
+      "rationale": "OFL 1.1 permits bundled and embedded use with copyright and license notices preserved; fonts remain separately OFL-licensed, may not be sold alone, and modified versions must respect reserved names. These unmodified devDependencies supply local browser-test fonts only, not production imports. Rendered screenshots are documents, not redistribution of the font software. This is a source review, not external legal approval."
+    },
     {
       "ecosystem": "nuget",
       "observedLicense": "FILE-SHA256:3e6ed02b718eec8e95805b3515e380fe83767b753b69e21641f9ed6f66580fe1",
