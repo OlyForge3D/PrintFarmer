@@ -28,6 +28,25 @@ public record ScanCodeAliasDto(
     DateTime UpdatedAt,
     SpoolmanFilamentDto? Filament);
 
+/// <summary>Outcome of looking up a scanned code.</summary>
+public enum ScanCodeAliasLookupState
+{
+    /// <summary>The code is remembered and its filament exists.</summary>
+    Found,
+
+    /// <summary>The code has never been remembered.</summary>
+    NotRemembered,
+
+    /// <summary>The code is remembered, but its filament no longer exists in Spoolman.</summary>
+    FilamentMissing,
+}
+
+/// <summary>
+/// Lookup response. A miss is a 200 with an explicit state so clients can tell a genuine
+/// "not remembered" apart from a missing route (404) on an older server.
+/// </summary>
+public record ScanCodeAliasLookupResponse(string Code, ScanCodeAliasLookupState State, ScanCodeAliasDto? Alias);
+
 /// <summary>
 /// Remembers scanned codes that are not retail GTINs (for example Amazon FNSKU stickers) as
 /// exact-match aliases for a Spoolman filament. Aliases are stored in PrintFarmer and are kept
@@ -44,20 +63,18 @@ public class ScanCodeAliasController(
 {
     private const int LogCodeMaxLength = 256;
 
-    /// <summary>Resolves a remembered scan code to its filament.</summary>
+    /// <summary>Looks up a remembered scan code and its filament.</summary>
     /// <param name="code">Scanned value. It is matched exactly (case-sensitive) after trimming.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The alias and its filament.</returns>
-    /// <response code="200">The code is remembered and its filament exists.</response>
+    /// <returns>The lookup state, with the alias and filament when found.</returns>
+    /// <response code="200">Lookup completed; <c>state</c> is found, notRemembered or filamentMissing.</response>
     /// <response code="400">The code is empty, too long, contains control characters, or is a GTIN.</response>
-    /// <response code="404">The code is not remembered, or its filament no longer exists.</response>
     /// <response code="502">Spoolman could not be reached to load the filament.</response>
     [HttpGet("filament")]
-    [ProducesResponseType(typeof(ScanCodeAliasDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ScanCodeAliasLookupResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
-    public async Task<ActionResult<ScanCodeAliasDto>> LookupAsync([FromQuery] string? code, CancellationToken ct)
+    public async Task<ActionResult<ScanCodeAliasLookupResponse>> LookupAsync([FromQuery] string? code, CancellationToken ct)
     {
         string logged = code?.Trim() ?? string.Empty;
         try
@@ -68,14 +85,14 @@ public class ScanCodeAliasController(
                 case ScanCodeAliasLookupStatus.Invalid:
                     return BadRequest(new { message = result.Error });
                 case ScanCodeAliasLookupStatus.NotFound:
-                    await LogAsync(logged, BarcodeScanAction.AliasResolve, BarcodeScanOutcome.NotFound, StatusCodes.Status404NotFound, null, "Scan code is not remembered.");
-                    return NotFound(new { message = "Scan code is not remembered.", reason = "not_remembered" });
+                    await LogAsync(logged, BarcodeScanAction.AliasResolve, BarcodeScanOutcome.NotFound, StatusCodes.Status200OK, null, "Scan code is not remembered.");
+                    return Ok(new ScanCodeAliasLookupResponse(logged, ScanCodeAliasLookupState.NotRemembered, null));
                 case ScanCodeAliasLookupStatus.FilamentMissing:
-                    await LogAsync(logged, BarcodeScanAction.AliasResolve, BarcodeScanOutcome.NotFound, StatusCodes.Status404NotFound, result.Alias?.FilamentId, result.Error ?? string.Empty);
-                    return NotFound(new { message = result.Error, reason = "filament_missing" });
+                    await LogAsync(logged, BarcodeScanAction.AliasResolve, BarcodeScanOutcome.NotFound, StatusCodes.Status200OK, result.Alias?.FilamentId, result.Error ?? string.Empty);
+                    return Ok(new ScanCodeAliasLookupResponse(logged, ScanCodeAliasLookupState.FilamentMissing, ToDto(result.Alias!, null)));
                 default:
                     await LogAsync(logged, BarcodeScanAction.AliasResolve, BarcodeScanOutcome.Resolved, StatusCodes.Status200OK, result.Filament!.Id, "Scan code resolved to filament.");
-                    return Ok(ToDto(result.Alias!, result.Filament));
+                    return Ok(new ScanCodeAliasLookupResponse(logged, ScanCodeAliasLookupState.Found, ToDto(result.Alias!, result.Filament)));
             }
         }
         catch (SpoolmanApiException ex)

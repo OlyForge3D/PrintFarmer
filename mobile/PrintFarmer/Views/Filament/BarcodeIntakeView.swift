@@ -5,8 +5,8 @@ struct BarcodeIntakeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = BarcodeIntakeViewModel()
 
-    /// A product barcode handed off by the shared scanner — either already
-    /// mapped to a filament or an unknown valid GTIN. When set, this view
+    /// A code handed off by the shared scanner — a valid GTIN (known or not)
+    /// or a non-GTIN code such as an Amazon FNSKU that can be remembered. When set, this view
     /// auto-processes it once on appearance: known barcodes import a spool,
     /// and unknown ones present the mapping flow so the operator chooses (or
     /// creates) the filament before the barcode is saved and a spool imported.
@@ -30,7 +30,7 @@ struct BarcodeIntakeView: View {
                             .font(.headline)
                             .foregroundStyle(Color.pfTextPrimary)
 
-                        Text("Known barcodes import instantly. Unknown barcodes ask you to choose or create a filament once, then continue scanning.")
+                        Text("Known barcodes import instantly. For a new code, choose or create its filament once; later scans of the same code add another spool of it.")
                             .font(.subheadline)
                             .foregroundStyle(Color.pfTextSecondary)
                             .multilineTextAlignment(.center)
@@ -68,6 +68,30 @@ struct BarcodeIntakeView: View {
                     }
                 }
 
+                if let match = viewModel.pendingAliasMatch {
+                    Section("Remembered Code") {
+                        LabeledContent("Code") {
+                            Text(match.code)
+                                .font(.body.monospaced())
+                        }
+                        LabeledContent("Filament", value: match.filament.name ?? match.filament.material ?? "Filament #\(match.filament.id)")
+                        Button {
+                            Task { await viewModel.confirmAliasMatch() }
+                        } label: {
+                            Label("Add Spool", systemImage: "plus.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.pfAccent)
+                        .disabled(viewModel.isBusy)
+                        .accessibilityIdentifier("barcodeIntake.aliasAddSpool")
+                        .accessibilityLabel("Add another spool of \(match.filament.name ?? "this filament")")
+                        Button("Not Now", role: .cancel) { viewModel.cancelAliasMatch() }
+                            .disabled(viewModel.isBusy)
+                            .accessibilityIdentifier("barcodeIntake.aliasCancel")
+                    }
+                }
+
                 Section("Imported This Session (\(viewModel.importedCount))") {
                     if viewModel.importedThisSession.isEmpty {
                         ContentUnavailableView {
@@ -99,8 +123,13 @@ struct BarcodeIntakeView: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .alert("Barcode Intake Error", isPresented: .constant(viewModel.errorMessage != nil)) {
-                Button("OK") { viewModel.clearError() }
+            .alert("Barcode Intake Error", isPresented: .constant(viewModel.errorMessage != nil && viewModel.pendingUnknownBarcode == nil)) {
+                if viewModel.retryAction != nil {
+                    Button("Retry") { Task { await viewModel.retry() } }
+                    Button("Cancel", role: .cancel) { viewModel.clearError() }
+                } else {
+                    Button("OK") { viewModel.clearError() }
+                }
             } message: {
                 if let error = viewModel.errorMessage {
                     Text(error)
@@ -113,6 +142,7 @@ struct BarcodeIntakeView: View {
                 if let barcode = viewModel.pendingUnknownBarcode {
                     UnknownBarcodeView(
                         barcode: barcode,
+                        remembersCode: viewModel.pendingCodeIsAlias,
                         spoolService: services.spoolService,
                         onSelectFilament: { filament in
                             let succeeded = await viewModel.importUnknownBarcode(with: filament)
@@ -139,6 +169,9 @@ struct BarcodeIntakeView: View {
 
 private struct UnknownBarcodeView: View {
     let barcode: String
+    /// True for a non-GTIN code (e.g. an FNSKU) that is remembered in
+    /// PrintFarmer rather than written to the filament's GTIN.
+    let remembersCode: Bool
     let spoolService: any SpoolServiceProtocol
     let onSelectFilament: @MainActor (SpoolmanFilament) async -> String?
 
@@ -151,6 +184,9 @@ private struct UnknownBarcodeView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showCreateForm = false
+    /// A filament already created in this sheet; reused on retry so a failed
+    /// remember/import never creates a duplicate filament.
+    @State private var createdFilament: SpoolmanFilament?
     @State private var filamentName = ""
     @State private var selectedMaterial = ""
     @State private var selectedVendorId: Int?
@@ -184,12 +220,15 @@ private struct UnknownBarcodeView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Unknown barcode")
+                        Text(remembersCode ? "New code" : "Unknown barcode")
                             .font(.headline)
                         Text(barcode)
                             .font(.body.monospaced())
                             .foregroundStyle(Color.pfTextSecondary)
-                        Text("Choose an existing filament or create a new filament to remember this barcode, then import the spool.")
+                            .accessibilityIdentifier("mapBarcode.code")
+                        Text(remembersCode
+                             ? "Choose an existing filament or create a new one. PrintFarmer remembers this code for that filament and adds a spool; later scans add another spool of it."
+                             : "Choose an existing filament or create a new filament to remember this barcode, then import the spool.")
                             .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)
                     }
@@ -234,7 +273,7 @@ private struct UnknownBarcodeView: View {
                     }
                 }
             }
-            .navigationTitle("Map Barcode")
+            .navigationTitle(remembersCode ? "Remember Code" : "Map Barcode")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -346,7 +385,7 @@ private struct UnknownBarcodeView: View {
                 if isSaving {
                     ProgressView()
                 } else {
-                    Label("Create and Import", systemImage: "checkmark.circle")
+                    Label(createdFilament == nil ? "Create and Import" : "Retry Import", systemImage: "checkmark.circle")
                 }
             }
             .disabled(!canCreateFilament || isSaving)
@@ -441,6 +480,10 @@ private struct UnknownBarcodeView: View {
         errorMessage = nil
         Task { @MainActor in
             do {
+                if let createdFilament {
+                    await finishSelecting(createdFilament)
+                    return
+                }
                 let trimmedName = filamentName.trimmingCharacters(in: .whitespacesAndNewlines)
                 let request = SpoolmanFilamentRequest.newFilament(
                     name: trimmedName,
@@ -451,20 +494,27 @@ private struct UnknownBarcodeView: View {
                     diameter: diameterMm,
                     weight: totalWeightG,
                     spoolWeight: spoolWeightG,
-                    gtin: barcode
+                    // The server's GTIN normalizer strips non-digits, so a
+                    // remembered non-GTIN code must never be written as a GTIN.
+                    gtin: remembersCode ? nil : barcode
                 )
                 let filament = try await spoolService.createFilament(request)
-                if let importError = await onSelectFilament(filament) {
-                    errorMessage = importError
-                    isSaving = false
-                } else {
-                    isSaving = false
-                    dismiss()
-                }
+                createdFilament = filament
+                await finishSelecting(filament)
             } catch {
                 errorMessage = error.localizedDescription
                 isSaving = false
             }
+        }
+    }
+
+    private func finishSelecting(_ filament: SpoolmanFilament) async {
+        if let importError = await onSelectFilament(filament) {
+            errorMessage = importError
+            isSaving = false
+        } else {
+            isSaving = false
+            dismiss()
         }
     }
 }

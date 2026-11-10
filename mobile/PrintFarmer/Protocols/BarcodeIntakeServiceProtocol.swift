@@ -14,6 +14,40 @@ protocol BarcodeIntakeServiceProtocol: Sendable {
 
     /// Sends the scanned value unchanged; GTIN normalization and validation stay server-side.
     func importSpool(barcode: String, fields: SpoolImportFields) async throws -> SpoolmanSpool
+
+    /// Looks up a remembered non-GTIN code (e.g. an Amazon FNSKU) by exact match.
+    /// A genuine miss returns `.notRemembered`; transport, auth and server
+    /// failures throw so callers never treat an outage as a miss.
+    func lookupCodeAlias(code: String) async throws -> ScanCodeAliasLookup
+
+    /// Remembers a non-GTIN code for the explicitly chosen filament. Stored in
+    /// PrintFarmer, separate from the Spoolman `gtin` mapping.
+    func saveCodeAlias(code: String, filamentId: Int) async throws -> ScanCodeAlias
+
+    /// Creates a spool of exactly `filamentId`.
+    func createSpool(filamentId: Int) async throws -> SpoolmanSpool
+}
+
+enum ScanCodeAliasLookupState: String, Codable, Sendable {
+    case found
+    case notRemembered
+    case filamentMissing
+}
+
+struct ScanCodeAlias: Codable, Sendable {
+    let id: Int
+    let code: String
+    let filamentId: Int
+    let filament: SpoolmanFilament?
+}
+
+struct ScanCodeAliasLookup: Codable, Sendable {
+    let code: String
+    let state: ScanCodeAliasLookupState
+    let alias: ScanCodeAlias?
+
+    /// The remembered filament, only when the alias resolved.
+    var filament: SpoolmanFilament? { state == .found ? alias?.filament : nil }
 }
 
 struct SpoolImportFields: Codable, Sendable, Equatable {

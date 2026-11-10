@@ -31,6 +31,30 @@ final class DemoBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
         demoFilament
     }
 
+    private let lock = NSLock()
+    private var aliases: [String: Int] = [:]
+
+    func lookupCodeAlias(code: String) async throws -> ScanCodeAliasLookup {
+        let filamentId = lock.withLock { aliases[code] }
+        guard let filamentId else {
+            return ScanCodeAliasLookup(code: code, state: .notRemembered, alias: nil)
+        }
+        return ScanCodeAliasLookup(
+            code: code,
+            state: .found,
+            alias: ScanCodeAlias(id: 1, code: code, filamentId: filamentId, filament: demoFilament)
+        )
+    }
+
+    func saveCodeAlias(code: String, filamentId: Int) async throws -> ScanCodeAlias {
+        lock.withLock { aliases[code] = filamentId }
+        return ScanCodeAlias(id: 1, code: code, filamentId: filamentId, filament: demoFilament)
+    }
+
+    func createSpool(filamentId: Int) async throws -> SpoolmanSpool {
+        try await importSpool(barcode: "", fields: SpoolImportFields())
+    }
+
     func importSpool(barcode: String, fields: SpoolImportFields) async throws -> SpoolmanSpool {
         SpoolmanSpool(
             id: Int.random(in: 1_000...9_999),

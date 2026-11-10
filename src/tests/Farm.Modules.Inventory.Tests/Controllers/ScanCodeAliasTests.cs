@@ -58,8 +58,8 @@ public class ScanCodeAliasTests
     [InlineData("B08XYZ1234")]
     [InlineData("CODE39-ABC")]
     [InlineData("https://example.com/spool")]
-    [InlineData("12345")]
-    [InlineData("012345678906")]
+    [InlineData("LOT/850078714923")]
+    [InlineData("00224X")]
     public void Validate_NonGtinCodes_AreKeptVerbatim(string code)
     {
         string? result = ScanCodeAliasValidator.Validate(code, out string? error);
@@ -86,6 +86,17 @@ public class ScanCodeAliasTests
     {
         Assert.Null(ScanCodeAliasValidator.Validate(code, out string? error));
         Assert.Contains("GTIN", error);
+    }
+
+    [Theory]
+    [InlineData("12345")]
+    [InlineData("00224")]
+    [InlineData("012345678906")]
+    [InlineData("1-2 3")]
+    public void Validate_DigitOnlyNonGtinCodes_AreRejected(string code)
+    {
+        Assert.Null(ScanCodeAliasValidator.Validate(code, out string? error));
+        Assert.Contains("digits", error);
     }
 
     [Theory]
@@ -238,9 +249,7 @@ public class ScanCodeAliasTests
         await factory.ResetDataAsync();
         using HttpClient admin = await factory.CreateAdminClientAsync();
 
-        HttpResponseMessage miss = await admin.GetAsync(LookupUrl(Fnsku));
-        Assert.Equal(HttpStatusCode.NotFound, miss.StatusCode);
-        Assert.Contains("not_remembered", await miss.Content.ReadAsStringAsync());
+        Assert.Equal(ScanCodeAliasLookupState.NotRemembered, (await LookupAsync(admin, Fnsku)).State);
 
         HttpResponseMessage created = await admin.PostAsJsonAsync("/api/spoolman/code-aliases", new { code = Fnsku, filamentId = 42 });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -250,10 +259,9 @@ public class ScanCodeAliasTests
         Assert.Equal(42, body.Filament!.Id);
 
         using HttpClient fresh = await factory.CreateAuthenticatedClientAsync("scan-user", "scan-user@example.com");
-        HttpResponseMessage hit = await fresh.GetAsync(LookupUrl(Fnsku));
-        Assert.Equal(HttpStatusCode.OK, hit.StatusCode);
-        ScanCodeAliasDto? resolved = await hit.Content.ReadFromJsonAsync<ScanCodeAliasDto>(JsonOptions);
-        Assert.Equal(42, resolved!.Filament!.Id);
+        ScanCodeAliasLookupResponse hit = await LookupAsync(fresh, Fnsku);
+        Assert.Equal(ScanCodeAliasLookupState.Found, hit.State);
+        Assert.Equal(42, hit.Alias!.Filament!.Id);
 
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -280,8 +288,7 @@ public class ScanCodeAliasTests
         ScanCodeAliasDto? existing = await conflict.Content.ReadFromJsonAsync<ScanCodeAliasDto>(JsonOptions);
         Assert.Equal(42, existing!.FilamentId);
 
-        ScanCodeAliasDto? resolved = await (await admin.GetAsync(LookupUrl(Fnsku))).Content.ReadFromJsonAsync<ScanCodeAliasDto>(JsonOptions);
-        Assert.Equal(42, resolved!.FilamentId);
+        Assert.Equal(42, (await LookupAsync(admin, Fnsku)).Alias!.FilamentId);
     }
 
     [Theory]
@@ -310,7 +317,7 @@ public class ScanCodeAliasTests
         _ = await admin.PostAsJsonAsync("/api/spoolman/code-aliases", new { code = Fnsku, filamentId = 42 });
 
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(LookupUrl("012345678905"))).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync(LookupUrl("00224"))).StatusCode);
+        Assert.Equal(ScanCodeAliasLookupState.NotRemembered, (await LookupAsync(admin, "00224")).State);
     }
 
     [Fact]
@@ -324,7 +331,7 @@ public class ScanCodeAliasTests
         HttpResponseMessage response = await admin.PostAsJsonAsync("/api/spoolman/code-aliases", new { code = Fnsku, filamentId = 99 });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync(LookupUrl(Fnsku))).StatusCode);
+        Assert.Equal(ScanCodeAliasLookupState.NotRemembered, (await LookupAsync(admin, Fnsku)).State);
     }
 
     [Fact]
@@ -367,7 +374,7 @@ public class ScanCodeAliasTests
         using HttpClient user = await factory.CreateAuthenticatedClientAsync("scan-user", "scan-user@example.com");
 
         Assert.Equal(HttpStatusCode.Forbidden, (await user.PostAsJsonAsync("/api/spoolman/code-aliases", new { code = Fnsku, filamentId = 42 })).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await user.GetAsync(LookupUrl(Fnsku))).StatusCode);
+        Assert.Equal(ScanCodeAliasLookupState.NotRemembered, (await LookupAsync(user, Fnsku)).State);
 
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -375,6 +382,13 @@ public class ScanCodeAliasTests
     }
 
     // ---- Helpers -------------------------------------------------------------------------
+
+    private static async Task<ScanCodeAliasLookupResponse> LookupAsync(HttpClient client, string code)
+    {
+        HttpResponseMessage response = await client.GetAsync(LookupUrl(code));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<ScanCodeAliasLookupResponse>(JsonOptions))!;
+    }
 
     private static string LookupUrl(string code) => $"/api/spoolman/code-aliases/filament?code={Uri.EscapeDataString(code)}";
 
