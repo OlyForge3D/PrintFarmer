@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 /// <summary>
 /// Result of resolving an NFC tag UID through Spoolman's persistent tag mapping.
