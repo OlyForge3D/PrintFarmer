@@ -30,6 +30,7 @@
  * `JsonPropertyName` (which is what the metadata API exposes as `property.name`).
  */
 const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
+  FarmIdentity: new Set(['farmName', 'timeZone']),
   // System / logging — retention window and the on/off toggle are asked about
   // early because they impact disk usage and audit visibility.
   SystemLog: new Set(['enabled', 'retentionDays']),

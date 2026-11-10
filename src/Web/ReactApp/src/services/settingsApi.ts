@@ -39,5 +39,7 @@ export async function fetchSettingsValues<T = Record<string, unknown>>(keyName: 
 
 export async function saveSettingsValues<T = Record<string, unknown>>(keyName: string, values: T): Promise<T & { rowVersion?: string }> {
   const res = await client.post(`/settings/${keyName}`, values);
+  const { queryClient } = await import('@/services/queryClient');
+  void queryClient.invalidateQueries({ queryKey: ['settings', keyName] });
   return res.data;
 }

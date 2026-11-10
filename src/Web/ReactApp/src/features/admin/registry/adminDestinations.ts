@@ -42,6 +42,7 @@ export type AdminDestinationIcon = ComponentType<{ className?: string }>;
  */
 export type AdminDestinationGroup =
   | 'overview'
+  | 'identity'
   | 'operations'
   | 'users'
   | 'data'
@@ -189,6 +190,20 @@ export const ADMIN_HUB_PARENT = {
  * the Control Center would misdescribe where the user came from.
  */
 export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
+  {
+    id: 'farm-identity',
+    kind: 'configuration',
+    settingsGroup: 'farm',
+    label: 'Farm Identity',
+    description: 'Farm name and timezone for the farm-local clock.',
+    path: '/admin/settings?tab=identity&sub=details',
+    icon: HomeIcon,
+    group: 'identity',
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
+    keywords: ['farm', 'identity', 'name', 'timezone', 'clock'],
+    isHubTile: true,
+  },
   // ── Overview ──────────────────────────────────────────────────────────
   {
     id: 'admin-home',
@@ -674,6 +689,7 @@ export const ADMIN_DESTINATION_GROUPS: readonly {
   description: string;
 }[] = [
   { id: 'overview', label: 'Overview', description: 'The Control Center home.' },
+  { id: 'identity', label: 'Farm Identity', description: 'Farm name and local time.' },
   { id: 'operations', label: 'Operations', description: 'Day-to-day monitoring and workflow.' },
   { id: 'users', label: 'Users', description: 'Accounts, roles, and audit trails.' },
   { id: 'data', label: 'Data', description: 'Reference data, tags, and lifecycle tools.' },

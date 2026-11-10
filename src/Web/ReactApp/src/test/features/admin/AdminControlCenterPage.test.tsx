@@ -720,7 +720,7 @@ describe('AdminControlCenterPage', () => {
     expect(mockedApiGet).toHaveBeenCalledTimes(2);
   });
 
-  it('renders permitted operational cards and seven focused settings categories', async () => {
+  it('renders permitted operational cards and twelve focused settings categories', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
     renderHub();
@@ -731,19 +731,21 @@ describe('AdminControlCenterPage', () => {
 
     const cards = screen.getAllByTestId('admin-hub-destination');
     // 8 operational (including Printed Parts, #2588) + 3 standalone
-    // configuration (Catalog, Locations, Power Monitors) + 11 categories.
-    expect(cards.length).toBe(22);
+    // configuration (Catalog, Locations, Power Monitors) + 12 categories.
+    expect(cards.length).toBe(23);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
     }
     const settingsCards = within(screen.getByTestId('admin-hub-settings')).getAllByRole('link');
     expect(settingsCards.map(card => card.getAttribute('data-destination-id'))).toEqual([
+      'settings-identity',
       'settings-system', 'settings-failure-detection', 'settings-costs', 'settings-planning',
       'settings-operator-features', 'settings-slicing', 'settings-hardware', 'settings-integrations',
       'settings-quotas', 'settings-users', 'settings-data',
     ]);
     expect(settingsCards.map(card => card.getAttribute('href'))).toEqual([
+      '/admin/settings?scope=system&tab=identity&sub=details',
       '/admin/settings?scope=system&tab=system',
       '/admin/settings?scope=system&tab=failure-detection',
       '/admin/settings?scope=system&tab=costs',
