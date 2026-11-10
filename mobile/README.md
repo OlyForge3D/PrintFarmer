@@ -577,3 +577,114 @@ git push origin ios/v1.0-beta.<N>
 The in-repository mobile client is licensed under the
 [GNU Affero General Public License v3.0 only](../LICENSE)
 (`AGPL-3.0-only`) beginning with PrintFarmer v0.2.3.
+
+## Catalog visual and accessibility candidates
+
+`ui-coverage/catalog.json` preserves all 37 iOS row IDs from the shared web
+inventory using the same entry schema. This is **not full state coverage**:
+52 capture scenarios target 36 broad rows; the retired server-switcher row has no adapter and explicit
+fixture, reachability or state-inventory blockers. New adapters are candidates,
+not native execution evidence. A captured image and passing audit
+do not promote an entire broad row to covered. See each row's `reason`.
+
+The separate `ios-ui-coverage.yml` check uses standard `macos-26` runners,
+the approved Xcode/runtime resolver, and the existing isolated UI-test
+bootstrap. It selects only
+`PrintFarmerUITests/CatalogVisualAccessibilityUITests` and
+`PrintFarmerUITests/CatalogRootVisualAccessibilityUITests`
+in its own test plan, in separate bounded invocations on each device family.
+The operator invocation also runs `PrintFarmerTests/UITestBootstrapTests`.
+Each invocation retains its own result bundle and log; the reporter merges
+distinct receipts and rejects duplicate scenario artifacts across exports.
+An export failure cannot hide the other invocation's retained evidence.
+The default plan skips all three capture classes; the App Store
+plan still selects only the legacy class and receives seven unique store images.
+It never contacts real printers or creates screenshot baselines. Captures use synthetic
+fixtures, a fixed date, English and stable system chrome on separate iPhone/iPad
+hosts. The base profile is portrait, dark appearance and normal Large text.
+Explicit `scenarioProfileOverrides` add light, system-with-light-device,
+largest accessibility text and landscape captures; they cannot override the
+pinned toolchain, runtime or locale. Idle instrument and chamber-sensor captures
+inspect synthetic controls without dispatching motion or temperature commands.
+The existing App Store
+capture selector remains available without the additional accessibility audit.
+Root captures follow the production unauthenticated route gates for login,
+all three onboarding pages, and the local-network explanation. They do not
+sign in, request an OS permission, or change a real server.
+The existing cold-offline bootstrap also exercises the cached read-only Farm
+and its idle offline-write review destination, without replaying any write.
+DEBUG-only `--uitesting` plus `--uitesting-catalog-root` fixtures hold the
+production splash, backend-loading and snapshot-pending surfaces, or leave
+the ephemeral server registry empty. A synthetic `.invalid` certificate
+request renders the existing trust sheet and is cancelled, never accepted;
+it bypasses TLS verification and does not create a certificate pin.
+Parts and completed-history captures additionally require
+`--uitesting-catalog-read-only` and exactly one parts/history selector under
+the existing visual-acceptance and App Store test gates. Only those launches
+replace the relevant services with fixed-date, no-network demo data; the
+legacy seven-image capture remains unchanged. Harvest and adjustment forms
+are inspected, never submitted. After capturing job detail, the collector
+scrolls its containing sheet at most four times to reveal the harvest action;
+the normal hittability check still fails if it cannot be reached.
+
+Native candidates run XCTest's `.all` accessibility audit against settled
+screens, collect **every** finding into the scenario receipt, then require the
+original PNG bytes to settle again before a confirming identical frame.
+Initial settling and post-audit restoration each have a 20-second budget and
+require three consecutive identical comparisons; the audit runs once per
+candidate, not repeatedly during its temporary Dynamic Type changes.
+Settling failures retain the pre-audit image (when available), final two
+frames, accessibility tree and audit findings as diagnostics, not receipts.
+They join the test's failure ledger so later scenes are still attempted;
+the test fails in teardown and the reporter rejects the missing receipt.
+The four held root states run as independent tests: an animated splash cannot
+hide first-server, backend-loading or snapshot-activation results.
+Findings are handled for reporting, not waived:
+each test explicitly fails after collecting its implemented screens, and the
+reporter also fails on any failed-audit receipt. This avoids stopping the
+whole catalog at the first known defect. Separate navigation groups allow
+remaining tests to run if one destination cannot be reached. An audit failure,
+unsettled screen (retained as diagnostic frames/tree, not accepted evidence),
+missing adapter receipt/image or wrong rendering profile fails the candidate
+check. A successful audit is **not VoiceOver
+interaction certification**. Dedicated appearance, largest-text and landscape
+captures exercise selected axis states, not the full screen/state matrix,
+system-dark variants, VoiceOver traversal or physical-keyboard behavior.
+
+The check retains screenshots, hashed JSON receipts, host/Xcode/runtime/device
+metadata, `.xcresult`, build/test logs and runner timing/events for three days.
+The operator capture invocation has a 2100-second ceiling inside a 36-minute
+step: the 1440-second default truncated a measured iPhone run before bundle
+finalization. Root capture retains the default 1440-second invocation ceiling
+and 25-minute step. The 131-minute family job reserves at least 20 minutes
+beyond the explicit setup/build/capture step budgets for checkout, simulator
+startup, exports, reporting and artifact upload. Audit, settling and failure
+rules are unchanged.
+`report.json` separates blocked rows, partially exercised rows and native
+scenarios with passed or failed audits. Valid temporary image/receipt pairs
+with passing audits are `captured-audit-passed`, not visual-regression
+certification. This new catalog has no committed PNG baselines or golden-approval
+gate; screenshots are temporary evidence only. Existing unrelated screenshot
+tests are unchanged. No branch-protection configuration is changed. A green
+candidate check cannot establish readiness or completion of the full inventory.
+
+On Windows, reporting contracts can be checked without pretending to run iOS:
+
+```powershell
+cd mobile
+python -m unittest discover -s scripts/tests -p 'test_ui_coverage.py' -v
+python scripts/report-ui-coverage.py --family iPhone --head <full-source-sha> `
+  --blocked-reason "No approved macOS simulator available." --output build/report.json
+```
+
+Standard hosted runner compute is currently free for this public repository;
+larger runners and artifact storage have different billing rules. See
+[GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+No billing setting is changed. Runner availability and pinned toolchain support
+must be proven by the actual job, not inferred from a green skipped iOS test.
+
+A receipt/image mismatch, inaccessible screen, missing state, or actual runner
+failure falsifies a coverage claim. Operators and assistive-technology users
+would bear the cost of false confidence; wrong hardware actions can be
+irreversible. These tests use isolated synthetic state and do not certify
+physical NFC, camera permissions, live printer behavior or operational safety.

@@ -112,6 +112,130 @@ final class UITestBootstrapTests: XCTestCase {
     }
 
     #if DEBUG
+    func test_catalogRoot_requiresBothGatesAndOneState() {
+        XCTAssertNil(UITestBootstrap.catalogRootState(in: ["--uitesting-catalog-root",
+                                                          "--uitesting-catalog-root-loading"]))
+        XCTAssertNil(UITestBootstrap.catalogRootState(in: ["--uitesting",
+                                                          "--uitesting-catalog-root-loading"]))
+        XCTAssertNil(UITestBootstrap.catalogRootState(in: ["--uitesting", "--uitesting-catalog-root",
+                                                          "--uitesting-catalog-root-loading",
+                                                          "--uitesting-catalog-root-snapshot"]))
+        for state in UITestBootstrap.CatalogRootState.allCases {
+            XCTAssertEqual(UITestBootstrap.catalogRootState(in: [
+                "--uitesting", "--uitesting-catalog-root",
+                "--uitesting-catalog-root-\(state.rawValue)"
+            ]), state)
+        }
+    }
+
+    func test_catalogRoot_emptyRegistryDoesNotSeedServer() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(defaults: defaults, arguments: [
+            "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-first-server"
+        ])
+        XCTAssertTrue(bundle.serverRegistry.servers.isEmpty)
+        XCTAssertNil(bundle.serverRegistry.activeServerID)
+    }
+
+    func test_catalogRoot_loadingAndSnapshotSurviveRestore() async throws {
+        for state in ["loading", "snapshot"] {
+            let defaults = try makeEphemeralDefaults()
+            let bundle = UITestBootstrap.makeBundle(defaults: defaults, arguments: [
+                "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-\(state)"
+            ])
+            await bundle.authViewModel.restoreSession()
+            XCTAssertTrue(bundle.authViewModel.hasCheckedAuth)
+            XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+            XCTAssertEqual(bundle.authViewModel.isLoading, state == "loading")
+            XCTAssertEqual(bundle.authViewModel.snapshotActivationPending, state == "snapshot")
+        }
+    }
+
+    func test_catalogCertificate_isSyntheticAndRequiresRootGates() throws {
+        XCTAssertNil(UITestBootstrap.catalogCertificateRequest(in: ["--uitesting-catalog-root-certificate"]))
+        let request = try XCTUnwrap(UITestBootstrap.catalogCertificateRequest(in: [
+            "--uitesting", "--uitesting-catalog-root", "--uitesting-catalog-root-certificate"
+        ]))
+        XCTAssertEqual(request.endpoint, "https://synthetic.printfarmer.invalid:5245")
+        XCTAssertEqual(request.subjectAlternativeNames, ["synthetic.printfarmer.invalid"])
+        XCTAssertEqual(request.fingerprint, String(repeating: "AB:", count: 31) + "AB")
+    }
+
+    func test_catalogReadOnlyFixtures_requireEveryGateAndExactlyOneFixture() {
+        let gates = ["--uitesting", "--uitesting-issue3259-visual-acceptance",
+                     "--uitesting-app-store-screenshots", "--uitesting-catalog-read-only"]
+        for fixture in UITestBootstrap.CatalogReadOnlyFixture.allCases {
+            let selector = "--uitesting-catalog-\(fixture.rawValue)"
+            XCTAssertEqual(UITestBootstrap.catalogReadOnlyFixture(in: gates + [selector]), fixture)
+            for gate in gates {
+                XCTAssertNil(UITestBootstrap.catalogReadOnlyFixture(in: gates.filter { $0 != gate } + [selector]))
+            }
+        }
+        XCTAssertNil(UITestBootstrap.catalogReadOnlyFixture(in: gates))
+        XCTAssertNil(UITestBootstrap.catalogReadOnlyFixture(in:
+            gates + ["--uitesting-catalog-parts", "--uitesting-catalog-history"]))
+    }
+
+    func test_catalogHistoryAndParts_useFixedSyntheticServices() async throws {
+        let arguments = ["--uitesting", "--uitesting-issue3259-visual-acceptance",
+                         "--uitesting-app-store-screenshots", "--uitesting-catalog-read-only",
+                         "--uitesting-catalog-history"]
+        let date = try XCTUnwrap(UITestBootstrap.appStoreScreenshotDate(in: arguments))
+        let bundle = UITestBootstrap.makeBundle(defaults: try makeEphemeralDefaults(), arguments: arguments)
+        let history = try await bundle.services.jobAnalyticsService.getHistory(
+            limit: nil, offset: nil, sortBy: nil, statuses: "Completed", dateStart: nil, dateEnd: nil
+        )
+        let entry = try XCTUnwrap(history.entries.first { $0.id == DemoData.job7ID.uuidString })
+        let job = try await bundle.services.jobService.get(id: DemoData.job7ID)
+        XCTAssertEqual(job.status, .completed)
+        XCTAssertEqual(job.actualEndTime, date.addingTimeInterval(-166_400))
+        XCTAssertEqual(entry.completedAt, job.actualEndTime)
+        let parts = try await bundle.services.partsInventoryService.listParts(includeInactive: false)
+        let bracket = try XCTUnwrap(parts.first { $0.sku == "BRKT-01" })
+        XCTAssertEqual(bracket.createdAt, date)
+        XCTAssertEqual(bracket.onHand, 4)
+    }
+
+    func test_catalogScanner_requiresBothTestLaunchGates() {
+        XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: []))
+        XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: [
+            "--uitesting-catalog-scanner", "--uitesting-catalog-scan-bin"
+        ]))
+        XCTAssertNil(UITestBootstrap.catalogBarcodeScanner(arguments: [
+            "--uitesting", "--uitesting-catalog-scan-bin"
+        ]))
+    }
+
+    func test_catalogScanner_returnsFixedBinBarcode() async throws {
+        let scanner = try XCTUnwrap(UITestBootstrap.catalogBarcodeScanner(arguments: [
+            "--uitesting", "--uitesting-catalog-scanner", "--uitesting-catalog-scan-bin"
+        ]))
+        XCTAssertTrue(scanner.isAvailable)
+        guard case .barcode(let barcode) = await scanner.scanBarcode() else {
+            return XCTFail("Expected the synthetic bin barcode.")
+        }
+        XCTAssertEqual(barcode, "BIN-A1")
+    }
+
+    func test_catalogScanner_returnsFixedPartBarcode() async throws {
+        let scanner = try XCTUnwrap(UITestBootstrap.catalogBarcodeScanner(arguments: [
+            "--uitesting", "--uitesting-catalog-scanner", "--uitesting-catalog-scan-part"
+        ]))
+        guard case .barcode(let barcode) = await scanner.scanBarcode() else {
+            return XCTFail("Expected the synthetic part barcode.")
+        }
+        XCTAssertEqual(barcode, "BRKT-01")
+    }
+
+    func test_catalogScanner_returnsPermissionFailureWithoutOpeningCamera() async throws {
+        let scanner = try XCTUnwrap(UITestBootstrap.catalogBarcodeScanner(arguments: [
+            "--uitesting", "--uitesting-catalog-scanner", "--uitesting-catalog-scan-error"
+        ]))
+        guard case .error(.permissionDenied) = await scanner.scanBarcode() else {
+            return XCTFail("Expected the synthetic permission failure.")
+        }
+    }
+
     func test_issue3259VisualAcceptanceLaunchArgument_selectsSyntheticCaptureMode() {
         XCTAssertEqual(
             UITestBootstrap.issue3259VisualAcceptanceLaunchArgument,

@@ -65,6 +65,42 @@ enum UITestBootstrap {
         "--uitesting-network-permission-complete"
     static let navigationChromeLaunchArgument = "--uitesting-navigation-chrome"
     #if DEBUG
+    enum CatalogRootState: String, CaseIterable {
+        case splash
+        case firstServer = "first-server"
+        case loading
+        case snapshot
+        case certificate
+    }
+
+    nonisolated static func catalogRootState(in arguments: [String]) -> CatalogRootState? {
+        guard arguments.contains("--uitesting"),
+              arguments.contains("--uitesting-catalog-root") else { return nil }
+        let states = CatalogRootState.allCases.filter {
+            arguments.contains("--uitesting-catalog-root-\($0.rawValue)")
+        }
+        return states.count == 1 ? states[0] : nil
+    }
+
+    static var catalogRootState: CatalogRootState? {
+        catalogRootState(in: CommandLine.arguments)
+    }
+
+    static func catalogCertificateRequest(in arguments: [String]) -> CertificateTrustRequest? {
+        guard catalogRootState(in: arguments) == .certificate else { return nil }
+        return CertificateTrustRequest(
+            id: UUID(uuidString: "37290000-0000-0000-0000-000000000001")!,
+            endpoint: "https://synthetic.printfarmer.invalid:5245",
+            fingerprint: String(repeating: "AB:", count: 31) + "AB",
+            subjectCommonName: "synthetic.printfarmer.invalid",
+            issuerCommonName: "Synthetic UI Test CA",
+            notBefore: Date(timeIntervalSince1970: 1_767_225_600),
+            notAfter: Date(timeIntervalSince1970: 1_798_761_600),
+            subjectAlternativeNames: ["synthetic.printfarmer.invalid"],
+            warning: "This synthetic certificate is for UI testing only."
+        )
+    }
+
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
     static let shiftTaskInitialLoadFailureLaunchArgument =
@@ -309,7 +345,12 @@ enum UITestBootstrap {
             migrateLegacyServerURL: false
         )
 
-        if registry.servers.isEmpty {
+        #if DEBUG
+        let seedsServer = catalogRootState(in: arguments) != .firstServer
+        #else
+        let seedsServer = true
+        #endif
+        if registry.servers.isEmpty && seedsServer {
             let baseURL = URL(string: "http://uitest.printfarmer.local")!
             // `add(...)` is throwing but with the wiped suite + fixed URL
             // it cannot fail here; treat any failure as programmer error.
@@ -375,6 +416,20 @@ enum UITestBootstrap {
         )
         #endif
         #if DEBUG
+        if let scanner = catalogBarcodeScanner(arguments: arguments) {
+            services.barcodeScannerService = scanner
+            services.partsInventoryService = DemoPartsInventoryService(
+                fixtureDate: appStoreScreenshotDate(in: arguments)
+            )
+        }
+        if let fixture = catalogReadOnlyFixture(in: arguments),
+           let date = appStoreScreenshotDate(in: arguments) {
+            services.partsInventoryService = DemoPartsInventoryService(fixtureDate: date)
+            if fixture == .history {
+                services.jobService = DemoJobService(dispatchEnabled: false, fixtureDate: date)
+                services.jobAnalyticsService = DemoJobAnalyticsService(fixtureDate: date)
+            }
+        }
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
         }
@@ -530,6 +585,9 @@ enum UITestBootstrap {
         #endif
         }
 
+        #if DEBUG
+        auth.holdCatalogRootState(arguments: arguments, user: testUser)
+        #endif
         return Environment(
             serverRegistry: registry,
             services: services,
@@ -2370,6 +2428,51 @@ enum UITestBootstrap {
             evaluatedAtUtc: evaluatedAt
         )
         return FleetFilamentCoverage(printers: [coverage], evaluatedAtUtc: evaluatedAt)
+    }
+    #endif
+
+    #if DEBUG
+    enum CatalogReadOnlyFixture: String, CaseIterable {
+        case parts
+        case history
+    }
+
+    nonisolated static func catalogReadOnlyFixture(in arguments: [String]) -> CatalogReadOnlyFixture? {
+        guard appStoreScreenshotDate(in: arguments) != nil,
+              arguments.contains("--uitesting-catalog-read-only") else { return nil }
+        let fixtures = CatalogReadOnlyFixture.allCases.filter {
+            arguments.contains("--uitesting-catalog-\($0.rawValue)")
+        }
+        return fixtures.count == 1 ? fixtures[0] : nil
+    }
+
+    static func catalogBarcodeScanner(arguments: [String]) -> (any BarcodeScannerProtocol)? {
+        guard arguments.contains(launchArgument),
+              arguments.contains("--uitesting-catalog-scanner") else { return nil }
+        let result: BarcodeScanResult
+        if arguments.contains("--uitesting-catalog-scan-bin") {
+            result = .barcode("BIN-A1")
+        } else if arguments.contains("--uitesting-catalog-scan-part") {
+            result = .barcode("BRKT-01")
+        } else if arguments.contains("--uitesting-catalog-scan-error") {
+            result = .error(.permissionDenied)
+        } else {
+            preconditionFailure("Catalog scanner requires a fixed synthetic scan scenario.")
+        }
+        return CatalogBarcodeScanner(result: result)
+    }
+
+    private final class CatalogBarcodeScanner: BarcodeScannerProtocol {
+        nonisolated let result: BarcodeScanResult
+        nonisolated let isAvailable = true
+
+        init(result: BarcodeScanResult) {
+            self.result = result
+        }
+
+        nonisolated func scanBarcode() async -> BarcodeScanResult {
+            result
+        }
     }
     #endif
 
