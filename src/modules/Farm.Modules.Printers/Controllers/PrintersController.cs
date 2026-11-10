@@ -1363,7 +1363,8 @@ public partial class PrintersController(
             false,
             rowVersion,
             p.ShowExternalSpool,
-            p.PrintGuardEnabled);
+            p.PrintGuardEnabled,
+            p.ExpectedOfflineSinceUtc);
     }
 
     /// <summary>

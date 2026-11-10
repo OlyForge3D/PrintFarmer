@@ -1068,6 +1068,7 @@ public class PrintersService(
                 : null,
             ConfigurationRevision = p.ConfigurationRevision,
             ShowExternalSpool = p.ShowExternalSpool,
+            ExpectedOfflineSinceUtc = p.ExpectedOfflineSinceUtc,
         };
     }
 #pragma warning restore CS8603
@@ -2012,6 +2013,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+                    ExpectedOfflineSinceUtc: p.ExpectedOfflineSinceUtc,
 
                     CameraStreamUrl: cam.StreamUrl,
                     CameraSnapshotUrl: cam.SnapshotUrl,
@@ -2045,6 +2047,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+                    ExpectedOfflineSinceUtc: p.ExpectedOfflineSinceUtc,
 
                     CameraStreamUrl: cam.StreamUrl,
                     CameraSnapshotUrl: cam.SnapshotUrl));
@@ -2070,7 +2073,8 @@ public class PrintersService(
                 null,
                 p.InMaintenance,
                 p.IsEnabled,
-                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt))
+                p.Model != null && p.ServiceState != null && p.ServiceState.LastModelSyncAt != null && p.Model.UpdatedAt > p.ServiceState.LastModelSyncAt,
+                p.ExpectedOfflineSinceUtc))
             .ToListAsync(ct);
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
@@ -2152,6 +2156,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+                    ExpectedOfflineSinceUtc: p.ExpectedOfflineSinceUtc,
 
                     // Live status from cache (or placeholder if not cached yet)
                     IsOnline: status.IsOnline,
@@ -2216,6 +2221,7 @@ public class PrintersService(
                     FrontendPort: p.FrontendPort,
                     InMaintenance: p.InMaintenance,
                     IsEnabled: p.IsEnabled,
+                    ExpectedOfflineSinceUtc: p.ExpectedOfflineSinceUtc,
 
                     // Offline status - but still include camera URL from database
                     IsOnline: false,
@@ -2677,7 +2683,8 @@ public class PrintersService(
             RowVersion: rowVersion,
             ConfigurationRevision: p.ConfigurationRevision,
             ShowExternalSpool: p.ShowExternalSpool,
-            PrintGuardEnabled: p.PrintGuardEnabled));
+            PrintGuardEnabled: p.PrintGuardEnabled,
+            ExpectedOfflineSinceUtc: p.ExpectedOfflineSinceUtc));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)

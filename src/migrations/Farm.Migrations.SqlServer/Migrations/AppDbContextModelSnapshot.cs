@@ -6088,6 +6088,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")
                         .HasColumnType("datetime2");
 

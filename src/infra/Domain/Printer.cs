@@ -21,6 +21,12 @@ public class Printer : IRevisionedEntity
 
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Explicit monitoring intent, not a power, availability or dispatch setting.
+    /// Cleared after an authoritative observation that began after this acknowledgement.
+    /// </summary>
+    public DateTime? ExpectedOfflineSinceUtc { get; set; }
+
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
     [JsonIgnore]
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)

@@ -60,6 +60,7 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
+import { PrinterMonitoringControl } from '@/features/printers/components/PrinterMonitoringControl';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -578,6 +579,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
           {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
+        <PrinterMonitoringControl printer={printer} />
       </div>
 
       {/* Identity + actions: the action grid sits beside the cover at the cover's

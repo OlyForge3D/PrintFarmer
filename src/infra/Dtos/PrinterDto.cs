@@ -57,6 +57,7 @@ namespace Farm.Infrastructure;
 /// <param name="FlowFactorPercent">Observed runtime extrusion override percentage, or null when unknown.</param>
 /// <param name="ShowExternalSpool">Presentation-only preference to show the filament box external spool slot.</param>
 /// <param name="ActiveExtruderId">Physical heater represented by primary hotend telemetry, when known.</param>
+/// <param name="ExpectedOfflineSinceUtc">Explicit shutdown acknowledgement, cleared on a proven reconnect.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -107,7 +108,8 @@ public record PrinterDto(
     string? ActiveExtruderId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null,
-    bool PrintGuardEnabled = false)
+    bool PrintGuardEnabled = false,
+    DateTime? ExpectedOfflineSinceUtc = null)
 {
     /// <summary>
     /// Credential-free native web URL, with query parameters and fragments removed.

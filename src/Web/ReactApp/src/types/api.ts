@@ -582,6 +582,8 @@ export interface PrinterJobInfo {
  * Operational state flags for a printer.
  */
 export interface PrinterOperationalState {
+  /** Monitoring intent only. Null means expected online; clears after a proven reconnect. */
+  expectedOfflineSinceUtc?: string | null;
   /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
   /** Whether printer is enabled for operations */
@@ -810,6 +812,7 @@ export interface PrinterSummary {
   inMaintenance: boolean;
   isEnabled: boolean;
   hasCatalogUpdate: boolean;
+  expectedOfflineSinceUtc?: string | null;
 }
 
 /**

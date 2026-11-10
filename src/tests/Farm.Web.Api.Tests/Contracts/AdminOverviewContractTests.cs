@@ -50,13 +50,14 @@ namespace Farm.Web.Api.Tests.Contracts;
 /// which member a live health probe reports.
 /// </para>
 /// <para>
-/// Two DI overrides make the array-item coverage below deterministic rather than dependent on
+/// Three DI overrides make the array-item coverage below deterministic rather than dependent on
 /// whatever the live probe happens to report: an additional, always-<c>Unhealthy</c> named
 /// health check (<c>wire-contract-test-attention</c>) forces a real
 /// <c>AttentionSeverity.Error</c> item through the health-check attention path (covering
 /// <c>actionDestinationId</c>), and a stubbed <see cref="IPrinterConnectionHealthProvider"/>
-/// reporting one offline printer forces a real <c>AttentionSeverity.Warning</c> item through
-/// the printer-connectivity attention path (covering <c>actionRoute</c>). Without these,
+/// reporting one offline printer, paired with a matching <see cref="IPrinterMonitoringReader"/>
+/// registry snapshot, forces a real <c>AttentionSeverity.Warning</c> item through the
+/// printer-connectivity attention path (covering <c>actionRoute</c>). Without these,
 /// <c>attention</c> is empty on a clean test host and every per-item assertion below —
 /// including the property-name allowlist that is the actual defence against a field rename —
 /// would never execute at all.
@@ -94,19 +95,28 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             username: "wire-contract-admin-overview",
             email: "wire-contract-admin-overview@example.com");
 
+        Printer offlinePrinter = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "wire-contract-offline-printer",
+            Backend = (int)PrinterBackend.Moonraker,
+        };
         Mock<IPrinterConnectionHealthProvider> offlinePrinterProvider = new();
         _ = offlinePrinterProvider
             .Setup(p => p.GetConnectionHealth())
             .Returns(new Dictionary<Guid, PrinterConnectionHealth>
             {
-                [Guid.NewGuid()] = new PrinterConnectionHealth
+                [offlinePrinter.Id] = new PrinterConnectionHealth
                 {
-                    PrinterId = Guid.NewGuid(),
-                    PrinterName = "wire-contract-offline-printer",
+                    PrinterId = offlinePrinter.Id,
+                    PrinterName = offlinePrinter.Name,
                     Backend = PrinterBackend.Moonraker,
                     ConnectionState = PrinterConnectionState.Offline,
                 },
             });
+        Mock<IPrinterMonitoringReader> monitoring = new();
+        _ = monitoring.Setup(reader => reader.GetSnapshotsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<PrinterMonitoringSnapshot> { new(offlinePrinter, null, false) });
 
         // Forces at least one real, deterministic attention item through EACH of the two
         // production code paths that populate AttentionItemDto — see class remarks — so the
@@ -118,6 +128,8 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
             {
                 services.RemoveAll<IPrinterConnectionHealthProvider>();
                 services.AddSingleton(offlinePrinterProvider.Object);
+                services.RemoveAll<IPrinterMonitoringReader>();
+                services.AddSingleton(monitoring.Object);
 
                 _ = services.AddHealthChecks().AddCheck(
                     "wire-contract-test-attention",
@@ -165,7 +177,7 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
         }
 
         JsonElement attention = root.GetProperty("attention");
-        // Guaranteed non-empty by the two DI overrides above — see class remarks. This
+        // Guaranteed non-empty by the DI overrides above — see class remarks. This
         // assertion documents that guarantee as an explicit test precondition: if it ever
         // fails, the DI overrides stopped working (e.g. a production change bypassed
         // IPrinterConnectionHealthProvider or the health-check pipeline), not that the

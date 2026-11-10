@@ -507,7 +507,11 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(screen.getAllByRole('heading', { level: 1, name: 'Admin Control Center' })).toHaveLength(1);
     expect(screen.getByTestId('admin-hub-attention')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('link', { name: 'Open Worker Jobs' }));
+    const workerJobsSummary = screen.getByText('Queued worker jobs need review', { selector: 'summary span' });
+    expect(workerJobsSummary.closest('details')).not.toHaveAttribute('open');
+    fireEvent.click(workerJobsSummary);
+    expect(workerJobsSummary.closest('details')).toHaveAttribute('open');
+    fireEvent.click(screen.getByRole('link', { name: /^Open Worker Jobs/ }));
 
     await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/workers'));
     expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs');

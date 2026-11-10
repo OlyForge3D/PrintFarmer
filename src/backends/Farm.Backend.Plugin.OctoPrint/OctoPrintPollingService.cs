@@ -724,6 +724,7 @@ public sealed class OctoPrintPollingService(
                 // Try HTTP polling fallback
                 try
                 {
+                    DateTime observationStartedAtUtc = DateTime.UtcNow;
                     OctoPrintStatusData? statusData = await wsAdapter.TryHttpPollingFallbackAsync(ct);
                     if (statusData != null)
                     {
@@ -814,7 +815,7 @@ public sealed class OctoPrintPollingService(
 
                         // Update cache before broadcasting to clients
                         _statusCacheWriter.UpdateStatus(
-                            cacheUpdate with { RawActivityState = statusData.State }, statusData.OriginWatermark);
+                            cacheUpdate with { RawActivityState = statusData.State, ObservationStartedAtUtc = observationStartedAtUtc }, statusData.OriginWatermark);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var signalRUpdate = new PrinterStatusUpdate(

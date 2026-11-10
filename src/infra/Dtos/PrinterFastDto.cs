@@ -41,4 +41,5 @@ public record PrinterFastDto(
     double? FanSpeedPercent = null,
     double? LiveZOffsetMm = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? SpeedFactorPercent = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] double? FlowFactorPercent = null,
+    DateTime? ExpectedOfflineSinceUtc = null);
