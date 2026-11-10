@@ -3925,6 +3925,12 @@ export interface SpoolmanBulkUpdateResult {
   errors: string[];
 }
 
+/** Fresh references to review before permanently deleting a Spoolman filament. */
+export interface SpoolmanFilamentDeletePreview {
+  activeSpoolCount: number;
+  archivedSpoolIds: number[];
+}
+
 /** Per-ID outcome of a local-library bulk delete (`DELETE /api/gcode-files` or `DELETE /api/3d-models`). */
 export type BulkDeleteItemStatus =
   | 'Deleted'

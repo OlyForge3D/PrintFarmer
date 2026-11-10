@@ -184,8 +184,8 @@
         },
         {
           "name": "filament",
-          "namespacePrefixes": ["Services/Cost", "Data"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cost.|FullyQualifiedName~Farm.Infrastructure.Tests.Data."
+          "namespacePrefixes": ["Services/Cost", "Services/SpoolmanFilamentDeletionTests", "Data"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Services.Cost.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.SpoolmanFilamentDeletionTests.|FullyQualifiedName~Farm.Infrastructure.Tests.Data."
         },
         {
           "name": "admin",

@@ -2,6 +2,26 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Real-app filament deletion evidence
+
+The `monolith-smoke.yml` workflow boots the actual API and Vite application
+against isolated SQLite and a digest-pinned disposable Spoolman. Its filament
+journey exercises hidden archived references, cancellation, non-cascading single
+and bulk requests, explicit deletion, active-spool protection and empty filaments.
+It attaches desktop (1440x1000) and mobile-viewport (390x844) screenshots plus JSON
+provenance to the Playwright report. Only synthetic inventory is created.
+
+Dispatch the workflow on the feature branch with optional
+`evidence_baseline_sha=<full pre-change SHA>` to also capture the actual baseline
+application. The baseline job copies only the current Playwright test driver;
+product sources and exact dependency locks remain those of the baseline commit.
+The before journey expects the original 403-derived API error and generic toast;
+the after journey expects successful guarded deletion. Each attachment identifies
+the application SHA, separate driver SHA, route, viewport, appearance and state.
+Reports are named `monolith-smoke-playwright-report-before` and
+`monolith-smoke-playwright-report-after`. Mobile viewport evidence is not a native
+device test. No browser route or API replacement is used.
+
 ## UI visual and accessibility coverage
 
 `src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles inventory rows to

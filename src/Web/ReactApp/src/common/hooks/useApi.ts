@@ -1088,9 +1088,9 @@ export function useCreateFilament() {
 
 export function useDeleteFilament() {
   const queryClient = useQueryClient();
-  return useMutation<void, ApiError, number>({
-    mutationFn: (id: number) => apiClient.deleteFilament(id),
-    onSuccess: () => {
+  return useMutation<void, ApiError, { id: number; archivedSpoolIds: number[] }>({
+    mutationFn: ({ id, archivedSpoolIds }) => apiClient.deleteFilament(id, archivedSpoolIds),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["filament-types"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.spoolmanVendors });
     },
