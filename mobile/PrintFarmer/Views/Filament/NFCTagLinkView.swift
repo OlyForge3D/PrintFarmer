@@ -9,9 +9,11 @@ struct NFCTagLinkView: View {
     let onLinked: (SpoolmanSpool) -> Void
 
     @State private var spools: [SpoolmanSpool] = []
+    @State private var searchText = ""
     @State private var isLoading = true
     @State private var isLinking = false
     @State private var isCreating = false
+    @State private var loadErrorMessage: String?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -20,19 +22,48 @@ struct NFCTagLinkView: View {
                 Section {
                     LabeledContent("Tag UID", value: uid)
                         .textSelection(.enabled)
+                        .listRowBackground(Color.pfCard)
                     Text("This tag is not linked in Spoolman. Select an existing spool or create one to link it.")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextSecondary)
+                        .listRowBackground(Color.pfCard)
                 }
 
-                Section("Link to existing spool") {
+                Section {
                     if isLoading {
                         ProgressView("Loading spools…")
+                            .listRowBackground(Color.pfCard)
+                    } else if let loadErrorMessage {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Couldn't load spools", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Color.pfError)
+                            Text(loadErrorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(Color.pfTextSecondary)
+                            Text("Retry loading before creating a spool so you don't accidentally create a duplicate.")
+                                .font(.footnote)
+                                .foregroundStyle(Color.pfTextSecondary)
+                            Button("Retry") {
+                                Task { await loadSpools() }
+                            }
+                            .disabled(isLoading)
+                        }
+                        .listRowBackground(Color.pfCard)
                     } else if spools.isEmpty {
-                        Text("No spools found.")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No existing spools found.")
+                                .foregroundStyle(Color.pfTextPrimary)
+                            Text("Create a spool to link this tag.")
+                                .font(.footnote)
+                                .foregroundStyle(Color.pfTextSecondary)
+                        }
+                        .listRowBackground(Color.pfCard)
+                    } else if visibleSpools.isEmpty {
+                        Text("No spools match “\(searchText)”.")
                             .foregroundStyle(Color.pfTextSecondary)
+                            .listRowBackground(Color.pfCard)
                     } else {
-                        ForEach(spools) { spool in
+                        ForEach(visibleSpools) { spool in
                             Button {
                                 Task { await link(spool) }
                             } label: {
@@ -45,9 +76,13 @@ struct NFCTagLinkView: View {
                                 }
                                 .frame(minHeight: 44, alignment: .leading)
                             }
+                            .listRowBackground(Color.pfCard)
                             .disabled(isLinking || isLoading)
                         }
                     }
+                } header: {
+                    Text("Link to existing spool")
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
 
                 if let errorMessage {
@@ -55,20 +90,28 @@ struct NFCTagLinkView: View {
                         Text(errorMessage)
                             .foregroundStyle(Color.pfError)
                             .font(.footnote)
+                            .listRowBackground(Color.pfCard)
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.pfBackground)
+            .searchable(text: $searchText, prompt: "Search spools by name, material, or ID")
+            .tint(Color.pfAccent)
             .navigationTitle("Link NFC Tag")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .toolbarBackground(Color.pfBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Create spool") { isCreating = true }
-                        .disabled(isLinking || isLoading)
+                        .disabled(isLinking || isLoading || loadErrorMessage != nil)
                 }
             }
             .overlay {
@@ -89,6 +132,9 @@ struct NFCTagLinkView: View {
     }
 
     private func loadSpools() async {
+        isLoading = true
+        loadErrorMessage = nil
+        defer { isLoading = false }
         do {
             var all: [SpoolmanSpool] = []
             var offset = 0
@@ -109,9 +155,19 @@ struct NFCTagLinkView: View {
             } while true
             spools = all
         } catch {
-            errorMessage = error.localizedDescription
+            loadErrorMessage = error.localizedDescription
         }
-        isLoading = false
+    }
+
+    private var visibleSpools: [SpoolmanSpool] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return spools }
+        return spools.filter { spool in
+            "\(spool.id)".localizedCaseInsensitiveContains(query)
+                || spool.name.localizedCaseInsensitiveContains(query)
+                || spool.filamentName?.localizedCaseInsensitiveContains(query) == true
+                || spool.material.localizedCaseInsensitiveContains(query)
+        }
     }
 
     private func link(_ spool: SpoolmanSpool) async {

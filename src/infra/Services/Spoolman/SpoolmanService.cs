@@ -1722,13 +1722,15 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/tag/scan";
         using var content = new StringContent(
-            JsonSerializer.Serialize(new
-            {
-                uid = normalizedUid,
-                format = normalizedFormat,
-                payload_b64 = request.PayloadB64,
-                create = false
-            }, TagScanJsonOptions),
+            JsonSerializer.Serialize(
+                new
+                {
+                    uid = normalizedUid,
+                    format = normalizedFormat,
+                    payload_b64 = request.PayloadB64,
+                    create = false
+                },
+                TagScanJsonOptions),
             System.Text.Encoding.UTF8,
             "application/json");
         using HttpResponseMessage response = await http.PostAsync(url, content, ct);

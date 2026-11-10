@@ -48,4 +48,44 @@ final class NFCTagLinkViewSnapshotTests: XCTestCase {
             window.isHidden = true
         }
     }
+
+    func testSpoolLoadFailureCreatesReviewAttachment() async throws {
+        let service = MockSpoolService()
+        service.errorToThrow = NetworkError.serverError(503)
+        let spoolsLoaded = expectation(description: "Failed spool lookup completed")
+        service.onListSpools = { spoolsLoaded.fulfill() }
+
+        let size = CGSize(width: 390, height: 844)
+        let rootView = NFCTagLinkView(
+            uid: "E0040108662F6FBC",
+            scannedData: nil,
+            spoolService: service,
+            onLinked: { _ in }
+        )
+        .environment(\.colorScheme, .light)
+        let host = UIHostingController(rootView: rootView)
+        host.view.frame = CGRect(origin: .zero, size: size)
+        host.view.backgroundColor = .systemBackground
+
+        let window = UIWindow(frame: host.view.frame)
+        window.rootViewController = host
+        window.overrideUserInterfaceStyle = .light
+        window.isHidden = false
+        host.view.layoutIfNeeded()
+
+        await fulfillment(of: [spoolsLoaded], timeout: 2)
+        await Task.yield()
+        host.view.layoutIfNeeded()
+
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "review-only-nfc-tag-link-spool-load-error-390-light"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        await Task.yield()
+        window.isHidden = true
+    }
 }
