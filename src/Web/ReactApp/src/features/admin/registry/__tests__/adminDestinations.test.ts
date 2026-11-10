@@ -33,6 +33,18 @@ function accessAs(
 }
 
 describe('adminDestinations registry', () => {
+  it('gives Farm Identity its own permission-gated configuration destination', () => {
+    expect(getDestinationById('farm-identity')).toMatchObject({
+      kind: 'configuration',
+      settingsGroup: 'farm',
+      label: 'Farm Identity',
+      path: '/admin/settings?tab=identity&sub=details',
+      group: 'identity',
+      requiredRole: null,
+      requiredPermission: { resource: 'system_settings', action: 'admin' },
+      isHubTile: true,
+    });
+  });
   it('has at least one destination', () => {
     expect(ADMIN_DESTINATIONS.length).toBeGreaterThan(0);
   });

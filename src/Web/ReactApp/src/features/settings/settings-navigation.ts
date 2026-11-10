@@ -430,6 +430,7 @@ export const SETTINGS_GROUP_TO_LOCATION: Record<
   string,
   { scopeId: SettingsScopeId; categoryId: string; subPageId: string }
 > = {
+  FarmIdentity: { scopeId: 'system', categoryId: 'identity', subPageId: 'details' },
   General: { scopeId: 'system', categoryId: 'general', subPageId: 'farm' },
   System: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
   Networking: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },

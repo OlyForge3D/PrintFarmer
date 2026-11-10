@@ -22,17 +22,17 @@ import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
 
 describe('getSettingsCategoryDestinations', () => {
-  it('uses the existing seven system categories and never adds personal settings', () => {
+  it('includes Farm Identity with system categories and never adds personal settings', () => {
     const cards = getSettingsCategoryDestinations({ hasRole: () => true, hasPermission: () => true });
     expect(cards.map(card => card.label)).toEqual([
-      'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Users', 'Data',
+      'Farm Identity', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Users', 'Data',
     ]);
     expect(cards.every(card => card.icon && card.description)).toBe(true);
-    expect(new Set(cards.map(card => card.path)).size).toBe(7);
+    expect(new Set(cards.map(card => card.path)).size).toBe(8);
   });
 
   it.each([
-    ['system_settings', ['general.farm', 'slicing.defaults', 'integrations.connections']],
+    ['system_settings', ['identity.details', 'general.farm', 'slicing.defaults', 'integrations.connections']],
     ['roles', ['users.roles']],
     ['users', ['users.accounts']],
     ['printers', ['hardware.printer-groups']],

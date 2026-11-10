@@ -5434,3 +5434,7 @@ export interface CustomFieldValue {
   options?: string;
   isRequired: boolean;
 }
+export interface FarmIdentitySettings {
+  farmName: string;
+  timeZone: string;
+}

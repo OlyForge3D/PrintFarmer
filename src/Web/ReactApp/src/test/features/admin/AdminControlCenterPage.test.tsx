@@ -720,7 +720,7 @@ describe('AdminControlCenterPage', () => {
     expect(mockedApiGet).toHaveBeenCalledTimes(2);
   });
 
-  it('renders permitted operational cards and seven focused settings categories', async () => {
+  it('renders permitted operational cards and eight focused settings categories', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
     renderHub();
@@ -731,18 +731,19 @@ describe('AdminControlCenterPage', () => {
 
     const cards = screen.getAllByTestId('admin-hub-destination');
     // 8 operational (including Printed Parts, #2588) + 3 standalone
-    // configuration (Catalog, Locations, Power Monitors) + 7 categories.
-    expect(cards.length).toBe(18);
+    // configuration (Catalog, Locations, Power Monitors) + 8 categories.
+    expect(cards.length).toBe(19);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
     }
     const settingsCards = within(screen.getByTestId('admin-hub-settings')).getAllByRole('link');
     expect(settingsCards.map(card => card.getAttribute('data-destination-id'))).toEqual([
-      'settings-general', 'settings-slicing', 'settings-hardware', 'settings-integrations',
+      'settings-identity', 'settings-general', 'settings-slicing', 'settings-hardware', 'settings-integrations',
       'settings-quotas', 'settings-users', 'settings-data',
     ]);
     expect(settingsCards.map(card => card.getAttribute('href'))).toEqual([
+      '/admin/settings?scope=system&tab=identity&sub=details',
       '/admin/settings?scope=system&tab=general&sub=farm',
       '/admin/settings?scope=system&tab=slicing&sub=defaults',
       '/admin/settings?scope=system&tab=hardware&sub=nfc',

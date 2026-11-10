@@ -14,6 +14,7 @@
  * groups in the metadata sense and are intentionally omitted.
  */
 export const SUB_PAGE_ALLOWED_GROUPS: Record<string, readonly string[]> = {
+  'identity.details': ['FarmIdentity'],
   'general.farm': ['General'],
   'general.system': ['System', 'Networking', 'Catalog', 'Files', 'Printers'],
   'general.automation': ['Operations', 'Monitoring', 'Maintenance', 'Job Queue'],

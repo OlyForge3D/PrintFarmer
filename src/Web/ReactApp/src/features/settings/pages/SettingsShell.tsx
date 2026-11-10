@@ -137,6 +137,14 @@ const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
 };
 
 const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
+  'identity.details': (
+    <SettingsSection>
+      <SettingsPage
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['identity.details']}
+        introText="Customize your farm name and the timezone used by the farm-local clock. Existing schedules, stored timestamps, and UTC planning hours are unchanged."
+      />
+    </SettingsSection>
+  ),
   'general.farm': (
     <SettingsSection>
       <SettingsPage

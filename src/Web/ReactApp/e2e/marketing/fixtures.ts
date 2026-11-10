@@ -41,6 +41,7 @@ const responses: Record<string, unknown> = {
   'GET /api/setup/status': { needsSetup: false },
   'GET /api/auth/me': { ...toolbarRouteUser, id: 'marketing-operator', username: 'demo', displayName: 'Demo operator', email: 'demo@example.invalid' },
   'GET /api/settings/SignalR': { logLevel: 'Error', consoleLoggingEnabled: false },
+  'GET /api/settings/FarmIdentity': { farmName: 'PrintFarmer', timeZone: 'UTC' },
   'GET /api/settings/Slicer': { enabled: true },
   'GET /api/settings/NetworkDiscovery': { enableDiscovery: false },
   'GET /api/workers/': [],
