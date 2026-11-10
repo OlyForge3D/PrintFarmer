@@ -63,6 +63,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         }
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
         let addAnother = app.buttons["barcodeIntake.aliasAddSpool"]
+        XCTAssertTrue(app.buttons["barcodeIntake.aliasCancel"].waitForExistence(timeout: 8),
+                      "wait for the asynchronous alias lookup before scrolling its confirmation")
         let intakeList = app.collectionViews.containing(.button, identifier: "barcodeIntake.aliasCancel").firstMatch
         for _ in 0..<3 where !addAnother.isHittable { intakeList.swipeUp() }
         XCTAssertTrue(addAnother.waitForExistence(timeout: 8), "a rescan offers the remembered filament")
