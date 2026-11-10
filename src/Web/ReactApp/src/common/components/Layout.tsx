@@ -824,6 +824,7 @@ export function Layout() {
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         className={clsx(
+          // impeccable-disable-next-line side-tab -- Existing active navigation indicator, not a decorative card border.
           'group flex items-center rounded-sm border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
           isActive
             ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
