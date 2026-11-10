@@ -566,6 +566,26 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testServiceUnavailableResponsePreservesServerMessage() async {
+        let message = "The connected Spoolman server does not support NFC tag APIs."
+        mockAPIClient.stubResponse(json: #"{"message":"The connected Spoolman server does not support NFC tag APIs."}"#, statusCode: 503)
+
+        do {
+            let _: [Printer] = try await apiClient.get("/api/spoolman/tags/scan")
+            XCTFail("Expected NetworkError.serverErrorMessage")
+        } catch let error as NetworkError {
+            if case .serverErrorMessage(let code, let actualMessage) = error {
+                XCTAssertEqual(code, 503)
+                XCTAssertEqual(actualMessage, message)
+                XCTAssertEqual(error.localizedDescription, message)
+            } else {
+                XCTFail("Expected .serverErrorMessage, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     func testConflictResponseThrows409() async {
         mockAPIClient.stubResponse(json: "{}", statusCode: 409)
 

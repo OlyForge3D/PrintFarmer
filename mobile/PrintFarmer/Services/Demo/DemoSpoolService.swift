@@ -93,4 +93,16 @@ final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     func listAvailableMaterials() async throws -> [String] {
         ["PLA", "PETG", "ABS", "TPU", "ASA"]
     }
+
+    func scanTag(uid: String, format: String?, payloadB64: String?) async throws -> SpoolmanTagScanResponse {
+        throw ServiceError.notImplemented("NFC tag lookup — unavailable in demo mode")
+    }
+
+    func linkTag(uid: String, toSpoolID spoolID: Int) async throws {
+        throw ServiceError.notImplemented("NFC tag linking — unavailable in demo mode")
+    }
+
+    func unlinkTag(uid: String, fromSpoolID spoolID: Int) async throws {
+        throw ServiceError.notImplemented("NFC tag unlinking — unavailable in demo mode")
+    }
 }

@@ -26,6 +26,8 @@ final class SpoolInventoryViewModel {
     var scanError: String?
     var scannedSpoolData: ScannedSpoolData?
     var showScannedDataSheet = false
+    var pendingNFCTagLink: ScannedNFCTag?
+    var nfcTagLinkData: ScannedSpoolData?
     var highlightedSpoolId: Int?
 
     // Monotonic authority for spool-highlight lifetime. Advanced synchronously
@@ -296,6 +298,68 @@ final class SpoolInventoryViewModel {
         case .newSpoolData(let data):
             scannedSpoolData = data
             showScannedDataSheet = true
+        case .nfcTag(let tag):
+            guard let spoolService else {
+                scanError = "Spool service not available"
+                return
+            }
+            do {
+                let response = try await spoolService.scanTag(
+                    uid: tag.uid,
+                    format: tag.openPrintTagPayload == nil ? nil : "openprinttag",
+                    payloadB64: tag.openPrintTagPayload?.base64EncodedString()
+                )
+                guard isViewActive else { return }
+                if let spoolID = response.matchedSpoolId {
+                    if let spool = findSpool(byId: spoolID) {
+                        setHighlight(spoolId: spool.id)
+                    } else {
+                        await loadSpools()
+                        if let spool = findSpool(byId: spoolID) {
+                            setHighlight(spoolId: spool.id)
+                        } else {
+                            scanError = "Spool #\(spoolID) not found in inventory."
+                        }
+                    }
+                } else if let filament = response.filament {
+                    scannedSpoolData = ScannedSpoolData(
+                        material: filament.material,
+                        colorHex: filament.colorHex,
+                        vendor: filament.vendor,
+                        weight: filament.weight,
+                        diameter: filament.diameter,
+                        temperature: filament.settingsExtruderTemp,
+                        spoolmanId: nil,
+                        filamentId: response.matchedFilamentId ?? filament.id
+                    )
+                    showScannedDataSheet = true
+                } else if response.matchedFilamentId != nil {
+                    scanError = "Spoolman matched this tag to a filament but returned no filament details."
+                } else if let data = tag.openPrintTagPayload.flatMap(NFCTagParser.parseOpenPrintTag) {
+                    pendingNFCTagLink = tag
+                    nfcTagLinkData = data
+                } else {
+                    switch tag.legacyContent {
+                    case .spoolId(let id):
+                        if let spool = findSpool(byId: id) {
+                            setHighlight(spoolId: spool.id)
+                        } else {
+                            scanError = "Spool #\(id) not found in inventory."
+                        }
+                    case .newSpoolData(let data):
+                        pendingNFCTagLink = tag
+                        nfcTagLinkData = data
+                    case .printerId:
+                        scanError = "This is a printer tag. Use Scan from the farm navigation to open it."
+                    case nil:
+                        pendingNFCTagLink = tag
+                        nfcTagLinkData = nil
+                    }
+                }
+            } catch {
+                logger.warning("NFC tag lookup failed: \(error.localizedDescription)")
+                scanError = error.localizedDescription
+            }
 
         case .cancelled:
             break
@@ -303,6 +367,16 @@ final class SpoolInventoryViewModel {
         case .error(let error):
             scanError = error.localizedDescription
         }
+    }
+
+    func completeNFCTagLink(to spool: SpoolmanSpool) {
+        pendingNFCTagLink = nil
+        nfcTagLinkData = nil
+        markSpoolNFCWritten(id: spool.id)
+        if !spools.contains(where: { $0.id == spool.id }) {
+            spools.insert(spool, at: 0)
+        }
+        setHighlight(spoolId: spool.id)
     }
 
     func deleteSpool(_ spool: SpoolmanSpool) async {
@@ -341,14 +415,26 @@ final class SpoolInventoryViewModel {
         do {
             let filament = await matchingFilament(for: spool, format: format)
 
-            try await nfcService.writeSpoolTag(spool: spool, filament: filament, format: format)
-            // Persist NFC tag association to backend
-            if let spoolService {
-                _ = try await spoolService.updateSpool(
-                    id: spool.id,
-                    SpoolmanSpoolRequest(hasNfcTag: true)
-                )
+            guard let spoolService else {
+                throw SpoolScanError.tagWrittenButLinkFailed("Spool service is unavailable.")
             }
+            _ = try await nfcService.writeSpoolTag(
+                spool: spool,
+                filament: filament,
+                format: format,
+                beforeWrite: { uid in
+                    let existing = try await spoolService.scanTag(uid: uid, format: nil, payloadB64: nil)
+                    if let linkedSpoolID = existing.matchedSpoolId, linkedSpoolID != spool.id {
+                        throw SpoolScanError.invalidPayload("This tag is already linked to spool #\(linkedSpoolID).")
+                    }
+                    if existing.matchedFilamentId != nil {
+                        throw SpoolScanError.invalidPayload("This tag is already linked to a filament.")
+                    }
+                },
+                afterWrite: { uid in
+                    try await spoolService.linkTag(uid: uid, toSpoolID: spool.id)
+                }
+            )
             markSpoolNFCWritten(id: spool.id)
             isWritingNFC = false
             return true

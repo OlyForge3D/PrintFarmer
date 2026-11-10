@@ -23,10 +23,13 @@ final class AddSpoolViewModel {
     var isSaving = false
     var errorMessage: String?
     var didSave = false
+    private(set) var createdSpool: SpoolmanSpool?
     var isViewActive = true
 
     // Scan pre-fill
     var isPrefilledFromScan = false
+    private var scannedFilamentId: Int?
+    var isFilamentSelectionLocked: Bool { scannedFilamentId != nil }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "AddSpool")
     private var spoolService: (any SpoolServiceProtocol)?
@@ -37,6 +40,7 @@ final class AddSpoolViewModel {
 
     func prefill(from scannedData: ScannedSpoolData) {
         isPrefilledFromScan = true
+        scannedFilamentId = scannedData.filamentId
         if let material = scannedData.material, !material.isEmpty {
             selectedMaterial = material
         }
@@ -106,7 +110,9 @@ final class AddSpoolViewModel {
         isLoading = false
     }
 
-    func saveSpool() async {
+    func saveSpool(
+        afterCreate: ((SpoolmanSpool) async throws -> Void)? = nil
+    ) async {
         guard let spoolService, isFormValid, isViewActive else { return }
 
         isSaving = true
@@ -119,14 +125,19 @@ final class AddSpoolViewModel {
         }
 
         let request = SpoolmanSpoolRequest(
-            filamentId: matchingFilament?.id,
+            filamentId: scannedFilamentId ?? matchingFilament?.id,
             remainingWeight: totalWeightG,
             initialWeight: totalWeightG,
             spoolWeight: spoolWeightG > 0 ? spoolWeightG : nil
         )
 
         do {
-            _ = try await spoolService.createSpool(request)
+            if createdSpool == nil {
+                createdSpool = try await spoolService.createSpool(request)
+            }
+            if let createdSpool {
+                try await afterCreate?(createdSpool)
+            }
             guard isViewActive else { return }
             didSave = true
         } catch {

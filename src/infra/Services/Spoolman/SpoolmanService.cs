@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -20,6 +21,11 @@ namespace Farm.Infrastructure.Services.Spoolman;
 
 public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger, IEgressGuard egressGuard) : ISpoolmanService
 {
+    private static readonly JsonSerializerOptions TagScanJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     /// <summary>
     /// Density applied when a caller creates a filament without one. Spoolman requires
     /// <c>density</c> (it has no default) and rejects the payload with HTTP 422 otherwise.
@@ -1692,6 +1698,177 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         catch
         {
             return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpoolmanTagScanResultDto> ScanTagAsync(SpoolmanTagScanRequest request, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(request.Uid);
+        if (request.PayloadB64 is { Length: > 4096 })
+        {
+            throw new ArgumentException("NFC tag payload must not exceed 4096 base64 characters.", nameof(request));
+        }
+
+        string? normalizedFormat = string.IsNullOrWhiteSpace(request.Format) ? null : request.Format.Trim();
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "scan a tag",
+                "Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/tag/scan";
+        using var content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                uid = normalizedUid,
+                format = normalizedFormat,
+                payload_b64 = request.PayloadB64,
+                create = false
+            }, TagScanJsonOptions),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        using HttpResponseMessage response = await http.PostAsync(url, content, ct);
+        await EnsureTagApiSuccessAsync(response, "scan a tag", ct);
+
+        using JsonDocument document = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(ct),
+            cancellationToken: ct);
+        JsonElement root = document.RootElement;
+        int? matchedSpoolId = TryGetInt(root, "matched_spool_id");
+        int? matchedFilamentId = TryGetInt(root, "matched_filament_id");
+        SpoolmanSpoolDto? spool = TryGetObject(root, "spool", SpoolmanJsonParser.ParseSpool);
+        SpoolmanFilamentDto? filament = TryGetObject(root, "filament", SpoolmanJsonParser.ParseFilament);
+        bool created = root.TryGetProperty("created", out JsonElement createdElement) &&
+            createdElement.ValueKind == JsonValueKind.True;
+        JsonElement? decoded = root.TryGetProperty("decoded", out JsonElement decodedElement)
+            ? decodedElement.Clone()
+            : null;
+
+        return new SpoolmanTagScanResultDto(matchedSpoolId, matchedFilamentId, spool, filament, created, decoded);
+    }
+
+    /// <inheritdoc/>
+    public async Task LinkTagToSpoolAsync(int spoolId, string uid, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(uid);
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "link a tag",
+                "Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/spool/{spoolId}/tag";
+        using var content = new StringContent(
+            JsonSerializer.Serialize(new { uid = normalizedUid }),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        using HttpResponseMessage response = await http.PostAsync(url, content, ct);
+        await EnsureTagApiSuccessAsync(response, $"link a tag to spool {spoolId}", ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task UnlinkTagFromSpoolAsync(int spoolId, string uid, CancellationToken ct)
+    {
+        string normalizedUid = NormalizeNfcTagUid(uid);
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "unlink a tag",
+                "Spoolman is not configured.");
+        }
+
+        string escapedUid = Uri.EscapeDataString(normalizedUid);
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/spool/{spoolId}/tag/{escapedUid}";
+        using HttpResponseMessage response = await http.DeleteAsync(url, ct);
+        await EnsureTagApiSuccessAsync(response, $"unlink a tag from spool {spoolId}", ct);
+    }
+
+    private static string NormalizeNfcTagUid(string uid)
+    {
+        if (string.IsNullOrWhiteSpace(uid))
+        {
+            throw new ArgumentException("An NFC tag UID is required.", nameof(uid));
+        }
+
+        string normalized = new string(uid.Where(static character =>
+            character is not ':' and not '-' and not ' ' and not '\t' and not '\r' and not '\n').ToArray())
+            .ToUpperInvariant();
+        if (normalized.Length is 0 or > 64)
+        {
+            throw new ArgumentException("The NFC tag UID must contain between 1 and 64 characters.", nameof(uid));
+        }
+
+        return normalized;
+    }
+
+    private static int? TryGetInt(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int parsed)
+                ? parsed
+                : null;
+    }
+
+    private static T? TryGetObject<T>(
+        JsonElement element,
+        string propertyName,
+        Func<JsonElement, T> parse)
+        where T : class
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Object
+                ? parse(value)
+                : null;
+    }
+
+    private static async Task EnsureTagApiSuccessAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        string body = await response.Content.ReadAsStringAsync(ct);
+        if (response.StatusCode == HttpStatusCode.NotFound && IsMissingTagEndpoint(body))
+        {
+            throw new SpoolmanApiException(
+                HttpStatusCode.ServiceUnavailable,
+                operation,
+                "The connected Spoolman server does not support NFC tag APIs. Update it to a tag-enabled build.");
+        }
+
+        throw new SpoolmanApiException(
+            response.StatusCode,
+            operation,
+            ParseSpoolmanErrorDetail(body));
+    }
+
+    private static bool IsMissingTagEndpoint(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("detail", out JsonElement detail)
+                && detail.ValueKind == JsonValueKind.String
+                && string.Equals(detail.GetString(), "Not Found", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 
