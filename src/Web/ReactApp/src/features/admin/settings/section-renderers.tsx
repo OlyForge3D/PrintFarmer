@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button, Input } from '@/common/components/ui';
 import { PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { FailureDetectionStatusCard } from '@/features/admin/components/FailureDetectionStatusCard';
-import { ObicoServersSection } from '@/features/admin/components/ObicoServersSection';
 import type { SettingValue } from '@/common/components/SettingsPagelet';
 
 /**
@@ -29,22 +27,6 @@ export interface SectionRenderer {
    * for sections whose extension is wide (e.g. Obico's server table).
    */
   fullWidth?: boolean;
-}
-
-function renderObico(): ReactNode {
-  return (
-    // `auto-fit`, not a `lg:` breakpoint. This grid lives inside a settings
-    // card in a `columns-*` flow, so its real width (~645px at a 1920px
-    // viewport) has nothing to do with the viewport. A viewport breakpoint
-    // split it into two 315px halves and clipped both panels.
-    // `min(28rem,100%)` so the track can still collapse below its preferred
-    // floor on a narrow container; a bare `28rem` minimum overflows the
-    // `overflow-hidden` card on phone widths.
-    <div className="mt-4 grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(28rem,100%),1fr))]">
-      <FailureDetectionStatusCard />
-      <ObicoServersSection />
-    </div>
-  );
 }
 
 function renderPerEngine({ values, onChange }: SectionRendererContext): ReactNode {
@@ -212,10 +194,6 @@ function renderMaterialPriceDefaults({ values, onChange }: SectionRendererContex
  * pagelet — that regresses the whole point of this indirection.
  */
 export const sectionRendererRegistry: Record<string, SectionRenderer> = {
-  Obico: {
-    fullWidth: true,
-    extension: renderObico,
-  },
   SlicerSettings: {
     extension: renderPerEngine,
   },

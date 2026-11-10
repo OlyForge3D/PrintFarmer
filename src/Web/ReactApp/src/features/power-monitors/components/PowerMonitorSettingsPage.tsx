@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router';
 import { toast } from 'sonner';
-import type { CostTrackingSettings } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { isSettingsConflict } from '@/common/utils/apiErrors';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { Button, FormField, HeaderActions, Input, Select, Toggle, Badge } from '@/common/components/ui';
@@ -23,10 +22,12 @@ import {
   type PowerMonitorProvider,
   type PowerMonitorTestResult,
 } from '@/features/power-monitors/types';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 export function PowerMonitorSettingsPage() {
   const { data: monitors = [], isLoading, isError } = usePowerMonitors();
   const { data: printers = [] } = usePrintersFast(true);
+  const { hasPermission } = useAuth();
 
   const createMutation = useCreatePowerMonitor();
   const updateMutation = useUpdatePowerMonitor();
@@ -45,23 +46,20 @@ export function PowerMonitorSettingsPage() {
   const [testResult, setTestResult] = useState<PowerMonitorTestResult | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
-  const [fallbackRate, setFallbackRate] = useState('');
-  const [savingFallback, setSavingFallback] = useState(false);
+  const [fallbackRate, setFallbackRate] = useState<number | null>(null);
+  const [fallbackLoading, setFallbackLoading] = useState(true);
   const [fallbackError, setFallbackError] = useState<string | null>(null);
-  const [fallbackLoaded, setFallbackLoaded] = useState(false);
-  const [fallbackConflict, setFallbackConflict] = useState(false);
-  const costSettingsRef = useRef<CostTrackingSettings | null>(null);
 
   const reloadFallback = async () => {
+    setFallbackLoading(true);
     try {
       const settings = await apiClient.getCostTrackingSettings();
-      costSettingsRef.current = settings;
-      setFallbackRate(settings.electricityRatePerKwh > 0 ? settings.electricityRatePerKwh.toString() : '');
-      setFallbackLoaded(true);
+      setFallbackRate(settings.electricityRatePerKwh > 0 ? settings.electricityRatePerKwh : null);
       setFallbackError(null);
-      setFallbackConflict(false);
     } catch {
-      setFallbackError('Could not load farm-wide settings. Reload before editing.');
+      setFallbackError('Could not load farm-wide settings.');
+    } finally {
+      setFallbackLoading(false);
     }
   };
 
@@ -166,31 +164,6 @@ export function PowerMonitorSettingsPage() {
     );
   };
 
-  const handleSaveFallbackRate = async () => {
-    if (savingFallback || fallbackConflict || !costSettingsRef.current) return;
-    setSavingFallback(true);
-    try {
-      const rate = Number(fallbackRate);
-      if (isNaN(rate) || rate < 0) {
-        toast.error('Enter a valid rate');
-        return;
-      }
-      const payload = { ...costSettingsRef.current, electricityRatePerKwh: rate };
-      const saved = await apiClient.updateCostTrackingSettings(payload);
-      costSettingsRef.current = saved ?? payload;
-      setFallbackError(null);
-      toast.success('Farm-wide fallback rate saved');
-    } catch (error) {
-      if (isSettingsConflict(error)) {
-        setFallbackConflict(true);
-        setFallbackError('Farm-wide settings changed elsewhere. Your rate is preserved. Reload to discard it and review the latest settings.');
-      }
-      toast.error('Failed to save farm-wide rate');
-    } finally {
-      setSavingFallback(false);
-    }
-  };
-
   const printerName = (id: string) =>
     printers.find((p) => p.id === id)?.name ?? id;
 
@@ -217,33 +190,27 @@ export function PowerMonitorSettingsPage() {
         <p className="text-xs text-pf-text-secondary mb-3">
           Used when a printer has no per-monitor rate configured.
         </p>
-        <div className="flex items-end gap-3">
-          <FormField label="Rate (USD/kWh)" className="w-48">
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={fallbackRate}
-              disabled={!fallbackLoaded || savingFallback}
-              onChange={(e) => setFallbackRate(e.target.value)}
-              placeholder="0.12"
-            />
-          </FormField>
-          <Button
-            variant="secondary"
-            onClick={handleSaveFallbackRate}
-            disabled={savingFallback || !fallbackLoaded || fallbackConflict}
+        <p className="mb-3 text-sm font-medium text-pf-text-primary" aria-live="polite">
+          {fallbackLoading
+            ? 'Loading farm-wide rate...'
+            : fallbackRate === null
+              ? 'Not configured'
+              : `$${fallbackRate}/kWh`}
+        </p>
+        {hasPermission('system_settings', 'admin') && (
+          <Link
+            to="/admin/settings?scope=system&tab=costs"
+            className="text-sm font-medium text-pf-accent underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
           >
-            {savingFallback ? 'Saving...' : 'Save'}
-          </Button>
-        </div>
+            Manage in Costs &amp; Energy settings
+          </Link>
+        )}
         {fallbackError && (
           <div className="mt-2 space-y-2">
             <p role="alert" className="text-sm text-pf-error">{fallbackError}</p>
-            <Button variant="secondary" disabled={savingFallback} onClick={async () => {
-              setSavingFallback(true);
-              try { await reloadFallback(); } finally { setSavingFallback(false); }
-            }}>Reload farm-wide settings</Button>
+            <Button variant="secondary" disabled={fallbackLoading} onClick={() => void reloadFallback()}>
+              Retry loading farm-wide rate
+            </Button>
           </div>
         )}
       </div>

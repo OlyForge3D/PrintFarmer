@@ -13,8 +13,8 @@ vi.mock('@/features/printer-groups/pages/PrinterGroupsPage', () => ({
   PrinterGroupsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="printer-groups-page" data-embedded={String(embedded)}>Printer Groups Page</div>,
 }));
 
-vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
-  NfcBindingsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="nfc-bindings-page" data-embedded={String(embedded)}>NFC Bindings Page</div>,
+vi.mock('@/features/nfc/pages/NfcSettingsPage', () => ({
+  NfcSettingsPage: () => <div data-testid="nfc-settings-page">NFC Readers and Bindings</div>,
 }));
 
 vi.mock('@/features/profile/pages/ApiKeysPage', () => ({
@@ -31,18 +31,18 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
 
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: ({
-    allowedGroups,
+    pageKey,
     introText,
     afterContent,
   }: {
-    allowedGroups?: string[];
+    pageKey?: string;
     introText?: string;
     afterContent?: React.ReactNode;
   }) => (
     <div>
       <div
         data-testid="legacy-settings-page"
-        data-groups={allowedGroups?.join(',') ?? 'all'}
+        data-page-key={pageKey ?? ''}
         data-intro={introText ?? ''}
       >
         Legacy Settings Page
@@ -50,10 +50,6 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
       {afterContent}
     </div>
   ),
-}));
-
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
 }));
 
 const authState = {
@@ -158,14 +154,14 @@ describe('SettingsShell edge cases', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=&');
   });
 
-  it('falls back to the first available system tab when the tab param is invalid', () => {
+  it('falls back to the single-page System category when the tab param is invalid', () => {
     renderSettings('/settings?scope=system&tab=not-real');
 
-    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
+    expect(getCategoryButton('System')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-page-key', 'system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
   it('does not fall back to personal content when an unprivileged user opens configuration', () => {

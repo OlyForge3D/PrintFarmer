@@ -106,7 +106,8 @@ export function useSettingsSearchIndex(options: UseSettingsSearchIndexOptions): 
       return [] as SettingsCommandItem[];
     }
     return buildSettingCommandItems(metadataQuery.data, groupsQuery.data)
-      .filter((item) => canAccessSettingsTab(item.categoryId, item.subPageId, destinationAccess));
+      .filter((item) => item.categoryId === 'maintenance'
+        || canAccessSettingsTab(item.categoryId, item.subPageId, destinationAccess));
   }, [user, hasPermission, metadataQuery.data, groupsQuery.data, destinationAccess]);
 
   const items = useMemo<SettingsCommandItem[]>(

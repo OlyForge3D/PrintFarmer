@@ -2,6 +2,13 @@
 
 ### Features
 
+- Regroup admin settings into Failure Detection, Costs & Energy, Planning,
+  Operator Features and a single System page (#3745). Move browser slicer modes
+  into Slicing, auto-tagging/custom fields into Data, and global maintenance
+  policy into Maintenance Settings. Combine NFC readers and bindings on one
+  Hardware page. Remove duplicate farm-rate editors while retaining per-record
+  overrides, persisted setting keys/API contracts and bounded legacy-link/pin migration.
+
 - Route Obico monitoring per print instead of permanently pinning printers
   (#3693). Reserve healthy pool capacity through warmup, pauses, and API
   restarts; release it when prints end. Unavailable monitoring never blocks

@@ -1,9 +1,21 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter, useLocation } from 'react-router';
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router';
+
+const access = vi.hoisted(() => ({ settings: true, maintenance: true }));
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: (resource: string) => resource === 'maintenance' ? access.maintenance : access.settings }),
+}));
+vi.mock('@/features/admin/pages/SettingsPage', () => ({
+  SettingsPage: ({ pageKey, onDirtyChange }: { pageKey: string; onDirtyChange: (dirty: boolean) => void }) => (
+    <div data-testid="maintenance-settings" data-page-key={pageKey}>
+      <button onClick={() => onDirtyChange(true)}>Edit maintenance setting</button>
+    </div>
+  ),
+}));
 
 // Mock PageTemplate to simplify testing
 vi.mock('@/common/components/PageTemplate', () => ({
@@ -119,6 +131,60 @@ const renderWithRouter = (initialRoute = '/maintenance') => {
 describe('MaintenanceDashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    access.settings = true;
+    access.maintenance = true;
+  });
+
+  it('renders only maintenance metadata on the settings tab', () => {
+    renderWithRouter('/maintenance?tab=settings');
+    expect(screen.getByTestId('maintenance-settings')).toHaveAttribute('data-page-key', 'maintenance.settings');
+  });
+
+  it('keeps system-settings-only delegates out of operational panels and selects the settings route', () => {
+    access.maintenance = false;
+    renderWithRouter('/maintenance?field=MaintenanceAlerts.enabled');
+    expect(screen.getByTestId('maintenance-settings')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fleet-overview-content')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('field=MaintenanceAlerts.enabled&tab=settings');
+  });
+
+  it('does not expose metadata editing without the separate settings permission', () => {
+    access.settings = false;
+    renderWithRouter('/maintenance?tab=settings');
+    expect(screen.queryByRole('tab', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('maintenance-settings')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /dashboard/i })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps unsaved settings on tab navigation until discard is confirmed', async () => {
+    const user = userEvent.setup();
+    renderWithRouter('/maintenance?tab=settings');
+    await user.click(screen.getByRole('button', { name: 'Edit maintenance setting' }));
+    await user.click(screen.getByRole('tab', { name: /dashboard/i }));
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(screen.getByTestId('maintenance-settings')).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: /dashboard/i }));
+    await user.click(screen.getByRole('button', { name: 'Discard Changes' }));
+    expect(screen.getByTestId('fleet-overview-content')).toBeInTheDocument();
+  });
+
+  it('blocks leaving maintenance through the app router while settings are dirty', async () => {
+    const user = userEvent.setup();
+    const router = createMemoryRouter([
+      { path: '/maintenance', element: <MaintenanceDashboardPage /> },
+      { path: '/printers', element: <div>Printers destination</div> },
+    ], { initialEntries: ['/maintenance?tab=settings'] });
+    render(<RouterProvider router={router} />);
+    await user.click(screen.getByRole('button', { name: 'Edit maintenance setting' }));
+    await act(async () => { await router.navigate('/printers'); });
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(router.state.location.pathname).toBe('/maintenance');
+    await act(async () => { await router.navigate('/printers'); });
+    await user.click(screen.getByRole('button', { name: 'Discard Changes' }));
+    expect(await screen.findByText('Printers destination')).toBeInTheDocument();
   });
 
   describe('tab deep-linking', () => {
