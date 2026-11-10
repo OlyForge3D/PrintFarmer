@@ -71,7 +71,7 @@ function SummaryStat({ label, value, accent = 'default' }: SummaryStatProps) {
       <p className={`text-3xl font-bold font-bebas tracking-wide ${accentStyle[accent]}`}>
         {value}
       </p>
-      <p className="text-[11px] uppercase tracking-widest text-pf-text-tertiary mt-0.5 truncate">{label}</p>
+      <p className="text-[11px] uppercase tracking-widest text-pf-text-tertiary mt-0.5 break-words">{label}</p>
     </div>
   );
 }
@@ -162,36 +162,31 @@ export function MaintenanceDashboardPage() {
       }
     >
       {/* ═══════════════════ Ribbon Stats ═══════════════════ */}
-      <div className="flex items-center justify-between gap-6 bg-pf-bg-1 border border-pf-border rounded-lg px-6 py-4 mb-6 overflow-x-auto">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 items-start gap-x-6 gap-y-4 bg-pf-bg-1 border border-pf-border rounded-lg px-6 py-4 mb-6 lg:[&>div+div]:border-l lg:[&>div+div]:border-pf-border">
         <SummaryStat
           label="Printers"
           value={stats?.totalPrinters ?? 0}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Online"
           value={stats?.printersOnline ?? 0}
           accent="green"
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Alerts"
           value={totalAlerts}
           accent={criticalAlerts > 0 ? 'red' : totalAlerts > 0 ? 'amber' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Overdue"
           value={overdueCount}
           accent={overdueCount > 0 ? 'red' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Due Soon"
           value={dueSoonCount}
           accent={dueSoonCount > 0 ? 'amber' : 'default'}
         />
-        <div className="w-px h-10 bg-pf-border shrink-0" />
         <SummaryStat
           label="Needs Attention"
           value={stats?.printersNeedingAttention ?? 0}
