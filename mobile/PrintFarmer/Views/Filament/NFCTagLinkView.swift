@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NFCTagLinkView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     let uid: String
     let scannedData: ScannedSpoolData?
@@ -97,8 +98,8 @@ struct NFCTagLinkView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.pfBackground)
-            .searchable(text: $searchText, prompt: "Search spools by name, material, or ID")
-            .tint(Color.pfAccent)
+            .searchable(text: $searchText, prompt: "Name, material, or ID")
+            .tint(colorScheme == .dark ? Color.pfAccent : Color.pfButtonPrimary)
             .navigationTitle("Link NFC Tag")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
