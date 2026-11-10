@@ -30,8 +30,8 @@ function SettingsFrame({ scope }) {
           React.createElement(SettingsSidebar, {
             categories: SETTINGS_CATEGORIES.filter(item => item.scopeId === scope),
             activeScope: scope,
-            activeCategory: scope === 'system' ? 'general' : 'profile',
-            activeSubPage: scope === 'system' ? 'farm' : 'preferences',
+            activeCategory: scope === 'system' ? 'identity' : 'profile',
+            activeSubPage: scope === 'system' ? 'details' : 'preferences',
             availableScopes: scopes,
             onCategoryChange: setSelected,
             onSelectDestination: destination => setSelected(destination.path),

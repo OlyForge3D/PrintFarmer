@@ -13,6 +13,32 @@ PrintFarmer's settings and admin UI is a two-layer system:
 This document is the source of truth for how the two layers connect, how new settings
 show up in the UI without any React changes, and where the sharp edges are.
 
+## Farm Identity
+
+Open **Admin Control Center > Farm Identity**
+(`/admin/settings?tab=identity&sub=details`) to edit the farm name and IANA
+timezone. Both fields are Essential settings in the `FarmIdentity` section;
+writes require `system_settings:admin`. Authenticated users can read this section
+through `GET /api/settings/FarmIdentity`; saves use the existing revision-checked
+`POST /api/settings/FarmIdentity` contract.
+
+The name appears in desktop/mobile web headers and the mobile navigation drawer
+(not the browser title or native iOS app). The header's **Farm time** clock uses
+the configured zone, labels its IANA ID and current UTC offset, and follows DST
+using the browser's timezone database. Saves refresh the current browser's
+identity; other browsers refresh within a minute while active.
+Narrow headers show a compact 24-hour time and offset; the IANA ID remains in
+the accessible label and tooltip. An unsupported browser timezone database
+shows an explicit clock error without hiding the farm name.
+
+Defaults are `farmName: "PrintFarmer"` and `timeZone: "UTC"`, including upgrades
+without a stored section. Names must contain 1-80 characters, cannot be blank,
+and cannot contain control characters. Timezones must be valid IANA IDs, not
+Windows names. Existing schedules retain their explicit timezones, new schedule
+creation keeps its existing behavior, planning workday hours remain UTC, and
+stored UTC instants are never converted or migrated. No database schema changes
+are required.
+
 ## Personal Profile settings
 
 `/settings?scope=user&tab=profile&sub=preferences` remains the canonical
@@ -76,6 +102,7 @@ opens its first accessible sub-page, using the existing per-destination grants.
 
 | Card / `tab` | Existing sub-pages / `sub` |
 |---|---|
+| Farm Identity / `identity` | Farm Identity (`details`) |
 | System / `system` | Single page: database, logging, connectivity, networking, catalog updates and files |
 | Failure Detection / `failure-detection` | Single page: Obico configuration, server pool and read-only provider runtime |
 | Costs & Energy / `costs` | Single CostTracking editor: farm rates, energy fallbacks and material prices |

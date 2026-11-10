@@ -51,6 +51,16 @@ export const SETTINGS_SCOPES: SettingsScope[] = [
 /** Settings categories with their sub-pages */
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   {
+    id: 'identity',
+    scopeId: 'system',
+    label: 'Farm Identity',
+    description: 'Farm name and timezone for the farm-local clock.',
+    keywords: ['farm', 'identity', 'name', 'timezone', 'clock'],
+    subPages: [
+      { id: 'details', label: 'Farm Identity', description: 'Customize the farm name and farm-local clock timezone without changing schedules.', keywords: ['farm', 'name', 'timezone', 'identity', 'clock'] },
+    ],
+  },
+  {
     id: 'profile',
     scopeId: 'user',
     label: 'Profile',

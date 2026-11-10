@@ -8,6 +8,7 @@ export interface SettingsSectionLocation {
 
 // Persisted section keys and metadata groups stay unchanged. These are UI homes.
 export const SETTINGS_GROUP_TO_LOCATION: Record<string, SettingsSectionLocation> = {
+  FarmIdentity: { scopeId: 'system', categoryId: 'identity', subPageId: 'details' },
   System: { scopeId: 'system', categoryId: 'system' },
   Networking: { scopeId: 'system', categoryId: 'system' },
   Catalog: { scopeId: 'system', categoryId: 'system' },

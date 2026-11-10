@@ -142,6 +142,14 @@ const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
 };
 
 const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
+  'identity.details': (
+    <SettingsSection>
+      <SettingsPage
+        pageKey="identity.details"
+        introText="Customize your farm name and the timezone used by the farm-local clock. Existing schedules, stored timestamps, and UTC planning hours are unchanged."
+      />
+    </SettingsSection>
+  ),
   'integrations.connections': <IntegrationConnectionsPanel />,
   'integrations.webhooks': (
     <SettingsSection>

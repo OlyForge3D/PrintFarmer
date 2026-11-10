@@ -11,6 +11,7 @@ const baseSeeds: Record<string, unknown> = {
   '/api/setup/status': { needsSetup: false },
   '/api/auth/me': toolbarRouteUser,
   '/api/settings/SignalR': { logLevel: 'Error', consoleLoggingEnabled: false },
+  '/api/settings/FarmIdentity': { farmName: 'PrintFarmer', timeZone: 'UTC' },
   '/api/settings/Slicer': { enabled: true },
   '/api/workers/': [],
   '/api/notifications': [],

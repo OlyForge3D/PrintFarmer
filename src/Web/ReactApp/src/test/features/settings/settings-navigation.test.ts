@@ -26,9 +26,10 @@ import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
 
 describe('getSettingsCategoryDestinations', () => {
-  it('uses the approved system categories and never adds personal settings', () => {
+  it('includes Farm Identity with system categories and never adds personal settings', () => {
     const cards = getSettingsCategoryDestinations({ hasRole: () => true, hasPermission: () => true });
     expect(cards.map(card => card.label)).toEqual([
+      'Farm Identity',
       'System',
       'Failure Detection',
       'Costs & Energy',
@@ -42,11 +43,12 @@ describe('getSettingsCategoryDestinations', () => {
       'Data',
     ]);
     expect(cards.every(card => card.icon && card.description)).toBe(true);
-    expect(new Set(cards.map(card => card.path)).size).toBe(11);
+    expect(new Set(cards.map(card => card.path)).size).toBe(12);
   });
 
   it.each([
     ['system_settings', [
+      'identity.details',
       'system.',
       'failure-detection.',
       'costs.',
@@ -384,6 +386,7 @@ describe('buildSettingCommandItems', () => {
 describe('settings section locations', () => {
   it('maps persisted setting groups to the approved settings homes', () => {
     expect(SETTINGS_GROUP_TO_LOCATION).toEqual({
+      FarmIdentity: { scopeId: 'system', categoryId: 'identity', subPageId: 'details' },
       System: { scopeId: 'system', categoryId: 'system' },
       Networking: { scopeId: 'system', categoryId: 'system' },
       Catalog: { scopeId: 'system', categoryId: 'system' },
@@ -413,6 +416,7 @@ describe('settings section locations', () => {
       PrintStatisticsSync: { scopeId: 'system', categoryId: 'maintenance', subPageId: 'settings' },
     });
     expect(getSettingsSectionPage('SlicerSettings', 'Operations')).toBe('slicing.defaults');
+    expect(getSettingsSectionPage('FarmIdentity', 'FarmIdentity')).toBe('identity.details');
     expect(getSettingsSectionPage('MaintenanceAlerts', 'Maintenance')).toBe('maintenance.settings');
   });
 
