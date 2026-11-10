@@ -81,6 +81,16 @@ const ESSENTIAL_SETTINGS_MAP: Readonly<Record<string, ReadonlySet<string>>> = {
 
   // Slicer — which UI mode users see and which modes are available.
   SlicerSettings: new Set(['slicerMode', 'enabledModes']),
+  QueuePlanning: new Set(['workdayStartHourUtc', 'workdayEndHourUtc']),
+  ShiftPlan: new Set(['maintenanceLeadMinutes']),
+  SpoolCoverage: new Set(['runoutWarningLeadMinutes', 'queuedShortageWarningsEnabled']),
+  HistorySeeding: new Set(['enabled']),
+  PrintStatisticsSync: new Set(['enabled']),
+  OperatorFeatures: new Set([
+    'attentionEnabled', 'nativePushEnabled', 'filamentCoverageEnabled',
+    'guidedSwapEnabled', 'multiSlotFallbackEnabled', 'shiftPlanEnabled',
+    'printedPartsInventoryEnabled', 'offlineWriteReplayEnabled',
+  ]),
 };
 
 export function isEssentialProperty(sectionKey: string, propertyName: string): boolean {

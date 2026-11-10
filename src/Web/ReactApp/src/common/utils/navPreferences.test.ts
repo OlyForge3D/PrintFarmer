@@ -92,15 +92,27 @@ describe('navPreferences', () => {
     expect(reset.orderedItemIds.slice(0, 3)).toEqual(['overview', 'print-queue', 'printers']);
   });
 
-  it('preserves explicit admin pins while normalizing regular navbar preferences', () => {
+  it('migrates regrouped admin pins, deduplicates them, and preserves unrelated pins', () => {
     const resolved = resolveNavPreferences(items, 'admin', {
       orderedItemIds: ['overview'],
       hiddenItemIds: [],
       pinnedItemIds: [],
-      adminPinnedItemIds: ['ops-analytics', 'ops-analytics', 'retired-destination'],
+      adminPinnedItemIds: [
+        'gen-system',
+        'gen-farm',
+        'hw-nfc-bindings',
+        'ops-analytics',
+        'auto-costs',
+        'hw-nfc',
+        'ops-analytics',
+        'retired-destination',
+      ],
     });
 
     expect(resolved.preferences.adminPinnedItemIds).toEqual([
+      'gen-system',
+      'auto-costs',
+      'hw-nfc',
       'ops-analytics',
       'retired-destination',
     ]);

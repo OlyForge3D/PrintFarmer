@@ -7,7 +7,6 @@ import {
   FolderOpenIcon,
   GearIcon,
   HomeIcon,
-  KeyIcon,
   LayersIcon,
   LayersTripleOutlineIcon,
   LocationIcon,
@@ -52,6 +51,11 @@ export type AdminDestinationGroup =
   | 'integrations'
   | 'general'
   | 'automation'
+  | 'system'
+  | 'failure-detection'
+  | 'costs'
+  | 'planning'
+  | 'operator-features'
   | 'quotas';
 
 export interface AdminDestinationPermission {
@@ -258,10 +262,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/maintenance',
     icon: WrenchIcon,
     group: 'operations',
-    // MaintenanceController is class-level `[RequirePermission("maintenance", "admin")]`
-    // for every endpoint, including reads.
+    // The page isolates system-settings delegates from maintenance operational reads.
     requiredRole: null,
-    requiredPermission: { resource: 'maintenance', action: 'admin' },
+    requiredPermissionAnyOf: [{ resource: 'maintenance', action: 'admin' }, { resource: 'system_settings', action: 'admin' }],
     keywords: ['maintenance', 'schedule', 'task', 'reminder', 'service'],
     isHubTile: true,
   },
@@ -435,39 +438,25 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     id: 'hw-nfc',
     kind: 'configuration',
     settingsGroup: 'hardware',
-    label: 'NFC Devices',
-    description: 'Register and manage NFC readers and hardware.',
+    label: 'NFC',
+    description: 'Manage NFC readers and spool-tag bindings.',
     path: '/admin/settings?tab=hardware&sub=nfc',
     icon: NfcIcon,
     group: 'hardware',
     // Backed by NfcDevicesController, `[RequirePermission("nfc_devices", "admin")]`.
     requiredRole: null,
     requiredPermission: { resource: 'nfc_devices', action: 'admin' },
-    keywords: ['nfc', 'reader', 'rfid', 'device'],
-  },
-  {
-    id: 'hw-nfc-bindings',
-    kind: 'configuration',
-    settingsGroup: 'hardware',
-    label: 'NFC Bindings',
-    description: 'Map NFC tags to printers, spools, and actions.',
-    path: '/admin/settings?tab=hardware&sub=nfc-bindings',
-    icon: NfcIcon,
-    group: 'hardware',
-    // Same NFC hardware surface as `hw-nfc`; gated on the same resource for consistency.
-    requiredRole: null,
-    requiredPermission: { resource: 'nfc_devices', action: 'admin' },
-    keywords: ['nfc', 'binding', 'bind', 'tag', 'assignment'],
+    keywords: ['nfc', 'reader', 'rfid', 'device', 'binding', 'spool', 'tray'],
   },
   {
     id: 'hw-custom-fields',
     kind: 'configuration',
-    settingsGroup: 'hardware',
+    settingsGroup: 'organization',
     label: 'Custom Fields',
-    description: 'Extend hardware records with custom metadata.',
-    path: '/admin/settings?tab=hardware&sub=custom-fields',
+    description: 'Extend printer and user records with custom metadata.',
+    path: '/admin/settings?tab=data&sub=custom-fields',
     icon: LayersTripleOutlineIcon,
-    group: 'hardware',
+    group: 'data',
     // Backed by CustomFieldsController, `[RequirePermission("custom_fields", "admin")]`.
     requiredRole: null,
     requiredPermission: { resource: 'custom_fields', action: 'admin' },
@@ -584,30 +573,30 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
 
   // ── General ───────────────────────────────────────────────────────────
   {
-    id: 'gen-farm',
+    id: 'failure-detection',
     kind: 'configuration',
-    settingsGroup: 'farm',
-    label: 'Farm Defaults',
-    description: 'Farm identity, timezone, and appearance defaults.',
-    path: '/admin/settings?tab=general&sub=farm',
+    settingsGroup: 'automation',
+    label: 'Failure Detection',
+    description: 'Obico configuration, server pool, and PrintGuard runtime status.',
+    path: '/admin/settings?tab=failure-detection',
     icon: GearIcon,
-    group: 'general',
+    group: 'failure-detection',
     // Rendered from the generic settings-class editor backed by
     // UnifiedSettingsController, `[RequirePermission("system_settings", "admin")]`.
     requiredRole: null,
     requiredPermission: { resource: 'system_settings', action: 'admin' },
-    keywords: ['farm', 'name', 'identity', 'timezone', 'appearance', 'branding'],
+    keywords: ['failure', 'detection', 'obico', 'printguard', 'monitoring'],
     isHubTile: true,
   },
   {
     id: 'gen-system',
     kind: 'configuration',
     settingsGroup: 'system',
-    label: 'System Config',
+    label: 'System',
     description: 'Database, logging, network discovery, and file parameters.',
-    path: '/admin/settings?tab=general&sub=system',
+    path: '/admin/settings?tab=system',
     icon: ServerIcon,
-    group: 'general',
+    group: 'system',
     // Same generic settings-class editor as `gen-farm`.
     requiredRole: null,
     requiredPermission: { resource: 'system_settings', action: 'admin' },
@@ -619,16 +608,55 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     id: 'auto-costs',
     kind: 'configuration',
     settingsGroup: 'automation',
-    label: 'Automation & Costs',
-    description: 'Cost tracking, failure detection, and auto-tag rules.',
-    path: '/admin/settings?tab=general&sub=automation',
-    icon: KeyIcon,
-    group: 'automation',
+    label: 'Costs & Energy',
+    description: 'Farm electricity tariff, machine rates, and material cost defaults.',
+    path: '/admin/settings?tab=costs',
+    icon: TrendingUpIcon,
+    group: 'costs',
     // Same generic settings-class editor as `gen-farm`/`gen-system`.
     requiredRole: null,
     requiredPermission: { resource: 'system_settings', action: 'admin' },
-    keywords: ['automation', 'cost', 'tracking', 'failure', 'obico', 'auto-tag', 'rule'],
+    keywords: ['cost', 'energy', 'electricity', 'tariff', 'wattage', 'material', 'price'],
     isHubTile: true,
+  },
+  {
+    id: 'planning',
+    kind: 'configuration',
+    settingsGroup: 'automation',
+    label: 'Planning',
+    description: 'Queue work windows, shifts, filament coverage, and history seeding.',
+    path: '/admin/settings?tab=planning',
+    icon: LayersIcon,
+    group: 'planning',
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
+    keywords: ['planning', 'queue', 'shift', 'spool', 'coverage', 'history'],
+  },
+  {
+    id: 'operator-features',
+    kind: 'configuration',
+    settingsGroup: 'farm',
+    label: 'Operator Features',
+    description: 'Farm-wide availability of operator workflows.',
+    path: '/admin/settings?tab=operator-features',
+    icon: GearIcon,
+    group: 'operator-features',
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
+    keywords: ['operator', 'feature', 'availability', 'attention', 'capability'],
+  },
+  {
+    id: 'data-auto-tagging',
+    kind: 'configuration',
+    settingsGroup: 'organization',
+    label: 'Auto-Tagging',
+    description: 'Automatic tag rules for farm records.',
+    path: '/admin/settings?tab=data&sub=auto-tagging',
+    icon: TagIcon,
+    group: 'data',
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
+    keywords: ['tag', 'auto-tag', 'rule', 'material'],
   },
 
   // ── Quotas ────────────────────────────────────────────────────────────
@@ -670,6 +698,11 @@ export const ADMIN_DESTINATION_GROUPS: readonly {
   { id: 'integrations', label: 'Integrations', description: 'External services and webhooks.' },
   { id: 'general', label: 'General', description: 'Farm identity and system configuration.' },
   { id: 'automation', label: 'Automation', description: 'Cost tracking and automated rules.' },
+  { id: 'system', label: 'System', description: 'Infrastructure and printer connectivity.' },
+  { id: 'failure-detection', label: 'Failure Detection', description: 'Detection providers and runtime.' },
+  { id: 'costs', label: 'Costs & Energy', description: 'Farm costing defaults.' },
+  { id: 'planning', label: 'Planning', description: 'Queue and production planning.' },
+  { id: 'operator-features', label: 'Operator Features', description: 'Workflow availability.' },
   { id: 'quotas', label: 'Quotas', description: 'Usage limits and policies.' },
 ];
 

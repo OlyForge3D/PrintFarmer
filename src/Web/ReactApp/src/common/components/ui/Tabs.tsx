@@ -62,8 +62,23 @@ export interface TabListProps {
 }
 
 const TabList: React.FC<TabListProps> = ({ children, className, 'aria-label': ariaLabel }) => {
+  const { activeTab } = useTabsContext();
+  const listRef = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !selected) return;
+    const bounds = list.getBoundingClientRect();
+    const tabBounds = selected.getBoundingClientRect();
+    if (tabBounds.left < bounds.left) {
+      list.scrollLeft += Math.floor(tabBounds.left - bounds.left);
+    } else if (tabBounds.right > bounds.right) {
+      list.scrollLeft += Math.ceil(tabBounds.right - bounds.right);
+    }
+  }, [activeTab]);
   return (
     <div
+      ref={listRef}
       className={clsx('flex items-center gap-2 bg-pf-bg-1 px-2 pt-2 pb-0', className)}
       role="tablist"
       aria-orientation="horizontal"
@@ -76,6 +91,7 @@ const TabList: React.FC<TabListProps> = ({ children, className, 'aria-label': ar
 
 export interface TabProps {
   id: string;
+  'aria-label'?: string;
   children: React.ReactNode;
   disabled?: boolean;
   icon?: React.ReactNode;
@@ -86,6 +102,7 @@ export interface TabProps {
 
 const Tab: React.FC<TabProps> = ({
   id,
+  'aria-label': ariaLabel,
   children,
   disabled = false,
   icon,
@@ -139,6 +156,7 @@ const Tab: React.FC<TabProps> = ({
       ref={btnRef}
       type="button"
       role="tab"
+      aria-label={ariaLabel}
       id={`tab-${id}`}
       data-tab-id={id}
       aria-selected={isActive}

@@ -111,7 +111,7 @@ for (const state of toolbarAdminStates) {
         await expect(page.getByRole('button', { name: 'Fixture CoreXY', exact: true })).toBeVisible();
         // Do not advance to the import/physical-operation workflow.
       }
-      if (state.path === '/settings' || state.name === 'admin-farm-settings') {
+      if (state.path === '/settings' || state.name === 'admin-system-settings') {
         await expect(page.getByRole('group', { name: 'Settings actions', exact: true })).toBeVisible();
       }
       if (state.name === 'scheduling' || state.name === 'admin-power-monitors') {

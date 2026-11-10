@@ -19,15 +19,15 @@ const worker = {
 export const toolbarAdminSeeds: Record<string, unknown> = {
   '/api/printers': [printer],
   '/api/settings/metadata': [{
-    key: 'General', className: 'GeneralSettings', displayName: 'Farm identity',
-    description: 'Farm identity and defaults.', group: 'General', order: 1,
+    key: 'SystemLog', className: 'SystemLogSettings', displayName: 'System logging',
+    description: 'System log configuration.', group: 'System', order: 1,
     properties: [{
-      name: 'farmName', type: 'String', attributes: [],
-      display: { name: 'Farm name', inputType: 'Text' },
+      name: 'enabled', type: 'Boolean', attributes: [],
+      display: { name: 'Enable system logging', inputType: 'Checkbox' },
     }],
   }],
-  '/api/settings/groups': [{ key: 'General', displayName: 'General', order: 1 }],
-  '/api/settings': { General: { farmName: 'Fixture farm' } },
+  '/api/settings/groups': [{ key: 'System', displayName: 'System', order: 1 }],
+  '/api/settings': { SystemLog: { enabled: true } },
   '/api/settings/farm': {
     electricityRatePerKwh: 0.15, defaultMachineHourlyRate: 1,
     averagePrinterWattage: 150, canWrite: true, rowVersion: 'fixture',
@@ -162,7 +162,7 @@ export const toolbarAdminStates = [
   { name: 'settings-notifications', path: '/settings', tab: 'Notifications', ready: 'Event × Channel Matrix', filtersDisclosureCount: 0 },
   { name: 'settings-passkeys', path: '/settings', tab: 'Passkeys', ready: 'Fixture security key', filtersDisclosureCount: 0 },
   { name: 'admin-hub', path: '/admin', ready: 'Database', filtersDisclosureCount: 0 },
-  { name: 'admin-farm-settings', path: '/admin/settings', ready: 'Electricity', filtersDisclosureCount: 0 },
+  { name: 'admin-system-settings', path: '/admin/settings', ready: 'Enable system logging', filtersDisclosureCount: 0 },
   { name: 'admin-status', path: '/admin/status', ready: 'fixture-host', filtersDisclosureCount: 0 },
   { name: 'admin-workers', path: '/admin/workers', ready: 'Fixture worker', filtersDisclosureCount: 1 },
   { name: 'admin-worker-jobs', path: '/admin/workers?workerTab=jobs', ready: 'New Slice Job', filtersDisclosureCount: 0 },
