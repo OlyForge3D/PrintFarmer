@@ -28,9 +28,16 @@ public class AdminOverviewServiceTests
 {
     private readonly Mock<HealthCheckService> _healthCheckService = new();
     private readonly List<IPrinterConnectionHealthProvider> _connectionHealthProviders = new();
+    private readonly List<PrinterMonitoringSnapshot> _monitoringSnapshots = [];
 
     private AdminOverviewService CreateService()
-        => new(_healthCheckService.Object, _connectionHealthProviders, NullLogger<AdminOverviewService>.Instance);
+    {
+        Mock<IPrinterMonitoringReader> monitoring = new();
+        monitoring.Setup(reader => reader.GetSnapshotsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_monitoringSnapshots);
+        return new(_healthCheckService.Object, _connectionHealthProviders,
+            NullLogger<AdminOverviewService>.Instance, monitoring.Object);
+    }
 
     private void SetPrinterConnectivity(params PrinterConnectionHealth[] printers)
     {
@@ -38,9 +45,84 @@ public class AdminOverviewServiceTests
         _ = provider.Setup(p => p.GetConnectionHealth())
             .Returns(printers.ToDictionary(p => p.PrinterId));
         _connectionHealthProviders.Add(provider.Object);
+        _monitoringSnapshots.AddRange(printers.Select(health => new PrinterMonitoringSnapshot(
+            new Printer { Id = health.PrinterId, Name = health.PrinterName, Backend = (int)health.Backend },
+            new PrinterStatusCacheSnapshot(new PrinterStatusDto(health.PrinterId,
+                health.ConnectionState == PrinterConnectionState.Connected, health.ConnectionState.ToString()), DateTime.UtcNow),
+            false)));
     }
 
     // ─── Happy path ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExpectedOffline_ExcludedFromHealthDenominatorAndWarnings()
+    {
+        SetPrinterConnectivity(ConnectedPrinter("online"), new PrinterConnectionHealth
+        {
+            PrinterId = Guid.NewGuid(),
+            PrinterName = "Shutdown",
+            Backend = PrinterBackend.Moonraker,
+            ConnectionState = PrinterConnectionState.Offline,
+        });
+        _monitoringSnapshots[1].Printer.ExpectedOfflineSinceUtc = DateTime.UtcNow.AddMinutes(-1);
+        SetHealthyReport();
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("1 / 1 reachable; 1 expected offline");
+        result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().Be(SubsystemStatus.Healthy);
+        result.Attention.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AllExpectedOffline_IsNeutralWithoutInventingReachablePrinters()
+    {
+        _monitoringSnapshots.Add(new(new Printer { Name = "Shutdown", ExpectedOfflineSinceUtc = DateTime.UtcNow }, null, false));
+        SetHealthyReport();
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("No printers expected online; 1 expected offline");
+        result.Attention.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task NoStatusWithoutAcknowledgement_IsUnknownNotAllClear()
+    {
+        _monitoringSnapshots.Add(new(new Printer { Name = "Unknown" }, null, false));
+        SetHealthyReport();
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().Be(SubsystemStatus.Unknown);
+        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Contain("1 status unknown");
+        result.Attention.Should().ContainSingle(item => item.Title.Contains("status is unknown"));
+    }
+
+    [Fact]
+    public async Task ExpectedOffline_DoesNotHideActiveWorkOrProviderFailures()
+    {
+        Printer printer = new() { Name = "Active", ExpectedOfflineSinceUtc = DateTime.UtcNow.AddMinutes(-1) };
+        _monitoringSnapshots.Add(new(printer,
+            new(new PrinterStatusDto(printer.Id, false, "Offline"), DateTime.UtcNow), true));
+        Mock<IPrinterConnectionHealthProvider> broken = new();
+        broken.Setup(value => value.GetConnectionHealth()).Throws(new InvalidOperationException("Provider unavailable"));
+        _connectionHealthProviders.Add(broken.Object);
+        SetHealthyReport();
+
+        AdminOverviewDto result = await CreateService().GetOverviewAsync();
+
+        result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().NotBe(SubsystemStatus.Healthy);
+        result.Attention.Should().Contain(item => item.Key == $"printer-{printer.Id}-unreachable");
+        result.Attention.Should().Contain(item => item.Key == "backends-degraded");
+    }
+
+    private void SetHealthyReport() => _healthCheckService.Setup(service => service.CheckHealthAsync(
+        It.IsAny<Func<HealthCheckRegistration, bool>?>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(BuildReport(
+            comprehensive: HealthCheckResult.Healthy("Ready", BuildComprehensiveData()),
+            signalr: HealthCheckResult.Healthy("Ready"),
+            spoolman: HealthCheckResult.Healthy("Spoolman not configured")));
 
     [Theory]
     [InlineData(false, HealthStatus.Healthy)]
@@ -280,7 +362,7 @@ public class AdminOverviewServiceTests
         // /printers has no ADMIN_DESTINATIONS registry entry (it's a top-level operational page),
         // so this attention item routes via ActionRoute directly rather than a destination id.
         printerItem.ActionDestinationId.Should().BeNull();
-        printerItem.ActionRoute.Should().Be("/printers");
+        printerItem.ActionRoute.Should().Be($"/printers/{offlinePrinterId}");
     }
 
     [Fact]

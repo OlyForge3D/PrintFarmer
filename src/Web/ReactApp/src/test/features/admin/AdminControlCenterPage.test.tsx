@@ -201,7 +201,7 @@ describe('AdminControlCenterPage', () => {
     });
 
     const headings = screen.getAllByRole('heading');
-    expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
+    expect(headings.findIndex((heading) => heading.textContent === 'Operational issues')).toBeLessThan(
       headings.findIndex((heading) => heading.textContent === 'System health checks'),
     );
     expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
@@ -439,7 +439,8 @@ describe('AdminControlCenterPage', () => {
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(within(row).getByText("Printer 'printer-02' is unreachable")).toBeInTheDocument();
     // Text label paired with icon/colour.
-    expect(within(row).getByText('Warning')).toBeInTheDocument();
+    expect(screen.getByText('1 Warning')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByText('Unexpected offline printers'));
 
     const actionLink = within(row).getByRole('link', { name: /Open Printers/i });
     expect(actionLink).toHaveAttribute('href', '/printers');
@@ -689,7 +690,7 @@ describe('AdminControlCenterPage', () => {
 
     const row = screen.getByTestId('admin-hub-attention-item');
     expect(row.getAttribute('data-attention-severity')).toBe('CosmicRay');
-    expect(within(row).getByText('CosmicRay')).toBeInTheDocument();
+    expect(screen.getByText('1 CosmicRay')).toBeInTheDocument();
     expect(within(row).getByText('A brand-new severity')).toBeInTheDocument();
   });
 

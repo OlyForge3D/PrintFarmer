@@ -275,9 +275,8 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  * `/admin` Control Center hub.
  *
  * Three bands, always in this order:
- * 1. **Needs attention** — server-ranked items, bounded to a preview with an
- *    explicit "Show all N" disclosure so a busy farm cannot bury the rest of
- *    the hub (#2517). See `AdminAttentionPanel`.
+ * 1. **Operational issues** — server-ranked, grouped type/severity disclosures
+ *    with visible totals and expanded critical errors. See `AdminAttentionPanel`.
  * 2. **System health checks** — compact, truthful subsystem status from the
  *    admin overview. Deliberately *not* the same domain as the header's System
  *    pill, which reports service health from `/api/system/info`; both bands say
@@ -616,7 +615,7 @@ export function AdminControlCenterPage() {
         {/* ── Band 1: attention ── */}
         {canViewOverview && (
           <AdminSection
-            caption="Needs attention"
+            caption="Operational issues"
             captionId="admin-hub-attention-heading"
             count={isHardError ? undefined : data?.attention.length}
           >
@@ -639,29 +638,28 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {!isLoading && !isHardError && data && data.attention.length === 0 && (
-              <p
-                className="flex items-center gap-2 text-sm text-pf-text-secondary"
-                data-testid="admin-hub-attention-clear"
-              >
-                {isAllClear ? (
-                  <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
-                ) : (
-                  <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" ariaLabel="" />
-                )}
-                {isAllClear
-                  ? 'Nothing needs your attention — every subsystem health check is reporting healthy.'
-                  : isStale
-                    ? 'The last successful check reported no attention items, but that refresh failed — this may be out of date.'
-                    : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
-              </p>
-            )}
-
-            {!isLoading && !isHardError && data && data.attention.length > 0 && (
+            {!isLoading && !isHardError && data && (
               <AdminAttentionPanel
                 items={data.attention}
                 access={{ hasRole, hasPermission }}
                 labelledBy="admin-hub-attention-heading"
+                emptyState={
+                  <p
+                    className="flex items-center gap-2 text-sm text-pf-text-secondary"
+                    data-testid="admin-hub-attention-clear"
+                  >
+                    {isAllClear ? (
+                      <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
+                    ) : (
+                      <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" ariaLabel="" />
+                    )}
+                    {isAllClear
+                      ? 'Nothing needs your attention — every subsystem health check is reporting healthy.'
+                      : isStale
+                        ? 'The last successful check reported no attention items, but that refresh failed — this may be out of date.'
+                        : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
+                  </p>
+                }
               />
             )}
           </AdminSection>
