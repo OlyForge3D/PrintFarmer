@@ -68,6 +68,41 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testUnknownBarcodeSaveMappingFailureKeepsPendingAndNeverImports() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentToResolve = nil
+        service.saveMappingError = NetworkError.serverError(400)
+
+        await viewModel.handleScannedBarcode("850078714923")
+        let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "850078714923")
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(service.importCalls.isEmpty, "a spool must not be created when the barcode mapping was not persisted")
+        XCTAssertTrue(viewModel.importedThisSession.isEmpty)
+    }
+
+    @MainActor
+    func testSkippingUnknownBarcodeCancelsWithoutPersistingOrCreatingSpool() async {
+        let (viewModel, service) = makeSubject()
+        service.filamentToResolve = nil
+        service.filamentToSave = makeFilament(id: 8)
+
+        await viewModel.handleScannedBarcode("850078714923")
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "850078714923")
+        viewModel.skipUnknownBarcode()
+
+        XCTAssertNil(viewModel.pendingUnknownBarcode)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
+        XCTAssertTrue(service.importCalls.isEmpty)
+        let importedAfterCancel = await viewModel.importUnknownBarcode(filamentId: 8)
+        XCTAssertFalse(importedAfterCancel, "a cancelled barcode must not be importable afterwards")
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
+    }
+
+    @MainActor
     func testScanNextScannerErrorDoesNotWedgeScanningState() async throws {
         let service = MockBarcodeIntakeService()
         let scanner = MockScannerService()

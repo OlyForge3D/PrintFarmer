@@ -51,16 +51,11 @@ describe('settings card internal layout (#1026)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the Obico extension sizes its two panels by their own width', () => {
-    // 28rem is deliberately high enough that the two panels always stack.
-    // Lowering it to 26rem would let them split at a 1440px viewport (860px
-    // container) but not at 1280 (700px), 1920 (645px) or 2560 (627px) — the
-    // container narrows as the viewport grows, so the panels would pop apart
-    // and back together as the window widens. A stable single column is the
-    // legible answer; that non-monotonic split is not.
-    expect(read(CARD_INTERNAL_FILES[0])).toContain(
-      'grid-cols-[repeat(auto-fit,minmax(min(28rem,100%),1fr))]'
-    );
+  it('keeps failure detection runtime and server management stacked outside metadata cards', () => {
+    const shell = read('features/settings/pages/SettingsShell.tsx');
+    expect(shell).toMatch(/<div className="space-y-6">[\s\S]*?<FailureDetectionStatusCard \/>[\s\S]*?<ObicoServersSection \/>/);
+    expect(read(CARD_INTERNAL_FILES[0])).not.toContain('ObicoServersSection');
+    expect(read(CARD_INTERNAL_FILES[0])).not.toContain('FailureDetectionStatusCard');
   });
 
   it('metric tiles reserve the widest label word', () => {

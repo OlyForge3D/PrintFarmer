@@ -38,6 +38,12 @@ vi.mock('@/features/settings/queries/useSettingsMetadata', () => ({
       className: 'SystemLogSettings',
       group: 'System',
       properties: [{ name: 'Enabled', type: 'boolean', display: { name: 'Enable System Logging' } }],
+    }, {
+      key: 'MaintenanceAlerts', className: 'MaintenanceAlertSettings', group: 'Maintenance',
+      properties: [{ name: 'enabled', type: 'boolean', display: { name: 'Enable maintenance alerts' } }],
+    }, {
+      key: 'PrintStatisticsSync', className: 'PrintStatisticsSyncSettings', group: 'Maintenance',
+      properties: [{ name: 'enabled', type: 'boolean', display: { name: 'Enable statistics synchronization' } }],
     }],
     isLoading: false,
     isError: false,
@@ -67,6 +73,7 @@ describe('useSettingsSearchIndex', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.destinationItems.some((item) => item.label === 'Login Audit')).toBe(true);
+    expect(result.current.destinationItems.some((item) => item.label === 'Maintenance')).toBe(true);
     expect(result.current.settingsNavItems.every((item) => item.scopeId === 'user')).toBe(true);
     expect(result.current.settingFieldItems.some((item) => item.id === 'setting.SystemLog.Enabled')).toBe(true);
     expect(result.current.items.length).toBe(
@@ -102,6 +109,12 @@ describe('useSettingsSearchIndex', () => {
 
     expect(result.current.settingFieldItems.some((item) => item.id === 'setting.SystemLog.Enabled')).toBe(true);
     expect(result.current.destinationItems.some((item) => item.label === 'Login Audit')).toBe(true);
+    for (const section of ['MaintenanceAlerts', 'PrintStatisticsSync']) {
+      const field = result.current.settingFieldItems.find((item) => item.id === `setting.${section}.enabled`);
+      expect(field).toBeDefined();
+      expect(field?.href).toBe(`/maintenance?tab=settings&field=${section}.enabled`);
+      expect(result.current.items).toContain(field);
+    }
   });
 
   it('collapses permission-gated lists to empty immediately on logout — no stale unauthorized names flash', async () => {
@@ -121,6 +134,15 @@ describe('useSettingsSearchIndex', () => {
     expect(result.current.settingsNavItems.length).toBeGreaterThan(0);
     expect(result.current.isLoading).toBe(false);
     expect(result.current.isError).toBe(false);
+  });
+
+  it('does not expose Failure Detection to an Obico-only delegate', () => {
+    authState.user = { id: '4', email: 'obico-delegate@test.com', isActive: true, roles: ['farm_user'] };
+    authState.roles = ['farm_user'];
+    authState.grant = 'obico:manage';
+    const { result } = renderHook(() => useSettingsSearchIndex({ enabled: true }), { wrapper });
+    expect(result.current.destinationItems.some((item) => item.label === 'Failure Detection')).toBe(false);
+    expect(result.current.settingFieldItems).toEqual([]);
   });
 
   it('does not report loading when enabled is false, even for an authenticated farm_admin', async () => {

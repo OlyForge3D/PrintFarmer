@@ -27,7 +27,6 @@ import {
   ADMIN_DESTINATIONS,
   getDestinationById,
   getStandaloneConfigurationDestinations,
-  hasAccessibleDestinationWithPrefix,
   resolveDestinationPath,
   type AdminDestination,
 } from '@/features/admin/registry';
@@ -36,6 +35,7 @@ import { getNavMoveFocusTarget } from '@/common/utils/navPreferences';
 import { AdminAttentionPanel } from '@/features/admin/components/AdminAttentionPanel';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
 import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
+import { getSettingsCategoryDestinations } from '@/features/settings/settings-navigation';
 import {
   isKnownSubsystemStatus,
   type KnownSubsystemStatus,
@@ -215,7 +215,7 @@ function getDashboardDestinations(
 ): {
   operational: AdminDestination[];
   configuration: AdminDestination[];
-  settings: boolean;
+  settings: AdminDestination[];
 } {
   const operational = OPERATIONAL_DESTINATION_IDS
     .map((id) => getDestinationById(id))
@@ -231,14 +231,7 @@ function getDashboardDestinations(
   // through the admin surface — on a dead-end hub (#2508, Hicks review).
   const configuration = getStandaloneConfigurationDestinations(access);
 
-  // Gate on actual reachability of the settings shell itself (not merely
-  // holding *some* configuration-kind permission) — several configuration
-  // destinations (data-catalog, hw-locations, hw-power-monitors) live outside
-  // /admin/settings, so a user whose only configuration grant unlocks one of
-  // those would otherwise see a "Farm & Admin Settings" card that leads
-  // nowhere (Bishop review, #2508). Those destinations are surfaced directly
-  // via `configuration` above instead.
-  const settings = hasAccessibleDestinationWithPrefix(access, '/admin/settings');
+  const settings = getSettingsCategoryDestinations(access);
 
   return { operational, configuration, settings };
 }
@@ -433,7 +426,7 @@ export function AdminControlCenterPage() {
   const hasAnyDestination =
     dashboardDestinations.operational.length > 0 ||
     dashboardDestinations.configuration.length > 0 ||
-    dashboardDestinations.settings;
+    dashboardDestinations.settings.length > 0;
 
   const refreshButton = (
     <HeaderActions className="justify-end mb-0">
@@ -781,19 +774,16 @@ export function AdminControlCenterPage() {
           </AdminSection>
         )}
 
-        {dashboardDestinations.settings && (
-          <AdminSection caption="Farm & Admin Settings" captionId="admin-hub-settings-heading">
-            <DestinationCard
-              destination={{
-                id: 'admin-settings',
-                kind: 'configuration',
-                label: 'Farm & Admin Settings',
-                description: 'Configure farm-wide behavior, access, and integrations.',
-                path: '/admin/settings?scope=system',
-                icon: HomeIcon,
-                group: 'general',
-              }}
-            />
+        {dashboardDestinations.settings.length > 0 && (
+          <AdminSection caption="Farm & Admin Settings" captionId="admin-hub-settings-heading" gap="loose">
+            <div
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+              data-testid="admin-hub-settings"
+            >
+              {dashboardDestinations.settings.map((destination) => (
+                <DestinationCard key={destination.id} destination={destination} />
+              ))}
+            </div>
           </AdminSection>
         )}
       </div>

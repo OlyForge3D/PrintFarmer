@@ -13,6 +13,32 @@ PrintFarmer's settings and admin UI is a two-layer system:
 This document is the source of truth for how the two layers connect, how new settings
 show up in the UI without any React changes, and where the sharp edges are.
 
+## Farm Identity
+
+Open **Admin Control Center > Farm Identity**
+(`/admin/settings?tab=identity&sub=details`) to edit the farm name and IANA
+timezone. Both fields are Essential settings in the `FarmIdentity` section;
+writes require `system_settings:admin`. Authenticated users can read this section
+through `GET /api/settings/FarmIdentity`; saves use the existing revision-checked
+`POST /api/settings/FarmIdentity` contract.
+
+The name appears in desktop/mobile web headers and the mobile navigation drawer
+(not the browser title or native iOS app). The header's **Farm time** clock uses
+the configured zone, labels its IANA ID and current UTC offset, and follows DST
+using the browser's timezone database. Saves refresh the current browser's
+identity; other browsers refresh within a minute while active.
+Narrow headers show a compact 24-hour time and offset; the IANA ID remains in
+the accessible label and tooltip. An unsupported browser timezone database
+shows an explicit clock error without hiding the farm name.
+
+Defaults are `farmName: "PrintFarmer"` and `timeZone: "UTC"`, including upgrades
+without a stored section. Names must contain 1-80 characters, cannot be blank,
+and cannot contain control characters. Timezones must be valid IANA IDs, not
+Windows names. Existing schedules retain their explicit timezones, new schedule
+creation keeps its existing behavior, planning workday hours remain UTC, and
+stored UTC instants are never converted or migrated. No database schema changes
+are required.
+
 ## Personal Profile settings
 
 `/settings?scope=user&tab=profile&sub=preferences` remains the canonical
@@ -46,7 +72,7 @@ The settings routes share one engine with route-locked scopes:
 | Route | Scope | Access | Rendered by |
 |---|---|---|---|
 | `/settings` | `user` | Authenticated | SettingsShell, personal content only |
-| `/admin/settings` | `system` | Per-destination grants | SettingsShell, Farm & Admin Settings |
+| `/admin/settings` | `system` | Per-destination grants | SettingsShell, focused settings category |
 | `/admin` | None | Authenticated, destinations filtered | AdminControlCenterPage |
 | `/admin/status` | None | `system_settings:admin` | SystemStatusPage |
 | `/admin/workers` | None | `dispatch-settings:manage` | WorkerManagementPage |
@@ -55,9 +81,9 @@ The settings routes share one engine with route-locked scopes:
 | `/admin/power-monitors` | None | `power_monitors:admin` | PowerMonitorSettingsPage |
 
 Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings`
-operates under `system` scope with unified grouped direct-leaf navigation,
-single-pane mounting (no horizontal settings sub-tabs or scope switcher),
-accessible mobile drawer navigation, persistent cross-group workspace search,
+operates under `system` scope with one focused category and its accessible sub-tabs,
+single-pane mounting (no cross-category sidebar or scope switcher),
+persistent cross-category workspace search,
 in-memory draft transition safety, and single page-level save presentation.
 Its header search placeholder includes the platform's command-palette shortcut
 (`Ctrl K`, or `⌘K` on macOS), without a redundant Search settings button.
@@ -68,30 +94,63 @@ without clearing its query; other editable fields retain their existing key hand
 Personal `/settings` (`user` scope) remains a separate profile workspace with
 category and sub-tab navigation.
 
-## Grouped Direct-Leaf Navigation & Single-Pane Mounting
+## Category Cards & Single-Pane Mounting
 
-Under `/admin/settings` (`system` scope), settings navigation is organized into 8 display groups consuming `adminDestinations.ts`:
+The Admin Control Center exposes purpose-specific `system` categories as cards.
+Labels, descriptions and icons come from the settings category registry; each card
+opens its first accessible sub-page, using the existing per-destination grants.
 
-1. **Farm**: Farm Defaults (`gen-farm`)
-2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`). Cameras is no longer an admin destination; it is the top-level `/cameras` page (`?view=all|location|printer`, #3332).
-4. **Automation & costs**: Automation & Costs (`auto-costs`)
-5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
-6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
-7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`), Quotas (`quotas`)
-8. **System**: System Config (`gen-system`)
+| Card / `tab` | Existing sub-pages / `sub` |
+|---|---|
+| Farm Identity / `identity` | Farm Identity (`details`) |
+| System / `system` | Single page: database, logging, connectivity, networking, catalog updates and files |
+| Failure Detection / `failure-detection` | Single page: Obico configuration, server pool and read-only provider runtime |
+| Costs & Energy / `costs` | Single CostTracking editor: farm rates, energy fallbacks and material prices |
+| Planning / `planning` | Single page: QueuePlanning, ShiftPlan, SpoolCoverage and HistorySeeding |
+| Operator Features / `operator-features` | Single page: farm-wide operator workflow switches |
+| Slicing / `slicing` | Defaults (`defaults`), Bed Types (`bed-types`), Slicer Profiles (`profiles`) |
+| Hardware / `hardware` | NFC (`nfc`, readers and spool bindings together), Printer Groups (`printer-groups`) |
+| Integrations / `integrations` | External Services (`connections`), Webhooks (`webhooks`) |
+| Quotas / `quotas` | Quota management (no sub-page) |
+| Users / `users` | Accounts (`accounts`), Roles (`roles`) |
+| Data / `data` | Tags (`tags`), Auto-Tagging (`auto-tagging`), Custom Fields (`custom-fields`) |
 
-In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
+Each category page names the category in its one page-level heading and offers
+a back link to the Admin Control Center. Only its permission-filtered sub-tabs
+are shown; exactly one content page mounts at a time. The tabs stay available
+during search. Global search and the command palette retain cross-category
+deep links, including `q` and section-qualified `field` targets.
 
-The desktop sidebar is capped at the available frame height and scrolls
-independently of the settings content. Short lists retain their natural height.
-Destinations below People & access, including **System → System Config**, remain
-reachable by scrolling or keyboard navigation.
+Locations, Catalog and Power Monitors remain standalone destinations in the
+admin hub and search, not new settings-shell sub-pages. The global sidebar,
+user-menu links and pinned destinations keep their existing routes.
+Personal preferences remain under `/settings`, not these category cards.
 
-Printer-file discovery controls live under **System Config → Files → Printer
-file index** (`/admin/settings?scope=system&tab=general&sub=system`).
+Printer-file discovery controls live under **System → Files → Printer
+file index** (`/admin/settings?scope=system&tab=system`).
 They remain subject to `system_settings:admin`; the On printers tab does not
 carry a separate discovery-settings shortcut.
+
+MaintenanceAlerts and PrintStatisticsSync live in the existing **Maintenance →
+Settings** tab (`/maintenance?tab=settings`), alongside per-printer maintenance
+management, with their existing `system_settings:admin` grant. Single-page
+destinations have no decorative sub-tab. Search, palette links and pins use the
+same section placement map as the editors.
+
+The existing Maintenance card is also visible to settings-only delegates. For
+those users it opens only the Settings editor and does not mount operational
+panels or fetch maintenance records; operational APIs retain `maintenance:admin`.
+
+The farm identity/timezone feature is separate. This regrouping does not change
+persisted keys, API payloads, scheduling timezone semantics or cost calculations.
+Costs & Energy replaces the duplicate Farm Defaults form. Power Monitors shows
+the farm electricity rate read-only, links to Costs & Energy, and retains monitor
+tariff overrides. `GET /api/settings/farm` remains available to slicer-mode readers;
+saving CostTracking or SlicerSettings invalidates that browser query.
+
+PrintGuard deployment configuration (`PFARM__PrintGuardShadow__*`) is not an
+editable database section. Its runtime status remains advisory; this page adds
+no automatic pause/cancel action and does not opt individual printers in.
 
 ## NFC Management Authorization
 
@@ -105,12 +164,14 @@ missing record. Linking or assigning an inaccessible or missing printer returns
 a uniform 403 without changing records. Firmware heartbeat and scan routes retain
 their separate device-token authentication contract.
 
-## Mobile Grouped Navigation
+## Responsive Navigation
 
-Mobile navigation renders a labeled grouped dropdown control (`<nav aria-label="Settings categories">`) containing all accessible display groups and leaves:
-
-- **Escape Key & Focus Restoration**: Pressing Escape or selecting a destination closes the drawer and restores focus to the mobile control trigger.
-- **Accessibility**: Includes proper ARIA expanded states, list semantics, and high-contrast match highlighting for search queries.
+System category pages use the same focused sub-tab control at desktop and mobile
+widths, wrapping labels onto additional rows rather than hiding destinations
+offscreen. Sub-tab selection retains system workspace search and keyboard focus.
+Denied deep links offer buttons for the permitted sections, including a sole
+permitted section. Personal settings retain their existing
+category navigation. Search retains keyboard selection and match highlighting.
 
 ## Safe Draft Transitions & Partial Saves
 
@@ -258,13 +319,13 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
 - **User scope** (`/settings`):
   - `profile` → Preferences, API Keys, Notifications, Passkeys
 - **System scope** (`/admin/settings`):
-  - `general` → Farm Defaults, System Config, Automation & Costs
+  - `system`, `failure-detection`, `costs`, `planning`, `operator-features` → single pages
   - `slicing` → Defaults, Bed Types, Slicer Profiles
-  - `hardware` → NFC Devices, Printer Groups, NFC Bindings, Custom Fields
+  - `hardware` → NFC (devices and bindings), Printer Groups
   - `integrations` → External Services, Webhooks
   - `quotas` → Print Quotas (`QuotaManagementPage`)
   - `users` → User Accounts, Roles & Permissions
-  - `data` → Tags
+  - `data` → Tags, Auto-Tagging, Custom Fields
 
 Access is defined once in `ADMIN_DESTINATIONS`: resource permissions, integration
 any-of grants, and the farm_admin-only Slicer Profiles exception. Neither the outlet
@@ -284,46 +345,37 @@ availability even without rendering inside the settings shell. Standalone-only
 users see their authorized links and an honest no-editor state without `tab`,
 `sub` or `field` editor state.
 
-Categories/sub-pages that render *metadata-driven* settings (Farm Defaults, System Config,
-Automation & Costs, External Services, Slicing Defaults) do so by mounting `<SettingsPage
-allowedGroups={[...]} />` and filtering the backend metadata down to the listed groups.
+Metadata-driven pages mount `<SettingsPage pageKey="..." />`. The shared placement
+map filters metadata by persisted section key first, then by backend group.
+This splits the broad Operations group without changing the backend schema.
 
 ## Tab-to-Group Map
 
-The subset of tabs that host `<SettingsPage>` filter backend metadata by group. The
-mapping is declared in `SUB_PAGE_CONTENT` in
-`src/Web/ReactApp/src/features/settings/pages/SettingsShell.tsx`:
+The mapping is declared in `SETTINGS_SECTION_TO_LOCATION` and
+`SETTINGS_GROUP_TO_LOCATION` in
+`src/Web/ReactApp/src/features/settings/subpage-groups.ts`. The shell, maintenance
+page and command search share it:
 
-| Tab key | `allowedGroups` on `<SettingsPage>` | Additional content |
+| Page key | Metadata placement | Additional content |
 |---|---|---|
-| `general.farm` | `['General']` | `<FarmSettingsSection />` via `afterContent` |
-| `general.system` | `['System', 'Networking', 'Catalog', 'Files', 'Printers']` | — |
-| `general.automation` | `['Operations', 'Monitoring', 'Maintenance', 'Job Queue']` | — |
-| `integrations.connections` | `['Integrations']` | Resource-gated Spoolman, Home Assistant and Telegram cards; generic editor requires `system_settings:admin`. |
-| `slicing.defaults` | `['Slicing']` | — |
+| `system` | System, Networking, Catalog, Files, Printers groups | Includes BackendTimeouts, CameraSync and NetworkDiscovery |
+| `failure-detection` | Obico; Monitoring group fallback | Provider runtime; Obico server pool requires `obico:manage` |
+| `costs` | CostTracking | Sole farm-wide rates editor |
+| `planning` | QueuePlanning, ShiftPlan, SpoolCoverage, HistorySeeding; Operations and Job Queue fallback | Hours remain UTC |
+| `operator-features` | OperatorFeatures | Deployment hard disables remain authoritative |
+| `data.auto-tagging` | AutoTagging | Tags and Custom Fields are separate Data sub-pages |
+| `maintenance.settings` | MaintenanceAlerts, PrintStatisticsSync; Maintenance group fallback | Existing maintenance dashboard |
+| `integrations.connections` | Integrations group | Resource-gated Spoolman, Home Assistant and Telegram cards; generic editor requires `system_settings:admin` |
+| `slicing.defaults` | SlicerSettings; Slicing group | Browser mode and per-engine settings |
 
 Other sub-pages (`users.accounts`, `data.tags`, `hardware.nfc`, etc.) render
 bespoke pages instead of a metadata-driven `<SettingsPage>`.
 
-### Groups declared in the code but not reachable via `allowedGroups`
-
-- **`General`** — no backend settings class currently declares `Group = "General"`, so
-  the Farm Defaults tab renders only `<FarmSettingsSection />` (its `afterContent`) with
-  an empty metadata section list. If you add a class with `[SettingDisplay(Group = "General")]`,
-  it will begin appearing on that tab automatically.
-
-### `Job Queue` — fixed during this epic
-
-`HistorySeedingBackgroundService.cs` declares `Group = "Job Queue"`. Until #939 no tab
-listed that group in `allowedGroups` and `SETTINGS_GROUP_TO_LOCATION` had no entry for
-it, so the section rendered nowhere *and* the command palette skipped it — leaving it
-unreachable by any route. It is now mapped onto the **Automation** sub-page alongside
-`Operations`, `Monitoring` and `Maintenance`, and is a normal configurable section.
-
-> **If you add a new group,** add it in **both** places or it will silently disappear:
-> the owning tab's `allowedGroups` in `SettingsShell.tsx`, and `SETTINGS_GROUP_TO_LOCATION`
-> in `settings-navigation.ts`. The palette skips any group missing from the latter via its
-> `if (!location) continue` guard, and it does so without warning.
+There is no backend `General` metadata group and no Farm Defaults form.
+HistorySeeding's `Job Queue` group resolves to Planning. When adding a section,
+add a section override if its group fallback is not the intended home. For a new
+group, add its location to the shared map; unmapped metadata is not discoverable
+through a page-specific editor or command search.
 
 ## Backend Settings Classes
 
@@ -689,7 +741,7 @@ Consequences, all enforced by tests:
 - **The settings workspace is not a second admin directory.**
   `getSettingsGroupedDestinations` returns only destinations embedded under
   `/admin/settings`. Catalog, Locations and Power Monitors carry a `settingsGroup` for
-  classification but render their own pages, so the sidebar no longer lists them.
+  classification but render their own pages, not settings category sub-tabs.
 - **One authorized exception, and it is a recovery affordance, not a directory.** A
   delegate whose only configuration grant is one of those standalone destinations can
   still open the settings shell but has no category to render. `SettingsShell` shows the
@@ -714,8 +766,9 @@ component code:
    sub-folder):
    - Add `[AppSetting("<SectionName>")]` at the class level.
    - Pick the `[SettingGroup(...)]` you want the section to live under. If the group is
-     new, make sure a sub-page in `SUB_PAGE_CONTENT` includes it in `allowedGroups` — or
-     add a new sub-page there.
+     new, add its location to `SETTINGS_GROUP_TO_LOCATION` in `subpage-groups.ts`.
+     Use `SETTINGS_SECTION_TO_LOCATION` when the section belongs on a different
+     page than its group's fallback.
    - Add `[SettingDisplay(...)]` at the class level (for the section card) and on every
      property (for the field rendering).
    - Add `[JsonPropertyName("...")]` on every property.
@@ -743,6 +796,17 @@ All supported React navigation must link directly to the current route. Do not a
 compatibility aliases or redirects for renamed URLs, and do not depend on historical
 bookmarks in tests. Update every in-app caller and its assertions in the same change as
 a route rename.
+
+**Scoped exception for the approved settings regrouping (#3745):** historical
+`general`/`farm`/`automation` links, `hardware.nfc-bindings` and
+`hardware.custom-fields` migrate to the new destinations. Section-qualified
+`field` targets select their new owner (including Maintenance); `q` and other
+query parameters are retained. Existing pinned destination IDs are preserved
+or migrated, with duplicates removed. New internal callers must still emit
+canonical URLs; this is not a general redirect registry.
+Bare General links retain the old Farm Defaults landing via Costs & Energy;
+an explicitly selected old Automation page falls back to Planning when no
+section-qualified field identifies a more specific destination.
 
 The settings and admin shell routes are:
 

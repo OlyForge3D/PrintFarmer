@@ -158,7 +158,7 @@ export async function prepareVisualScene(context: BrowserContext, page: Page, sc
       await expect(page.getByRole('heading', { name: 'Printer Dashboard', exact: true })).toBeVisible();
       await loadPinnedFonts(page);
     } else if (scene.heading && scene.overlay !== 'nfc-pairing' && scene.overlay !== 'nfc-link-error') {
-      await expect(page.getByRole('heading', { name: scene.heading, exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: scene.heading, level: scene.headingLevel, exact: true })).toBeVisible();
     }
     if (scene.overlay === 'auth-redirect') {
       await expect(page).toHaveURL(/\/login$/);

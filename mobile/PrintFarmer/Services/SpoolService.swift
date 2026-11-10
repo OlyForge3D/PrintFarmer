@@ -57,4 +57,19 @@ actor SpoolService: SpoolServiceProtocol {
     func listAvailableMaterials() async throws -> [String] {
         try await apiClient.get("/api/spoolman/materials/available")
     }
+
+    func scanTag(uid: String, format: String? = nil, payloadB64: String? = nil) async throws -> SpoolmanTagScanResponse {
+        try await apiClient.post(
+            "/api/spoolman/tags/scan",
+            body: SpoolmanTagScanRequest(uid: uid, format: format, payloadB64: payloadB64)
+        )
+    }
+
+    func linkTag(uid: String, toSpoolID spoolID: Int) async throws {
+        try await apiClient.postVoid("/api/spoolman/spools/\(spoolID)/tag", body: SpoolmanTagLinkRequest(uid: uid))
+    }
+
+    func unlinkTag(uid: String, fromSpoolID spoolID: Int) async throws {
+        try await apiClient.delete("/api/spoolman/spools/\(spoolID)/tag/\(uid)")
+    }
 }

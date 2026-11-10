@@ -7,6 +7,11 @@ import {
   saveSettingsValues,
 } from '../settingsApi';
 import { client } from '../api/httpClient';
+import { queryClient } from '@/services/queryClient';
+
+vi.mock('@/services/queryClient', () => ({
+  queryClient: { invalidateQueries: vi.fn() },
+}));
 
 vi.mock('../api/httpClient', () => ({
   client: {
@@ -118,6 +123,13 @@ describe('settingsApi', () => {
       await expect(saveSettingsValues(keyName, values)).resolves.toEqual(saved);
 
       expect(client.post).toHaveBeenCalledWith(`/settings/${keyName}`, values);
+      expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['settings', keyName] });
+    });
+
+    it('does not refresh the displayed identity after a rejected save', async () => {
+      vi.mocked(client.post).mockRejectedValue(new Error('Invalid timezone'));
+      await expect(saveSettingsValues('FarmIdentity', { timeZone: 'invalid' })).rejects.toThrow('Invalid timezone');
+      expect(queryClient.invalidateQueries).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,12 +8,9 @@ import UIKit
 extension ScanViewModelTests {
     @MainActor
     func testQueuedExternalScanWaitsForBarcodeIntakeDismissal() async {
-        let partsService = MockPartsInventoryService()
-        partsService.resolveBinError = NetworkError.notFound
-        partsService.resolvePartError = NetworkError.notFound
         let barcodeService = MockBarcodeIntakeService()
         barcodeService.filamentToResolve = makeFilament(id: 9, name: "PLA")
-        let (viewModel, scanner) = makeControlledSubject(partsService: partsService, barcodeService: barcodeService)
+        let (viewModel, scanner) = makeControlledSubject(barcodeService: barcodeService)
         scanner.scanStarted = expectation(description: "Initial camera")
         viewModel.requestExternalScan(UUID())
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
@@ -58,9 +55,9 @@ extension ScanViewModelTests {
 
     @MainActor
     func testQueuedExternalScanPreservesResolverErrorUntilAcknowledged() async {
-        let partsService = MockPartsInventoryService()
-        partsService.resolveBinError = NetworkError.serverError(500)
-        let (viewModel, scanner) = makeControlledSubject(partsService: partsService)
+        let barcodeService = MockBarcodeIntakeService()
+        barcodeService.resolveError = NetworkError.serverError(500)
+        let (viewModel, scanner) = makeControlledSubject(barcodeService: barcodeService)
         scanner.scanStarted = expectation(description: "Initial camera")
         viewModel.requestExternalScan(UUID())
         await fulfillment(of: [scanner.scanStarted], timeout: 2)

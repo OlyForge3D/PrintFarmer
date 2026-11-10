@@ -41,10 +41,13 @@ approve a change. The historical catalog hash is not independently verified
 because its original source note is unavailable; current inventory coverage is
 instead checked against source-derived inputs.
 
-The inventory contains 138 rows: 98 web, 3 public-site, and 37 native iOS.
-Executable candidates currently cover 97 web rows and all 3 public-site rows;
+The inventory contains 141 rows: 101 web, 3 public-site, and 37 native iOS.
+Executable candidates currently cover 100 web rows and all 3 public-site rows;
 the remaining web row, OrcaImportWizard, is blocked. The candidate catalog
-contains 165 executable scenes. These are sampled candidates, not every route
+contains 169 executable scenes. Settings candidates use the canonical category
+URLs, including failure detection, costs, planning, operator features, and
+auto-tagging; NFC devices and bindings share the hardware NFC leaf. These are
+sampled candidates, not every route
 alias or state/theme/viewport combination; unrepresented web states and overlays
 remain explicitly unverified. Native entries remain unverified until the
 approved Xcode 26.6 / iOS 26.5 runner is available. Tests use no production

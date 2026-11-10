@@ -20,6 +20,14 @@ export const toolbarAdminSeeds: Record<string, unknown> = {
   '/api/printers': [printer],
   '/api/settings/metadata': [
     {
+      key: 'SystemLog', className: 'SystemLogSettings', displayName: 'System logging',
+      description: 'System log configuration.', group: 'System', order: 1,
+      properties: [{
+        name: 'enabled', type: 'Boolean', attributes: [],
+        display: { name: 'Enable system logging', inputType: 'Checkbox' },
+      }],
+    },
+    {
       key: 'General', className: 'GeneralSettings', displayName: 'Farm identity',
       description: 'Farm identity and defaults.', group: 'General', order: 1,
       properties: [{
@@ -65,6 +73,36 @@ export const toolbarAdminSeeds: Record<string, unknown> = {
         display: { name: 'Default connection timeout', inputType: 'Number', unit: 'seconds' },
       }],
     },
+    {
+      key: 'CostTracking', className: 'CostTrackingSettings', displayName: 'Cost tracking',
+      group: 'Operations', properties: [
+        { name: 'electricityRatePerKwh', type: 'Double', attributes: [], display: { name: 'Electricity rate per kWh', inputType: 'Number' } },
+      ],
+    },
+    {
+      key: 'Obico', className: 'ObicoSettings', displayName: 'Obico',
+      group: 'Monitoring', properties: [
+        { name: 'enabled', type: 'Boolean', attributes: [], display: { name: 'Enable Obico detection', inputType: 'Checkbox' } },
+      ],
+    },
+    {
+      key: 'QueuePlanning', className: 'QueuePlanningSettings', displayName: 'Queue planning',
+      group: 'Operations', properties: [
+        { name: 'workdayStartHourUtc', type: 'Int32', attributes: [], display: { name: 'Workday start hour (UTC)', inputType: 'Number' } },
+      ],
+    },
+    {
+      key: 'OperatorFeatures', className: 'OperatorFeatureSettings', displayName: 'Operator features',
+      group: 'Operations', properties: [
+        { name: 'attentionEnabled', type: 'Boolean', attributes: [], display: { name: 'Attention feed', inputType: 'Checkbox' } },
+      ],
+    },
+    {
+      key: 'AutoTagging', className: 'AutoTaggingSettings', displayName: 'Auto-tagging rules',
+      group: 'Operations', properties: [
+        { name: 'enabled', type: 'Boolean', attributes: [], display: { name: 'Enable automatic tagging', inputType: 'Checkbox' } },
+      ],
+    },
   ],
   '/api/settings/groups': [
     { key: 'General', displayName: 'General', order: 1 },
@@ -72,13 +110,20 @@ export const toolbarAdminSeeds: Record<string, unknown> = {
     { key: 'Operations', displayName: 'Operations', order: 3 },
     { key: 'Slicing', displayName: 'Slicing', order: 4 },
     { key: 'Integrations', displayName: 'Integrations', order: 5 },
+    { key: 'Monitoring', displayName: 'Monitoring', order: 6 },
   ],
   '/api/settings': {
+    SystemLog: { enabled: true },
     General: { farmName: 'Fixture farm' },
     System: { discoveryEnabled: true, discoverySubnets: ['192.0.2.0/24'] },
     Operations: { enableAutomaticCostCalculation: true },
     Slicing: { defaultInfillDensity: 20 },
     Integrations: { defaultConnectionTimeoutSeconds: 30 },
+    CostTracking: { electricityRatePerKwh: 0.15 },
+    Obico: { enabled: false },
+    QueuePlanning: { workdayStartHourUtc: 8 },
+    OperatorFeatures: { attentionEnabled: true },
+    AutoTagging: { enabled: false },
   },
   '/api/settings/security/password-policy': {
     minLength: 8,
@@ -186,6 +231,12 @@ export const toolbarAdminSeeds: Record<string, unknown> = {
   '/api/bed-types': [],
   '/api/nfc-devices': [],
   '/api/nfc/bindings': [],
+  '/api/obico-servers': [],
+  '/api/failure-detection/status': {
+    monitoringEnabled: false, confidenceThreshold: 0.8, scanIntervalSeconds: 30,
+    configuredPrinterCount: 0, activelyMonitoredPrinterCount: 0,
+    lastAnalyzedPrinterCount: 0, lastFailureCount: 0, printers: [],
+  },
   '/api/printer-groups': [],
   '/api/custom-fields/definitions': [],
   '/api/webhooks': [],
@@ -256,19 +307,23 @@ export const toolbarAdminStates = [
   { name: 'settings-notifications', path: '/settings', tab: 'Notifications', ready: 'Event × Channel Matrix', filtersDisclosureCount: 0 },
   { name: 'settings-passkeys', path: '/settings', tab: 'Passkeys', ready: 'Fixture security key', filtersDisclosureCount: 0 },
   { name: 'admin-hub', path: '/admin', ready: 'Database', filtersDisclosureCount: 0 },
-  { name: 'admin-farm-settings', path: '/admin/settings', ready: 'Electricity', filtersDisclosureCount: 0 },
+  { name: 'admin-farm-settings', path: '/admin/settings?tab=identity&sub=details', ready: 'Farm name', filtersDisclosureCount: 0 },
   {
     name: 'admin-system-settings',
-    path: '/admin/settings?tab=general&sub=system&field=System.discoverySubnets',
+    path: '/admin/settings?tab=system&field=System.discoverySubnets',
     ready: 'Discovery subnets',
     filtersDisclosureCount: 0,
   },
   {
-    name: 'admin-automation-settings',
-    path: '/admin/settings?tab=general&sub=automation&field=Operations.enableAutomaticCostCalculation',
-    ready: 'Automatic cost calculation',
+    name: 'admin-cost-settings',
+    path: '/admin/settings?tab=costs&field=CostTracking.electricityRatePerKwh',
+    ready: 'Electricity rate per kWh',
     filtersDisclosureCount: 0,
   },
+  { name: 'admin-failure-detection', path: '/admin/settings?tab=failure-detection', ready: 'Failure Detection Runtime', filtersDisclosureCount: 0 },
+  { name: 'admin-planning', path: '/admin/settings?tab=planning&field=QueuePlanning.workdayStartHourUtc', ready: 'Workday start hour', filtersDisclosureCount: 0 },
+  { name: 'admin-operator-features', path: '/admin/settings?tab=operator-features&field=OperatorFeatures.attentionEnabled', ready: 'Attention feed', filtersDisclosureCount: 0 },
+  { name: 'admin-auto-tagging', path: '/admin/settings?tab=data&sub=auto-tagging&field=AutoTagging.enabled', ready: 'Enable automatic tagging', filtersDisclosureCount: 0 },
   {
     name: 'admin-slicing-defaults',
     path: '/admin/settings?tab=slicing&sub=defaults&field=Slicing.defaultInfillDensity',
@@ -286,9 +341,9 @@ export const toolbarAdminStates = [
   { name: 'admin-slicer-profiles', path: '/admin/settings?tab=slicing&sub=profiles', ready: 'Showing 0 profile(s)', filtersDisclosureCount: 0 },
   { name: 'admin-bed-types', path: '/admin/settings?tab=slicing&sub=bed-types', ready: 'No bed types configured', filtersDisclosureCount: 0 },
   { name: 'admin-nfc-devices', path: '/admin/settings?tab=hardware&sub=nfc', ready: 'No NFC devices registered', filtersDisclosureCount: 0 },
-  { name: 'admin-nfc-bindings', path: '/admin/settings?tab=hardware&sub=nfc-bindings', ready: 'No NFC tags have been bound yet', filtersDisclosureCount: 0 },
+  { name: 'admin-nfc-bindings', path: '/admin/settings?tab=hardware&sub=nfc', ready: 'No NFC tags have been bound yet', filtersDisclosureCount: 0 },
   { name: 'admin-printer-groups', path: '/admin/settings?tab=hardware&sub=printer-groups', ready: 'No printer groups yet', filtersDisclosureCount: 0 },
-  { name: 'admin-custom-fields', path: '/admin/settings?tab=hardware&sub=custom-fields', ready: 'No printer custom fields', filtersDisclosureCount: 0 },
+  { name: 'admin-custom-fields', path: '/admin/settings?tab=data&sub=custom-fields', ready: 'No printer custom fields', filtersDisclosureCount: 0 },
   { name: 'admin-webhooks', path: '/admin/settings?tab=integrations&sub=webhooks', ready: 'No webhooks configured', filtersDisclosureCount: 0 },
   { name: 'admin-roles', path: '/admin/settings?tab=users&sub=roles', ready: 'No roles yet', filtersDisclosureCount: 0 },
   { name: 'admin-quotas', path: '/admin/settings?tab=quotas', ready: 'No quotas configured yet', filtersDisclosureCount: 0 },

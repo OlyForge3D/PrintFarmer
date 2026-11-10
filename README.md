@@ -28,6 +28,10 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 
 ## ✨ Key Features
 
+**Farm Identity** - Customize the farm name and IANA timezone from Admin Control
+Center. Desktop/mobile web headers show the name and a DST-aware farm-local
+clock; existing schedules and UTC planning hours are unchanged.
+
 ✅ **Multi-Printer Dashboard** - Manage unlimited 3D printers from a single interface  
 ✅ **Real-time Updates** - SignalR WebSocket for live status (temperatures, progress, state)  
 ✅ **Hierarchical Location System** - Organize printers into custom hierarchies (Warehouse > Floor > Room > Rack)  
@@ -52,6 +56,13 @@ See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidenc
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Advisory Print Monitoring** - [Obico per-print capacity routing and independent PrintGuard alerts](./docs/OBICO_ML_API.md#per-print-obico-routing); neither automatically pauses printers
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
+
+Admin configuration has dedicated Failure Detection, Costs & Energy, Planning,
+Operator Features and System pages. Hardware combines NFC readers and bindings;
+Data groups tags, automatic tagging and custom fields. Global maintenance policy
+is in Maintenance's Settings tab. Cost/rate overrides stay with their owning
+records; [settings navigation and save boundaries](./docs/SETTINGS_ARCHITECTURE.md#category-cards--single-pane-mounting)
+describe the canonical destinations.
 
 ### Moonraker temperature and sensor controls
 

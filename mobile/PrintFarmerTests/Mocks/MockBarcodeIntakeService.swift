@@ -5,6 +5,11 @@ final class MockBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
     /// Represents the deterministic filament selected by the server; the mock does not
     /// index by GTIN because multiple filament records may share the same value.
     var filamentToResolve: SpoolmanFilament?
+    /// Opt-in model of the server persisting `POST /api/spoolman/barcodes`:
+    /// once a mapping is saved, later resolves of that exact barcode return
+    /// the saved filament, mirroring the filament `gtin` lookup.
+    var persistsSavedMappings = false
+    private(set) var savedMappings: [String: SpoolmanFilament] = [:]
     var filamentToSave: SpoolmanFilament?
     var spoolToImport: SpoolmanSpool?
     var resolveError: Error?
@@ -18,6 +23,7 @@ final class MockBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
     func resolveFilament(barcode: String) async throws -> SpoolmanFilament? {
         resolveBarcodes.append(barcode)
         if let resolveError { throw resolveError }
+        if persistsSavedMappings, let saved = savedMappings[barcode] { return saved }
         return filamentToResolve
     }
 
@@ -25,6 +31,7 @@ final class MockBarcodeIntakeService: BarcodeIntakeServiceProtocol, @unchecked S
         saveMappingCalls.append((barcode, filamentId))
         if let saveMappingError { throw saveMappingError }
         guard let filamentToSave else { throw NetworkError.notFound }
+        if persistsSavedMappings { savedMappings[barcode] = filamentToSave }
         return filamentToSave
     }
 

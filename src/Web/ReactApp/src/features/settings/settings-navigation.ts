@@ -8,6 +8,7 @@ import {
   NetworkIcon,
   ServerIcon,
   ShieldIcon,
+  TagIcon,
   UsersIcon,
   WrenchIcon,
 } from '@/common/components/icons/MdiIcons';
@@ -17,7 +18,10 @@ import type {
   AdminDestinationGroup,
 } from '@/features/admin/registry/adminDestinations';
 import { ADMIN_DESTINATION_GROUPS } from '@/features/admin/registry/adminDestinations';
+import { canAccessSettingsTab, getDestinationForTab, type AdminDestinationAccess } from '@/features/admin/registry/adminDestinations';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
+import { getSettingsSectionLocation } from './subpage-groups';
+export { SETTINGS_GROUP_TO_LOCATION } from './subpage-groups';
 import {
   DEFAULT_SCOPE,
   SETTINGS_CATEGORIES,
@@ -276,13 +280,18 @@ export function groupRankedResults(results: readonly FuzzyResult[]): FuzzyGroup[
 export const SETTINGS_CATEGORY_ICONS: Record<string, SettingsCategoryIcon> = {
   profile: AccountIcon,
   general: GearIcon,
+  system: ServerIcon,
+  'failure-detection': ShieldIcon,
+  costs: DatabaseIcon,
+  planning: LayersIcon,
+  'operator-features': WrenchIcon,
   slicing: LayersIcon,
   hardware: WrenchIcon,
   integrations: NetworkIcon,
   quotas: DatabaseIcon,
   operations: ServerIcon,
   users: UsersIcon,
-  data: DatabaseIcon,
+  data: TagIcon,
 };
 
 export const SETTINGS_SUBPAGE_ICONS: Record<string, SettingsCategoryIcon> = {
@@ -300,22 +309,59 @@ export function getSettingsCategoryIcon(categoryId: string): SettingsCategoryIco
   return SETTINGS_CATEGORY_ICONS[categoryId] ?? GearIcon;
 }
 
+export function getSettingsCategoryDestinations(access: AdminDestinationAccess): AdminDestination[] {
+  return SETTINGS_CATEGORIES
+    .filter((category) => category.scopeId === 'system')
+    .flatMap((category) => {
+      const firstSubPage = category.subPages.find((subPage) =>
+        canAccessSettingsTab(category.id, subPage.id, access));
+      if (category.subPages.length > 0 ? !firstSubPage : !canAccessSettingsTab(category.id, undefined, access)) {
+        return [];
+      }
+      return [{
+        id: `settings-${category.id}`,
+        kind: 'configuration' as const,
+        label: category.label,
+        description: category.description,
+        path: buildSettingsPath({
+          scopeId: 'system',
+          categoryId: category.id,
+          subPageId: firstSubPage?.id,
+        }),
+        icon: getSettingsCategoryIcon(category.id),
+        group: getDestinationForTab(category.id, firstSubPage?.id)?.group ?? 'general',
+      }];
+    });
+}
+
 const TAB_SHORTHANDS: Record<string, { categoryId: string; subPageId?: string }> = {
   printers: { categoryId: 'hardware', subPageId: 'printer-groups' },
-  farm: { categoryId: 'general', subPageId: 'farm' },
-  system: { categoryId: 'general', subPageId: 'system' },
-  automation: { categoryId: 'general', subPageId: 'automation' },
+  farm: { categoryId: 'costs' },
+  automation: { categoryId: 'planning' },
 };
 
 export function resolveSettingsNavigationTarget(
   categoryId?: string | null,
   subPageId?: string | null,
   scopeId?: string | null,
+  field?: string | null,
 ): ResolvedSettingsNavigationTarget {
   const scopedFallback = isSettingsScope(scopeId) ? scopeId : DEFAULT_SCOPE;
 
   let targetCat = categoryId;
   let targetSub = subPageId;
+
+  if (targetCat === 'general' || targetCat === 'farm' || targetCat === 'automation') {
+    const sectionKey = field?.split('.')[0];
+    const fieldLocation = sectionKey ? getSettingsSectionLocation(sectionKey, '') : undefined;
+    targetCat = fieldLocation?.categoryId ?? (targetSub === 'system' ? 'system'
+      : targetCat === 'automation' || targetSub === 'automation' ? 'planning' : 'costs');
+    targetSub = fieldLocation?.subPageId;
+  } else if (targetCat === 'hardware' && targetSub === 'nfc-bindings') {
+    targetSub = 'nfc';
+  } else if (targetCat === 'hardware' && targetSub === 'custom-fields') {
+    targetCat = 'data';
+  }
 
   if (targetCat && TAB_SHORTHANDS[targetCat]) {
     const shorthand = TAB_SHORTHANDS[targetCat];
@@ -390,43 +436,16 @@ export function buildSettingsCommandItems(): SettingsCommandItem[] {
 }
 
 /**
- * Which settings sub-page renders the properties in a given metadata `group`.
- * Kept in sync by hand with `SUB_PAGE_CONTENT` in `SettingsShell.tsx` — every
- * group referenced from an `allowedGroups` prop there must map back here, or
- * palette navigation for that group would drop the user on the wrong sub-page.
- *
- * Groups that live inside a mixed sub-page (e.g. `Networking` under
- * `general.system`) all point at the same destination; the shell renders them
- * side-by-side inside a single page.
- */
-export const SETTINGS_GROUP_TO_LOCATION: Record<
-  string,
-  { scopeId: SettingsScopeId; categoryId: string; subPageId: string }
-> = {
-  General: { scopeId: 'system', categoryId: 'general', subPageId: 'farm' },
-  System: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
-  Networking: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
-  Catalog: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
-  Files: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
-  Printers: { scopeId: 'system', categoryId: 'general', subPageId: 'system' },
-  Operations: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
-  Monitoring: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
-  Maintenance: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
-  // `HistorySeedingBackgroundService` declares Group = "Job Queue". Without an
-  // entry here the palette silently skips it (`if (!location) continue`), and
-  // without a matching `allowedGroups` entry in the automation sub-page it
-  // renders nowhere — leaving the section unreachable by any route.
-  'Job Queue': { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
-  Integrations: { scopeId: 'system', categoryId: 'integrations', subPageId: 'connections' },
-  Slicing: { scopeId: 'system', categoryId: 'slicing', subPageId: 'defaults' },
-};
-
-/**
  * Personal settings and farm configuration have separate canonical routes.
  */
 export function buildSettingsPath(
   target: { scopeId: SettingsScopeId; categoryId: string; subPageId?: string; field?: string },
 ): string {
+  if (target.categoryId === 'maintenance') {
+    const params = new URLSearchParams({ tab: 'settings' });
+    if (target.field) params.set('field', target.field);
+    return `/maintenance?${params}`;
+  }
   const basePath = target.scopeId === 'system'
       ? '/admin/settings'
       : '/settings';
@@ -527,7 +546,7 @@ export function buildSettingCommandItems(
 
   for (const section of metadata) {
     const groupKey = section.group || 'Other';
-    const location = SETTINGS_GROUP_TO_LOCATION[groupKey];
+    const location = getSettingsSectionLocation(section.key, groupKey);
     if (!location) {
       continue;
     }

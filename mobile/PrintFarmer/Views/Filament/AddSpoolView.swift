@@ -7,6 +7,7 @@ struct AddSpoolView: View {
     @State private var saveTask: Task<Void, Never>?
 
     var scannedData: ScannedSpoolData?
+    var onSpoolCreated: ((SpoolmanSpool) async throws -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -29,7 +30,9 @@ struct AddSpoolView: View {
                     }
                 } else {
                     materialSection
+                        .disabled(viewModel.isFilamentSelectionLocked)
                     vendorSection
+                        .disabled(viewModel.isFilamentSelectionLocked)
                     colorSection
                     weightSection
 
@@ -51,11 +54,11 @@ struct AddSpoolView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(viewModel.createdSpool == nil ? "Save" : "Retry Link") {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        saveTask = Task { await viewModel.saveSpool() }
+                        saveTask = Task { await viewModel.saveSpool(afterCreate: onSpoolCreated) }
                     }
-                    .disabled(!viewModel.isFormValid || viewModel.isSaving)
+                    .disabled(!viewModel.isFormValid || viewModel.isSaving || viewModel.didSave)
                 }
             }
             .task {

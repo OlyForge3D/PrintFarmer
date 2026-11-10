@@ -108,25 +108,25 @@ describe('SettingsSidebar is a flat grouped nav', () => {
   });
 
   it('bounds a long list to the settings frame so its inner navigation can scroll', () => {
-    renderSidebar({ activeScope: 'system', activeCategory: 'general' });
+    renderSidebar({ activeScope: 'system', activeCategory: 'system' });
     const nav = desktopNav();
 
     expect(nav).toHaveClass('max-h-full', 'min-h-0', 'overflow-hidden');
     expect(nav.firstElementChild).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
-    expect(within(nav).getByRole('button', { name: 'System Config' })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'System' })).toBeInTheDocument();
   });
 
   it('walks the whole list with arrow keys, across group boundaries', () => {
     renderSidebar();
     const nav = within(desktopNav());
-    // Profile is the last item of the User group; General is the first of System.
+    // Profile is the last item of the User group; System is the first of System.
     const profile = nav.getByRole('button', { name: 'Profile' });
-    const general = nav.getByRole('button', { name: 'General' });
+    const system = nav.getByRole('button', { name: 'System' });
 
     profile.focus();
     fireEvent.keyDown(profile, { key: 'ArrowDown' });
 
-    expect(general).toHaveFocus();
+    expect(system).toHaveFocus();
   });
 
   it('wraps from the last item back to the first', () => {

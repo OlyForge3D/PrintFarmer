@@ -390,6 +390,7 @@ const responses: Record<string, unknown> = {
   'GET /api/setup/bootstrap': { baseUrl: '' },
   'GET /api/auth/me': captureUser,
   'GET /api/settings/SignalR': { logLevel: 'Error', consoleLoggingEnabled: false },
+  'GET /api/settings/FarmIdentity': { farmName: 'PrintFarmer', timeZone: 'UTC' },
   'GET /api/settings/Slicer': { enabled: true },
   'GET /api/settings/NetworkDiscovery': { enableDiscovery: false },
   'GET /api/workers/': [],

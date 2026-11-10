@@ -125,6 +125,242 @@ layouts, effective hit regions, or rendered contrast.
 VoiceOver behavior, Dynamic Type, hierarchy, state handling, and real device
 usability still require the native design review and appropriate author evidence.
 
+### Whole-source observational baseline (Layer 2)
+
+From the repository root, generate the reusable full-source report:
+
+```powershell
+node scripts\design\baseline-ui-design.mjs --output docs\design\ui-source-baseline.json
+node scripts\design\baseline-ui-design.mjs --commit <full-sha> --output <report.json>
+node --test scripts\design\tests\baseline-ui-design.test.mjs scripts\design\tests\check-ui-design.test.mjs scripts\design\tests\post-edit-hook.test.mjs scripts\design\tests\ui-paths.test.mjs
+```
+
+`--commit` defaults to `HEAD`. The command enumerates an immutable Git tree and
+reads its blobs, not working-tree application edits or untracked files. It
+requires Git and Node.js 20+, with no additional detector dependencies. Run from
+the repository root; create the output directory first. The checked-in
+[`ui-source-baseline.json`](design/ui-source-baseline.json) is an observed-debt
+snapshot, not an approved golden or a promise to keep these findings forever.
+
+| Platform | Enumerated tracked scope | Supported inspection | Excluded / unsupported |
+| --- | --- | --- | --- |
+| Web application | `src/Web/ReactApp/**` | Full contents of supported text extensions under `src/`, `public/`, plus `index.html` | Tests, fixtures, vendored/build directories excluded; other tooling/configuration, assets and unsupported formats listed without inspection |
+| Native iOS | `mobile/PrintFarmer/**` | All production `.swift`, including helpers outside Views; only the existing same-line `Button`/`NavigationLink` fixed-frame-below-44-points regex | Asset catalogs, images, JSON and other formats unsupported; no native design-token or rendered checks |
+| Public website | `site/**` | Full supported text source, including nested privacy pages, HTML and CSS | Images/SVG and other unsupported formats explicitly listed |
+
+Supported web/site extensions are `.astro`, `.css`, `.htm`, `.html`, `.js`,
+`.jsx`, `.less`, `.sass`, `.scss`, `.svelte`, `.ts`, `.tsx` and `.vue`. These are
+regex inspections, not AST/type analysis. Unlike the changed-file command's
+HTML path, Layer 2 deliberately uses the existing **regex** engine for HTML:
+the upstream static-HTML wrapper silently falls back when optional parser
+dependencies are unavailable. This baseline therefore makes no static cascade,
+linked stylesheet/resource, browser, axe, screenshot or visual claim. External
+and generated sources, nested submodules, and files outside the three roots are
+not inspected. Source-local test/fixture/build directory exclusions use the
+enumerated reasons in the report; iOS test targets outside the app root are not
+application source.
+
+The deterministic JSON contains the inspected commit, all enumerated paths and
+their dispositions, Git blob IDs, inspected-input SHA-256 hashes, effective
+shared config, selected design contexts, upstream registry and integrity pin,
+executing tooling hashes, per-platform counts and concrete findings. The
+executing tooling is the working-tree version and may differ from the inspected
+source commit; this distinction is explicit. There are no timestamps, local
+absolute paths or filesystem-mtime decisions in the report. Unchanged inputs
+and tooling produce identical bytes, including on repeated runs.
+
+Findings distinguish `design-system` token rules from `generic-static`
+heuristics, and `blocker`, `advisory` and `suppressed` dispositions. A blocker is
+a **detector classification, not a new blocking gate**. Layer 2 treats either
+upstream `advisory: true` or `severity: "advisory"` as advisory; changed-file CI
+retains its existing `advisory: true`-only partitioning. Inline ignores and
+shared justified, scoped value waivers remain concrete suppressed observations;
+hook output limits never truncate this baseline.
+
+Design constraints come from the nearest committed `DESIGN.md` (including the
+upstream case variants and fallback directories) and optional JSON sidecar.
+Mapping-only frontmatter is validated before the upstream normalizer runs;
+unsupported YAML constructs, malformed input and malformed consumed sidecar
+structures fail explicitly. The report does not implement arbitrary YAML or
+validate every narrative sidecar field. Only literal web fonts, colors, radii
+and font-size tokens that the normalizer understands can become checks;
+spacing, prose, semantic/adaptive tokens, native `pt` radii and human design
+intent are not executable constraints.
+
+**Current design-config limitation:** the React `package.json` boundary has no
+local `DESIGN.md`, so the upstream nearest-project semantics abstain from
+parent design-token rules there. The website inherits root `DESIGN.md`;
+native design artifacts are recorded but native token rules are unsupported.
+These are limitations, not repaired artifacts or confirmation that the
+incumbent design docs accurately describe all themes. Each file records its
+actual enabled design-system checks.
+
+Exit `0` means an observational report was produced even with debt. Invalid
+config, unreadable/invalid UTF-8 or symlink source, incomplete platform scope,
+Git/vendor/scanner failure and output-write failure exit nonzero. A report is
+replaced only after a complete successful scan; a previous report left behind
+after failure is **stale**, not the result of that failed run.
+
+This report is Layer 2; the separate count ratchet below is Layer 4.
+Changed-file CI remains unchanged. There is no remediation,
+human-approved visual/a11y baseline or weekly automation here.
+Missing source roots/files, unexpected exclusions or a detector missing a
+known fixture falsify coverage claims. False-green interpretation can harm
+keyboard, low-vision and assistive-technology users and farm operators by
+letting usability defects ship; it can also mislead maintainers into trusting
+an audit that never happened. Regenerating or replacing this observational
+report is reversible; shipping inaccessible or misleading operational UI can
+have downstream effects that replacing JSON does not undo.
+
+### Total-count non-regression ceiling (Layer 4)
+
+[`ui-count-ceiling.json`](../.impeccable/ui-count-ceiling.json) pins the
+observational snapshot above by SHA-256 and explicitly allows **51 supported,
+unsuppressed findings: 17 blockers plus 34 advisories**. These are static
+observations, not 51 independently confirmed defects. The ceiling compares
+`blockers + advisories`; suppressed findings and unsupported/excluded files do
+not count. All severities and per-platform counts remain visible in evidence.
+
+The only debt rejection is **total > ceiling**. Equal and lower totals pass;
+the blocker/advisory split has no independent ceiling. **Same-total swaps are
+allowed**, even across files, rules, platforms or severity. Removing one
+advisory and adding one blocker can therefore pass this policy. This is
+intentionally not a per-file, per-rule or per-occurrence ratchet; source and
+design review still matter. An unrelated PR with unchanged supported source
+and policy passes despite the incumbent observations. After a deliberate
+ceiling reduction, stale PR heads may need synchronization rather than an
+automatic waiver.
+
+Before freezing the ceiling, the repository-owned
+[`source-adapter.mjs`](../scripts/design/source-adapter.mjs) corrected two
+demonstrated source-context false positives. Comment bodies are blanked without
+changing UTF-16 offsets or newlines; original source still supplies inline
+waivers. Only empty, explicitly `animate-spin`/`pf-animate-spin`, square
+`h-N`/`w-N`, `rounded-full` div/span loading rings have their top/bottom border
+utility tokens masked before upstream deduplication. Actual rounded card
+accents, image elements missing/empty `src`, and strings/templates remain
+detectable. This does not infer runtime/dynamic image validity or broadly
+ignore border rules. Vendored Impeccable remains unchanged and integrity-pinned;
+the adapter is separately included in tooling provenance.
+
+The loading-ring correction covers both paired empty tags and self-closing
+div/span tags. An additional per-site exception covers **only the exact
+`BlobImage` function in `FileThumbnail.tsx`**: its React 19 ref callback assigns
+the created object URL to `image.src`, removes the attribute and revokes the
+same URL in cleanup, and depends on `[blob]`. The adapter matches that complete
+source block once and removes only its image's `broken-image` observation.
+Changing the callback, ref binding or dependency list invalidates the match.
+Other images in the same file and all other ref images remain checked.
+This is conservative source evidence, not a general ref exemption or proof
+that the browser supports object URLs. An unchanged source block rendered
+without that callback behavior would falsify the exception's reasoning.
+If wrong, missing previews could mislead farm operators; the tooling correction
+is reversible, but operational decisions made from a misleading preview are not.
+
+The initial corrected scan removed **25 observations** from the original 88:
+**7 `broken-image` comment examples** and **18 loading-ring
+`border-accent-on-rounded` matches**, lowering the ceiling to 63. The complete
+audit of the remaining 12 rounded-border observations found **11 self-closing
+loading rings**; the non-ring `MetadataProfileRenderer.tsx` tab observation is
+retained. Together with the source-proven `BlobImage` correction, this removes
+**12 more observations**, deliberately lowering the ceiling **63 -> 51**
+(29 -> 17 blockers, 34 advisories unchanged). No product source or vendor
+files changed; the immutable inspected commit and web/iOS/website scope are
+unchanged. Remaining
+observations are still provisional, including runtime-built image sources and
+multiline/conditional loading indicators the narrow source adapter cannot infer.
+The changed-file non-HTML detector uses these same authorized bug fixes;
+its static-HTML engine and other gate behavior remain unchanged.
+
+The new [`ui-count-ratchet.yml`](../.github/workflows/ui-count-ratchet.yml)
+follows the repository's trusted-default-branch execution pattern:
+
+- `pull_request_target` loads trusted workflow logic; the checkout explicitly
+  selects the default branch, never the PR head, with no persisted credentials.
+- The workflow fetches `refs/pull/<number>/head` as Git objects and verifies the
+  fetched SHA matches the event head. It never checks out, imports or installs
+  PR code. The public repository fetch needs no scanner token or secret.
+- Node runs trusted tooling with no `npm install`/`npm ci`. Only the separate
+  trusted status-writing action receives its standard GitHub action token.
+- The allowance and pinned baseline are read from the immutable trusted
+  checkout commit, not from the PR. The runner verifies executing tool bytes
+  against that commit, checks vendor integrity and report/tool provenance,
+  and reproduces the pinned baseline exactly from its inspected Git commit
+  before scanning the target.
+- The target scan uses trusted-base shared config, design contexts and package
+  boundaries. PR edits to tooling, allowance, `DESIGN.md`, sidecars or config
+  cannot raise the effective allowance or weaken the checks judging that PR.
+  Their proposed behavior only takes effect after trusted-base delivery and a
+  deliberate compatible baseline refresh.
+
+Inline waivers also come from the trusted base: existing whole-file waivers
+remain effective, while line/next-line waivers require the same source text at
+the same line. PR-added directives do not suppress findings. This prevents
+self-approval through new inline suppressions; moving a waived line can expose
+an observation until its waiver is deliberately reviewed/refreshed. It does
+not add an occurrence-level debt gate.
+
+Local parity requires a trusted checkout whose `HEAD` and tooling bytes match
+the supplied trusted-base SHA, with both source commits available:
+
+```powershell
+node scripts\design\ui-count-ratchet.mjs --trusted-base <trusted-checkout-sha> --head <immutable-target-sha> --output <new-result.json>
+node --test scripts\design\tests\ui-count-ratchet.test.mjs scripts\design\tests\baseline-ui-design.test.mjs scripts\design\tests\check-ui-design.test.mjs scripts\design\tests\post-edit-hook.test.mjs scripts\design\tests\ui-paths.test.mjs
+```
+
+The result includes the full enumerated scan, exact target/trusted SHAs,
+approved snapshot, observed severity counts, ceiling and delta. Exit `0` means
+the total is within the ceiling; an increase exits `1` **with full evidence**.
+Missing/incompatible policy or baseline, incorrect counts/hashes, unavailable
+source objects, broken scanning, lost platform capability and invalid
+provenance fail explicitly, without manufacturing a passing report.
+`ui/full-source-count` is posted on the PR head, with pending/failure states
+and a 14-day artifact for completed scans. Infrastructure/provenance errors
+fail even though they are not increases in observed debt.
+
+This becomes operational only after the workflow, tooling, baseline and
+allowance land together on the trusted default branch. It cannot securely
+judge its own first deployment from PR-head tooling. Repository administrators
+must select `ui/full-source-count` as a required status if they want it to be a
+merge requirement; this implementation does not modify repository rulesets.
+The existing changed-file design checks are neither removed nor relaxed.
+
+### Deliberately refreshing or lowering the ceiling
+
+No scan automatically updates its allowed count. A maintainer first inspects
+the observations, scope/provenance and policy changes, then prepares a new
+source snapshot and explicitly refreshes the two files:
+
+```powershell
+node scripts\design\baseline-ui-design.mjs --commit <reviewed-source-sha> --output docs\design\ui-source-baseline.json
+node scripts\design\ui-count-ratchet.mjs --approve-baseline --ceiling <observed-blockers-plus-advisories>
+```
+
+The second command verifies exact snapshot reproducibility and requires the
+explicit ceiling to equal the observed unsuppressed total. It permits an
+equal-count refresh or a decrease, never an increase over the existing
+allowance. Review and deliver **both** the report and allowance with any
+detector changes; stale tooling pins deliberately block rather than silently
+discarding history. A failed paired refresh leaves incompatible files that
+fail verification, not a success-shaped allowance. The command is a deliberate
+local policy edit, not evidence of human approval or permission to merge.
+
+Approval writers use an exclusive sibling `.lock` file and replace the
+allowance atomically, so concurrent refreshes cannot race the no-increase
+check. A competing writer fails explicitly. After an interrupted process,
+verify no approval writer is running before removing its stale lock and
+retrying; do not remove another writer's lock.
+
+The approved Layer 2 scope and limitations still apply: regex-only web/HTML,
+no web token policy across its missing local `DESIGN.md` boundary, only the
+narrow native target rule, and no binary/rendered/WCAG completeness claims.
+Missed known fixtures, mismatched source SHAs or demonstrable bypass by PR
+tool/config/waiver edits would falsify the gate's reasoning. Aggregate trades
+can hide an important new defect, harming assistive-technology users or farm
+operators despite a passing count. Lowering/restoring policy is reviewable
+and reversible; shipping those defects or treating the status as approval can
+have downstream harm that a restored ceiling does not undo.
+
 CI uses shared detector exceptions, not a developer's local overrides. Shared
 config accepts `detector.ignoreValues` with a file glob and a nonempty reason;
 project-wide `ignoreRules` and whole-file `ignoreFiles` fail with guidance.

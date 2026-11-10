@@ -31,8 +31,12 @@ The mobile app is not a second web console.
   printed-part stock and quantity adjustments remain a secondary toolbar entry,
   not a fourth tab.
 - **Scan**: a floating button above the tab bar on every tab. The shared
-  scanner reads barcode/QR and NFC printer and spool tags. Existing barcode
-  intake and tagged-spool creation flows are reused.
+  scanner handles spools only: spool QR/NFC tags and labels for an existing
+  spool open it, NFC tags carrying new-spool data start spool creation, and
+  valid GTIN-8/12/13/14 product barcodes open barcode intake. An unknown
+  product barcode is mapped to a filament (persisted as that filament's
+  Spoolman GTIN) before a spool is imported. Printer, bin and part codes are
+  reported as unrecognized.
 - **Account avatar**: notifications, Settings, Servers and offline activity.
 
 iPhone has exactly three tabs: Farm, Queue and Filament. Regular-width iPad

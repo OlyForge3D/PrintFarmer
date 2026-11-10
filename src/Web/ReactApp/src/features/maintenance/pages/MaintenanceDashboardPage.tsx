@@ -10,8 +10,8 @@
  *   Inventory  — Spare parts, consumables, replacement tracking
  */
 
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useContext, useEffect, useState } from 'react';
+import { UNSAFE_DataRouterContext, useBlocker, useNavigate, useSearchParams } from 'react-router';
 import { format } from 'date-fns';
 import './MaintenanceDashboardPage.css';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -50,6 +50,27 @@ import { MaintenanceCostAnalysis } from '../components/MaintenanceCostAnalysis';
 import { PrinterUptimeChart } from '../components/PrinterUptimeChart';
 import { MaintenanceReport } from '../components/MaintenanceReport';
 import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+
+function MaintenanceDraftGuard({ dirty }: { dirty: boolean }) {
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && (currentLocation.pathname !== nextLocation.pathname
+      || new URLSearchParams(nextLocation.search).get('tab') !== 'settings'));
+  return (
+    <ConfirmationModal
+      isOpen={blocker.state === 'blocked'}
+      title="Unsaved Changes"
+      message="Stay here to keep your maintenance settings edits, or discard them and leave."
+      cancelButtonText="Stay"
+      confirmButtonText="Discard Changes"
+      onCancel={() => blocker.state === 'blocked' && blocker.reset()}
+      onConfirm={() => blocker.state === 'blocked' && blocker.proceed()}
+      isDangerous
+    />
+  );
+}
 
 // ──────────────────────── Summary Stat Card ────────────────────────
 
@@ -78,23 +99,71 @@ function SummaryStat({ label, value, accent = 'default' }: SummaryStatProps) {
 
 // ──────────────────────── Main Page ────────────────────────
 
-const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytics'] as const;
+const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytics', 'settings'] as const;
 type MainTabId = (typeof MAIN_TAB_IDS)[number];
 
 export function MaintenanceDashboardPage() {
+  const { hasPermission } = useAuth();
+  return hasPermission('maintenance', 'admin')
+    ? <MaintenanceOperationsPage />
+    : <MaintenanceSettingsOnlyPage />;
+}
+
+function MaintenanceSettingsOnlyPage() {
+  const { hasPermission } = useAuth();
+  const canEditSettings = hasPermission('system_settings', 'admin');
+  const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
+  const [dirty, setDirty] = useState(false);
+  const parent = useAdminHubParent();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (canEditSettings && searchParams.get('tab') !== 'settings') {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'settings');
+        return next;
+      }, { replace: true });
+    }
+  }, [canEditSettings, searchParams, setSearchParams]);
+  return (
+    <PageTemplate title="Maintenance" subtitle="Farm-wide maintenance settings" icon={WrenchIcon} parent={parent}>
+      {canEditSettings ? (
+        <>
+          <h2 className="mb-4 text-lg font-semibold text-pf-text-primary">Settings</h2>
+          <SettingsPage pageKey="maintenance.settings" onDirtyChange={setDirty} introText="Configure maintenance alerts and print statistics synchronization." />
+          {isDataRouter && <MaintenanceDraftGuard dirty={dirty} />}
+        </>
+      ) : <p role="alert">You don't have permission to view maintenance.</p>}
+    </PageTemplate>
+  );
+}
+
+function MaintenanceOperationsPage() {
+  const { hasPermission } = useAuth();
+  const canEditSettings = hasPermission('system_settings', 'admin');
+  const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
   const adminHubParent = useAdminHubParent();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const activeMainTab: MainTabId = MAIN_TAB_IDS.includes(tabParam as MainTabId)
+  const activeMainTab: MainTabId = MAIN_TAB_IDS.includes(tabParam as MainTabId) && (tabParam !== 'settings' || canEditSettings)
     ? (tabParam as MainTabId)
     : 'dashboard';
-  const handleMainTabChange = (tabId: string) => {
+  const commitMainTabChange = (tabId: string) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('tab', tabId);
       return next;
     });
+  };
+  const handleMainTabChange = (tabId: string) => {
+    if (!isDataRouter && settingsDirty && tabId !== 'settings') {
+      setPendingTab(tabId);
+      return;
+    }
+    commitMainTabChange(tabId);
   };
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedDayTasks, setSelectedDayTasks] = useState<UpcomingMaintenanceTask[]>([]);
@@ -196,7 +265,7 @@ export function MaintenanceDashboardPage() {
 
       {/* ═══════════════════ Main Tabs ═══════════════════ */}
       <Tabs activeTab={activeMainTab} onTabChange={handleMainTabChange} className="space-y-0">
-        <Tabs.List className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
+        <Tabs.List aria-label="Maintenance sections" className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
           <Tabs.Tab id="dashboard" icon={<WrenchIcon className="h-4 w-4" />}>
             Dashboard
           </Tabs.Tab>
@@ -217,9 +286,15 @@ export function MaintenanceDashboardPage() {
           <Tabs.Tab id="analytics" icon={<ChartIcon className="h-4 w-4" />}>
             Analytics
           </Tabs.Tab>
+          {canEditSettings && <Tabs.Tab id="settings">Settings</Tabs.Tab>}
         </Tabs.List>
 
         <Tabs.Panels>
+          {canEditSettings && (
+            <Tabs.Panel id="settings">
+              <SettingsPage pageKey="maintenance.settings" onDirtyChange={setSettingsDirty} introText="Configure maintenance alerts and print statistics synchronization." />
+            </Tabs.Panel>
+          )}
           {/* ─────────── Dashboard Tab ─────────── */}
           <Tabs.Panel id="dashboard">
             <div className="space-y-8 mt-6">
@@ -530,6 +605,21 @@ export function MaintenanceDashboardPage() {
           </Tabs.Panel>
         </Tabs.Panels>
       </Tabs>
+
+      {isDataRouter && <MaintenanceDraftGuard dirty={settingsDirty} />}
+      <ConfirmationModal
+        isOpen={pendingTab !== null}
+        title="Unsaved Changes"
+        message="Stay here to keep your maintenance settings edits, or discard them and leave."
+        cancelButtonText="Stay"
+        confirmButtonText="Discard Changes"
+        onCancel={() => setPendingTab(null)}
+        onConfirm={() => {
+          if (pendingTab) commitMainTabChange(pendingTab);
+          setPendingTab(null);
+        }}
+        isDangerous
+      />
 
       {/* Error Display */}
       {(statsError || alertsError || tasksError || componentsError) && (

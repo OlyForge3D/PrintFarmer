@@ -148,7 +148,7 @@ struct ContentView: View {
         .background(Color.pfAccentBg, in: Capsule())
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
         .accessibilityLabel("Scan")
-        .accessibilityHint("Opens barcode and NFC scanning for printers and spools.")
+        .accessibilityHint("Opens barcode and NFC scanning for spools.")
         .accessibilityIdentifier("navigation.scan")
         .dynamicTypeSize(dynamicTypeSize.isAccessibilitySize ? .xxxLarge : dynamicTypeSize)
     }
