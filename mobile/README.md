@@ -48,6 +48,22 @@ Visual-acceptance fixture images are included only in Debug builds.
 
 4. Build and run on a simulator or device (iOS 17+).
 
+## NFC spool tags
+
+The app reads the physical NFC UID first and resolves it through the connected
+PrintFarmer server and Spoolman. A linked spool opens directly. A tag linked to
+a filament opens spool intake for that filament; an unlinked tag can be linked
+to an existing spool or to a newly created spool after confirmation. A failed
+UID lookup is surfaced as an error, not treated as an unknown tag.
+
+OpenPrintTag writes use the `application/vnd.openprinttag` NDEF MIME record with
+CBOR payload on NFC-V/ISO15693 tags. PrintFarmer verifies the written NDEF
+message before registering the UID in Spoolman, so a link failure reports
+partial success rather than claiming the tag was registered. The app preserves
+legacy OpenSpool and prior PrintFarmer tag reads. ISO15693 UIDs use the
+uppercase E0-first bytes returned by CoreNFC; UID identity is independent of
+NDEF payload data.
+
 ## Testing
 
 The iOS CI matrix selects shipping Login, three-tab shell, Scan, harvest,

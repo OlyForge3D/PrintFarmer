@@ -885,6 +885,7 @@ final class ServiceContainer: @unchecked Sendable {
              .serverUnreachable,
              .invalidResponse,
              .serverError,
+             .serverErrorMessage,
              .transportError,
              .decodingFailed,
              .staleServerResponse:

@@ -23,6 +23,7 @@ final class ScanViewModel {
         /// A structured spool link or ID whose spool is absent from the
         /// active server. It offers manual creation only, never GTIN intake.
         case missingSpool(id: Int, code: String)
+        case unknownNFCTag(ScannedNFCTag, ScannedSpoolData?)
 
         var id: String {
             switch self {
@@ -30,6 +31,7 @@ final class ScanViewModel {
             case .missingSpool(let id, _): "missing-spool-\(id)"
             case .newSpool: "new-spool"
             case .addSpoolManually(let code): "manual-\(code)"
+            case .unknownNFCTag(let tag, _): "nfc-\(tag.uid)"
             }
         }
     }
@@ -135,12 +137,80 @@ final class ScanViewModel {
                 await routeToSpoolIfExists(id: id, code: "Spool #\(id)", subtitle: "Spool #\(id)")
             case .newSpoolData(let data):
                 pendingOutcome = .newSpool(data)
+            case .nfcTag(let tag):
+                await resolveNFCTag(tag)
             case .cancelled:
                 break
             case .error(let error):
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func resolveNFCTag(_ tag: ScannedNFCTag) async {
+        guard let spoolService else {
+            errorMessage = "Spool service not available"
+            return
+        }
+        do {
+            let response = try await spoolService.scanTag(
+                uid: tag.uid,
+                format: tag.openPrintTagPayload == nil ? nil : "openprinttag",
+                payloadB64: tag.openPrintTagPayload?.base64EncodedString()
+            )
+            guard isViewActive else { return }
+            if let spoolID = response.matchedSpoolId {
+                await routeToSpoolIfExists(id: spoolID, subtitle: "NFC-linked spool #\(spoolID)")
+                return
+            }
+            if let responseFilament = response.filament {
+                let data = ScannedSpoolData(
+                    material: responseFilament.material,
+                    colorHex: responseFilament.colorHex,
+                    vendor: responseFilament.vendor,
+                    weight: responseFilament.weight,
+                    diameter: responseFilament.diameter,
+                    temperature: responseFilament.settingsExtruderTemp,
+                    spoolmanId: nil,
+                    filamentId: response.matchedFilamentId ?? responseFilament.id
+                )
+                recordRecentScan(icon: "wave.3.right", title: "Filament NFC tag", subtitle: tag.uid)
+                pendingOutcome = .newSpool(data)
+                return
+            }
+            if response.matchedFilamentId != nil {
+                errorMessage = "Spoolman matched this tag to a filament but returned no filament details."
+                return
+            }
+            if let data = tag.openPrintTagPayload.flatMap(NFCTagParser.parseOpenPrintTag) {
+                recordRecentScan(icon: "wave.3.right", title: "Unlinked NFC tag", subtitle: tag.uid)
+                pendingOutcome = .unknownNFCTag(tag, data)
+                return
+            }
+            if let legacy = tag.legacyContent {
+                switch legacy {
+                case .spoolId(let id):
+                    await routeToSpoolIfExists(id: id, subtitle: "NFC spool #\(id)")
+                case .printerId:
+                    errorMessage = Self.notSpoolTagMessage
+                case .newSpoolData(let data):
+                    pendingOutcome = .unknownNFCTag(tag, data)
+                }
+                return
+            }
+            recordRecentScan(icon: "wave.3.right", title: "Unlinked NFC tag", subtitle: tag.uid)
+            pendingOutcome = .unknownNFCTag(tag, nil)
+        } catch {
+            guard isViewActive else { return }
+            logger.warning("NFC tag lookup failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func completeNFCTagLink(to spool: SpoolmanSpool) {
+        recordRecentScan(icon: "wave.3.right", title: "NFC tag linked", subtitle: "Spool #\(spool.id)")
+        pendingOutcome = nil
+        pendingDeepLinkDestination = .spoolDetail(id: spool.id)
     }
 
     private var isAwaitingResultAcknowledgment: Bool {
@@ -334,14 +404,18 @@ final class ScanViewModel {
     /// server before routing to `.spoolDetail` — such a payload NEVER falls
     /// back to raw barcode registration; it either routes or surfaces an
     /// explicit error.
-    private func routeToSpoolIfExists(id: Int, code: String, subtitle: String) async {
+    /// NFC callers pass no `code`: a stale NFC link keeps its explicit error
+    /// rather than offering barcode-driven spool creation.
+    private func routeToSpoolIfExists(id: Int, code: String? = nil, subtitle: String) async {
         guard let exists = await existingSpoolLookup(id: id) else { return }
         if exists {
             recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
             pendingDeepLinkDestination = .spoolDetail(id: id)
-        } else {
+        } else if let code {
             recordRecentScan(icon: "questionmark.circle", title: "Spool not found", subtitle: subtitle)
             pendingOutcome = .missingSpool(id: id, code: code)
+        } else {
+            errorMessage = "Spool #\(id) was not found on this server."
         }
     }
 
