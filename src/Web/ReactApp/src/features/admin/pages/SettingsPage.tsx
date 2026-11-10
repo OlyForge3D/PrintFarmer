@@ -731,6 +731,7 @@ function GroupSaveBlock({
                     error={sectionErrors[meta.key]}
                     compact
                     searchQuery={query}
+                    fieldRenderers={renderer?.fieldRenderers}
                   />
                   {extensionRender && (
                     <div className="px-4 pt-2">

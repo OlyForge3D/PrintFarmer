@@ -52,7 +52,12 @@ for (const viewport of [
     await page.goto('/admin/settings?tab=identity&sub=details');
     await expect(page.getByRole('heading', { name: 'Farm Identity', exact: true }).first()).toBeVisible();
     await page.getByLabel('Farm name', { exact: false }).fill('Workshop North');
-    await page.getByLabel('Farm timezone', { exact: false }).fill('America/Los_Angeles');
+    await page.getByRole('searchbox', { name: 'Filter timezones' }).fill('Los Angeles');
+    const timezone = page.getByRole('combobox', { name: 'Farm timezone' });
+    await timezone.focus();
+    await timezone.press('End');
+    await timezone.press('Tab');
+    await expect(timezone).toHaveValue('America/Los_Angeles');
     await page.getByRole('button', { name: /save/i }).click();
     const header = page.locator('header:visible').first();
     await expect(header.getByText('Workshop North', { exact: true })).toBeVisible();
@@ -68,6 +73,16 @@ for (const viewport of [
     expect(errors).toEqual([]);
     expect(violations).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`farm-identity-${viewport.width}.png`), fullPage: true });
+
+    await page.getByRole('button', { name: 'Enter timezone manually' }).click();
+    await page.getByRole('textbox', { name: 'Farm timezone' }).fill('US/Pacific');
+    await page.getByRole('button', { name: 'Choose from timezone list' }).click();
+    await expect(timezone).toHaveValue('US/Pacific');
+    await page.getByRole('button', { name: /save/i }).click();
+    await expect(header.getByLabel('Farm time: 03:00 GMT-7 (US/Pacific)', { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Farm timezone' })).toHaveValue('US/Pacific');
+    expect(identity.timeZone).toBe('US/Pacific');
 
     await page.goto('/admin');
     const identityCard = page.getByRole('link', { name: /Farm Identity/ }).first();
