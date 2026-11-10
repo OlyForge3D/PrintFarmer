@@ -354,7 +354,8 @@ export function resolveSettingsNavigationTarget(
   if (targetCat === 'general' || targetCat === 'farm' || targetCat === 'automation') {
     const sectionKey = field?.split('.')[0];
     const fieldLocation = sectionKey ? getSettingsSectionLocation(sectionKey, '') : undefined;
-    targetCat = fieldLocation?.categoryId ?? (targetCat === 'farm' || targetSub === 'farm' ? 'costs' : targetSub === 'system' ? 'system' : 'planning');
+    targetCat = fieldLocation?.categoryId ?? (targetSub === 'system' ? 'system'
+      : targetCat === 'automation' || targetSub === 'automation' ? 'planning' : 'costs');
     targetSub = fieldLocation?.subPageId;
   } else if (targetCat === 'hardware' && targetSub === 'nfc-bindings') {
     targetSub = 'nfc';

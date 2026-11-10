@@ -110,6 +110,10 @@ management, with their existing `system_settings:admin` grant. Single-page
 destinations have no decorative sub-tab. Search, palette links and pins use the
 same section placement map as the editors.
 
+The existing Maintenance card is also visible to settings-only delegates. For
+those users it opens only the Settings editor and does not mount operational
+panels or fetch maintenance records; operational APIs retain `maintenance:admin`.
+
 The farm identity/timezone feature is separate. This regrouping does not change
 persisted keys, API payloads, scheduling timezone semantics or cost calculations.
 Costs & Energy replaces the duplicate Farm Defaults form. Power Monitors shows
@@ -773,6 +777,9 @@ a route rename.
 query parameters are retained. Existing pinned destination IDs are preserved
 or migrated, with duplicates removed. New internal callers must still emit
 canonical URLs; this is not a general redirect registry.
+Bare General links retain the old Farm Defaults landing via Costs & Energy;
+an explicitly selected old Automation page falls back to Planning when no
+section-qualified field identifies a more specific destination.
 
 The settings and admin shell routes are:
 

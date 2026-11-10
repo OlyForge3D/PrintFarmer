@@ -147,6 +147,10 @@ describe('resolveSettingsNavigationTarget', () => {
       scopeId: 'system',
       categoryId: 'costs',
     });
+    expect(resolveSettingsNavigationTarget('general', undefined, 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'costs',
+    });
     expect(resolveSettingsNavigationTarget('general', 'system', 'system')).toEqual({
       scopeId: 'system',
       categoryId: 'system',

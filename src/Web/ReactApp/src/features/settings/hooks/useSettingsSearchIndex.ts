@@ -107,8 +107,7 @@ export function useSettingsSearchIndex(options: UseSettingsSearchIndexOptions): 
     }
     return buildSettingCommandItems(metadataQuery.data, groupsQuery.data)
       .filter((item) => item.categoryId === 'maintenance'
-        ? hasPermission('maintenance', 'admin')
-        : canAccessSettingsTab(item.categoryId, item.subPageId, destinationAccess));
+        || canAccessSettingsTab(item.categoryId, item.subPageId, destinationAccess));
   }, [user, hasPermission, metadataQuery.data, groupsQuery.data, destinationAccess]);
 
   const items = useMemo<SettingsCommandItem[]>(

@@ -10,7 +10,7 @@
  *   Inventory  — Spare parts, consumables, replacement tracking
  */
 
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { UNSAFE_DataRouterContext, useBlocker, useNavigate, useSearchParams } from 'react-router';
 import { format } from 'date-fns';
 import './MaintenanceDashboardPage.css';
@@ -103,6 +103,42 @@ const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytic
 type MainTabId = (typeof MAIN_TAB_IDS)[number];
 
 export function MaintenanceDashboardPage() {
+  const { hasPermission } = useAuth();
+  return hasPermission('maintenance', 'admin')
+    ? <MaintenanceOperationsPage />
+    : <MaintenanceSettingsOnlyPage />;
+}
+
+function MaintenanceSettingsOnlyPage() {
+  const { hasPermission } = useAuth();
+  const canEditSettings = hasPermission('system_settings', 'admin');
+  const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
+  const [dirty, setDirty] = useState(false);
+  const parent = useAdminHubParent();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (canEditSettings && searchParams.get('tab') !== 'settings') {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'settings');
+        return next;
+      }, { replace: true });
+    }
+  }, [canEditSettings, searchParams, setSearchParams]);
+  return (
+    <PageTemplate title="Maintenance" subtitle="Farm-wide maintenance settings" icon={WrenchIcon} parent={parent}>
+      {canEditSettings ? (
+        <>
+          <h2 className="mb-4 text-lg font-semibold text-pf-text-primary">Settings</h2>
+          <SettingsPage pageKey="maintenance.settings" onDirtyChange={setDirty} introText="Configure maintenance alerts and print statistics synchronization." />
+          {isDataRouter && <MaintenanceDraftGuard dirty={dirty} />}
+        </>
+      ) : <p role="alert">You don't have permission to view maintenance.</p>}
+    </PageTemplate>
+  );
+}
+
+function MaintenanceOperationsPage() {
   const { hasPermission } = useAuth();
   const canEditSettings = hasPermission('system_settings', 'admin');
   const isDataRouter = useContext(UNSAFE_DataRouterContext) !== null;
@@ -234,7 +270,7 @@ export function MaintenanceDashboardPage() {
 
       {/* ═══════════════════ Main Tabs ═══════════════════ */}
       <Tabs activeTab={activeMainTab} onTabChange={handleMainTabChange} className="space-y-0">
-        <Tabs.List className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
+        <Tabs.List aria-label="Maintenance sections" className="border-b border-pf-border bg-pf-bg-1 -mx-4 px-4 mb-0 overflow-x-auto">
           <Tabs.Tab id="dashboard" icon={<WrenchIcon className="h-4 w-4" />}>
             Dashboard
           </Tabs.Tab>

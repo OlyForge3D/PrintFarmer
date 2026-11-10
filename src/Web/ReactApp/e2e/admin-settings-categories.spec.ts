@@ -208,6 +208,9 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     ]) {
       test(`${surface.id} retains its dedicated editor`, async ({ page }, testInfo) => {
         const requests = await mountRoutedToolbarPage(page, surface.path, seeds);
+        if (surface.id === 'maintenance') {
+          await expect(page.getByRole('tab', { name: 'Settings', exact: true })).toBeInViewport({ ratio: 1 });
+        }
         if (surface.id === 'auto-tagging' || surface.id === 'maintenance') {
           await page.getByRole('radio', { name: /Everything:/ }).click();
         }
@@ -227,6 +230,101 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
         expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
       });
     }
+
+    test('legacy pins resolve in the real navbar without duplicate destinations', async ({ page }, testInfo) => {
+      await page.addInitScript(() => {
+        localStorage.setItem('pf_nav_preferences_v1:toolbar-fixture-user', JSON.stringify({
+          version: 1, orderedItemIds: [], hiddenItemIds: [], pinnedItemIds: [],
+          adminPinnedItemIds: ['gen-farm', 'auto-costs', 'hw-nfc-bindings', 'hw-nfc'],
+        }));
+      });
+      const requests = await mountRoutedToolbarPage(page, '/admin', seeds);
+      await expect(page.getByRole('heading', { level: 1, name: 'Admin Control Center' })).toBeVisible();
+      if (viewport.width === 390) {
+        await page.getByRole('button', { name: 'Open navigation menu' }).click();
+      }
+      const admin = page.getByRole('region', { name: 'Admin', exact: true });
+      await expect(admin.getByRole('link', { name: 'Costs & Energy', exact: true })).toHaveCount(1);
+      await expect(admin.getByRole('link', { name: 'Costs & Energy', exact: true })).toHaveAttribute('href', '/admin/settings?tab=costs');
+      await expect(admin.getByRole('link', { name: 'NFC', exact: true })).toHaveCount(1);
+      await expect(admin.getByRole('link', { name: 'NFC', exact: true })).toHaveAttribute('href', '/admin/settings?tab=hardware&sub=nfc');
+      await admin.scrollIntoViewIfNeeded();
+      const screenshot = testInfo.outputPath('migrated-pins.png');
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await testInfo.attach('Migrated navbar pins', { path: screenshot, contentType: 'image/png' });
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
+
+    test('a settings delegate can discover maintenance fields in workspace and palette', async ({ page }, testInfo) => {
+      const operationalRequests: string[] = [];
+      page.on('request', request => {
+        if (new URL(request.url()).pathname.startsWith('/api/maintenance/')) operationalRequests.push(request.url());
+      });
+      const requests = await mountRoutedToolbarPage(page, '/admin', {
+        ...seeds,
+        '/api/auth/me': { ...toolbarRouteUser, roles: ['farm_user'], permissions: ['system_settings:admin'] },
+      });
+      await page.locator('main a[href="/maintenance"]').click();
+      await expect(page).toHaveURL(/\/maintenance\?tab=settings/);
+      await expect(page.getByRole('heading', { level: 2, name: 'Settings', exact: true })).toBeVisible();
+      await expect(page.getByRole('tab', { name: /Dashboard/ })).toHaveCount(0);
+      const settingsScreenshot = testInfo.outputPath('delegated-maintenance.png');
+      await page.screenshot({ path: settingsScreenshot, fullPage: true });
+      await testInfo.attach('Delegated maintenance settings only', { path: settingsScreenshot, contentType: 'image/png' });
+      await page.goto('/admin/settings?scope=system&tab=system');
+      await page.getByRole('combobox', { name: 'Search all settings' }).fill('Enable maintenance alerts');
+      await expect(page.getByRole('option').filter({ hasText: 'Enable maintenance alerts' })).toBeVisible();
+      const workspaceScreenshot = testInfo.outputPath('delegated-maintenance-search.png');
+      await page.screenshot({ path: workspaceScreenshot, fullPage: true });
+      await testInfo.attach('Delegated maintenance workspace search', { path: workspaceScreenshot, contentType: 'image/png' });
+      await page.keyboard.press('Control+k');
+      await page.getByLabel('Search settings command palette').fill('Enable statistics synchronization');
+      const field = page.getByRole('option').filter({ hasText: 'Enable statistics synchronization' });
+      await expect(field).toBeVisible();
+      const paletteScreenshot = testInfo.outputPath('delegated-maintenance-palette.png');
+      await page.screenshot({ path: paletteScreenshot, fullPage: true });
+      await testInfo.attach('Delegated maintenance palette', { path: paletteScreenshot, contentType: 'image/png' });
+      await field.click();
+      await expect(page).toHaveURL(/\/maintenance\?tab=settings&field=PrintStatisticsSync.enabled/);
+      await expect(page.getByText('Enable statistics synchronization')).toBeVisible();
+      expect(operationalRequests).toEqual([]);
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
+
+    test('provider details appear once outside attention and active summaries', async ({ page }, testInfo) => {
+      const requests = await mountRoutedToolbarPage(page, '/admin/settings?scope=system&tab=failure-detection', {
+        ...seeds,
+        '/api/failure-detection/status': {
+          monitoringEnabled: true, confidenceThreshold: 0.8, scanIntervalSeconds: 30,
+          configuredPrinterCount: 2, activelyMonitoredPrinterCount: 1,
+          lastAnalyzedPrinterCount: 1, lastFailureCount: 0,
+          printers: [
+            {
+              printerId: 'attention', printerName: 'Fixture attention printer', state: 'misconfigured',
+              reason: 'Snapshot configuration needs attention.', isPrinting: false,
+              detectionSource: 'global', lastOutcome: 'none',
+              providers: [{ provider: 'PrintGuard', state: 'misconfigured', analysisMode: 'Shadow', reason: 'Provider camera not configured.', lastOutcome: 'none' }],
+            },
+            {
+              printerId: 'healthy', printerName: 'Fixture active printer', state: 'monitoring',
+              reason: 'Monitoring configured.', isPrinting: true,
+              detectionSource: 'global', lastOutcome: 'healthy',
+              providers: [{ provider: 'PrintGuard', state: 'monitoring', analysisMode: 'Shadow', reason: 'Provider analysis active.', lastOutcome: 'healthy' }],
+            },
+          ],
+        },
+      });
+      const providers = page.getByRole('region', { name: 'Detection provider status' });
+      await expect(providers.getByText('Fixture attention printer')).toBeVisible();
+      await expect(providers.getByText('Fixture active printer')).toBeVisible();
+      await expect(page.getByText('Provider camera not configured.', { exact: false })).toHaveCount(1);
+      await expect(page.getByText('Provider analysis active.', { exact: false })).toHaveCount(1);
+      await providers.scrollIntoViewIfNeeded();
+      const screenshot = testInfo.outputPath('detection-providers.png');
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await testInfo.attach('Populated provider runtime', { path: screenshot, contentType: 'image/png' });
+      expect(requests).toEqual({ unhandled: [], writes: [], external: [], errors: [] });
+    });
 
     test('a sole-permitted integration leaf has keyboard recovery from a denied link', async ({ page }, testInfo) => {
       const requests = await mountRoutedToolbarPage(

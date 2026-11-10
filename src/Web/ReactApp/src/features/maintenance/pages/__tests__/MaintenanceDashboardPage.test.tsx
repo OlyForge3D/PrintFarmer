@@ -5,9 +5,9 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router';
 
-const access = vi.hoisted(() => ({ settings: true }));
+const access = vi.hoisted(() => ({ settings: true, maintenance: true }));
 vi.mock('@/features/auth/hooks/useAuth', () => ({
-  useAuth: () => ({ hasPermission: () => access.settings }),
+  useAuth: () => ({ hasPermission: (resource: string) => resource === 'maintenance' ? access.maintenance : access.settings }),
 }));
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: ({ pageKey, onDirtyChange }: { pageKey: string; onDirtyChange: (dirty: boolean) => void }) => (
@@ -132,11 +132,21 @@ describe('MaintenanceDashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     access.settings = true;
+    access.maintenance = true;
   });
 
   it('renders only maintenance metadata on the settings tab', () => {
     renderWithRouter('/maintenance?tab=settings');
     expect(screen.getByTestId('maintenance-settings')).toHaveAttribute('data-page-key', 'maintenance.settings');
+  });
+
+  it('keeps system-settings-only delegates out of operational panels and selects the settings route', () => {
+    access.maintenance = false;
+    renderWithRouter('/maintenance?field=MaintenanceAlerts.enabled');
+    expect(screen.getByTestId('maintenance-settings')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fleet-overview-content')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('field=MaintenanceAlerts.enabled&tab=settings');
   });
 
   it('does not expose metadata editing without the separate settings permission', () => {

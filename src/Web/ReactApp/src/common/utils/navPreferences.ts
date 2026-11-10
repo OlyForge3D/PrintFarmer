@@ -172,8 +172,7 @@ export function normalizeNavPreferences(
     hiddenItemIds: uniqueKnownIds(preferences?.hiddenItemIds ?? [], knownIds),
     pinnedItemIds: uniqueKnownIds(preferences?.pinnedItemIds ?? [], knownIds),
     ...(Array.isArray(preferences?.adminPinnedItemIds)
-      ? { adminPinnedItemIds: uniqueStringIds(preferences.adminPinnedItemIds.map((id) =>
-        typeof id === 'string' ? ADMIN_PIN_MIGRATIONS[id] ?? id : id)) }
+      ? { adminPinnedItemIds: getAdminPinnedItemIds(preferences) }
       : {}),
   }, items);
 }
@@ -334,7 +333,10 @@ export function setNavItemPinned(preferences: NavPreferences, itemId: string, pi
 }
 
 export function getAdminPinnedItemIds(preferences?: Partial<NavPreferences> | null): string[] {
-  return Array.isArray(preferences?.adminPinnedItemIds) ? uniqueStringIds(preferences.adminPinnedItemIds) : [];
+  return Array.isArray(preferences?.adminPinnedItemIds)
+    ? uniqueStringIds(preferences.adminPinnedItemIds.map((id) =>
+      typeof id === 'string' ? ADMIN_PIN_MIGRATIONS[id] ?? id : id))
+    : [];
 }
 
 export function setAdminNavItemPinned(preferences: NavPreferences, destinationId: string, pinned: boolean): NavPreferences {

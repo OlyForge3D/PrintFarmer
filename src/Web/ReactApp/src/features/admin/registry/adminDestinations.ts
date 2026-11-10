@@ -247,10 +247,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/maintenance',
     icon: WrenchIcon,
     group: 'operations',
-    // MaintenanceController is class-level `[RequirePermission("maintenance", "admin")]`
-    // for every endpoint, including reads.
+    // The page isolates system-settings delegates from maintenance operational reads.
     requiredRole: null,
-    requiredPermission: { resource: 'maintenance', action: 'admin' },
+    requiredPermissionAnyOf: [{ resource: 'maintenance', action: 'admin' }, { resource: 'system_settings', action: 'admin' }],
     keywords: ['maintenance', 'schedule', 'task', 'reminder', 'service'],
     isHubTile: true,
   },
@@ -570,7 +569,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     // Rendered from the generic settings-class editor backed by
     // UnifiedSettingsController, `[RequirePermission("system_settings", "admin")]`.
     requiredRole: null,
-    requiredPermissionAnyOf: [{ resource: 'system_settings', action: 'admin' }, { resource: 'obico', action: 'manage' }],
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['failure', 'detection', 'obico', 'printguard', 'monitoring'],
     isHubTile: true,
   },
