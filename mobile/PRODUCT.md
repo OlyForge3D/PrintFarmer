@@ -48,9 +48,11 @@ The mobile app is not a second web console.
   A number that is neither a GTIN nor an existing spool ID, an app link that is
   not a spool, or a code longer than 128 characters is reported as
   unrecognized with an **Add Spool** action that opens manual spool creation.
-  A spool link, ID or NFC tag for a spool that
-  is not on the server shows **Spool Not Found** with the same **Add Spool**
-  action (manual creation only). An existing spool ID wins over a GTIN
+  A spool link or ID for a spool that is not on the server shows **Spool Not
+  Found** with the same **Add Spool** action (manual creation only). An NFC
+  tag pointing to a missing spool opens **Link NFC Tag** to relink it to an
+  existing spool or create one; it never enters Barcode Intake. An existing
+  spool ID wins over a GTIN
   mapping with the same digits. A scan never dead-ends.
 - **Account avatar**: notifications, Settings, Servers and offline activity.
 

@@ -22,7 +22,7 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testNFCLinkToMissingSpoolKeepsExplicitErrorInsteadOfBarcodeIntake() async {
+    func testNFCLinkToMissingSpoolOffersRelinkInsteadOfDeadEndOrBarcodeIntake() async {
         let (viewModel, barcodeService, spoolService) = makeSubject()
         spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
         spoolService.tagScanToReturn = SpoolmanTagScanResponse(
@@ -32,19 +32,101 @@ final class ScanViewModelTests: XCTestCase {
             filament: nil,
             created: false
         )
-        let tag = ScannedNFCTag(
-            uid: "E0040108662F6FBC",
-            technology: .iso15693,
-            openPrintTagPayload: nil,
-            legacyContent: nil
-        )
+        let tag = makeTag()
 
         await runNFCScan(.nfcTag(tag), viewModel: viewModel)
 
-        XCTAssertEqual(viewModel.errorMessage, "Spool #77 was not found on this server.")
-        XCTAssertNil(viewModel.pendingOutcome, "a stale NFC link never becomes barcode-driven creation")
+        guard case .staleNFCLink(let staleTag, let spoolID) = viewModel.pendingOutcome else {
+            return XCTFail("A stale NFC link must offer relinking, not dead-end")
+        }
+        XCTAssertEqual(staleTag.uid, tag.uid)
+        XCTAssertEqual(spoolID, 77)
+        XCTAssertNil(viewModel.errorMessage)
         XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "an NFC UID never enters Barcode Intake")
         XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
+        XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty)
+        XCTAssertNil(spoolService.linkedTag, "nothing is relinked until the user chooses")
+    }
+
+    @MainActor
+    func testLegacyNFCSpoolContentForMissingSpoolOffersRelink() async {
+        let (viewModel, barcodeService, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: nil,
+            matchedFilamentId: nil,
+            spool: nil,
+            filament: nil,
+            created: false
+        )
+        let tag = makeTag(legacyContent: .spoolId(12))
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        guard case .staleNFCLink(let staleTag, 12) = viewModel.pendingOutcome else {
+            return XCTFail("Legacy NFC spool content for an absent spool must offer relinking")
+        }
+        XCTAssertEqual(staleTag.uid, tag.uid)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
+    }
+
+    @MainActor
+    func testNFCLinkCompletionNavigatesWhileItsResultIsActive() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: 77, matchedFilamentId: nil, spool: nil, filament: nil, created: false
+        )
+        let tag = makeTag()
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        viewModel.completeNFCTagLink(uid: tag.uid, to: makeSpool(id: 5))
+
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertEqual(viewModel.pendingDeepLinkDestination, .spoolDetail(id: 5))
+        XCTAssertEqual(viewModel.recentScans.first?.title, "NFC tag linked")
+    }
+
+    @MainActor
+    func testNFCLinkCompletionAfterCancelIsIgnored() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: 77, matchedFilamentId: nil, spool: nil, filament: nil, created: false
+        )
+        let tag = makeTag()
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+        let recentCount = viewModel.recentScans.count
+
+        // The sheet's binding clears the outcome when the user cancels.
+        viewModel.pendingOutcome = nil
+        viewModel.resultPresentationDidDismiss()
+        viewModel.completeNFCTagLink(uid: tag.uid, to: makeSpool(id: 5))
+
+        XCTAssertNil(viewModel.pendingDeepLinkDestination, "a late link never navigates after Cancel")
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertEqual(viewModel.recentScans.count, recentCount)
+    }
+
+    @MainActor
+    func testLateNFCLinkCompletionNeverReplacesANewerResult() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [], totalCount: 0)
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: 77, matchedFilamentId: nil, spool: nil, filament: nil, created: false
+        )
+        let tag = makeTag()
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+        viewModel.pendingOutcome = nil
+        viewModel.resultPresentationDidDismiss()
+        await viewModel.dispatch("SPL-AB12")
+
+        viewModel.completeNFCTagLink(uid: tag.uid, to: makeSpool(id: 5))
+
+        XCTAssertEqual(viewModel.pendingOutcome?.id, "unknown-SPL-AB12")
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
     }
 
     @MainActor
@@ -1193,6 +1275,15 @@ extension ScanViewModelTests {
             density: 1.24, diameter: 1.75, weight: 1000, spoolWeight: 200, price: 25,
             settingsExtruderTemp: 215, settingsBedTemp: 60, articleNumber: nil, gtin: nil,
             comment: nil, multiColorHexes: nil, externalId: nil
+        )
+    }
+
+    private func makeTag(legacyContent: LegacyNFCTagContent? = nil) -> ScannedNFCTag {
+        ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: legacyContent
         )
     }
 

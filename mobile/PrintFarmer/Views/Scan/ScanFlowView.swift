@@ -92,7 +92,16 @@ struct ScanFlowView: View {
                                 scannedData: data,
                                 spoolService: services.spoolService
                             ) { spool in
-                                viewModel.completeNFCTagLink(to: spool)
+                                viewModel.completeNFCTagLink(uid: tag.uid, to: spool)
+                            }
+                        case .staleNFCLink(let tag, let spoolID):
+                            NFCTagLinkView(
+                                uid: tag.uid,
+                                scannedData: nil,
+                                spoolService: services.spoolService,
+                                staleSpoolID: spoolID
+                            ) { spool in
+                                viewModel.completeNFCTagLink(uid: tag.uid, to: spool)
                             }
                         }
                     }
