@@ -298,6 +298,7 @@ private struct UnknownBarcodeView: View {
                                     selectFilament(filament)
                                 } label: {
                                     filamentRow(filament)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Use filament \(filament.name ?? filament.material ?? String(filament.id))")
@@ -307,6 +308,7 @@ private struct UnknownBarcodeView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("mapBarcode.list")
             .navigationTitle(remembersCode ? "Remember Code" : "Map Barcode")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

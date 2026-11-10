@@ -140,7 +140,7 @@ public class ScanCodeAliasTests
 
         Assert.Equal(ScanCodeAliasLookupStatus.NotFound, (await afterRestart.LookupAsync("x0022z40i1", CancellationToken.None)).Status);
         Assert.Equal(ScanCodeAliasLookupStatus.NotFound, (await afterRestart.LookupAsync("X0022Z40I", CancellationToken.None)).Status);
-        Assert.Equal(ScanCodeAliasLookupStatus.NotFound, (await afterRestart.LookupAsync("00224", CancellationToken.None)).Status);
+        Assert.Equal(ScanCodeAliasLookupStatus.Invalid, (await afterRestart.LookupAsync("00224", CancellationToken.None)).Status);
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public class ScanCodeAliasTests
         _ = await database.CreateService(spoolman).SaveAsync(Fnsku, 42, null, CancellationToken.None);
 
         spoolman.Verify(s => s.SaveBarcodeMappingAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        spoolman.Verify(s => s.UpdateFilamentAsync(It.IsAny<int>(), It.IsAny<SpoolmanUpdateFilamentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        spoolman.Verify(s => s.UpdateFilamentInSpoolmanAsync(It.IsAny<int>(), It.IsAny<SpoolmanCreateFilamentRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -371,7 +371,8 @@ public class ScanCodeAliasTests
         _ = await admin.PostAsJsonAsync("/api/spoolman/code-aliases", new { code = Fnsku, filamentId = 42 });
 
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(LookupUrl("012345678905"))).StatusCode);
-        Assert.Equal(ScanCodeAliasLookupState.NotRemembered, (await LookupAsync(admin, "00224")).State);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(LookupUrl("00224"))).StatusCode);
+        Assert.Equal(42, (await LookupAsync(admin, Fnsku)).Alias!.FilamentId);
     }
 
     [Fact]

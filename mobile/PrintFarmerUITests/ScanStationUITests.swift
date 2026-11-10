@@ -70,8 +70,11 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         let showCreate = app.buttons["mapBarcode.showCreate"]
         XCTAssertTrue(showCreate.waitForExistence(timeout: 5))
         showCreate.tap()
-        XCTAssertTrue(app.buttons["mapBarcode.create"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons["mapBarcode.create"].label, "Create filament and add spool")
+        let list = app.collectionViews["mapBarcode.list"]
+        let create = app.buttons["mapBarcode.create"]
+        for _ in 0..<4 where !create.exists { list.swipeUp() }
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        XCTAssertEqual(create.label, "Create filament and add spool")
         attachScreenshot(named: "fnsku-first-scan-create-filament")
     }
 
