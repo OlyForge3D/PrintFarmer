@@ -156,6 +156,23 @@ export function FailureDetectionStatusCard() {
                         </Badge>
                       </div>
                       <div className="mt-1 text-sm text-pf-text-secondary">{printer.reason}</div>
+                      {printer.providers?.map(provider => (
+                        <div key={provider.provider} className="mt-2 text-sm text-pf-text-secondary">
+                          <span className="font-medium">{provider.provider}</span>
+                          {' - '}{provider.state} ({provider.analysisMode}): {provider.reason}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {data.printers.some(printer => printer.providers?.length) && (
+                <div className="space-y-2" aria-label="Detection provider status">
+                  {data.printers.map(printer => (
+                    <div key={printer.printerId} className="text-sm text-pf-text-secondary">
+                      {printer.printerName}: {printer.providers?.map(provider =>
+                        `${provider.provider}: ${provider.state} (${provider.analysisMode}) - ${provider.reason}`,
+                      ).join('; ') || 'No provider status reported'}
                     </div>
                   ))}
                 </div>

@@ -53,6 +53,13 @@ See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidenc
 ✅ **Advisory Print Monitoring** - [Obico per-print capacity routing and independent PrintGuard alerts](./docs/OBICO_ML_API.md#per-print-obico-routing); neither automatically pauses printers
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
+Admin configuration has dedicated Failure Detection, Costs & Energy, Planning,
+Operator Features and System pages. Hardware combines NFC readers and bindings;
+Data groups tags, automatic tagging and custom fields. Global maintenance policy
+is in Maintenance's Settings tab. Cost/rate overrides stay with their owning
+records; [settings navigation and save boundaries](./docs/SETTINGS_ARCHITECTURE.md#category-cards--single-pane-mounting)
+describe the canonical destinations.
+
 ### Moonraker temperature and sensor controls
 
 The primary Hotend follows the active physical tool; additional extruders retain

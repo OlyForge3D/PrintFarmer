@@ -85,6 +85,44 @@ describe('adminDestinations registry', () => {
     expect(getDestinationById('hw-locations')?.path).toBe('/locations');
   });
 
+  it('uses the regrouped System, Costs, and Failure Detection destinations', () => {
+    expect(getDestinationById('gen-farm')).toBeUndefined();
+    expect(getDestinationById('gen-system')).toMatchObject({
+      label: 'System',
+      path: '/admin/settings?tab=system',
+      group: 'system',
+    });
+    expect(getDestinationById('auto-costs')).toMatchObject({
+      label: 'Costs & Energy',
+      path: '/admin/settings?tab=costs',
+      group: 'costs',
+    });
+    expect(getDestinationById('failure-detection')).toMatchObject({
+      label: 'Failure Detection',
+      path: '/admin/settings?tab=failure-detection',
+      group: 'failure-detection',
+    });
+  });
+
+  it('keeps auto-tagging and custom fields in Data and combines NFC bindings under Hardware', () => {
+    expect(getDestinationById('data-auto-tagging')).toMatchObject({
+      label: 'Auto-Tagging',
+      path: '/admin/settings?tab=data&sub=auto-tagging',
+      group: 'data',
+    });
+    expect(getDestinationById('hw-custom-fields')).toMatchObject({
+      label: 'Custom Fields',
+      path: '/admin/settings?tab=data&sub=custom-fields',
+      group: 'data',
+    });
+    expect(getDestinationById('hw-nfc')).toMatchObject({
+      label: 'NFC',
+      path: '/admin/settings?tab=hardware&sub=nfc',
+      group: 'hardware',
+    });
+    expect(getDestinationById('hw-nfc-bindings')).toBeUndefined();
+  });
+
   it('registers Printed Parts as a pinnable operational destination', () => {
     expect(getDestinationById('parts-inventory')).toMatchObject({
       kind: 'operational',
@@ -103,8 +141,8 @@ describe('adminDestinations registry', () => {
       'hardware',
       'slicing',
       'integrations',
-      'general',
-      'automation',
+      'failure-detection',
+      'costs',
       'quotas',
     ];
     for (const group of requiredHubGroups) {

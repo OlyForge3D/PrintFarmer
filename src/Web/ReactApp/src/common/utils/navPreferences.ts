@@ -114,6 +114,11 @@ const uniqueStringIds = (ids: readonly unknown[]) => {
   });
 };
 
+const ADMIN_PIN_MIGRATIONS: Readonly<Record<string, string>> = {
+  'gen-farm': 'auto-costs',
+  'hw-nfc-bindings': 'hw-nfc',
+};
+
 const getAnchoredIds = (items: readonly NavPreferenceItem[]) => new Set(items.filter((item) => item.anchored).map((item) => item.id));
 
 const enforceAnchoredNavPreferences = (preferences: NavPreferences, items: readonly NavPreferenceItem[]): NavPreferences => {
@@ -167,7 +172,8 @@ export function normalizeNavPreferences(
     hiddenItemIds: uniqueKnownIds(preferences?.hiddenItemIds ?? [], knownIds),
     pinnedItemIds: uniqueKnownIds(preferences?.pinnedItemIds ?? [], knownIds),
     ...(Array.isArray(preferences?.adminPinnedItemIds)
-      ? { adminPinnedItemIds: uniqueStringIds(preferences.adminPinnedItemIds) }
+      ? { adminPinnedItemIds: uniqueStringIds(preferences.adminPinnedItemIds.map((id) =>
+        typeof id === 'string' ? ADMIN_PIN_MIGRATIONS[id] ?? id : id)) }
       : {}),
   }, items);
 }

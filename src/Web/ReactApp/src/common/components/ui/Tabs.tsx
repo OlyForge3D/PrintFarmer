@@ -76,6 +76,7 @@ const TabList: React.FC<TabListProps> = ({ children, className, 'aria-label': ar
 
 export interface TabProps {
   id: string;
+  'aria-label'?: string;
   children: React.ReactNode;
   disabled?: boolean;
   icon?: React.ReactNode;
@@ -86,6 +87,7 @@ export interface TabProps {
 
 const Tab: React.FC<TabProps> = ({
   id,
+  'aria-label': ariaLabel,
   children,
   disabled = false,
   icon,
@@ -139,6 +141,7 @@ const Tab: React.FC<TabProps> = ({
       ref={btnRef}
       type="button"
       role="tab"
+      aria-label={ariaLabel}
       id={`tab-${id}`}
       data-tab-id={id}
       aria-selected={isActive}

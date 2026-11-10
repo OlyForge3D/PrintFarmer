@@ -233,10 +233,6 @@ vi.mock('@/features/admin/pages/RoleManagementPage', () => ({
   ),
 }));
 
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
-}));
-
 vi.mock('@/features/settings/components/IntegrationSettingsCards', () => ({
   SpoolmanSettingsCard: () => <div data-testid="spoolman-settings">Spoolman settings</div>,
   HomeAssistantSettingsCard: () => <div data-testid="home-assistant-settings">Home Assistant settings</div>,
@@ -264,12 +260,12 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
   ),
 }));
 
-function numberProp(name: string, label: string) {
+function numberProp(name: string, label: string, minValue = 1) {
   return {
     name,
     type: 'number',
     attributes: [],
-    display: { name: label, inputType: 'Number', minValue: 1, maxValue: 100000 },
+    display: { name: label, inputType: 'Number', minValue, maxValue: 100000 },
   };
 }
 
@@ -319,6 +315,13 @@ function installSettingsApiDefaults() {
       ],
     },
     {
+      key: 'CostTracking',
+      className: 'CostTrackingSettings',
+      displayName: 'Cost Tracking',
+      group: 'Operations',
+      properties: [numberProp('electricityRatePerKwh', 'Electricity Rate', 0)],
+    },
+    {
       key: 'NetworkDiscovery',
       className: 'NetworkDiscoverySettings',
       displayName: 'Network Discovery',
@@ -334,14 +337,17 @@ function installSettingsApiDefaults() {
   settingsApi.fetchSettingsGroups.mockResolvedValue([
     { key: 'System', displayName: 'System', order: 1 },
     { key: 'Networking', displayName: 'Networking', order: 2 },
+    { key: 'Operations', displayName: 'Operations', order: 3 },
   ]);
   settingsState.values = {
     SystemLog: { enabled: true, retentionDays: 30 },
     NetworkDiscovery: { enableDiscovery: true, scanIntervalMinutes: 10 },
+    CostTracking: { electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' },
   };
   settingsApi.fetchSettingsUnified.mockImplementation(() => Promise.resolve({
     SystemLog: { ...settingsState.values.SystemLog },
     NetworkDiscovery: { ...settingsState.values.NetworkDiscovery },
+    CostTracking: { ...settingsState.values.CostTracking },
   }));
   settingsApi.saveSettingsValues.mockImplementation((key: string, values: Record<string, unknown>) => {
     settingsState.values[key] = { ...values };
@@ -382,7 +388,7 @@ function renderWorkspace(initialRoute = '/admin') {
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
 
-  return render(
+  return { queryClient, ...render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
@@ -410,7 +416,7 @@ function renderWorkspace(initialRoute = '/admin') {
         </GlobalCommandPaletteProvider>
       </MemoryRouter>
     </QueryClientProvider>,
-  );
+  ) };
 }
 
 function grantOnly(...grants: string[]) {
@@ -427,7 +433,7 @@ function fieldInput(section: string, property: string): HTMLInputElement {
 }
 
 async function openSystemSettings() {
-  renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
+  renderWorkspace('/admin/settings?scope=system&tab=system');
   await screen.findByLabelText('Retention Days');
 }
 
@@ -509,16 +515,13 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('link', { name: 'Admin Control Center' }));
-    fireEvent.click(await screen.findByRole('link', { name: /^General/ }));
+    fireEvent.click(await screen.findByRole('link', { name: /^System Database/ }));
 
     await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings'));
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
-    expect(screen.getAllByRole('heading', { level: 1, name: 'General' })).toHaveLength(1);
-    expect(await screen.findByTestId('farm-settings-section')).toBeInTheDocument();
-
-    fireEvent.click(await screen.findByRole('tab', { name: /System Config/i }));
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
+    expect(screen.getAllByRole('heading', { level: 1, name: 'System' })).toHaveLength(1);
+    expect(screen.queryByTestId('farm-settings-section')).not.toBeInTheDocument();
     await screen.findByLabelText('Retention Days');
     expect(screen.queryByRole('heading', { level: 1, name: 'User Settings' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
@@ -533,16 +536,16 @@ describe('Admin workspace integrated flow (#2507)', () => {
     await waitFor(() => expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm'));
+    await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin'));
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('q=');
 
     fireEvent.click(screen.getByRole('button', { name: 'Go forward' }));
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system'));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system'));
     await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(31));
   });
 
   it('keeps exact cross-group field search mounted through query synchronization', async () => {
-    renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
+    renderWorkspace('/admin/settings?scope=system&tab=system');
 
     await screen.findByLabelText('Retention Days');
 
@@ -553,8 +556,8 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(scanResult).toHaveTextContent('Admin / Networking / Network Discovery');
     fireEvent.click(scanResult);
 
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general'));
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system'));
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
     expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes');
     expect(screen.getByTestId('location-search')).toHaveTextContent('q=scan+interval');
     await waitFor(() => expect(fieldInput('NetworkDiscovery', 'scanIntervalMinutes')).toHaveValue(10));
@@ -603,25 +606,27 @@ describe('Admin workspace integrated flow (#2507)', () => {
 
   it('saves farm-wide rates with their draft revision and renews it for another save', async () => {
     const initial = { electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' };
-    apiClientMock.getCostTrackingSettings.mockResolvedValue(initial);
-    apiClientMock.updateCostTrackingSettings.mockResolvedValue({ ...initial, electricityRatePerKwh: 0.25, rowVersion: 'cost-v2' });
-    renderWorkspace('/admin/power-monitors');
+    settingsState.values.CostTracking = initial;
+    settingsApi.saveSettingsValues.mockResolvedValue({ ...initial, electricityRatePerKwh: 0.25, rowVersion: 'cost-v2' });
+    const { queryClient } = renderWorkspace('/admin/settings?scope=system&tab=costs');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     const rate = await screen.findByRole('spinbutton');
     await waitFor(() => expect(rate).toHaveValue(0.12));
     fireEvent.change(rate, { target: { value: '0.25' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(apiClientMock.updateCostTrackingSettings).toHaveBeenCalledWith({ electricityRatePerKwh: 0.25, rowVersion: 'cost-v1' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(settingsApi.saveSettingsValues).toHaveBeenCalledWith('CostTracking', { electricityRatePerKwh: 0.25, rowVersion: 'cost-v1' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument());
     fireEvent.change(rate, { target: { value: '0.30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(apiClientMock.updateCostTrackingSettings).toHaveBeenLastCalledWith({ electricityRatePerKwh: 0.30, rowVersion: 'cost-v2' }));
-    expect(apiClientMock.getCostTrackingSettings).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(settingsApi.saveSettingsValues).toHaveBeenLastCalledWith('CostTracking', { electricityRatePerKwh: 0.30, rowVersion: 'cost-v2' }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['settings', 'farm'] });
+    expect(apiClientMock.updateCostTrackingSettings).not.toHaveBeenCalled();
   });
 
   it('exposes conflict recovery when the shell owns the save action', async () => {
     settingsState.values.SystemLog.rowVersion = 'v1';
     settingsApi.saveSettingsValues.mockRejectedValue({ statusCode: 409 });
-    renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
+    renderWorkspace('/admin/settings?scope=system&tab=system');
     fireEvent.change(await screen.findByLabelText('Retention Days'), { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     const reload = await screen.findByRole('button', { name: 'Reload settings (discard all page edits)' });
@@ -632,21 +637,20 @@ describe('Admin workspace integrated flow (#2507)', () => {
   });
 
   it.each([409, 412])('preserves a farm-wide rate on %s until explicit reload', async (statusCode) => {
-    apiClientMock.getCostTrackingSettings.mockResolvedValue({ electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' });
-    apiClientMock.updateCostTrackingSettings.mockRejectedValue({ statusCode });
-    renderWorkspace('/admin/power-monitors');
+    settingsState.values.CostTracking = { electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' };
+    settingsApi.saveSettingsValues.mockRejectedValue({ statusCode });
+    renderWorkspace('/admin/settings?scope=system&tab=costs');
     const rate = await screen.findByRole('spinbutton');
     await waitFor(() => expect(rate).toHaveValue(0.12));
     fireEvent.change(rate, { target: { value: '0.25' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await screen.findByText(/Farm-wide settings changed elsewhere/);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findAllByText(/Settings changed elsewhere/)).not.toHaveLength(0);
     expect(rate).toHaveValue(0.25);
-    expect(apiClientMock.getCostTrackingSettings).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    apiClientMock.getCostTrackingSettings.mockResolvedValue({ electricityRatePerKwh: 0.18, rowVersion: 'cost-v3' });
-    fireEvent.click(screen.getByRole('button', { name: 'Reload farm-wide settings' }));
-    await waitFor(() => expect(rate).toHaveValue(0.18));
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(settingsApi.fetchSettingsUnified).toHaveBeenCalledTimes(1);
+    settingsState.values.CostTracking = { electricityRatePerKwh: 0.18, rowVersion: 'cost-v3' };
+    fireEvent.click(screen.getByRole('button', { name: 'Reload settings (discard all page edits)' }));
+    await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(0.18));
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
   });
 
   it('preserves personal settings separation and blocks dirty workspace search navigation until the user discards', async () => {
@@ -657,7 +661,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
     personalView.unmount();
 
-    renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
+    renderWorkspace('/admin/settings?scope=system&tab=system');
     const retention = await screen.findByLabelText('Retention Days');
     fireEvent.change(retention, { target: { value: '45' } });
 
@@ -667,7 +671,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Quotas/i }));
 
     expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system');
 
     fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
     expect(screen.queryByRole('dialog', { name: 'Unsaved Changes' })).not.toBeInTheDocument();

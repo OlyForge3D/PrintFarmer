@@ -127,7 +127,7 @@ vi.mock('@/common/components/Layout', async () => {
         <nav aria-label="Main">
           <NavLink to="/printers">Printers</NavLink>
           <NavLink to="/projects">Projects</NavLink>
-          <NavLink to="/admin/settings?scope=system&tab=general&sub=system">
+          <NavLink to="/admin/settings?scope=system&tab=system">
             Farm &amp; Admin Settings
           </NavLink>
         </nav>
@@ -197,10 +197,6 @@ vi.mock('@/features/admin/settings/section-renderers', () => ({
   getSectionRenderer: () => undefined,
 }));
 
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
-}));
-
 vi.mock('@/features/settings/components/IntegrationSettingsCards', () => ({
   SpoolmanSettingsCard: () => <div data-testid="spoolman-settings">Spoolman settings</div>,
   HomeAssistantSettingsCard: () => <div data-testid="home-assistant-settings">Home Assistant settings</div>,
@@ -253,7 +249,7 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
 import App from '../../../App';
 import { queryClient } from '@/services/queryClient';
 
-const SETTINGS_URL = '/admin/settings?scope=system&tab=general&sub=system';
+const SETTINGS_URL = '/admin/settings?scope=system&tab=system';
 
 function numberProp(name: string, label: string) {
   return {

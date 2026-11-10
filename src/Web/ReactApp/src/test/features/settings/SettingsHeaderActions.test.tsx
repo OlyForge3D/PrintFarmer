@@ -29,10 +29,6 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page">Legacy Settings Page</div>,
 }));
 
-vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
-  FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
-}));
-
 vi.mock('@/features/auth/hooks/useAuth', () => {
   const user = {
     id: '1',
