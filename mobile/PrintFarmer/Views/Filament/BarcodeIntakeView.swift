@@ -328,6 +328,7 @@ private struct UnknownBarcodeView: View {
         Section("New Filament") {
             if materials.isEmpty {
                 TextField("Material (e.g. PLA, PETG)", text: $selectedMaterial)
+                    .accessibilityIdentifier("mapBarcode.material")
             } else {
                 Picker("Material", selection: $selectedMaterial) {
                     Text("Select…").tag("")
@@ -338,6 +339,7 @@ private struct UnknownBarcodeView: View {
                 .onChange(of: selectedMaterial) { _, newMaterial in
                     applyMaterialDensity(for: newMaterial)
                 }
+                .accessibilityIdentifier("mapBarcode.material")
             }
 
             if vendors.isEmpty {

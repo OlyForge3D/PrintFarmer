@@ -32,6 +32,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     }
 
     func testFnskuFirstScanRemembersPickedFilamentAndRescanAddsAnotherSpool() {
+        let isLive = configureLiveIntakeIfRequested()
         relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
         openScanAndScan()
 
@@ -40,7 +41,9 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.staticTexts["Unrecognized Code"].exists, "the field-reported FNSKU must not dead-end")
         XCTAssertEqual(app.staticTexts["mapBarcode.code"].label, "X0022Z40I1")
         XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists, "creating a new filament is offered")
-        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
+        let filament = !isLive
+            ? app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
+            : app.buttons["mapBarcode.filament.42"]
         XCTAssertTrue(filament.waitForExistence(timeout: 8), "picking an existing filament is offered")
         attachScreenshot(named: "fnsku-first-scan-remember-code")
         filament.tap()
@@ -48,9 +51,16 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "a spool was created")
         XCTAssertFalse(app.navigationBars["Remember Code"].exists)
         attachScreenshot(named: "fnsku-first-scan-spool-added")
-        app.buttons["Done"].firstMatch.tap()
+        app.buttons["Done with barcode intake"].tap()
+        XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForNonExistence(timeout: 8))
 
-        openScanAndScan()
+        if isLive {
+            // A fresh app process must resolve the server's durable mapping.
+            relaunchAppForTest(additionalArguments: [])
+            openScanAndScan()
+        } else {
+            app.buttons["scan.primary"].tap()
+        }
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
         let addAnother = app.buttons["barcodeIntake.aliasAddSpool"]
         XCTAssertTrue(addAnother.waitForExistence(timeout: 8), "a rescan offers the remembered filament")
@@ -64,6 +74,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     }
 
     func testFnskuFirstScanOffersCreatingANewFilament() {
+        _ = configureLiveIntakeIfRequested()
         relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
         openScanAndScan()
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
@@ -71,11 +82,28 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(showCreate.waitForExistence(timeout: 5))
         showCreate.tap()
         let list = app.collectionViews["mapBarcode.list"]
+        let materialField = app.textFields["mapBarcode.material"]
+        if materialField.exists {
+            materialField.tap()
+            materialField.typeText("PLA")
+        } else {
+            app.buttons["mapBarcode.material"].tap()
+            app.buttons["PLA"].firstMatch.tap()
+        }
+        let name = app.textFields["Filament Name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("FNSKU new filament")
         let create = app.buttons["mapBarcode.create"]
-        for _ in 0..<4 where !create.exists { list.swipeUp() }
+        for _ in 0..<4 where !create.isHittable { list.swipeUp() }
         XCTAssertTrue(create.waitForExistence(timeout: 5))
         XCTAssertEqual(create.label, "Create filament and add spool")
         attachScreenshot(named: "fnsku-first-scan-create-filament")
+        XCTAssertTrue(create.isEnabled)
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.navigationBars["Remember Code"].exists)
+        attachScreenshot(named: "fnsku-new-filament-spool-added")
     }
 
     func testFnskuRememberFailureShowsRetryInTheSheetAndRetryAddsOneSpool() {
@@ -157,6 +185,14 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func configureLiveIntakeIfRequested() -> Bool {
+        guard let url = ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_URL"] else { return false }
+        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_URL"] = url
+        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_TOKEN"] =
+            ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_TOKEN"]
+        return true
     }
 
     private func openScanAndScan() {

@@ -390,6 +390,21 @@ enum UITestBootstrap {
            let fault = DemoBarcodeIntakeService.Fault(rawValue: arguments[index + 1]) {
             services.barcodeIntakeService = DemoBarcodeIntakeService(fault: fault)
         }
+        if let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_URL"] {
+            guard let url = URL(string: rawURL),
+                  url.scheme == "http",
+                  url.host == "127.0.0.1",
+                  let token = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_TOKEN"],
+                  !token.isEmpty else {
+                preconditionFailure("Live intake UI tests require a loopback API URL and fixture token")
+            }
+            let client = APIClient(
+                baseURL: url,
+                authenticated: AuthenticatedIdentity(accessToken: token, serverID: UUID())
+            )
+            services.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
+            services.spoolService = SpoolService(apiClient: client)
+        }
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
         }
