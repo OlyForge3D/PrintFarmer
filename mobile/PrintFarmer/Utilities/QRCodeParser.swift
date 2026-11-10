@@ -103,3 +103,67 @@ enum QRCodeParser {
         return nil
     }
 }
+
+// MARK: - Scanned Barcode Normalizer
+
+/// Normalizes scanner payloads before dispatch. VisionKit reports UPC-E in
+/// its compressed 8-digit form, which fails a GTIN-12 mod-10 check, so it is
+/// expanded to its equivalent UPC-A (GTIN-12) value. Other symbologies pass
+/// through unchanged.
+enum ScannedBarcodeNormalizer {
+
+    static func payload(_ raw: String, isUPCE: Bool) -> String {
+        guard isUPCE else { return raw }
+        return expandUPCE(raw) ?? raw
+    }
+
+    /// Expands a UPC-E code (6 digits with implied number system 0, 7 digits
+    /// with number system, or 8 digits with number system and check digit)
+    /// to UPC-A. Returns nil for any other shape, a number system other than
+    /// 0 or 1, or a check digit that does not match the expansion.
+    static func expandUPCE(_ raw: String) -> String? {
+        let code = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard code.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        let digits = code.compactMap { $0.wholeNumberValue }
+        let numberSystem: Int
+        let body: [Int]
+        let providedCheck: Int?
+        switch digits.count {
+        case 6:
+            (numberSystem, body, providedCheck) = (0, digits, nil)
+        case 7:
+            (numberSystem, body, providedCheck) = (digits[0], Array(digits[1...6]), nil)
+        case 8:
+            (numberSystem, body, providedCheck) = (digits[0], Array(digits[1...6]), digits[7])
+        default:
+            return nil
+        }
+        guard numberSystem == 0 || numberSystem == 1 else { return nil }
+
+        let (d1, d2, d3, d4, d5, d6) = (body[0], body[1], body[2], body[3], body[4], body[5])
+        let manufacturer: [Int]
+        let product: [Int]
+        switch d6 {
+        case 0...2:
+            manufacturer = [d1, d2, d6, 0, 0]
+            product = [0, 0, d3, d4, d5]
+        case 3:
+            manufacturer = [d1, d2, d3, 0, 0]
+            product = [0, 0, 0, d4, d5]
+        case 4:
+            manufacturer = [d1, d2, d3, d4, 0]
+            product = [0, 0, 0, 0, d5]
+        default:
+            manufacturer = [d1, d2, d3, d4, d5]
+            product = [0, 0, 0, 0, d6]
+        }
+        let upcABody = [numberSystem] + manufacturer + product
+        var sum = 0
+        for (index, digit) in upcABody.enumerated() {
+            sum += index.isMultiple(of: 2) ? digit * 3 : digit
+        }
+        let check = (10 - sum % 10) % 10
+        if let providedCheck, providedCheck != check { return nil }
+        return (upcABody + [check]).map(String.init).joined()
+    }
+}

@@ -62,7 +62,7 @@ extension ScanViewModelTests {
         viewModel.requestExternalScan(UUID())
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
         viewModel.requestExternalScan(UUID())
-        await completeScan(viewModel, scanner, returning: .barcode("SERVER-ERROR"))
+        await completeScan(viewModel, scanner, returning: .barcode("4006381333931"))
         let errorMessage = viewModel.errorMessage
         XCTAssertNotNil(errorMessage)
         viewModel.requestExternalScan(UUID())

@@ -71,9 +71,13 @@ struct ScanFlowView: View {
                     Group {
                         switch outcome {
                         case .unknownCode(let code):
-                            UnrecognizedScanView(code: code)
+                            UnrecognizedScanView(code: code) {
+                                viewModel.addSpool(fromUnrecognized: code)
+                            }
                         case .newSpool(let data):
                             AddSpoolView(scannedData: data)
+                        case .addSpoolManually:
+                            AddSpoolView()
                         }
                     }
                     .onAppear { viewModel.resultPresentationDidAppear() }
@@ -242,11 +246,13 @@ struct ScanFlowView: View {
 
 private struct UnrecognizedScanView: View {
     let code: String
+    let onAddSpool: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     private var description: String {
-        "\"\(code)\" isn't a spool label or a filament product barcode (UPC/EAN/GTIN)."
+        "\"\(code)\" isn't a spool label or a known filament product barcode (UPC/EAN/GTIN). "
+            + "You can still add the spool manually. This code won't be remembered for future scans."
     }
 
     var body: some View {
@@ -255,6 +261,14 @@ private struct UnrecognizedScanView: View {
                 Label("Unrecognized Code", systemImage: "questionmark.circle")
             } description: {
                 Text(description)
+            } actions: {
+                Button {
+                    onAddSpool()
+                } label: {
+                    Label("Add Spool", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("scan.unrecognized.addSpool")
             }
             .navigationTitle("Unrecognized")
             #if os(iOS)

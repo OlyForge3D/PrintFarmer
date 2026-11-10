@@ -100,6 +100,9 @@ enum UITestBootstrap {
     static let coldOfflineShellLaunchArgument =
         "--uitesting-cold-offline-shell"
     #if DEBUG
+    /// Followed by a code value: installs a scanner stub that returns that
+    /// code, so XCUI can drive the scan result paths without a camera.
+    static let scanCodeLaunchArgument = "--uitesting-scan-code"
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
         "--uitesting-issue3259-visual-acceptance"
@@ -375,6 +378,10 @@ enum UITestBootstrap {
         )
         #endif
         #if DEBUG
+        if let index = arguments.firstIndex(of: scanCodeLaunchArgument),
+           arguments.indices.contains(index + 1) {
+            services.barcodeScannerService = UITestStubBarcodeScanner(code: arguments[index + 1])
+        }
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()
         }
@@ -3127,6 +3134,22 @@ private final class QueueReorderUITestJobService: DemoJobService, @unchecked Sen
             estimatedStartTime: nil,
             estimatedCompletionTime: nil
         )
+    }
+}
+#endif
+
+#if DEBUG
+private final class UITestStubBarcodeScanner: BarcodeScannerProtocol, @unchecked Sendable {
+    private let code: String
+
+    init(code: String) {
+        self.code = code
+    }
+
+    var isAvailable: Bool { true }
+
+    func scanBarcode() async -> BarcodeScanResult {
+        .barcode(code)
     }
 }
 #endif
