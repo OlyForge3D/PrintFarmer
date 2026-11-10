@@ -333,6 +333,7 @@ public sealed class TrackedMotionRetirementMigrationTests
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
+            modelBuilder.Entity<Printer>().Ignore(printer => printer.ExpectedOfflineSinceUtc);
         }
     }
 }
