@@ -252,6 +252,7 @@ private struct UnknownBarcodeView: View {
                             Label("Create New Filament", systemImage: "plus.circle")
                         }
                         .accessibilityLabel("Create new filament for barcode")
+                        .accessibilityIdentifier("mapBarcode.showCreate")
                     }
 
                     Section("Existing Filaments") {
@@ -268,6 +269,7 @@ private struct UnknownBarcodeView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Use filament \(filament.name ?? filament.material ?? String(filament.id))")
+                                .accessibilityIdentifier("mapBarcode.filament.\(filament.id)")
                             }
                         }
                     }
@@ -385,17 +387,23 @@ private struct UnknownBarcodeView: View {
                 if isSaving {
                     ProgressView()
                 } else {
-                    Label(createdFilament == nil ? "Create and Import" : "Retry Import", systemImage: "checkmark.circle")
+                    Label(createButtonTitle, systemImage: "checkmark.circle")
                 }
             }
             .disabled(!canCreateFilament || isSaving)
-            .accessibilityLabel("Create filament and import spool")
+            .accessibilityLabel(remembersCode ? "Create filament and add spool" : "Create filament and import spool")
+            .accessibilityIdentifier("mapBarcode.create")
 
             Button("Choose Existing Instead") {
                 showCreateForm = false
             }
             .disabled(isSaving)
         }
+    }
+
+    private var createButtonTitle: String {
+        if createdFilament != nil { return remembersCode ? "Retry Add Spool" : "Retry Import" }
+        return remembersCode ? "Create and Add Spool" : "Create and Import"
     }
 
     private func filamentRow(_ filament: SpoolmanFilament) -> some View {

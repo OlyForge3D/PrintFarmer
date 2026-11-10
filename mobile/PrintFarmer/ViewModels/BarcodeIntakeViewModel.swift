@@ -70,7 +70,12 @@ final class BarcodeIntakeViewModel {
     }
 
     var importedCount: Int { importedThisSession.count }
-    var lastResolvedBarcode: String? { lastResolvedFilament?.gtin }
+    /// The resolved filament's GTIN, shown only when the scanned code itself was a GTIN;
+    /// a remembered non-GTIN code (e.g. an FNSKU) must not be presented as a GTIN.
+    var lastResolvedBarcode: String? {
+        guard let lastScannedBarcode, ScanViewModel.isSupportedProductBarcode(lastScannedBarcode) else { return nil }
+        return lastResolvedFilament?.gtin
+    }
     var lastResolvedVendorSKU: String? { lastResolvedFilament?.articleNumber }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "BarcodeIntake")

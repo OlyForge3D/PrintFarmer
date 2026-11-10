@@ -36,11 +36,19 @@ The mobile app is not a second web console.
   valid GTIN-8/12/13/14 product barcodes open barcode intake. An unknown
   product barcode is mapped to a filament (persisted as that filament's
   Spoolman GTIN) before a spool is imported. UPC-E is expanded to its UPC-A
-  GTIN first. Any other code (Code 128/39 text, non-spool QR, or a number
-  that is neither a GTIN nor an existing spool ID) is reported as
-  unrecognized with an **Add Spool** action that opens manual spool creation;
-  such codes are never written to the GTIN mapping, so they are not
-  remembered for future scans. A spool link, ID or NFC tag for a spool that
+  GTIN first. A non-GTIN code such as an Amazon FNSKU sticker (Code 128/39
+  text or a non-link QR payload) opens barcode intake in **Remember Code**
+  mode: the first scan asks the user to pick an existing filament or create a
+  new one, saves the exact code against that filament ID in PrintFarmer (a
+  case-sensitive alias, kept separate from the Spoolman GTIN and NFC
+  mappings), then adds a spool of it. A later scan of the same code shows the
+  remembered filament and adds another spool once the user confirms. Lookup or
+  save failures show Retry and never create anything. Codes made only of
+  digits, spaces and dashes are never remembered: they are spool IDs or GTINs.
+  A number that is neither a GTIN nor an existing spool ID, an app link that is
+  not a spool, or a code longer than 128 characters is reported as
+  unrecognized with an **Add Spool** action that opens manual spool creation.
+  A spool link, ID or NFC tag for a spool that
   is not on the server shows **Spool Not Found** with the same **Add Spool**
   action (manual creation only). An existing spool ID wins over a GTIN
   mapping with the same digits. A scan never dead-ends.

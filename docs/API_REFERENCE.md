@@ -90,6 +90,32 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 > python3 scripts/backfill-spoolman-gtin.py --spoolman-url http://localhost:7912 --apply
 > ```
 
+## Remembered Scan Codes
+
+Non-GTIN scan codes (for example an Amazon FNSKU such as `X0022Z40I1`, or other
+Code 128/39 text) can be remembered against a Spoolman filament. Aliases are
+stored in PrintFarmer's own database, not in Spoolman, and are kept separate
+from the filament `gtin` mapping: a code is matched exactly and
+case-sensitively, never through GTIN digit normalization, so `X0022Z40I1` can
+never match GTIN `00224`.
+
+- `GET /api/spoolman/code-aliases/filament?code=` (any authenticated user)
+  always returns `200` with `{ code, state, alias }`, where `state` is `Found`,
+  `NotRemembered` or `FilamentMissing` (the alias points at a filament that no
+  longer exists in Spoolman). Returns `400` for an invalid code and `502` when
+  Spoolman cannot be reached. Clients must treat any non-`200` response as an
+  error, never as "not remembered".
+- `POST /api/spoolman/code-aliases` with `{ code, filamentId }` (requires the
+  `spoolman:admin` permission) returns `201` when the alias is created or
+  re-pointed from a deleted filament, `200` when it already maps to that
+  filament (idempotent retries), `409` with the existing alias when the code
+  is linked to a different filament, `404` when the filament does not exist,
+  `400` for an invalid request, and `502` when Spoolman fails.
+
+Validation rejects empty codes, codes over 128 UTF-16 code units, control or
+format characters, valid GTINs (use the GTIN mapping instead), and any value
+made only of digits, spaces and dashes (spool IDs and malformed GTINs).
+
 ## Spoolman Barcode Diagnostics
 
 - `GET /api/spoolman/barcodes/scan-logs?limit=` returns recent barcode scan

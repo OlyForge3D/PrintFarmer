@@ -350,6 +350,8 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         XCTAssertTrue(second)
         XCTAssertEqual(service.createSpoolCalls, [8, 8], "each confirmed rescan adds a new spool")
         XCTAssertTrue(service.aliasSaveCalls.isEmpty)
+        XCTAssertNotNil(viewModel.lastResolvedFilament?.gtin)
+        XCTAssertNil(viewModel.lastResolvedBarcode, "a remembered FNSKU is never presented as a GTIN")
         XCTAssertNil(viewModel.pendingAliasMatch)
     }
 

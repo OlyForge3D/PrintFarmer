@@ -31,14 +31,62 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 5))
     }
 
-    func testUnrecognizedNonGtinScanOffersManualAddSpool() {
+    func testFnskuFirstScanRemembersPickedFilamentAndRescanAddsAnotherSpool() {
         relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
+        openScanAndScan()
+
+        XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Unrecognized Code"].exists, "the field-reported FNSKU must not dead-end")
+        XCTAssertEqual(app.staticTexts["mapBarcode.code"].label, "X0022Z40I1")
+        XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists, "creating a new filament is offered")
+        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
+        XCTAssertTrue(filament.waitForExistence(timeout: 8), "picking an existing filament is offered")
+        attachScreenshot(named: "fnsku-first-scan-remember-code")
+        filament.tap()
+
+        XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "a spool was created")
+        XCTAssertFalse(app.navigationBars["Remember Code"].exists)
+        attachScreenshot(named: "fnsku-first-scan-spool-added")
+        app.buttons["Done"].firstMatch.tap()
+
+        openScanAndScan()
+        XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
+        let addAnother = app.buttons["barcodeIntake.aliasAddSpool"]
+        XCTAssertTrue(addAnother.waitForExistence(timeout: 8), "a rescan offers the remembered filament")
+        XCTAssertFalse(app.navigationBars["Remember Code"].exists, "a remembered code skips filament selection")
+        XCTAssertFalse(app.staticTexts["Imported This Session (1)"].exists, "nothing is created before confirmation")
+        attachScreenshot(named: "fnsku-rescan-remembered")
+        addAnother.tap()
+        XCTAssertTrue(addAnother.waitForNonExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "a second spool was added")
+        attachScreenshot(named: "fnsku-rescan-second-spool")
+    }
+
+    func testFnskuFirstScanOffersCreatingANewFilament() {
+        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
+        openScanAndScan()
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
+        let showCreate = app.buttons["mapBarcode.showCreate"]
+        XCTAssertTrue(showCreate.waitForExistence(timeout: 5))
+        showCreate.tap()
+        XCTAssertTrue(app.buttons["mapBarcode.create"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["mapBarcode.create"].label, "Create filament and add spool")
+        attachScreenshot(named: "fnsku-first-scan-create-filament")
+    }
+
+    func testAppLinkThatIsNotASpoolOffersManualAddSpool() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "printfarmer://printer/00000000-0000-0000-0000-000000000001/ready"
+        ])
         openScanAndScan()
         XCTAssertTrue(app.staticTexts["Unrecognized Code"].waitForExistence(timeout: 5))
         let addSpool = app.buttons["scan.unrecognized.addSpool"]
         XCTAssertTrue(addSpool.waitForExistence(timeout: 5))
+        attachScreenshot(named: "unrecognized-app-link")
         addSpool.tap()
         XCTAssertTrue(app.navigationBars["Add Spool"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.navigationBars["Barcode Intake"].exists, "an app link is never remembered")
     }
 
     func testUnknownGtinScanOpensBarcodeIntake() {
@@ -57,6 +105,13 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         addSpool.tap()
         XCTAssertTrue(app.navigationBars["Add Spool"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.navigationBars["Barcode Intake"].exists, "a spool link never enters GTIN intake")
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func openScanAndScan() {
