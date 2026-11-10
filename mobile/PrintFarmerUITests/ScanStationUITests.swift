@@ -30,4 +30,41 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         intake.tap()
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 5))
     }
+
+    func testUnrecognizedNonGtinScanOffersManualAddSpool() {
+        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
+        openScanAndScan()
+        XCTAssertTrue(app.staticTexts["Unrecognized Code"].waitForExistence(timeout: 5))
+        let addSpool = app.buttons["scan.unrecognized.addSpool"]
+        XCTAssertTrue(addSpool.waitForExistence(timeout: 5))
+        addSpool.tap()
+        XCTAssertTrue(app.navigationBars["Add Spool"].waitForExistence(timeout: 8))
+    }
+
+    func testUnknownGtinScanOpensBarcodeIntake() {
+        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "4006381333931"])
+        openScanAndScan()
+        XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["Map Barcode"].waitForExistence(timeout: 8))
+    }
+
+    func testMissingSpoolLinkOffersManualAddSpool() {
+        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "printfarmer://spool/987654"])
+        openScanAndScan()
+        XCTAssertTrue(app.staticTexts["Spool Not Found"].waitForExistence(timeout: 8))
+        let addSpool = app.buttons["scan.unrecognized.addSpool"]
+        XCTAssertTrue(addSpool.waitForExistence(timeout: 5))
+        addSpool.tap()
+        XCTAssertTrue(app.navigationBars["Add Spool"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.navigationBars["Barcode Intake"].exists, "a spool link never enters GTIN intake")
+    }
+
+    private func openScanAndScan() {
+        let scan = app.buttons["navigation.scan"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 8))
+        scan.tap()
+        let primary = app.buttons["scan.primary"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 5))
+        primary.tap()
+    }
 }

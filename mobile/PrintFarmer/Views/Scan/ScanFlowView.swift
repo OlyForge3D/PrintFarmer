@@ -71,16 +71,37 @@ struct ScanFlowView: View {
                     Group {
                         switch outcome {
                         case .unknownCode(let code):
-                            UnrecognizedScanView(code: code)
+                            UnrecognizedScanView(code: code) {
+                                viewModel.addSpool(fromUnrecognized: code)
+                            }
                         case .newSpool(let data):
                             AddSpoolView(scannedData: data)
+                        case .missingSpool(let id, let code):
+                            UnrecognizedScanView(
+                                code: code,
+                                title: "Spool Not Found",
+                                message: "Spool #\(id) isn't on this server. You can add a new spool for this label."
+                            ) {
+                                viewModel.addSpool(fromUnrecognized: code)
+                            }
+                        case .addSpoolManually:
+                            AddSpoolView()
                         case .unknownNFCTag(let tag, let data):
                             NFCTagLinkView(
                                 uid: tag.uid,
                                 scannedData: data,
                                 spoolService: services.spoolService
                             ) { spool in
-                                viewModel.completeNFCTagLink(to: spool)
+                                viewModel.completeNFCTagLink(uid: tag.uid, to: spool)
+                            }
+                        case .staleNFCLink(let tag, let spoolID):
+                            NFCTagLinkView(
+                                uid: tag.uid,
+                                scannedData: nil,
+                                spoolService: services.spoolService,
+                                staleSpoolID: spoolID
+                            ) { spool in
+                                viewModel.completeNFCTagLink(uid: tag.uid, to: spool)
                             }
                         }
                     }
@@ -250,21 +271,33 @@ struct ScanFlowView: View {
 
 private struct UnrecognizedScanView: View {
     let code: String
+    var title = "Unrecognized Code"
+    var message: String?
+    let onAddSpool: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     private var description: String {
-        "\"\(code)\" isn't a spool label or a filament product barcode (UPC/EAN/GTIN)."
+        message ?? "\"\(code)\" isn't a spool label or a known filament product barcode (UPC/EAN/GTIN). "
+            + "You can still add the spool manually. This code won't be remembered for future scans."
     }
 
     var body: some View {
         NavigationStack {
             ContentUnavailableView {
-                Label("Unrecognized Code", systemImage: "questionmark.circle")
+                Label(title, systemImage: "questionmark.circle")
             } description: {
                 Text(description)
+            } actions: {
+                Button {
+                    onAddSpool()
+                } label: {
+                    Label("Add Spool", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("scan.unrecognized.addSpool")
             }
-            .navigationTitle("Unrecognized")
+            .navigationTitle(message == nil ? "Unrecognized" : "Not Found")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

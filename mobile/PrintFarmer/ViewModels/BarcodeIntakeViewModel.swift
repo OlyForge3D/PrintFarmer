@@ -12,6 +12,9 @@ final class BarcodeIntakeViewModel {
     var errorMessage: String?
     var isViewActive = true
 
+    static let notProductBarcodeMessage =
+        "That isn't a filament product barcode (UPC/EAN/GTIN). Use Add Spool to create this spool manually."
+
     var importedCount: Int { importedThisSession.count }
     var lastResolvedBarcode: String? { lastResolvedFilament?.gtin }
     var lastResolvedVendorSKU: String? { lastResolvedFilament?.articleNumber }
@@ -59,8 +62,17 @@ final class BarcodeIntakeViewModel {
 
         lastScannedBarcode = trimmed
         lastResolvedFilament = nil
-        isBusy = true
+        pendingUnknownBarcode = nil
         errorMessage = nil
+
+        // The server's GTIN normalizer strips non-digits, so a non-GTIN value
+        // (Code 128/39 text, a non-spool QR) must never be resolved or mapped.
+        guard ScanViewModel.isSupportedProductBarcode(trimmed) else {
+            errorMessage = Self.notProductBarcodeMessage
+            return
+        }
+
+        isBusy = true
 
         do {
             let filament = try await barcodeService.resolveFilament(barcode: trimmed)
@@ -88,6 +100,11 @@ final class BarcodeIntakeViewModel {
     @discardableResult
     func importUnknownBarcode(filamentId: Int) async -> Bool {
         guard let barcode = pendingUnknownBarcode else { return false }
+        guard ScanViewModel.isSupportedProductBarcode(barcode) else {
+            pendingUnknownBarcode = nil
+            errorMessage = Self.notProductBarcodeMessage
+            return false
+        }
         guard let barcodeService else {
             errorMessage = "Barcode intake service not available"
             return false

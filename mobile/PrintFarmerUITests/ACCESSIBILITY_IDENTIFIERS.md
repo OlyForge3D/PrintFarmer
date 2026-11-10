@@ -142,3 +142,4 @@ The shipped cases are:
 | Attention harvest bin scan | `attention.item.<attention-id>.action.scanBin` |
 | Primary scanner action | `scan.primary` |
 | Scanner NFC hint | `scan.nfc.hint` |
+| Unrecognized scan Add Spool action | `scan.unrecognized.addSpool` |

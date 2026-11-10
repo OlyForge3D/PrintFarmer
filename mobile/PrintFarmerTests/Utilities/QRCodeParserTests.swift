@@ -207,4 +207,51 @@ final class QRCodeParserTests: XCTestCase {
     func testFloatingPointNumber() {
         XCTAssertNil(QRCodeParser.parse("42.5"))
     }
+
+    // MARK: - UPC-E normalization
+
+    func testUPCEEightDigitPayloadExpandsToValidUPCA() {
+        let expanded = ScannedBarcodeNormalizer.expandUPCE("01234565")
+        XCTAssertEqual(expanded, "012345000065")
+        XCTAssertTrue(ScanViewModel.isSupportedProductBarcode(expanded ?? ""))
+        XCTAssertNotEqual(
+            ScannedBarcodeNormalizer.payload("01234565", isUPCE: true), "01234565",
+            "the compressed UPC-E form can coincidentally pass the EAN-8 check, so it must be expanded"
+        )
+    }
+
+    func testUPCESixAndSevenDigitFormsComputeTheCheckDigit() {
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("123456"), "012345000065")
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("0123456"), "012345000065")
+    }
+
+    func testUPCEExpansionCoversEveryLastDigitRule() {
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("01234505"), "012000003455")
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("01234531"), "012300000451")
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("01234543"), "012340000053")
+        XCTAssertEqual(ScannedBarcodeNormalizer.expandUPCE("01234565"), "012345000065")
+    }
+
+    func testUPCENumberSystemOneExpandsToAValidGTIN() throws {
+        let expanded = try XCTUnwrap(ScannedBarcodeNormalizer.expandUPCE("1234565"))
+        XCTAssertTrue(expanded.hasPrefix("1"))
+        XCTAssertEqual(expanded.count, 12)
+        XCTAssertTrue(ScanViewModel.isSupportedProductBarcode(expanded))
+    }
+
+    func testUPCERejectsBadCheckDigitNumberSystemAndShape() {
+        XCTAssertNil(ScannedBarcodeNormalizer.expandUPCE("01234566"), "wrong check digit")
+        XCTAssertNil(ScannedBarcodeNormalizer.expandUPCE("21234565"), "number system must be 0 or 1")
+        XCTAssertNil(ScannedBarcodeNormalizer.expandUPCE("12345"))
+        XCTAssertNil(ScannedBarcodeNormalizer.expandUPCE("ABCDEF"))
+    }
+
+    func testNormalizerOnlyExpandsUPCEPayloads() {
+        XCTAssertEqual(ScannedBarcodeNormalizer.payload("01234565", isUPCE: true), "012345000065")
+        XCTAssertEqual(ScannedBarcodeNormalizer.payload("01234565", isUPCE: false), "01234565")
+        XCTAssertEqual(
+            ScannedBarcodeNormalizer.payload("SPL-AB12", isUPCE: true), "SPL-AB12",
+            "an unexpandable payload passes through so it still reaches the Unrecognized result"
+        )
+    }
 }

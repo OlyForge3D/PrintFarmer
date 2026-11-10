@@ -85,7 +85,7 @@ function DayCell({ date, tasks, isCurrentMonth, isSelected, onClick }: DayCellPr
         className={`
           inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium
           ${today ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : ''}
-          ${!today && isCurrentMonth ? 'text-pf-text-primary' : 'text-pf-text-tertiary'}
+          ${today ? '' : isCurrentMonth ? 'text-pf-text-primary' : 'text-pf-text-tertiary'}
         `}
       >
         {format(date, 'd')}

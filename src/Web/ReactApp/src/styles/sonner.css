@@ -1,0 +1,9 @@
+html [data-sonner-toaster][data-sonner-theme='light'],
+html [data-sonner-toaster][data-sonner-theme='dark'] {
+  --success-bg: var(--pf-success-bg);
+  --success-border: var(--pf-success-border);
+  --success-text: var(--pf-success-fg);
+  --warning-bg: var(--pf-warning-bg);
+  --warning-border: var(--pf-warning-border);
+  --warning-text: var(--pf-warning-text);
+}
