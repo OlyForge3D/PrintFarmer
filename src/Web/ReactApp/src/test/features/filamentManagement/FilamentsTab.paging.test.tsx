@@ -186,7 +186,7 @@ describe('FilamentsTab — server-side paging', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
     const dialog = screen.getByRole('dialog');
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('3 active spools');
-    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeDisabled();
     expect(mockDeleteFilament).not.toHaveBeenCalled();
   });
 
@@ -197,7 +197,7 @@ describe('FilamentsTab — server-side paging', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('status')).toHaveTextContent('Checking active and archived spools');
-    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeDisabled();
   });
 
   it('fails closed and surfaces a plain ApiError when spool verification fails', async () => {
@@ -207,7 +207,7 @@ describe('FilamentsTab — server-side paging', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
     const dialog = screen.getByRole('dialog');
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Spoolman is unavailable. Try again.');
-    expect(within(dialog).getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeDisabled();
     expect(mockDeleteFilament).not.toHaveBeenCalled();
   });
 
@@ -216,7 +216,7 @@ describe('FilamentsTab — server-side paging', () => {
     render(<FilamentsTab />);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
     expect(await screen.findByText(/This filament has no spools/)).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(mockDeleteFilament).toHaveBeenCalledWith({ id: 1, archivedSpoolIds: [] }));
   });
 
@@ -226,7 +226,7 @@ describe('FilamentsTab — server-side paging', () => {
     render(<FilamentsTab />);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Filament 1' }));
     expect(await screen.findByText(/This filament has no spools/)).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
       'Failed to delete filament: The spool list changed. Review confirmation again.', { duration: 10000 },
     ));
@@ -240,10 +240,10 @@ describe('FilamentsTab — server-side paging', () => {
     });
     render(<FilamentsTab />);
     fireEvent.click(await screen.findByRole('button', { name: 'Select Filament 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Filaments with active or archived spools will be skipped');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete', exact: true }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
       'Deleted 0, failed 1. Filament 1: Has 2 archived spools. Delete individually.', { duration: 10000 },
     ));

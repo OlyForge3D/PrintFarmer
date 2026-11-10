@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Exceptions;
@@ -104,7 +104,10 @@ public sealed class SpoolmanFilamentDeletionTests
         handler.Spools.Add((1, true));
         handler.BeforeRead = read =>
         {
-            if (read == 2) handler.Spools[0] = (1, false);
+            if (read == 2)
+            {
+                handler.Spools[0] = (1, false);
+            }
         };
         using var http = new HttpClient(handler);
 
@@ -138,7 +141,10 @@ public sealed class SpoolmanFilamentDeletionTests
         handler.Spools.AddRange([(1, true), (2, true)]);
         handler.BeforeRead = read =>
         {
-            if (read == 3) handler.Spools.Add((3, false));
+            if (read == 3)
+            {
+                handler.Spools.Add((3, false));
+            }
         };
         using var http = new HttpClient(handler);
 
@@ -237,13 +243,19 @@ public sealed class SpoolmanFilamentDeletionTests
                 BeforeRead?.Invoke(Reads.Count);
                 string json = ReadBody ?? JsonSerializer.Serialize(Spools.Select(s => new
                 {
-                    id = s.Id, archived = s.Archived, filament = new { id = 10 },
+                    id = s.Id,
+                    archived = s.Archived,
+                    filament = new { id = 10 },
                 }));
                 var response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(json, Encoding.UTF8, "application/json"),
                 };
-                if (TotalCount is not null) response.Headers.Add("X-Total-Count", TotalCount);
+                if (TotalCount is not null)
+                {
+                    response.Headers.Add("X-Total-Count", TotalCount);
+                }
+
                 return Task.FromResult(response);
             }
 
