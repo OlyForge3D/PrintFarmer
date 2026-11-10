@@ -109,6 +109,7 @@ import {
   SpoolmanMaterial,
   SpoolmanBulkUpdateFilamentsRequest,
   SpoolmanBulkUpdateResult,
+  SpoolmanFilamentDeletePreview,
   SpoolmanUpdateFilamentRequest,
   SpoolmanUpdateSpoolRequest,
   SpoolmanBulkUpdateSpoolsRequest,
@@ -3742,8 +3743,22 @@ export class ApiClient {
   /**
    * Delete a single filament from Spoolman by ID.
    */
-  async deleteFilament(id: number): Promise<void> {
-    await this.client.delete(`/spoolman/filaments/${id}`);
+  async deleteFilament(id: number, archivedSpoolIds?: number[]): Promise<void> {
+    if (archivedSpoolIds === undefined) {
+      await this.client.delete(`/spoolman/filaments/${id}`);
+    } else {
+      // Each server-side Spoolman request is bounded; a batch can legitimately
+      // exceed the shared client timeout. Keep its final/partial outcome visible.
+      await this.client.post(`/spoolman/filaments/${id}/delete-confirmed`, { archivedSpoolIds }, { timeout: 0 });
+    }
+  }
+
+  /** Includes archived spools, without deleting anything. Never use a cached display list. */
+  async previewFilamentDelete(id: number, signal?: AbortSignal): Promise<SpoolmanFilamentDeletePreview> {
+    const response = await this.client.get<SpoolmanFilamentDeletePreview>(
+      `/spoolman/filaments/${id}/delete-preview`, { signal },
+    );
+    return response.data;
   }
 
   /**
