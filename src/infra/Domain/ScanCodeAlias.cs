@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Remembers a scanned code that is not a retail GTIN (for example an Amazon FNSKU such as

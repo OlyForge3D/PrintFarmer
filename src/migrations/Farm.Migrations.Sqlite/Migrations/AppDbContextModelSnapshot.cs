@@ -8019,6 +8019,40 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ScanCodeAlias", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FilamentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("FilamentId");
+
+                    b.ToTable("ScanCodeAliases");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Spool", b =>
                 {
                     b.Property<Guid>("Id")
