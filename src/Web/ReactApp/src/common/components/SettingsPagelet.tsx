@@ -69,6 +69,16 @@ export interface SettingsPageletProps {
    * which cannot contain rich markup, so no highlighting is applied there.
    */
   searchQuery?: string;
+  fieldRenderers?: Record<string, React.ComponentType<SettingFieldControlProps>>;
+}
+
+export interface SettingFieldControlProps {
+  id: string;
+  label: string;
+  value: SettingValue;
+  required: boolean;
+  error?: string;
+  onChange: (value: SettingValue) => void;
 }
 
 // Helper — string / number are directly usable as input values; anything else
@@ -195,7 +205,7 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
  * or SlicerSettings' per-engine map) is contributed via the section-renderer
  * registry (`section-renderers.tsx`) and rendered by `SettingsPage`, not here.
  */
-export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact, searchQuery }) => {
+export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact, searchQuery, fieldRenderers }) => {
   const query = searchQuery ?? '';
 
   // Required fields lead, everything else keeps its declared order (#1012).
@@ -286,8 +296,23 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         const isMono = isNumber || (inputType !== undefined && MONO_INPUT_TYPES.has(inputType));
 
         let control: React.ReactNode;
+        const CustomControl = fieldRenderers?.[prop.name];
 
-        if (isArray) {
+        if (CustomControl) {
+          control = (
+            <div className={FIELD_CONTROL_CLASS}>
+              <CustomControl
+                id={fieldId}
+                label={accessibleName}
+                value={values[prop.name]}
+                required={isRequired}
+                error={err}
+                onChange={(value) => onChange(prop.name, value)}
+              />
+              {err && <div id={`${fieldId}-error`} className="text-pf-error text-xs mt-1" role="alert">{err}</div>}
+            </div>
+          );
+        } else if (isArray) {
           const arr = values[prop.name] as (string | number)[];
           control = (
             // The requirement is "at least one entry", which is a property of the

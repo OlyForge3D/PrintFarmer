@@ -3,7 +3,7 @@ import { QueryClientContext } from '@tanstack/react-query';
 import { getSettingsSectionPage } from '@/features/settings/subpage-groups';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { isSettingsConflict } from '@/common/utils/apiErrors';
+import { isApiError, isSettingsConflict } from '@/common/utils/apiErrors';
 import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
@@ -136,8 +136,11 @@ function extractFieldErrors(
   if (typeof err !== 'object' || err === null) return result;
   const maybeObj = err as Record<string, unknown>;
   const resp = maybeObj['response'];
-  if (!resp || typeof resp !== 'object') return result;
-  const data = (resp as Record<string, unknown>)['data'];
+  const data = isApiError(err)
+    ? err.data
+    : resp && typeof resp === 'object'
+      ? (resp as Record<string, unknown>)['data']
+      : undefined;
   if (!data || typeof data !== 'object') return result;
   const dataObj = data as Record<string, unknown>;
   const errorsObj = dataObj['errors'] as Record<string, unknown> | undefined;
@@ -731,6 +734,7 @@ function GroupSaveBlock({
                     error={sectionErrors[meta.key]}
                     compact
                     searchQuery={query}
+                    fieldRenderers={renderer?.fieldRenderers}
                   />
                   {extensionRender && (
                     <div className="px-4 pt-2">

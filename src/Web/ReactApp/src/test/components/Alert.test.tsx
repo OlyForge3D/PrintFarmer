@@ -46,7 +46,7 @@ describe('Alert', () => {
       render(<Alert type="warning">Warning message</Alert>);
 
       const alert = screen.getByText('Warning message').closest('[class*="border"][class*="rounded"]');
-      expect(alert).toHaveClass('bg-pf-warning');
+      expect(alert).toHaveClass('bg-pf-warning-bg');
     });
   });
 

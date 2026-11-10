@@ -174,15 +174,13 @@ export function NfcPairingModal({ session }: NfcPairingModalProps) {
                   {searchQuery ? 'No spools match your search' : 'No spools available'}
                 </p>
               ) : (
-                <ul className="divide-y divide-pf-border" role="listbox" aria-label="Spool search results">
+                <ul className="divide-y divide-pf-border" aria-label="Spool search results">
                   {spools.map((spool) => (
                     <li key={spool.id}>
                       <Button
                         variant="ghost"
                         className="w-full px-4 py-3 text-left hover:bg-pf-bg-2 transition-colors flex items-center gap-3 rounded-none h-auto"
                         onClick={() => handleSelectSpool(spool)}
-                        role="option"
-                        aria-selected={false}
                       >
                         {spool.colorHex && (
                           <span
@@ -305,4 +303,3 @@ export function NfcPairingModal({ session }: NfcPairingModalProps) {
     </Modal>
   );
 }
-

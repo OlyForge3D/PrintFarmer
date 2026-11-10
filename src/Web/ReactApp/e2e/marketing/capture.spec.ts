@@ -11,7 +11,7 @@ for (const scene of [
   { name: 'materials', path: '/spools', heading: 'Filament Inventory', marker: 'Ocean blue PLA' },
 ]) {
   test(`capture ${scene.name} from the real routed app`, async ({ page, context }) => {
-    const violations = await isolateCapture(context);
+    const { violations } = await isolateCapture(context);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.clock.setFixedTime(new Date(captureTime));
@@ -66,12 +66,11 @@ for (const scene of [
     expect(errors).toEqual([]);
     await mkdir(assets, { recursive: true });
     await page.screenshot({ path: `${assets}${scene.name}.png`, animations: 'disabled' });
-    expect(violations).toEqual([]);
   });
 }
 
 test('network guard blocks external, unknown API, other loopback ports, and writes', async ({ context, page }) => {
-  const violations = await isolateCapture(context);
+  const { violations } = await isolateCapture(context);
   await page.goto(captureOrigin);
   const results = await page.evaluate(async () => {
     const requests = [

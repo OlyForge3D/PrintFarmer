@@ -2,6 +2,58 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## UI visual and accessibility coverage
+
+`src/Web/ReactApp/e2e/ui-coverage/catalog.json` reconciles inventory rows to
+executable candidate scenarios, explicit unverified coverage, or platform
+blockers. The original transferred Layer 1 inventory note is unavailable, so
+the catalog's historical snapshot and SHA-256 are retained as unverified
+provenance metadata; they are not independently recomputed or bound to an
+available artifact. The catalog check instead validates current coverage
+against routes, settings, static pages, and curated surfaces in the source via
+`e2e/ui-coverage/inventory-contract.mjs`. The row count is not a count of every
+route alias, modal caller, or state/theme/viewport combination.
+
+```bash
+npm run test:ui-coverage:catalog
+npm run test:ui-coverage:candidate
+```
+
+The frontend CI job validates the catalog; the separate
+`UI coverage candidates (Windows Chromium)` job runs the candidate suite.
+Candidate screenshots are attached to Playwright results and uploaded as a
+short-retention CI artifact for inspection; they are not committed baselines
+and do not gate changes through pixel comparisons.
+
+The catalog test checks stable IDs and explicit dispositions, and verifies
+source-derived inventory coverage. Candidate tests capture full-page screenshots
+under Playwright's `test-results` directory, use synthetic read-only app
+responses, load the pinned local theme fonts, and run axe WCAG 2.2 A/AA rules.
+They also retain the 320px and 200%-equivalent horizontal-overflow checks and
+explicit light/dark, high-contrast, and system-contrast scenes. These are
+machine-detected checks, not WCAG conformance or runtime-completeness
+certification.
+
+Pixel-diff regression detection against committed PNG baselines is intentionally
+not provided. Screenshot artifacts are evidence for inspection only; their
+presence does not prove visual correctness, exercise every interaction, or
+approve a change. The historical catalog hash is not independently verified
+because its original source note is unavailable; current inventory coverage is
+instead checked against source-derived inputs.
+
+The inventory contains 141 rows: 101 web, 3 public-site, and 37 native iOS.
+Executable candidates currently cover 100 web rows and all 3 public-site rows;
+the remaining web row, OrcaImportWizard, is blocked. The candidate catalog
+contains 169 executable scenes. Settings candidates use the canonical category
+URLs, including failure detection, costs, planning, operator features, and
+auto-tagging; NFC devices and bindings share the hardware NFC leaf. These are
+sampled candidates, not every route
+alias or state/theme/viewport combination; unrepresented web states and overlays
+remain explicitly unverified. Native entries remain unverified until the
+approved Xcode 26.6 / iOS 26.5 runner is available. Tests use no production
+accounts, secrets, printer commands, profile mutations, or real hardware. This
+is a first executable slice, not a completed full-coverage gate.
+
 ## TestEmulator sensor fixtures
 
 The in-process TestEmulator backend exposes seven stable sensor IDs through the

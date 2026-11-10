@@ -275,7 +275,7 @@ export function AutoDispatchDashboardPage() {
         <div className="flex items-center gap-3">
           <span className={clsx(
             'text-xs font-bold uppercase tracking-[0.15em]',
-            globalEnabled ? 'text-pf-success' : 'text-pf-text-muted',
+            globalEnabled ? 'text-pf-success' : 'text-pf-text-secondary',
           )}>
             {globalEnabled ? 'System Online' : 'System Offline'}
           </span>

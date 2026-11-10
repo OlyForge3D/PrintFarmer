@@ -30,7 +30,7 @@ export const Select: React.FC<SelectProps> = ({ invalid, className, containerCla
           invalid ? 'text-pf-error' : 'text-pf-text-tertiary',
           rest.disabled && 'opacity-50'
         )}
-        ariaLabel=""
+        decorative
       />
     </div>
   );

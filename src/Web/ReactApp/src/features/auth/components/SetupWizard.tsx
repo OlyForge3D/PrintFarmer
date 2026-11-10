@@ -550,14 +550,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Password *</label>
         <div className="relative">
-          <input id="password" ref={passwordInputRef} type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} aria-required="true" aria-invalid={accountErrors.password ? true : undefined} aria-describedby={accountErrors.password ? 'password-error' : undefined} />
+          <input id="password" ref={passwordInputRef} type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-12" disabled={submitting} aria-required="true" aria-invalid={accountErrors.password ? true : undefined} aria-describedby={accountErrors.password ? 'password-error' : undefined} />
           <Button
             type="button"
             onClick={() => setShowPassword(p => !p)}
             variant="subtle"
             size="sm"
-            className="absolute right-3 top-1/2 -translate-y-1/2 !p-0 !h-auto"
+            className="absolute right-1 top-1/2 !h-11 !w-11 !p-0 -translate-y-1/2"
             disabled={submitting}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
             title={showPassword ? 'Hide password' : 'Show password'}
           >
             {showPassword ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
