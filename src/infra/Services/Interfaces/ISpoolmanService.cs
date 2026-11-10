@@ -90,6 +90,15 @@ public interface ISpoolmanService
     Task<SpoolmanFilamentDto?> GetFilamentByIdAsync(int filamentId, CancellationToken ct);
 
     /// <summary>
+    /// Gets a filament by ID, distinguishing a missing filament from a failure.
+    /// </summary>
+    /// <returns>The filament, or null only when Spoolman answers 404 Not Found.</returns>
+    /// <exception cref="Farm.Infrastructure.Exceptions.SpoolmanApiException">
+    /// When Spoolman is not configured, unreachable, or returns any other non-success status.
+    /// </exception>
+    Task<SpoolmanFilamentDto?> FindFilamentByIdAsync(int filamentId, CancellationToken ct);
+
+    /// <summary>
     /// Gets detailed information about a specific filament spool by its ID.
     /// </summary>
     /// <param name="spoolId">The unique identifier of the spool to retrieve</param>
