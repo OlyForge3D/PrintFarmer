@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { isolateCapture } from './fixtures';
 
 for (const viewport of [
@@ -10,6 +10,19 @@ for (const viewport of [
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize(viewport);
+    const targetSizes: { control: string; width: number; height: number }[] = [];
+    async function checkTargetSize(control: Locator, name: string) {
+      const bounds = await control.boundingBox();
+      expect(bounds, `${name} is rendered`).not.toBeNull();
+      if (!bounds) throw new Error(`${name} has no bounding box`);
+      targetSizes.push({ control: name, width: bounds.width, height: bounds.height });
+      if (viewport.width < 640) {
+        expect(bounds.width, `${name} mobile width`).toBeGreaterThanOrEqual(44);
+        expect(bounds.height, `${name} mobile height`).toBeGreaterThanOrEqual(44);
+      } else {
+        expect(bounds.height, `${name} retains compact desktop sizing`).toBeLessThan(44);
+      }
+    }
     await page.clock.setFixedTime(new Date('2026-03-08T10:00:00Z'));
     let identity = { farmName: 'PrintFarmer', timeZone: 'UTC', rowVersion: 'absent' };
     const metadata = [{
@@ -54,6 +67,9 @@ for (const viewport of [
     await page.getByLabel('Farm name', { exact: false }).fill('Workshop North');
     await page.getByRole('searchbox', { name: 'Filter timezones' }).fill('Los Angeles');
     const timezone = page.getByRole('combobox', { name: 'Farm timezone' });
+    await checkTargetSize(page.getByRole('searchbox', { name: 'Filter timezones' }), 'Timezone filter');
+    await checkTargetSize(timezone, 'Timezone select');
+    await checkTargetSize(page.getByRole('button', { name: 'Enter timezone manually' }), 'Manual entry toggle');
     await timezone.focus();
     await timezone.press('End');
     await timezone.press('Tab');
@@ -76,6 +92,13 @@ for (const viewport of [
 
     await page.getByRole('button', { name: 'Enter timezone manually' }).click();
     await page.getByRole('textbox', { name: 'Farm timezone' }).fill('US/Pacific');
+    await checkTargetSize(page.getByRole('textbox', { name: 'Farm timezone' }), 'Manual timezone input');
+    await checkTargetSize(page.getByRole('button', { name: 'Choose from timezone list' }), 'List entry toggle');
+    await page.screenshot({ path: testInfo.outputPath(`farm-identity-manual-${viewport.width}.png`), fullPage: true });
+    await testInfo.attach('timezone-target-sizes', {
+      body: JSON.stringify({ viewport, targetSizes }, null, 2),
+      contentType: 'application/json',
+    });
     await page.getByRole('button', { name: 'Choose from timezone list' }).click();
     await expect(timezone).toHaveValue('US/Pacific');
     await page.getByRole('button', { name: /save/i }).click();

@@ -33,7 +33,7 @@ export function FarmTimeZoneControl({ id, label, value, required, error, onChang
           placeholder="Filter by region or city"
           value={filter}
           onChange={event => setFilter(event.currentTarget.value)}
-          className="text-base sm:text-sm"
+          className="min-h-11 min-w-11 text-base sm:min-h-0 sm:min-w-0 sm:text-sm"
           aria-controls={id}
         />
       )}
@@ -49,7 +49,7 @@ export function FarmTimeZoneControl({ id, label, value, required, error, onChang
           value={selected}
           placeholder="America/Los_Angeles"
           onChange={event => onChange(event.currentTarget.value)}
-          className="text-base sm:text-sm"
+          className="min-h-11 min-w-11 text-base sm:min-h-0 sm:min-w-0 sm:text-sm"
           autoComplete="off"
           spellCheck={false}
         />
@@ -64,7 +64,7 @@ export function FarmTimeZoneControl({ id, label, value, required, error, onChang
           invalid={Boolean(error)}
           value={selected}
           onChange={event => onChange(event.currentTarget.value)}
-          className="text-base sm:text-sm"
+          className="min-h-11 min-w-11 text-base sm:min-h-0 sm:min-w-0 sm:text-sm"
         >
           {!selected && <option value="">Choose a timezone</option>}
           {options.map(zone => <option key={zone} value={zone}>{zone}</option>)}
@@ -83,7 +83,7 @@ export function FarmTimeZoneControl({ id, label, value, required, error, onChang
         </p>
       )}
       {zones !== null && (
-        <Button type="button" variant="secondary" size="sm" onClick={() => setManual(current => !current)}>
+        <Button type="button" variant="secondary" size="sm" className="min-h-11 min-w-11 sm:min-h-0 sm:min-w-0" onClick={() => setManual(current => !current)}>
           {manual ? 'Choose from timezone list' : 'Enter timezone manually'}
         </Button>
       )}
