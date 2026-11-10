@@ -32,7 +32,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     }
 
     func testUnrecognizedNonGtinScanOffersManualAddSpool() {
-        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "LOT-A1B2"])
+        relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
         openScanAndScan()
         XCTAssertTrue(app.staticTexts["Unrecognized Code"].waitForExistence(timeout: 5))
         let addSpool = app.buttons["scan.unrecognized.addSpool"]

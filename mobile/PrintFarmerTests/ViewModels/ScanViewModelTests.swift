@@ -434,6 +434,7 @@ final class ScanViewModelTests: XCTestCase {
     @MainActor
     func testNonGtinSymbologyPayloadsAreUnrecognizedWithoutResolvingOrErroring() async {
         let cases: [(symbology: String, payload: String)] = [
+            ("Amazon FNSKU Code 128 from the field report", "X0022Z40I1"),
             ("Code 128 alphanumeric", "SPL-AB12"),
             ("Code 128 numeric (not a GTIN, no such spool)", "12345"),
             ("Code 128 with embedded GTIN digits", "LOT/850078714923"),
@@ -468,10 +469,10 @@ final class ScanViewModelTests: XCTestCase {
     @MainActor
     func testUnrecognizedNonGtinOffersManualAddSpoolAfterTheResultSheetDismisses() async {
         let (viewModel, barcodeService, _) = makeSubject()
-        await viewModel.dispatch("SPL-AB12")
+        await viewModel.dispatch("X0022Z40I1")
         viewModel.resultPresentationDidAppear()
 
-        viewModel.addSpool(fromUnrecognized: "SPL-AB12")
+        viewModel.addSpool(fromUnrecognized: "X0022Z40I1")
 
         XCTAssertNil(viewModel.pendingOutcome, "the Unrecognized sheet dismisses first")
         XCTAssertNil(viewModel.pendingSpoolBarcode)
@@ -479,7 +480,7 @@ final class ScanViewModelTests: XCTestCase {
         guard case .addSpoolManually(let code) = viewModel.pendingOutcome else {
             return XCTFail("Add Spool must open manual spool creation for a non-GTIN code")
         }
-        XCTAssertEqual(code, "SPL-AB12")
+        XCTAssertEqual(code, "X0022Z40I1")
         XCTAssertNil(viewModel.pendingSpoolBarcode, "a non-GTIN must never enter GTIN intake")
         XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty, "a non-GTIN must never be written to the GTIN mapping")
         XCTAssertTrue(barcodeService.importCalls.isEmpty, "nothing is created until the user saves")

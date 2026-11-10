@@ -230,7 +230,7 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
     func testScanNextNonGtinResultIsRejectedBeforeResolution() async throws {
         let service = MockBarcodeIntakeService()
         let scanner = MockScannerService()
-        scanner.barcodeScanResultToReturn = .barcode("LOT-A1B2")
+        scanner.barcodeScanResultToReturn = .barcode("X0022Z40I1")
         let viewModel = BarcodeIntakeViewModel()
         viewModel.configure(barcodeService: service, scanner: scanner)
 
