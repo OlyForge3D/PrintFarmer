@@ -63,6 +63,7 @@ public static class DatabaseInitializationExtensions
                         db,
                         logger,
                         startupCts.Token);
+                    await SqlitePrinterMonitoringSchemaUpgrade.ApplyAsync(db, logger, startupCts.Token);
                 }
 
                 _ = await ProviderAwareMigrationRunner.MigrateAsync(

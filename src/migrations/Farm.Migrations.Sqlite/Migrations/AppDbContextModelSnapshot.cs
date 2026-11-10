@@ -6044,6 +6044,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")
                         .HasColumnType("TEXT");
 

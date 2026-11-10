@@ -389,6 +389,7 @@ public sealed class SdcpPollingService(
 
                     // SDCP uses BackendUrl which combines ServerUrl with BackendPort
                     // The GetCompositeStatusAsync expects the base URL (which it converts to WebSocket URL internally)
+                    DateTime observationStartedAtUtc = DateTime.UtcNow;
                     long? originWatermark = await OriginWatermark
                         .CaptureAsync(watermarkReader, _logger, "SDCP status", ct)
                         .ConfigureAwait(false);
@@ -485,7 +486,7 @@ public sealed class SdcpPollingService(
                     {
                         Sensors = state.Sensors,
                     };
-                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate with { ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,

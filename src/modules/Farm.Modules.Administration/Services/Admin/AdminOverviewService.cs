@@ -25,15 +25,18 @@ public sealed class AdminOverviewService : IAdminOverviewService
     private readonly HealthCheckService _healthCheckService;
     private readonly IEnumerable<IPrinterConnectionHealthProvider> _connectionHealthProviders;
     private readonly ILogger<AdminOverviewService> _logger;
+    private readonly IPrinterMonitoringReader _monitoring;
 
     public AdminOverviewService(
         HealthCheckService healthCheckService,
         IEnumerable<IPrinterConnectionHealthProvider> connectionHealthProviders,
-        ILogger<AdminOverviewService> logger)
+        ILogger<AdminOverviewService> logger,
+        IPrinterMonitoringReader monitoring)
     {
         _healthCheckService = healthCheckService ?? throw new ArgumentNullException(nameof(healthCheckService));
         _connectionHealthProviders = connectionHealthProviders ?? throw new ArgumentNullException(nameof(connectionHealthProviders));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _monitoring = monitoring ?? throw new ArgumentNullException(nameof(monitoring));
     }
 
     public async Task<AdminOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
@@ -68,6 +71,23 @@ public sealed class AdminOverviewService : IAdminOverviewService
         }
 
         PrinterConnectivitySnapshot printerConnectivity = GetPrinterConnectivity();
+        try
+        {
+            IReadOnlyList<PrinterMonitoringSnapshot> registered = await _monitoring.GetSnapshotsAsync(cancellationToken);
+            printerConnectivity = MergeMonitoring(printerConnectivity, registered, checkedAt);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // CodeQL #6625: preserve the never-500 contract; log and expose ProviderErrorCount.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _logger.LogWarning(ex, "Admin overview: printer monitoring registry unavailable");
+            printerConnectivity = printerConnectivity with { ProviderErrorCount = printerConnectivity.ProviderErrorCount + 1 };
+        }
+
         List<SubsystemHealthDto> subsystems = BuildSubsystems(report, probeError, printerConnectivity);
         List<AttentionItemDto> attention = BuildAttention(report, probeError, printerConnectivity);
 
@@ -208,17 +228,29 @@ public sealed class AdminOverviewService : IAdminOverviewService
 
     private static SubsystemHealthDto BuildBackendsTile(PrinterConnectivitySnapshot connectivity)
     {
-        int failedCount = connectivity.Printers.Count(p => p.ConnectionState != PrinterConnectionState.Connected);
-        int totalCount = connectivity.Printers.Count;
+        int failedCount = connectivity.Printers.Count(p => p.ConnectionState != PrinterConnectionState.Connected
+            && !connectivity.ExpectedOfflineIds.Contains(p.PrinterId)
+            && !connectivity.UnknownIds.Contains(p.PrinterId));
+        int totalCount = connectivity.Printers.Count - connectivity.ExpectedOfflineIds.Count;
         SubsystemStatus status = failedCount == 0 && connectivity.ProviderErrorCount == 0
-            ? SubsystemStatus.Healthy
+            ? connectivity.UnknownIds.Count > 0 ? SubsystemStatus.Unknown
+            : SubsystemStatus.Healthy
             : failedCount == totalCount && totalCount > 0
                 ? SubsystemStatus.Unhealthy
                 : SubsystemStatus.Degraded;
 
         string detail = totalCount == 0
-            ? connectivity.ProviderErrorCount == 0 ? "No registered printers reported" : "Printer status unavailable"
-            : string.Create(CultureInfo.InvariantCulture, $"{totalCount - failedCount} / {totalCount} reachable");
+            ? connectivity.ProviderErrorCount == 0 ? "No printers expected online" : "Printer status unavailable"
+            : string.Create(CultureInfo.InvariantCulture, $"{totalCount - failedCount - connectivity.UnknownIds.Count} / {totalCount} reachable");
+        if (connectivity.ExpectedOfflineIds.Count > 0)
+        {
+            detail += string.Create(CultureInfo.InvariantCulture, $"; {connectivity.ExpectedOfflineIds.Count} expected offline");
+        }
+
+        if (connectivity.UnknownIds.Count > 0)
+        {
+            detail += string.Create(CultureInfo.InvariantCulture, $"; {connectivity.UnknownIds.Count} status unknown");
+        }
 
         return new SubsystemHealthDto
         {
@@ -468,23 +500,77 @@ public sealed class AdminOverviewService : IAdminOverviewService
         }
 
         foreach (PrinterConnectionHealth printer in connectivity.Printers.Where(
-                     p => p.ConnectionState != PrinterConnectionState.Connected))
+                     p => p.ConnectionState != PrinterConnectionState.Connected
+                         && !connectivity.ExpectedOfflineIds.Contains(p.PrinterId)))
         {
             items.Add(new AttentionItemDto
             {
-                Key = "printer-" + printer.PrinterId + "-unreachable",
+                Key = "printer-" + printer.PrinterId
+                    + (connectivity.UnknownIds.Contains(printer.PrinterId) ? "-unknown" : "-unreachable"),
                 Severity = AttentionSeverity.Warning,
-                Title = $"Printer '{printer.PrinterName}' is unreachable",
-                Detail = $"{printer.PrinterName} is {printer.ConnectionState}.",
+                Title = connectivity.UnknownIds.Contains(printer.PrinterId)
+                    ? $"Printer '{printer.PrinterName}' status is unknown"
+                    : $"Printer '{printer.PrinterName}' is unreachable",
+                Detail = connectivity.UnknownIds.Contains(printer.PrinterId)
+                    ? "No fresh printer status is available. Check connectivity and backend diagnostics."
+                    : $"{printer.PrinterName} is {printer.ConnectionState}.",
                 ActionLabel = "Open Printers",
-                ActionRoute = "/printers",
+                ActionRoute = $"/printers/{printer.PrinterId}",
             });
         }
     }
 
     private sealed record PrinterConnectivitySnapshot(
         IReadOnlyList<PrinterConnectionHealth> Printers,
-        int ProviderErrorCount);
+        int ProviderErrorCount)
+    {
+        public HashSet<Guid> ExpectedOfflineIds { get; init; } = [];
+
+        public HashSet<Guid> UnknownIds { get; init; } = [];
+    }
+
+    private static PrinterConnectivitySnapshot MergeMonitoring(
+        PrinterConnectivitySnapshot connectivity,
+        IReadOnlyList<PrinterMonitoringSnapshot> registered,
+        DateTime utcNow)
+    {
+        Dictionary<Guid, PrinterConnectionHealth> reported = connectivity.Printers
+            .GroupBy(printer => printer.PrinterId).ToDictionary(group => group.Key, group => group.First());
+        List<PrinterConnectionHealth> printers = [];
+        HashSet<Guid> expected = [];
+        HashSet<Guid> unknown = [];
+        foreach (PrinterMonitoringSnapshot snapshot in registered)
+        {
+            Printer printer = snapshot.Printer;
+            bool hasProvider = reported.TryGetValue(printer.Id, out PrinterConnectionHealth? health);
+            bool fresh = snapshot.Status is { } status && status.UpdatedAtUtc <= utcNow
+                && utcNow - status.UpdatedAtUtc <= PrinterStatusFreshness.MaximumAge;
+            if (snapshot.IsExpectedOffline
+                && (!hasProvider || health!.ConnectionState == PrinterConnectionState.Offline))
+            {
+                expected.Add(printer.Id);
+            }
+            else if (!fresh && !hasProvider)
+            {
+                unknown.Add(printer.Id);
+            }
+
+            printers.Add(health ?? new PrinterConnectionHealth
+            {
+                PrinterId = printer.Id,
+                PrinterName = printer.Name,
+                Backend = (PrinterBackend)printer.Backend,
+                ConnectionState = fresh && snapshot.Status!.Status.IsOnline
+                    ? PrinterConnectionState.Connected : PrinterConnectionState.Offline,
+            });
+        }
+
+        return new PrinterConnectivitySnapshot(printers, connectivity.ProviderErrorCount)
+        {
+            ExpectedOfflineIds = expected,
+            UnknownIds = unknown,
+        };
+    }
 
     private static SubsystemStatus MapStatus(HealthStatus status) => status switch
     {

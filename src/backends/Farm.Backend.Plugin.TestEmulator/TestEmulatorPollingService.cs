@@ -136,6 +136,7 @@ public sealed class TestEmulatorPollingService(
 
     private async Task TickPrinterAsync(Guid printerId, CancellationToken ct)
     {
+        DateTime observationStartedAtUtc = DateTime.UtcNow;
         long? originWatermark = await OriginWatermark
             .CaptureAsync(watermarkReader, logger, "test-emulator status", ct)
             .ConfigureAwait(false);
@@ -195,7 +196,7 @@ public sealed class TestEmulatorPollingService(
         {
             Sensors = sensors,
         };
-        statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
+        statusCacheWriter.UpdateStatus(cacheUpdate with { ObservationStartedAtUtc = observationStartedAtUtc }, originWatermark);
 
         var signalRUpdate = new PrinterStatusUpdate(
             Id: printerId,

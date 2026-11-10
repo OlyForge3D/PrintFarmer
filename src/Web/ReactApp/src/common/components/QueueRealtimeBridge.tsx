@@ -303,6 +303,12 @@ export function QueueRealtimeBridge() {
           queryKey: ['failure-detection-status'],
         });
       }) ?? (() => {});
+    const unsubscribeMonitoring =
+      printerSignalRService.onPrinterMonitoringChanged?.(() => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+        void queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+        void queryClient.invalidateQueries({ queryKey: ['attention'] });
+      }) ?? (() => {});
 
     void refreshBoth();
     void printerSignalRService.connect();
@@ -321,6 +327,7 @@ export function QueueRealtimeBridge() {
       unsubscribeResources();
       unsubscribeGcodeLibrary();
       unsubscribeCameras();
+      unsubscribeMonitoring();
       invalidateRefresher.dispose();
       reconcileRefresher.dispose();
       const lifecycle = printerSignalRService as typeof printerSignalRService & {

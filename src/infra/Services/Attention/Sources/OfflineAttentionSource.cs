@@ -33,7 +33,8 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// </remarks>
 public sealed class OfflineAttentionSource(
     IPrintersService printersService,
-    IPrinterStatusCacheReader statusCache) : IAttentionSource
+    IPrinterStatusCacheReader statusCache,
+    IPrinterMonitoringReader monitoring) : IAttentionSource
 {
     /// <summary>
     /// Deterministic timestamp used for continuous Offline items. Value chosen to be
@@ -56,11 +57,13 @@ public sealed class OfflineAttentionSource(
     public async Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
     {
         List<Printer> printers = await _printers.GetAllAsync(cancellationToken);
+        HashSet<Guid> expectedOffline = (await monitoring.GetSnapshotsAsync(cancellationToken))
+            .Where(snapshot => snapshot.IsExpectedOffline).Select(snapshot => snapshot.Printer.Id).ToHashSet();
         List<AttentionItemDto> items = new();
 
         foreach (Printer printer in printers)
         {
-            if (!printer.IsEnabled)
+            if (!printer.IsEnabled || expectedOffline.Contains(printer.Id))
             {
                 continue;
             }

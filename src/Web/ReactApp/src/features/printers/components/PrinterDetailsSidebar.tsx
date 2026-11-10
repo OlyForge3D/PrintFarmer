@@ -1,4 +1,5 @@
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { PrinterMonitoringControl } from '@/features/printers/components/PrinterMonitoringControl';
 import { BedClearEvidencePanel } from '@/features/printers/components/BedClearEvidencePanel';
 import { PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
 import { RuntimeFactorControls } from '@/features/printers/components/RuntimeFactorControls';
@@ -744,6 +745,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
             <p className="text-xs text-pf-text-secondary">{formatPrinterModelSubtitle(printer.manufacturerName, printer.modelName)}</p>
             <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
+            <PrinterMonitoringControl printer={displayPrinter ?? printer} />
           </div>
           <Button
             type="button"

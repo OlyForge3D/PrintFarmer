@@ -48,6 +48,23 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 
 (Extend with additional DTO details as needed.)
 
+## Printer Expected-Offline Monitoring
+
+`PUT /api/printers/{id}/expected-offline` accepts a JSON boolean: `true`
+acknowledges an already-offline printer; `false` restores normal monitoring.
+It requires `printers:admin`, Submit access to the printer's group, and an
+`If-Match` header containing the printer's current revision.
+
+The response contains `id`, nullable `expectedOfflineSinceUtc`, and `rowVersion`,
+with the updated revision also returned as an ETag. Missing preconditions return
+428; a stale revision returns 412. Acknowledgement returns 409 when offline
+status is unknown or the printer has active or assigned work.
+
+Intent persists until a proven successful reconnect or explicit reversal.
+Actual connectivity remains offline, and active-work or provider faults remain
+actionable. This endpoint changes no power, maintenance, dispatch, or scheduling
+policy.
+
 ## Spoolman Barcode Resolution
 
 - `GET /api/spoolman/filaments/by-barcode?code=` resolves a scanned retail barcode

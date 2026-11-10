@@ -7,6 +7,12 @@
 - **Delimiter**: Comma (`,`)
 - **Header**: First row must contain column names (case-insensitive)
 
+CSV and JSON configuration exports intentionally omit expected-offline monitoring
+acknowledgements. Imports do not accept or infer shutdown intent: new printers
+default to expected online. Existing-printer duplicate detection is unchanged.
+Review the actual printer state and use **Mark expected offline** after
+import instead of carrying a stale acknowledgement to another printer or server.
+
 ## Required Fields
 
 These fields must be present in every row:
@@ -491,4 +497,3 @@ dotnet run --project src/tools/AdminCli -- \
 - Sample CSV generation: `dotnet run --project src/tools/AdminCli -- --sample-csv --output sample.csv`
 - Discovery command: `dotnet run --project src/tools/AdminCli -- --discover --range 192.168.1.0/24 --format csv --output discovered.csv`
 - Setup status check: `dotnet run --project src/tools/AdminCli -- --status`
-

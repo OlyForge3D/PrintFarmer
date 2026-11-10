@@ -67,7 +67,9 @@ public sealed record PrinterStatusCacheSnapshot(
     long? OriginWatermark = null,
     DateTime? LastSeenAtUtc = null,
     string Source = "backend",
-    DateTime? SensorsUpdatedAtUtc = null);
+    DateTime? SensorsUpdatedAtUtc = null,
+    DateTime? LastOnlineObservationStartedAtUtc = null,
+    bool HasActivePrintAtDisconnect = false);
 
 /// <summary>
 /// Shared freshness policy for decisions that require live printer telemetry.
@@ -211,7 +213,9 @@ public class PrinterStatusCache :
                 originWatermark,
                 normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
                 "backend",
-                SensorsObservedAt(status, existingSnapshot, observedAtUtc));
+                SensorsObservedAt(status, existingSnapshot, observedAtUtc),
+                OnlineObservationStartedAt(status, existingSnapshot, observedAtUtc),
+                HasActivePrintAtDisconnect(status, existingSnapshot));
             LogTransitionIfChanged(status.Id, existing, normalized);
             transition = DetectOfflineTransition(existing, normalized);
         }
@@ -245,7 +249,9 @@ public class PrinterStatusCache :
                     originWatermark,
                     normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
                     "backend",
-                    SensorsObservedAt(status, existingSnapshot, observedAtUtc));
+                    SensorsObservedAt(status, existingSnapshot, observedAtUtc),
+                    OnlineObservationStartedAt(status, existingSnapshot, observedAtUtc),
+                    HasActivePrintAtDisconnect(status, existingSnapshot));
                 LogTransitionIfChanged(status.Id, existing, normalized);
                 if (DetectOfflineTransition(existing, normalized) is AttentionChangeKind kind)
                 {
@@ -335,6 +341,26 @@ public class PrinterStatusCache :
 
         return normalized with { Sensors = sensors };
     }
+
+    private static DateTime? OnlineObservationStartedAt(
+        PrinterStatusDto status,
+        PrinterStatusCacheSnapshot? previous,
+        DateTime utcNow)
+    {
+        DateTime? evidence = status.IsOnline
+            && status.ObservationStartedAtUtc <= utcNow
+            ? status.ObservationStartedAtUtc
+            : null;
+        return evidence > previous?.LastOnlineObservationStartedAtUtc
+            || previous?.LastOnlineObservationStartedAtUtc is null
+            ? evidence
+            : previous.LastOnlineObservationStartedAtUtc;
+    }
+
+    private static bool HasActivePrintAtDisconnect(PrinterStatusDto status, PrinterStatusCacheSnapshot? previous) =>
+        !status.IsOnline && (previous?.HasActivePrintAtDisconnect == true
+            || PrinterStateClassifier.IsActivePrintingJob(previous?.Status.RawActivityState ?? previous?.Status.State)
+            || PrinterStateClassifier.IsActivePrintingJob(status.RawActivityState ?? status.State));
 
     private static DateTime? SensorsObservedAt(
         PrinterStatusDto status,

@@ -6065,6 +6065,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
