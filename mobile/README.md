@@ -171,6 +171,25 @@ whole-screen references. Retained goldens still require strict precision, no
 skips and separate approved iPhone/iPad evidence. The guide does not authorize
 re-recording to hide runtime drift.
 
+### Connected scan-code intake checks
+
+The two `ScanStationUITests.testFnskuFirstScan…` scenarios can use production
+intake/spool clients against an isolated loopback API. Pass
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_URL=http://127.0.0.1:<port>` and
+`TEST_RUNNER_PRINTFARMER_ALIAS_API_TOKEN` through `xcodebuild` using the runner
+above. Never use a production account or farm. This opt-in exists only in DEBUG
+UI-test launches; the scanner and unrelated shell services remain fixtures.
+
+Run each first-scan selector separately and reset the isolated fixture's
+`X0022Z40I1` alias before **each** run. The preflight requires `NotRemembered`
+and fails explicitly on stale fixtures or lookup errors. Seed two filaments
+with the same material/vendor and IDs 41/42 for the existing-filament scenario;
+it explicitly selects 42, relaunches the app and confirms another spool.
+The new-filament scenario submits the form only in connected mode because the
+standard demo spool service is intentionally read-only. Verify the API database
+and distinct upstream spool IDs separately, and identify any fixture upstream
+or unavailable physical camera in the evidence.
+
 ## Updating App Store screenshots (manual)
 
 From the repository root, run:

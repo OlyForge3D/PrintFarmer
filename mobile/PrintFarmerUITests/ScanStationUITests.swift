@@ -31,8 +31,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 5))
     }
 
-    func testFnskuFirstScanRemembersPickedFilamentAndRescanAddsAnotherSpool() {
-        let isLive = configureLiveIntakeIfRequested()
+    func testFnskuFirstScanRemembersPickedFilamentAndRescanAddsAnotherSpool() async throws {
+        let isLive = try await configureLiveIntakeIfRequested()
         relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
         openScanAndScan()
 
@@ -63,6 +63,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         }
         XCTAssertTrue(app.navigationBars["Barcode Intake"].waitForExistence(timeout: 8))
         let addAnother = app.buttons["barcodeIntake.aliasAddSpool"]
+        let intakeList = app.collectionViews.containing(.button, identifier: "barcodeIntake.aliasCancel").firstMatch
+        for _ in 0..<3 where !addAnother.isHittable { intakeList.swipeUp() }
         XCTAssertTrue(addAnother.waitForExistence(timeout: 8), "a rescan offers the remembered filament")
         XCTAssertFalse(app.navigationBars["Remember Code"].exists, "a remembered code skips filament selection")
         XCTAssertFalse(app.staticTexts["Imported This Session (1)"].exists, "nothing is created before confirmation")
@@ -73,8 +75,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         attachScreenshot(named: "fnsku-rescan-second-spool")
     }
 
-    func testFnskuFirstScanOffersCreatingANewFilament() {
-        _ = configureLiveIntakeIfRequested()
+    func testFnskuFirstScanOffersCreatingANewFilament() async throws {
+        let isLive = try await configureLiveIntakeIfRequested()
         relaunchAppForTest(additionalArguments: ["--uitesting-scan-code", "X0022Z40I1"])
         openScanAndScan()
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
@@ -100,10 +102,13 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertEqual(create.label, "Create filament and add spool")
         attachScreenshot(named: "fnsku-first-scan-create-filament")
         XCTAssertTrue(create.isEnabled)
-        create.tap()
-        XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.navigationBars["Remember Code"].exists)
-        attachScreenshot(named: "fnsku-new-filament-spool-added")
+        // DemoSpoolService deliberately rejects writes; connected runs prove submission.
+        if isLive {
+            create.tap()
+            XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8))
+            XCTAssertFalse(app.navigationBars["Remember Code"].exists)
+            attachScreenshot(named: "fnsku-new-filament-spool-added")
+        }
     }
 
     func testFnskuRememberFailureShowsRetryInTheSheetAndRetryAddsOneSpool() {
@@ -187,11 +192,27 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         add(attachment)
     }
 
-    private func configureLiveIntakeIfRequested() -> Bool {
-        guard let url = ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_URL"] else { return false }
-        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_URL"] = url
-        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_TOKEN"] =
-            ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_TOKEN"]
+    private func configureLiveIntakeIfRequested() async throws -> Bool {
+        guard let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_URL"] else { return false }
+        let url = try XCTUnwrap(URL(string: rawURL))
+        _ = try XCTUnwrap(url.scheme == "http" && url.host == "127.0.0.1" ? url : nil,
+                          "Live intake fixtures must use a loopback HTTP API")
+        let token = try XCTUnwrap(ProcessInfo.processInfo.environment["PRINTFARMER_ALIAS_API_TOKEN"])
+        var components = try XCTUnwrap(URLComponents(
+            url: url.appendingPathComponent("api/spoolman/code-aliases/filament"),
+            resolvingAgainstBaseURL: false
+        ))
+        components.queryItems = [URLQueryItem(name: "code", value: "X0022Z40I1")]
+        var request = URLRequest(url: try XCTUnwrap(components.url))
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual(try XCTUnwrap(response as? HTTPURLResponse).statusCode, 200)
+        struct LookupState: Decodable { let state: String }
+        let lookup = try JSONDecoder().decode(LookupState.self, from: data)
+        XCTAssertEqual(lookup.state, "NotRemembered",
+                       "Reset the isolated fixture's X0022Z40I1 alias before EACH connected first-scan test")
+        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_URL"] = rawURL
+        app.launchEnvironment["PRINTFARMER_UITEST_INTAKE_TOKEN"] = token
         return true
     }
 
