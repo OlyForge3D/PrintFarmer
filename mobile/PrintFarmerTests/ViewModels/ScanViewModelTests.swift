@@ -58,6 +58,55 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testNFCFilamentLinkCreatesSpoolIntakeForLinkedFilamentWithoutRelinkingUID() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        let filament = makeFilament(id: 42, name: "PETG Blue")
+        spoolService.tagScanToReturn = SpoolmanTagScanResponse(
+            matchedSpoolId: nil,
+            matchedFilamentId: filament.id,
+            spool: nil,
+            filament: filament,
+            created: false
+        )
+        let tag = ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: nil
+        )
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        guard case .newSpool(let data) = viewModel.pendingOutcome else {
+            return XCTFail("A filament-linked UID should open spool intake")
+        }
+        XCTAssertEqual(data.filamentId, filament.id)
+        XCTAssertEqual(spoolService.tagScanCalledWith?.uid, tag.uid)
+        XCTAssertNil(spoolService.linkedTag, "the existing filament UID binding must remain unchanged")
+    }
+
+    @MainActor
+    func testUnknownNFCTagOnlyOffersExplicitLinkAndDoesNotMutateSpoolman() async {
+        let (viewModel, _, spoolService) = makeSubject()
+        let tag = ScannedNFCTag(
+            uid: "E0040108662F6FBC",
+            technology: .iso15693,
+            openPrintTagPayload: nil,
+            legacyContent: nil
+        )
+
+        await runNFCScan(.nfcTag(tag), viewModel: viewModel)
+
+        guard case .unknownNFCTag(let unresolvedTag, nil) = viewModel.pendingOutcome else {
+            return XCTFail("An unknown UID should offer explicit linking")
+        }
+        XCTAssertEqual(unresolvedTag.uid, tag.uid)
+        XCTAssertEqual(spoolService.tagScanCalledWith?.uid, tag.uid)
+        XCTAssertNil(spoolService.createSpoolCalledWith)
+        XCTAssertNil(spoolService.linkedTag)
+    }
+
+    @MainActor
     func testDispatchPrinterDeepLinkIsNotRoutedFromSpoolScanner() async {
         let (viewModel, barcodeService, spoolService) = makeSubject()
 

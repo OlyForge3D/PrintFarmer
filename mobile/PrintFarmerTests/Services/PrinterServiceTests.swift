@@ -823,7 +823,7 @@ final class PrinterServiceTests: XCTestCase {
                 switch (status, error) {
                 case (400, .clientError(400, _)), (403, .forbidden), (404, .notFound),
                      (409, .conflict), (412, .preconditionFailed), (428, .preconditionRequired),
-                     (503, .serverError(503)): break
+                     (503, .serverErrorMessage(503, "Not applied or outcome unknown")): break
                 default: XCTFail("Unexpected mapping for \(status): \(error)")
                 }
             }

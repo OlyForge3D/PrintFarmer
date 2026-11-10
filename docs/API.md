@@ -44,6 +44,42 @@ See [bootstrap configuration](GETTING_STARTED.md#first-administrator-bootstrap-p
 when the host environment is `Development`. The effective bypass state is logged
 at startup, and a configured bypass is ignored in every other environment.
 
+## Spoolman NFC tags
+
+`POST /api/spoolman/tags/scan` resolves an NFC UID against Spoolman's persistent
+tag mapping. It accepts `{ "uid": "E0040108662F6FBC" }` and optional
+`format`/`payloadB64` fields. Scans are non-mutating: an unknown UID returns
+null matches and does not create a tag binding or spool. A known UID resolves
+to at most one spool or filament. Tag-link operations use the existing
+`spoolman:admin` permission:
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `POST /api/spoolman/spools/{id}/tag` | `{ "uid": "E0040108662F6FBC" }` | `204` when linked |
+| `DELETE /api/spoolman/spools/{id}/tag/{uid}` | — | `204` when unlinked |
+
+CoreNFC UIDs are sent as uppercase hexadecimal in the byte order returned by
+the platform. For ISO15693, this is the canonical E0-first UID; readers that
+report a different order must normalize at their device boundary. UID identity
+is separate from NDEF contents and spool/printer/tray context.
+
+OpenPrintTag scans send only the payload from an
+`application/vnd.openprinttag` NDEF MIME record as base64 with
+`format: "openprinttag"`. The Scan API never creates a mapping implicitly;
+unknown tags require an explicit link or a user-confirmed create-and-link flow.
+Filament-linked tags open spool intake for that filament and retain their
+filament binding. The iOS writer emits CBOR using the OpenPrintTag
+specification source pinned at
+[`060e420`](https://github.com/OpenPrintTag/openprinttag-specification/tree/060e420892d66c062c8af440c97701aab96bac79).
+The specification has no separate wire-version field. OpenPrintTag writing is
+for NFC-V/ISO15693 tags; legacy OpenSpool and prior PrintFarmer tag content
+remain readable.
+
+An attached Spoolman instance must provide the tag scan and link endpoints. An
+older Spoolman deployment returns an explicit endpoint error; PrintFarmer does
+not treat that failure as an unknown UID or silently fall back to embedded
+payload identity.
+
 ## Response Format
 
 All API responses use camelCase JSON (for TypeScript compatibility):
