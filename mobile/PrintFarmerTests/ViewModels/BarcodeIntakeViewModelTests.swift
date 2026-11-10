@@ -482,6 +482,8 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
             NetworkError.noConnection,
             NetworkError.serverError(502),
             NetworkError.transportError(URLError(.badServerResponse)),
+            // The server maps an upstream Spoolman timeout on create to 400.
+            NetworkError.clientError(400, nil),
         ]
         for error in uncertain {
             let (viewModel, service) = makeSubject()

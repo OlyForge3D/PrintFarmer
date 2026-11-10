@@ -122,10 +122,14 @@ final class ScanViewModelTests: XCTestCase {
         viewModel.pendingOutcome = nil
         viewModel.resultPresentationDidDismiss()
         await viewModel.dispatch("SPL-AB12")
+        // A rememberable code now opens Barcode Intake rather than a result sheet.
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "SPL-AB12")
+        XCTAssertNil(viewModel.pendingOutcome)
 
         viewModel.completeNFCTagLink(uid: tag.uid, to: makeSpool(id: 5))
 
-        XCTAssertEqual(viewModel.pendingOutcome?.id, "unknown-SPL-AB12")
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "SPL-AB12", "the newer intake is untouched")
+        XCTAssertNil(viewModel.pendingOutcome)
         XCTAssertNil(viewModel.pendingDeepLinkDestination)
     }
 

@@ -46,12 +46,15 @@ final class BarcodeIntakeViewModel {
 
     /// True only when the request definitely did not create anything on the
     /// server, so it is safe to retry a non-idempotent spool creation.
+    /// A generic client error is excluded: the server reports an upstream
+    /// Spoolman timeout or failure on spool creation as HTTP 400, after which
+    /// the spool may already exist.
     nonisolated static func isDefiniteFailure(_ error: Error) -> Bool {
         guard let networkError = error as? NetworkError else { return false }
         switch networkError {
         case .invalidURL, .unauthorized, .forbidden, .notFound, .featureDisabled,
              .methodNotAllowed, .conflict, .partsInventoryConflict, .preconditionFailed,
-             .preconditionRequired, .clientError, .serverUnreachable, .authFailed,
+             .preconditionRequired, .serverUnreachable, .authFailed,
              .insecureTransportBlocked, .certificateChanged, .certificateNotTrusted:
             return true
         default:

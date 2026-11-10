@@ -423,7 +423,7 @@ private struct UnknownBarcodeView: View {
                 }
             }
             .disabled(!canCreateFilament || isSaving)
-            .accessibilityLabel(remembersCode ? "Create filament and add spool" : "Create filament and import spool")
+            .accessibilityLabel(createButtonAccessibilityLabel)
             .accessibilityIdentifier("mapBarcode.create")
 
             Button("Choose Existing Instead") {
@@ -436,6 +436,11 @@ private struct UnknownBarcodeView: View {
     private var createButtonTitle: String {
         if createdFilament != nil { return remembersCode ? "Retry Add Spool" : "Retry Import" }
         return remembersCode ? "Create and Add Spool" : "Create and Import"
+    }
+
+    private var createButtonAccessibilityLabel: String {
+        if createdFilament != nil { return remembersCode ? "Retry adding spool" : "Retry importing spool" }
+        return remembersCode ? "Create filament and add spool" : "Create filament and import spool"
     }
 
     private func filamentRow(_ filament: SpoolmanFilament) -> some View {
