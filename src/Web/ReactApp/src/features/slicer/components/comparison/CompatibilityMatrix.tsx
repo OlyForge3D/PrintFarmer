@@ -139,7 +139,13 @@ export function CompatibilityMatrix({
       </Tabs>
 
       {/* Matrix table */}
-      <div className="overflow-x-auto rounded-lg border border-pf-border">
+      <div
+        className="overflow-x-auto rounded-lg border border-pf-border"
+        role="tabpanel"
+        id={`panel-${mode}`}
+        aria-labelledby={`tab-${mode}`}
+        tabIndex={0}
+      >
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-pf-border bg-pf-bg-1">

@@ -204,7 +204,7 @@ function ThemePreview({ option }: { option: ThemeOption }) {
                   <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">Printer card</div>
                   <div className="mt-1 text-sm font-semibold">Voron 2.4</div>
                 </div>
-                <div className="rounded-xs bg-[var(--preview-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--preview-accent)]">
+                <div className="rounded-xs bg-[var(--preview-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--preview-text)]">
                   Active
                 </div>
               </div>
@@ -355,12 +355,12 @@ export function ThemeSwitcher() {
                   <span className={clsx('text-sm font-semibold', isActive ? 'text-[var(--pf-on-accent)]' : 'text-[var(--pf-text-primary)]')}>
                     {option.label}
                   </span>
-                  <span className={clsx('mt-1 block text-xs', isActive ? 'text-[var(--pf-on-accent)]/80' : 'text-pf-text-secondary')}>
+                  <span className={clsx('mt-1 block text-xs', isActive ? 'text-[var(--pf-on-accent)]' : 'text-pf-text-secondary')}>
                     {option.description}
                   </span>
                 </div>
 
-                {isActive ? <span className="mt-0.5 text-xs text-[var(--pf-on-accent)]/80">✓ Active</span> : null}
+                {isActive ? <span className="mt-0.5 text-xs text-[var(--pf-on-accent)]">✓ Active</span> : null}
               </Button>
             );
           })}

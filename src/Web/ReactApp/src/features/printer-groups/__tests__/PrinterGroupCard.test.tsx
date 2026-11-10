@@ -10,7 +10,9 @@ vi.mock('@/common/components/ui', () => ({
       <div data-testid="card" className={className} onClick={onClick}>{children}</div>
     ),
     {
-      Body: ({ children }: { children: React.ReactNode }) => <div data-testid="card-body">{children}</div>,
+      Body: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+        <div data-testid="card-body" className={className}>{children}</div>
+      ),
       Header: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
       Footer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     },
@@ -86,9 +88,18 @@ describe('PrinterGroupCard', () => {
     expect(screen.getByText(/Updated 2 hours ago/)).toBeInTheDocument();
   });
 
-  it('calls onSelect when card is clicked', () => {
+  it('provides a full-card primary action without nesting the action buttons', () => {
     renderCard();
-    fireEvent.click(screen.getByTestId('card'));
+    const selectButton = screen.getByRole('button', { name: 'Select Test Group printer group' });
+    const editButton = screen.getByLabelText('Edit group');
+    const deleteButton = screen.getByLabelText('Delete group');
+
+    expect(selectButton).toHaveClass('absolute', 'inset-0');
+    expect(screen.getByTestId('card-body')).toHaveClass('pointer-events-none');
+    expect(selectButton).not.toContainElement(editButton);
+    expect(selectButton).not.toContainElement(deleteButton);
+
+    fireEvent.click(selectButton);
     expect(onSelect).toHaveBeenCalledWith(mockGroup);
   });
 

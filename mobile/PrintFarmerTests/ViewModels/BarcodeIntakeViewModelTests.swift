@@ -57,11 +57,11 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.filamentToSave = makeFilament(id: 8)
         service.importError = NetworkError.serverError(500)
 
-        await viewModel.handleScannedBarcode("ABC/DEF 12")
+        await viewModel.handleScannedBarcode("4006381333931")
         let succeeded = await viewModel.importUnknownBarcode(filamentId: 8)
 
         XCTAssertFalse(succeeded)
-        XCTAssertEqual(viewModel.pendingUnknownBarcode, "ABC/DEF 12")
+        XCTAssertEqual(viewModel.pendingUnknownBarcode, "4006381333931")
         XCTAssertNotNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
         XCTAssertFalse(viewModel.isBusy)
@@ -184,9 +184,9 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         let (viewModel, service) = makeSubject()
         service.resolveError = NetworkError.serverError(500)
 
-        await viewModel.handleScannedBarcode("ABC123")
+        await viewModel.handleScannedBarcode("96385074")
 
-        XCTAssertEqual(viewModel.lastScannedBarcode, "ABC123")
+        XCTAssertEqual(viewModel.lastScannedBarcode, "96385074")
         XCTAssertNotNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.importedThisSession.isEmpty)
         XCTAssertNil(viewModel.pendingUnknownBarcode)
@@ -196,10 +196,51 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
         service.filamentToResolve = makeFilament(id: 9)
         service.spoolToImport = makeSpool(id: 99, filamentId: 9)
 
-        await viewModel.handleScannedBarcode("ABC123")
+        await viewModel.handleScannedBarcode("96385074")
 
         XCTAssertEqual(viewModel.importedThisSession.map(\.id), [99])
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testNonGtinValuesNeverResolveMapOrImport() async {
+        // Barcode Intake's own camera also reports Code 128/39 and QR text.
+        // The server strips non-digits, so none of these may be resolved,
+        // mapped as a GTIN, or imported.
+        let codes = ["LOT/850078714923", "ABC123", "SPL-AB12", "https://example.com/p/4006381333931",
+                     "12345", "850078714924"]
+        for code in codes {
+            let (viewModel, service) = makeSubject()
+            service.filamentToResolve = makeFilament(id: 7)
+
+            await viewModel.handleScannedBarcode(code)
+            let imported = await viewModel.importUnknownBarcode(filamentId: 7)
+
+            XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.notProductBarcodeMessage, code)
+            XCTAssertNil(viewModel.pendingUnknownBarcode, code)
+            XCTAssertFalse(imported, code)
+            XCTAssertFalse(viewModel.isBusy, code)
+            XCTAssertTrue(service.resolveBarcodes.isEmpty, "\(code) must not be resolved")
+            XCTAssertTrue(service.saveMappingCalls.isEmpty, "\(code) must not be mapped")
+            XCTAssertTrue(service.importCalls.isEmpty, "\(code) must not be imported")
+        }
+    }
+
+    @MainActor
+    func testScanNextNonGtinResultIsRejectedBeforeResolution() async throws {
+        let service = MockBarcodeIntakeService()
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .barcode("X0022Z40I1")
+        let viewModel = BarcodeIntakeViewModel()
+        viewModel.configure(barcodeService: service, scanner: scanner)
+
+        viewModel.scanNext()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(viewModel.errorMessage, BarcodeIntakeViewModel.notProductBarcodeMessage)
+        XCTAssertTrue(service.resolveBarcodes.isEmpty)
+        XCTAssertTrue(service.saveMappingCalls.isEmpty)
+        XCTAssertTrue(service.importCalls.isEmpty)
     }
 
     @MainActor

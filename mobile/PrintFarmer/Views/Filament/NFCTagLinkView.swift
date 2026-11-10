@@ -7,6 +7,8 @@ struct NFCTagLinkView: View {
     let uid: String
     let scannedData: ScannedSpoolData?
     let spoolService: any SpoolServiceProtocol
+    /// Set when the tag points to a spool that no longer exists on this server.
+    var staleSpoolID: Int?
     let onLinked: (SpoolmanSpool) -> Void
 
     @State private var spools: [SpoolmanSpool] = []
@@ -24,7 +26,7 @@ struct NFCTagLinkView: View {
                     LabeledContent("Tag UID", value: uid)
                         .textSelection(.enabled)
                         .listRowBackground(Color.pfCard)
-                    Text("This tag is not linked in Spoolman. Select an existing spool or create one to link it.")
+                    Text(linkExplanation)
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextSecondary)
                         .listRowBackground(Color.pfCard)
@@ -109,6 +111,7 @@ struct NFCTagLinkView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isLinking)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Create spool") { isCreating = true }
@@ -130,6 +133,15 @@ struct NFCTagLinkView: View {
             }
             .task { await loadSpools() }
         }
+        .interactiveDismissDisabled(isLinking)
+    }
+
+    private var linkExplanation: String {
+        if let staleSpoolID {
+            return "This tag points to spool #\(staleSpoolID), which isn't on this server. "
+                + "Select an existing spool or create one to relink it."
+        }
+        return "This tag is not linked in Spoolman. Select an existing spool or create one to link it."
     }
 
     private func loadSpools() async {

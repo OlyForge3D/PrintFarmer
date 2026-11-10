@@ -344,7 +344,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
           </div>
         </div>
 
-        <div className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div tabIndex={0} className="relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {filteredItems.length > 0 ? (
             <div id={listboxId} role="listbox" aria-label="Command palette results" className="space-y-3">
               {filteredGroups.map((group) => {

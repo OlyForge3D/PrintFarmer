@@ -6,7 +6,8 @@ import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 const seeds: Record<string, unknown> = {
   ...toolbarAdminSeeds,
   '/api/settings/metadata': [
-    ...(toolbarAdminSeeds['/api/settings/metadata'] as object[]),
+    ...(toolbarAdminSeeds['/api/settings/metadata'] as { key: string }[])
+      .filter(section => !['CostTracking', 'Obico', 'QueuePlanning', 'OperatorFeatures', 'AutoTagging', 'Slicing'].includes(section.key)),
     {
       key: 'CostTracking', className: 'CostTrackingSettings', displayName: 'Cost tracking',
       group: 'Operations', properties: [

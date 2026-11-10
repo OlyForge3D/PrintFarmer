@@ -64,30 +64,30 @@ export function FarmCostSummaryWidget({ className = '' }: { className?: string }
       {summary && (
         <div className="space-y-3">
           <div className="text-center p-3 bg-pf-bg-0 rounded-lg">
-            <p className="text-xs text-pf-text-muted mb-1">Total Cost</p>
+            <p className="text-xs text-pf-text-secondary mb-1">Total Cost</p>
             <p className="text-2xl font-bold text-pf-text-primary">
               {formatCurrency(summary.totalCostUsd)}
             </p>
-            <p className="text-xs text-pf-text-muted mt-1">
+            <p className="text-xs text-pf-text-secondary mt-1">
               {summary.jobsWithCostData} job{summary.jobsWithCostData !== 1 ? 's' : ''} tracked
             </p>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-              <p className="text-xs text-pf-text-muted mb-1">Energy</p>
+              <p className="text-xs text-pf-text-secondary mb-1">Energy</p>
               <p className="text-sm font-semibold text-pf-text-primary">
                 {formatCurrency(summary.totalEnergyCostUsd)}
               </p>
             </div>
             <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-              <p className="text-xs text-pf-text-muted mb-1">Material</p>
+              <p className="text-xs text-pf-text-secondary mb-1">Material</p>
               <p className="text-sm font-semibold text-pf-text-primary">
                 {formatCurrency(summary.totalMaterialCostUsd)}
               </p>
             </div>
             <div className="text-center p-2 bg-pf-bg-0 rounded-md">
-              <p className="text-xs text-pf-text-muted mb-1">Machine</p>
+              <p className="text-xs text-pf-text-secondary mb-1">Machine</p>
               <p className="text-sm font-semibold text-pf-text-primary">
                 {formatCurrency(summary.totalMachineTimeCostUsd)}
               </p>
@@ -95,7 +95,7 @@ export function FarmCostSummaryWidget({ className = '' }: { className?: string }
           </div>
 
           {summary.averageCostPerJobUsd > 0 && (
-            <p className="text-xs text-pf-text-muted text-center">
+            <p className="text-xs text-pf-text-secondary text-center">
               Avg. {formatCurrency(summary.averageCostPerJobUsd)} per job
             </p>
           )}

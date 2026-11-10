@@ -50,7 +50,7 @@ function getStatusIndicator(printer: PrinterMaintenanceStatus): {
     return { color: 'text-pf-accent', bgColor: 'bg-pf-accent-bg/15', label: 'In Maintenance' };
   }
   if (printer.criticalAlerts > 0) {
-    return { color: 'text-pf-error', bgColor: 'bg-pf-error/10', label: 'Critical' };
+    return { color: 'text-pf-error-text', bgColor: 'bg-pf-error/10', label: 'Critical' };
   }
   if (printer.highAlerts > 0) {
     return { color: 'text-pf-warning', bgColor: 'bg-pf-warning/10', label: 'Needs Attention' };
@@ -78,12 +78,11 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         hover:border-pf-accent/50 hover:shadow-md transition-all duration-200
         focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg-0
       `}
-      aria-label={`${printer.printerName} - ${status.label}`}
     >
       {/* Header with status indicator */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className={`p-2 rounded-lg ${status.bgColor}`}>
+          <div aria-hidden="true" className={`p-2 rounded-lg ${status.bgColor}`}>
             <PrinterIcon className={`h-5 w-5 ${status.color}`} aria-hidden="true" />
           </div>
           <div className="min-w-0">
@@ -91,10 +90,11 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
               {printer.printerName}
             </h4>
             <p className="text-xs text-pf-text-tertiary flex items-center gap-1">
-              <CircleIcon 
-                className={`h-2 w-2 ${printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary'}`} 
-                aria-hidden="true"
-              />
+              <span aria-hidden="true">
+                <CircleIcon
+                  className={`h-2 w-2 ${printer.isOnline ? 'text-pf-success' : 'text-pf-text-tertiary'}`}
+                />
+              </span>
               {printer.isOnline ? 'Online' : 'Offline'}
             </p>
           </div>
@@ -103,7 +103,10 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {/* Maintenance mode indicator */}
         {printer.inMaintenance && (
           <div className="shrink-0" title="In maintenance mode">
-            <WrenchIcon className="h-4 w-4 text-pf-accent" aria-hidden="true" />
+            <span aria-hidden="true">
+              <WrenchIcon className="h-4 w-4 text-pf-accent" />
+            </span>
+            <span className="sr-only">In Maintenance</span>
           </div>
         )}
       </div>
@@ -112,14 +115,18 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       <div className="flex items-center justify-between">
         {hasAlerts ? (
           <div className="flex items-center gap-2">
-            <AlertCircleIcon className={`h-4 w-4 ${status.color}`} aria-hidden="true" />
+            <span aria-hidden="true">
+              <AlertCircleIcon className={`h-4 w-4 ${status.color}`} />
+            </span>
             <span className="text-sm text-pf-text-secondary">
               {printer.activeAlertCount} alert{printer.activeAlertCount !== 1 ? 's' : ''}
             </span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <CheckCircleIcon className="h-4 w-4 text-pf-success" aria-hidden="true" />
+            <span aria-hidden="true">
+              <CheckCircleIcon className="h-4 w-4 text-pf-success" />
+            </span>
             <span className="text-sm text-pf-text-secondary">Healthy</span>
           </div>
         )}
@@ -127,23 +134,31 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
         {/* Severity breakdown badges */}
         {hasAlerts && (
           <div className="flex items-center gap-1">
+            <span className="sr-only">
+              {[
+                printer.criticalAlerts > 0 ? `Critical alerts: ${printer.criticalAlerts}` : '',
+                printer.highAlerts > 0 ? `High alerts: ${printer.highAlerts}` : '',
+                printer.mediumAlerts > 0 ? `Medium alerts: ${printer.mediumAlerts}` : '',
+                printer.lowAlerts > 0 ? `Low alerts: ${printer.lowAlerts}` : '',
+              ].filter(Boolean).join('; ')}
+            </span>
             {printer.criticalAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error rounded-sm">
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-error/10 text-pf-error-text rounded-sm">
                 {printer.criticalAlerts}
               </span>
             )}
             {printer.highAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
                 {printer.highAlerts}
               </span>
             )}
             {printer.mediumAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-warning/10 text-pf-warning rounded-sm">
                 {printer.mediumAlerts}
               </span>
             )}
             {printer.lowAlerts > 0 && (
-              <span className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
+              <span aria-hidden="true" className="px-1.5 py-0.5 text-xs font-medium bg-pf-accent-bg/15 text-pf-accent rounded-sm">
                 {printer.lowAlerts}
               </span>
             )}

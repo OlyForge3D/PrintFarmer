@@ -187,6 +187,16 @@ describe('MaintenanceDashboardPage', () => {
     expect(await screen.findByText('Printers destination')).toBeInTheDocument();
   });
 
+  it('keeps all six full summary captions next to their metric values', () => {
+    renderWithRouter();
+
+    for (const label of ['Printers', 'Online', 'Alerts', 'Overdue', 'Due Soon', 'Needs Attention']) {
+      const caption = screen.getByText(label, { exact: true });
+      expect(caption).toBeVisible();
+      expect(caption.previousElementSibling).toHaveTextContent(/^0$/);
+    }
+  });
+
   describe('tab deep-linking', () => {
     it('defaults to the Dashboard tab and panel when no tab query parameter is present', () => {
       renderWithRouter('/maintenance');
