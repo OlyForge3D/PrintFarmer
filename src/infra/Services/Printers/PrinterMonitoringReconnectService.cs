@@ -29,6 +29,7 @@ public sealed class PrinterMonitoringReconnectService(
             }
             catch (Exception ex)
             {
+                // CodeQL cs/catch-of-all-exceptions (#6624): keep the host alive and retry; failures remain logged.
                 logger.LogError(ex, "Unable to reconcile expected-offline printer reconnects; will retry");
             }
         }

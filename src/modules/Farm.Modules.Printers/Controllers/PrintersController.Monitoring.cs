@@ -44,9 +44,8 @@ public partial class PrintersController
         {
             IPrinterStatusCacheReader cache = HttpContext.RequestServices.GetRequiredService<IPrinterStatusCacheReader>();
             PrinterStatusCacheSnapshot? snapshot = cache.GetSnapshot(id);
-            PrinterStatusDto? status = snapshot?.Status;
-            if (status is null || status.IsOnline
-                || snapshot?.HasActivePrintAtDisconnect == true
+            if (snapshot is null || snapshot.Status is not { } status || status.IsOnline
+                || snapshot.HasActivePrintAtDisconnect
                 || !PrinterMonitoringPolicy.IsOfflineState(status.State)
                 || PrinterStateClassifier.IsActivePrintingJob(status.RawActivityState ?? status.State)
                 || await monitoring.HasActiveJobAsync(id, ct).ConfigureAwait(false))

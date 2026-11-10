@@ -124,6 +124,40 @@ public class AdminOverviewServiceTests
             signalr: HealthCheckResult.Healthy("Ready"),
             spoolman: HealthCheckResult.Healthy("Spoolman not configured")));
 
+    [Fact]
+    public async Task GetOverviewAsync_WhenMonitoringRegistryThrows_DegradesBackendsAndAddsAttention()
+    {
+        SetHealthyReport();
+        Mock<IPrinterMonitoringReader> monitoring = new();
+        monitoring.Setup(reader => reader.GetSnapshotsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Registry unavailable"));
+        AdminOverviewService service = new(_healthCheckService.Object, _connectionHealthProviders,
+            NullLogger<AdminOverviewService>.Instance, monitoring.Object);
+
+        AdminOverviewDto result = await service.GetOverviewAsync();
+
+        result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().Be(SubsystemStatus.Degraded);
+        result.Attention.Should().ContainSingle(item => item.Key == "backends-degraded");
+        result.OverallStatus.Should().Be(SubsystemStatus.Degraded);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_WhenCallerCancelsDuringMonitoringRead_PropagatesCancellation()
+    {
+        SetHealthyReport();
+        using CancellationTokenSource cts = new();
+        Mock<IPrinterMonitoringReader> monitoring = new();
+        monitoring.Setup(reader => reader.GetSnapshotsAsync(cts.Token))
+            .Callback(() => cts.Cancel())
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        AdminOverviewService service = new(_healthCheckService.Object, _connectionHealthProviders,
+            NullLogger<AdminOverviewService>.Instance, monitoring.Object);
+
+        Func<Task> act = async () => await service.GetOverviewAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     [Theory]
     [InlineData(false, HealthStatus.Healthy)]
     [InlineData(true, HealthStatus.Healthy)]

@@ -80,7 +80,9 @@ public sealed class AdminOverviewService : IAdminOverviewService
         {
             throw;
         }
+#pragma warning disable CA1031 // CodeQL #6625: preserve the never-500 contract; log and expose ProviderErrorCount.
         catch (Exception ex)
+#pragma warning restore CA1031
         {
             _logger.LogWarning(ex, "Admin overview: printer monitoring registry unavailable");
             printerConnectivity = printerConnectivity with { ProviderErrorCount = printerConnectivity.ProviderErrorCount + 1 };
