@@ -120,6 +120,50 @@ final class AddSpoolViewModelTests: XCTestCase {
         XCTAssertEqual(service.createFilamentCallCount, 0)
     }
 
+    func testMissingNewFilamentColorPreventsBothWrites() async {
+        prepareNewFilament()
+        viewModel.colorHex = ""
+
+        await viewModel.saveSpool()
+
+        XCTAssertFalse(viewModel.isFormValid)
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertEqual(service.createFilamentCallCount, 0)
+        XCTAssertEqual(service.createSpoolCallCount, 0)
+    }
+
+    func testEmptyInventoryExplainsUncertaintyAndReloadRestoresSelection() async {
+        service.filamentsToReturn = []
+        await viewModel.loadReferenceData()
+        await viewModel.saveSpool()
+
+        XCTAssertTrue(viewModel.filamentInventoryMessage?.contains("empty or unavailable") == true)
+        XCTAssertFalse(viewModel.isCreatingFilament)
+        XCTAssertFalse(viewModel.isFormValid)
+        XCTAssertEqual(service.createFilamentCallCount, 0)
+        XCTAssertEqual(service.createSpoolCallCount, 0)
+
+        service.filamentsToReturn = [filament(id: 42)]
+        await viewModel.loadReferenceData()
+        viewModel.selectedFilamentId = 42
+        XCTAssertNil(viewModel.filamentInventoryMessage)
+        XCTAssertTrue(viewModel.isFormValid)
+    }
+
+    func testMaterialSelectionAppliesKnownDensityButPreservesItForUnknownMaterials() {
+        viewModel.materials = [
+            SpoolmanMaterial(id: 1, name: "PETG", density: 1.27, colorHex: nil),
+            SpoolmanMaterial(id: 2, name: "TPU", density: 1.21, colorHex: nil)
+        ]
+        viewModel.selectedMaterial = "PETG"
+        XCTAssertEqual(viewModel.densityGPerCm3, 1.27)
+        viewModel.selectedMaterial = "TPU"
+        XCTAssertEqual(viewModel.densityGPerCm3, 1.21)
+        viewModel.densityGPerCm3 = 1.3
+        viewModel.selectedMaterial = "Custom"
+        XCTAssertEqual(viewModel.densityGPerCm3, 1.3)
+    }
+
     func testReferenceLoadFailurePreservesFormAndRequiresSuccessfulReload() async {
         prepareNewFilament()
         service.errorToThrow = NetworkError.unauthorized

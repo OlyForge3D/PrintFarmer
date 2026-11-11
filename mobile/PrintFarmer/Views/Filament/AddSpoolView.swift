@@ -32,6 +32,7 @@ struct AddSpoolView: View {
                     Group {
                         filamentSection
                         if viewModel.isCreatingFilament && !viewModel.isFilamentSelectionLocked {
+                            newFilamentSection
                             materialSection
                             vendorSection
                             colorSection
@@ -114,12 +115,26 @@ struct AddSpoolView: View {
                         }
                     }
                     .accessibilityIdentifier("addSpool.filament")
+                    if let message = viewModel.filamentInventoryMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        Button("Reload Filament Options") {
+                            Task { await viewModel.loadReferenceData() }
+                        }
+                    }
                 }
             }
         } header: {
             Text("Filament")
         } footer: {
             Text("Choose the exact filament product, not an existing physical spool. Saving adds a new spool.")
+        }
+    }
+
+    private var newFilamentSection: some View {
+        Section("New Filament") {
+            TextField("Filament Name", text: $viewModel.filamentName)
         }
     }
 
@@ -164,8 +179,6 @@ struct AddSpoolView: View {
                     .font(.caption)
                     .foregroundStyle(Color.pfError)
             }
-
-            TextField("Filament Name", text: $viewModel.filamentName)
         }
     }
 
@@ -214,6 +227,9 @@ struct AddSpoolView: View {
                                 )
                         }
                         .accessibilityLabel(swatch.name)
+                        .accessibilityAddTraits(
+                            viewModel.colorHex.lowercased() == swatch.hex.lowercased() ? [.isSelected] : []
+                        )
                     }
                 }
                 .padding(.vertical, 4)

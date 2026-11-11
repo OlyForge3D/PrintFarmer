@@ -5,7 +5,14 @@ import os
 final class AddSpoolViewModel {
     // Form fields
     var filamentName = ""
-    var selectedMaterial = ""
+    var selectedMaterial = "" {
+        didSet {
+            if let density = materials.first(where: { $0.name == selectedMaterial })?.density,
+               density.isFinite, density > 0 {
+                densityGPerCm3 = density
+            }
+        }
+    }
     var selectedVendor = ""
     var colorHex = "#10b981"
     var totalWeightG: Double = 1000
@@ -36,6 +43,11 @@ final class AddSpoolViewModel {
     var isPrefilledFromScan = false
     private var scannedFilamentId: Int?
     var isFilamentSelectionLocked: Bool { scannedFilamentId != nil || createdFilament != nil }
+    var filamentInventoryMessage: String? {
+        guard hasLoadedReferenceData, !filaments.contains(where: { $0.id > 0 }) else { return nil }
+        return "No filaments were returned. Inventory may be empty or unavailable. "
+            + "Reload before creating a filament that may already exist."
+    }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "AddSpool")
     private var spoolService: (any SpoolServiceProtocol)?
@@ -84,7 +96,7 @@ final class AddSpoolViewModel {
             && !selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && densityGPerCm3.isFinite && densityGPerCm3 > 0
             && diameterMm.isFinite && diameterMm > 0
-            && (colorHex.isEmpty || colorHex.range(of: "^#?[0-9a-fA-F]{6}$", options: .regularExpression) != nil)
+            && colorHex.range(of: "^#?[0-9a-fA-F]{6}$", options: .regularExpression) != nil
             && (selectedVendor.isEmpty || selectedVendorId != nil)
     }
 
@@ -166,7 +178,7 @@ final class AddSpoolViewModel {
                         name: filamentName.trimmingCharacters(in: .whitespacesAndNewlines),
                         material: selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines),
                         vendorId: selectedVendorId,
-                        colorHex: colorHex.isEmpty ? nil : colorHex,
+                        colorHex: colorHex,
                         density: densityGPerCm3,
                         diameter: diameterMm,
                         weight: totalWeightG,
