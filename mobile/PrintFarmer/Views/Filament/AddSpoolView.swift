@@ -348,6 +348,8 @@ struct AddSpoolView: View {
                                             lineWidth: viewModel.colorHex.lowercased() == swatch.hex.lowercased() ? 3 : 1
                                         )
                                 )
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .accessibilityLabel(swatch.name)
                         .accessibilityAddTraits(

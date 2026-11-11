@@ -30,6 +30,40 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.buttons["partScan.applyAdjustment"].exists)
     }
 
+    func testAddSpoolSwatchesHaveMinimumTouchTargetsAndPaddedCornersSelectColor() {
+        shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
+        let addSpool = app.buttons["inventory.addSpool"]
+        XCTAssertTrue(addSpool.waitForExistence(timeout: 8))
+        addSpool.tap()
+        let createFilament = app.switches["addSpool.createFilament"]
+        XCTAssertTrue(createFilament.waitForExistence(timeout: 8))
+        if createFilament.value as? String != "1" {
+            createFilament.tap()
+        }
+
+        let red = app.buttons["Red"]
+        for _ in 0..<4 {
+            if red.exists && red.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(red.isHittable)
+        for name in ["Black", "White", "Red"] {
+            let swatch = app.buttons[name]
+            XCTAssertTrue(swatch.exists, name)
+            XCTAssertEqual(swatch.label, name)
+            XCTAssertGreaterThanOrEqual(swatch.frame.width, 44, name)
+            XCTAssertGreaterThanOrEqual(swatch.frame.height, 44, name)
+        }
+
+        red.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)).tap()
+        let selected = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "selected == true"), object: red
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
+        XCTAssertEqual(app.textFields["#RRGGBB"].value as? String, "#E53E3E")
+        XCTAssertFalse(app.buttons["Black"].isSelected)
+    }
+
     func testScanFromPrintedPartsSheetReturnsInPlace() {
         shellDestinationButton(tabIdentifier: "tab.filament", timeout: 8).tap()
         app.buttons["inventory.actions"].tap()
