@@ -109,6 +109,37 @@ final class AddSpoolViewModel {
             && (selectedVendor.isEmpty || selectedVendorId != nil)
     }
 
+    /// Existing filaments that may already be the product being created. Suggestions are
+    /// informational only; nothing is selected until `useSuggestedFilament(id:)` is called.
+    var filamentSuggestions: [FilamentSuggestion] {
+        Array(rankedFilamentSuggestions.prefix(FilamentSuggestionMatcher.limit))
+    }
+
+    var hiddenFilamentSuggestionCount: Int {
+        max(0, rankedFilamentSuggestions.count - FilamentSuggestionMatcher.limit)
+    }
+
+    var hasSameNameSuggestion: Bool {
+        rankedFilamentSuggestions.first?.match == .sameName
+    }
+
+    private var rankedFilamentSuggestions: [FilamentSuggestion] {
+        guard hasLoadedReferenceData, isCreatingFilament, !isFilamentSelectionLocked else { return [] }
+        return FilamentSuggestionMatcher.rankedSuggestions(
+            in: filaments, material: selectedMaterial, vendor: selectedVendor, name: filamentName
+        )
+    }
+
+    /// Switches from creating a filament to the explicitly chosen existing one. Typed
+    /// new-filament fields are kept so the user can switch back.
+    func useSuggestedFilament(id: Int) {
+        guard isCreatingFilament, !isFilamentSelectionLocked, !isSaving,
+              createdSpool == nil, uncertainCreation == nil,
+              filamentSuggestions.contains(where: { $0.id == id }) else { return }
+        selectedFilamentId = id
+        isCreatingFilament = false
+    }
+
     private var selectedVendorId: Int? {
         let matches = vendors.filter { $0.name == selectedVendor && $0.id > 0 }
         return matches.count == 1 ? matches.first?.id : nil
@@ -242,6 +273,102 @@ final class AddSpoolViewModel {
         switch error {
         case .unauthorized, .forbidden: return true
         default: return false
+        }
+    }
+}
+
+struct FilamentSuggestion: Identifiable, Equatable {
+    enum Match: Equatable {
+        /// Same name words, ignoring case, spacing, punctuation and word order.
+        case sameName
+        /// Shares at least one name word (or word prefix) with the typed name.
+        case similarName
+        /// Same material, and same vendor when one is chosen; the name does not overlap.
+        case materialVendor
+    }
+
+    let filament: SpoolmanFilament
+    let match: Match
+    var id: Int { filament.id }
+
+    static func == (lhs: FilamentSuggestion, rhs: FilamentSuggestion) -> Bool {
+        lhs.id == rhs.id && lhs.match == rhs.match
+    }
+}
+
+enum FilamentSuggestionMatcher {
+    static let limit = 5
+
+    /// Ranks existing filaments with the same material (and vendor, when chosen) by how
+    /// closely their names match. Filaments with another material or vendor are never
+    /// offered, however similar their names are.
+    static func rankedSuggestions(
+        in filaments: [SpoolmanFilament], material: String, vendor: String, name: String
+    ) -> [FilamentSuggestion] {
+        let materialKey = comparisonKey(material)
+        guard !materialKey.isEmpty else { return [] }
+        let vendorKey = comparisonKey(vendor)
+        let typed = nameTokens(name)
+
+        typealias Scored = (suggestion: FilamentSuggestion, score: Int, extra: Int, label: String)
+        let scored: [Scored] = filaments
+            .filter { filament in
+                filament.id > 0
+                    && comparisonKey(filament.material ?? "") == materialKey
+                    && (vendorKey.isEmpty || comparisonKey(filament.vendor ?? "") == vendorKey)
+            }
+            .map { filament -> Scored in
+                let candidate = nameTokens(filament.name ?? "")
+                let matched = typed.filter { token in
+                    candidate.contains { $0 == token || (token.count >= 2 && $0.hasPrefix(token)) }
+                }.count
+                let match: FilamentSuggestion.Match
+                if !typed.isEmpty && typed == candidate {
+                    match = .sameName
+                } else if matched > 0 {
+                    match = .similarName
+                } else {
+                    match = .materialVendor
+                }
+                return (
+                    FilamentSuggestion(filament: filament, match: match), matched,
+                    abs(candidate.count - typed.count), comparisonKey(filament.name ?? "")
+                )
+            }
+
+        return scored.sorted { lhs, rhs in
+            let lhsRank = rank(lhs.suggestion.match), rhsRank = rank(rhs.suggestion.match)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if lhs.extra != rhs.extra { return lhs.extra < rhs.extra }
+            if lhs.label != rhs.label { return lhs.label < rhs.label }
+            return lhs.suggestion.id < rhs.suggestion.id
+        }
+        .map(\.suggestion)
+    }
+
+    /// Case-, diacritic- and width-insensitive text with collapsed whitespace. Punctuation is
+    /// kept so materials such as "PLA" and "PLA+" stay distinct.
+    static func comparisonKey(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    /// Order-independent name words, ignoring case, diacritics and punctuation.
+    static func nameTokens(_ value: String) -> Set<String> {
+        Set(
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+                .split { !$0.isLetter && !$0.isNumber }
+                .map(String.init)
+        )
+    }
+
+    private static func rank(_ match: FilamentSuggestion.Match) -> Int {
+        switch match {
+        case .sameName: return 0
+        case .similarName: return 1
+        case .materialVendor: return 2
         }
     }
 }

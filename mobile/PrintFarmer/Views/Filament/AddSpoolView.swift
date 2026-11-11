@@ -35,6 +35,7 @@ struct AddSpoolView: View {
                             newFilamentSection
                             materialSection
                             vendorSection
+                            suggestionsSection
                             colorSection
                             filamentPropertiesSection
                         }
@@ -135,7 +136,93 @@ struct AddSpoolView: View {
     private var newFilamentSection: some View {
         Section("New Filament") {
             TextField("Filament Name", text: $viewModel.filamentName)
+                .accessibilityIdentifier("addSpool.newFilamentName")
+            if viewModel.hasSameNameSuggestion {
+                Label(
+                    "An existing \(viewModel.selectedMaterial) filament already has this name. See Existing Matches below.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(Color.pfWarning)
+            }
         }
+    }
+
+    // MARK: - Existing filament suggestions
+
+    @ViewBuilder
+    private var suggestionsSection: some View {
+        if !viewModel.selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Section {
+                if viewModel.filamentSuggestions.isEmpty {
+                    Text(noSuggestionsText)
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                } else {
+                    ForEach(viewModel.filamentSuggestions) { suggestion in
+                        suggestionRow(suggestion)
+                    }
+                    if viewModel.hiddenFilamentSuggestionCount > 0 {
+                        Text("\(viewModel.hiddenFilamentSuggestionCount) more. Refine the name to narrow the list.")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                    }
+                }
+            } header: {
+                Text("Existing Matches")
+            } footer: {
+                Text("Tap a filament to add this spool to it instead. Nothing is chosen automatically; "
+                    + "keep filling in the form to create a new filament.")
+            }
+        }
+    }
+
+    private var noSuggestionsText: String {
+        let material = viewModel.selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewModel.selectedVendor.isEmpty
+            ? "No existing \(material) filaments."
+            : "No existing \(material) filaments from \(viewModel.selectedVendor)."
+    }
+
+    private func suggestionRow(_ suggestion: FilamentSuggestion) -> some View {
+        let filament = suggestion.filament
+        let title = filament.name ?? "Filament #\(filament.id)"
+        let detail = ["#\(filament.id)", filament.material, filament.vendor].compactMap { $0 }.joined(separator: " · ")
+        let matchText: String? = switch suggestion.match {
+        case .sameName: "Same name"
+        case .similarName: "Similar name"
+        case .materialVendor: nil
+        }
+        return Button {
+            viewModel.useSuggestedFilament(id: filament.id)
+        } label: {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color(hex: filament.colorHex ?? "#808080"))
+                    .frame(width: 20, height: 20)
+                    .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(Color.pfTextPrimary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(Color.pfTextSecondary)
+                }
+                Spacer(minLength: 8)
+                if let matchText {
+                    Text(matchText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(suggestion.match == .sameName ? Color.pfWarning : Color.pfTextSecondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([matchText, title, detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityHint("Uses this existing filament instead of creating a new one")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("addSpool.suggestion.\(filament.id)")
     }
 
     // MARK: - Material
