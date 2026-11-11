@@ -383,11 +383,17 @@ enum FilamentSuggestionMatcher {
 
     /// Text description of a filament color so same-name products are distinguishable
     /// without relying on the swatch alone.
-    @MainActor\n    static func colorDescription(_ colorHex: String?) -> String {
-        let digits = (colorHex ?? "").trimmingCharacters(in: CharacterSet.alphanumerics.inverted).uppercased()
-        guard digits.range(of: "^[0-9A-F]{6}$", options: .regularExpression) != nil else { return "No color" }
-        let hex = "#" + digits
+    @MainActor
+    static func colorDescription(_ colorHex: String?) -> String {
+        guard let hex = normalizedHex(colorHex) else { return "No color" }
         return AddSpoolViewModel.colorSwatches.first { $0.hex.uppercased() == hex }?.name ?? hex
+    }
+
+    /// `#RRGGBB` in uppercase, or nil when the value is not a six-digit hex color.
+    static func normalizedHex(_ colorHex: String?) -> String? {
+        let digits = (colorHex ?? "").trimmingCharacters(in: CharacterSet.alphanumerics.inverted).uppercased()
+        guard digits.range(of: "^[0-9A-F]{6}$", options: .regularExpression) != nil else { return nil }
+        return "#" + digits
     }
 
     /// Case-, diacritic- and width-insensitive text with collapsed whitespace. Punctuation is

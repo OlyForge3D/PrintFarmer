@@ -240,16 +240,16 @@ struct AddSpoolView: View {
 
     @ViewBuilder
     private func swatch(_ colorHex: String?) -> some View {
-        if FilamentSuggestionMatcher.colorDescription(colorHex) == "No color" {
+        if let hex = FilamentSuggestionMatcher.normalizedHex(colorHex) {
             Circle()
-                .strokeBorder(Color.pfBorder, lineWidth: 1)
+                .fill(Color(hex: hex))
                 .frame(width: 20, height: 20)
+                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
                 .accessibilityHidden(true)
         } else {
             Circle()
-                .fill(Color(hex: colorHex ?? ""))
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
                 .frame(width: 20, height: 20)
-                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
                 .accessibilityHidden(true)
         }
     }
