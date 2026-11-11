@@ -3,6 +3,7 @@ import SwiftUI
 struct AddSpoolView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel = AddSpoolViewModel()
     @State private var saveTask: Task<Void, Never>?
 
@@ -32,10 +33,11 @@ struct AddSpoolView: View {
                     Group {
                         filamentSection
                         if viewModel.isCreatingFilament && !viewModel.isFilamentSelectionLocked {
-                            newFilamentSection
+                            let suggestions = viewModel.filamentSuggestionList
+                            newFilamentSection(suggestions)
                             materialSection
                             vendorSection
-                            suggestionsSection
+                            suggestionsSection(suggestions)
                             colorSection
                             filamentPropertiesSection
                         }
@@ -133,13 +135,13 @@ struct AddSpoolView: View {
         }
     }
 
-    private var newFilamentSection: some View {
+    private func newFilamentSection(_ suggestions: FilamentSuggestionList) -> some View {
         Section("New Filament") {
             TextField("Filament Name", text: $viewModel.filamentName)
                 .accessibilityIdentifier("addSpool.newFilamentName")
-            if viewModel.hasSameNameSuggestion {
+            if suggestions.hasSameName {
                 Label(
-                    "An existing \(viewModel.selectedMaterial) filament already has this name. See Existing Matches below.",
+                    "An existing \(trimmedMaterial) filament already has this name. See Existing Matches below.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
@@ -151,19 +153,19 @@ struct AddSpoolView: View {
     // MARK: - Existing filament suggestions
 
     @ViewBuilder
-    private var suggestionsSection: some View {
+    private func suggestionsSection(_ suggestions: FilamentSuggestionList) -> some View {
         if !viewModel.selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Section {
-                if viewModel.filamentSuggestions.isEmpty {
+                if suggestions.visible.isEmpty {
                     Text(noSuggestionsText)
                         .font(.caption)
                         .foregroundStyle(Color.pfTextSecondary)
                 } else {
-                    ForEach(viewModel.filamentSuggestions) { suggestion in
+                    ForEach(suggestions.visible) { suggestion in
                         suggestionRow(suggestion)
                     }
-                    if viewModel.hiddenFilamentSuggestionCount > 0 {
-                        Text("\(viewModel.hiddenFilamentSuggestionCount) more. Refine the name to narrow the list.")
+                    if suggestions.hiddenCount > 0 {
+                        Text("\(suggestions.hiddenCount) more. \(refineText)")
                             .font(.caption)
                             .foregroundStyle(Color.pfTextSecondary)
                     }
@@ -172,22 +174,33 @@ struct AddSpoolView: View {
                 Text("Existing Matches")
             } footer: {
                 Text("Tap a filament to add this spool to it instead. Nothing is chosen automatically; "
-                    + "keep filling in the form to create a new filament.")
+                    + "keep filling in the form to create a new filament. Your entries here are kept if you switch back.")
             }
         }
     }
 
+    private var refineText: String {
+        viewModel.selectedVendor.isEmpty
+            ? "Refine the name or choose a vendor to narrow the list."
+            : "Refine the name to narrow the list."
+    }
+
+    private var trimmedMaterial: String {
+        viewModel.selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var noSuggestionsText: String {
-        let material = viewModel.selectedMaterial.trimmingCharacters(in: .whitespacesAndNewlines)
-        return viewModel.selectedVendor.isEmpty
-            ? "No existing \(material) filaments."
-            : "No existing \(material) filaments from \(viewModel.selectedVendor)."
+        viewModel.selectedVendor.isEmpty
+            ? "No existing \(trimmedMaterial) filaments."
+            : "No existing \(trimmedMaterial) filaments from \(viewModel.selectedVendor)."
     }
 
     private func suggestionRow(_ suggestion: FilamentSuggestion) -> some View {
         let filament = suggestion.filament
         let title = filament.name ?? "Filament #\(filament.id)"
-        let detail = ["#\(filament.id)", filament.material, filament.vendor].compactMap { $0 }.joined(separator: " · ")
+        let color = FilamentSuggestionMatcher.colorDescription(filament.colorHex)
+        let detail = ["#\(filament.id)", filament.material, filament.vendor, color]
+            .compactMap { $0 }.joined(separator: " · ")
         let matchText: String? = switch suggestion.match {
         case .sameName: "Same name"
         case .similarName: "Similar name"
@@ -195,25 +208,25 @@ struct AddSpoolView: View {
         }
         return Button {
             viewModel.useSuggestedFilament(id: filament.id)
+            if !viewModel.isCreatingFilament, viewModel.selectedFilamentId == filament.id {
+                UIAccessibility.post(notification: .announcement, argument: "Using existing filament #\(filament.id), \(title)")
+            }
         } label: {
             HStack(spacing: 12) {
-                Circle()
-                    .fill(Color(hex: filament.colorHex ?? "#808080"))
-                    .frame(width: 20, height: 20)
-                    .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
-                    .accessibilityHidden(true)
+                swatch(filament.colorHex)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .foregroundStyle(Color.pfTextPrimary)
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(Color.pfTextSecondary)
+                    if dynamicTypeSize.isAccessibilitySize, let matchText {
+                        matchBadge(matchText, match: suggestion.match)
+                    }
                 }
                 Spacer(minLength: 8)
-                if let matchText {
-                    Text(matchText)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(suggestion.match == .sameName ? Color.pfWarning : Color.pfTextSecondary)
+                if !dynamicTypeSize.isAccessibilitySize, let matchText {
+                    matchBadge(matchText, match: suggestion.match)
                 }
             }
             .contentShape(Rectangle())
@@ -223,6 +236,29 @@ struct AddSpoolView: View {
         .accessibilityHint("Uses this existing filament instead of creating a new one")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("addSpool.suggestion.\(filament.id)")
+    }
+
+    @ViewBuilder
+    private func swatch(_ colorHex: String?) -> some View {
+        if FilamentSuggestionMatcher.colorDescription(colorHex) == "No color" {
+            Circle()
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+                .frame(width: 20, height: 20)
+                .accessibilityHidden(true)
+        } else {
+            Circle()
+                .fill(Color(hex: colorHex ?? ""))
+                .frame(width: 20, height: 20)
+                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func matchBadge(_ text: String, match: FilamentSuggestion.Match) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(match == .sameName ? Color.pfWarning : Color.pfTextSecondary)
+            .fixedSize()
     }
 
     // MARK: - Material

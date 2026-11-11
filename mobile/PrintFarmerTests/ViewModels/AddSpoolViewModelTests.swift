@@ -354,14 +354,14 @@ final class AddSpoolViewModelTests: XCTestCase {
         service.filamentsToReturn = [filament(id: 41), filament(id: 42, name: "Galaxy Black")]
         await viewModel.loadReferenceData()
         viewModel.isCreatingFilament = true
-        XCTAssertTrue(viewModel.filamentSuggestions.isEmpty)
+        XCTAssertTrue(viewModel.filamentSuggestionList.visible.isEmpty)
 
         viewModel.selectedMaterial = "PLA"
         viewModel.filamentName = "red pla"
 
-        XCTAssertEqual(viewModel.filamentSuggestions.map(\.id), [41, 42])
-        XCTAssertEqual(viewModel.filamentSuggestions.map(\.match), [.sameName, .materialVendor])
-        XCTAssertTrue(viewModel.hasSameNameSuggestion)
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.map(\.id), [41, 42])
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.map(\.match), [.sameName, .materialVendor])
+        XCTAssertTrue(viewModel.filamentSuggestionList.hasSameName)
         XCTAssertNil(viewModel.selectedFilamentId)
         XCTAssertTrue(viewModel.isCreatingFilament)
     }
@@ -414,13 +414,16 @@ final class AddSpoolViewModelTests: XCTestCase {
         viewModel.isCreatingFilament = true
         viewModel.selectedMaterial = "PLA"
 
-        XCTAssertEqual(viewModel.filamentSuggestions.count, FilamentSuggestionMatcher.limit)
-        XCTAssertEqual(viewModel.hiddenFilamentSuggestionCount, 3)
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.count, FilamentSuggestionMatcher.limit)
+        XCTAssertEqual(viewModel.filamentSuggestionList.hiddenCount, 3)
     }
 
     func testTappingSuggestionSwitchesToExistingFilamentWithoutCreatingOne() async {
         prepareNewFilament()
+        viewModel.errorMessage = "Stale error"
         viewModel.useSuggestedFilament(id: 42)
+
+        XCTAssertNil(viewModel.errorMessage)
 
         XCTAssertFalse(viewModel.isCreatingFilament)
         XCTAssertEqual(viewModel.selectedFilamentId, 42)
@@ -454,9 +457,20 @@ final class AddSpoolViewModelTests: XCTestCase {
         viewModel.prefill(from: scan(filamentID: 900))
         viewModel.isCreatingFilament = true
         viewModel.selectedMaterial = "PLA"
-        XCTAssertTrue(viewModel.filamentSuggestions.isEmpty)
+        XCTAssertTrue(viewModel.filamentSuggestionList.visible.isEmpty)
         viewModel.useSuggestedFilament(id: 41)
         XCTAssertEqual(viewModel.selectedFilamentId, 900)
+    }
+
+    func testSameNameSuggestionsAreDistinguishedByColorText() {
+        let ranked = FilamentSuggestionMatcher.rankedSuggestions(
+            in: [filament(id: 1, colorHex: "#000000"), filament(id: 2, colorHex: "ab12cd"), filament(id: 3, colorHex: nil)],
+            material: "PLA", vendor: "", name: "PLA Red"
+        )
+        let colors = ranked.map { FilamentSuggestionMatcher.colorDescription($0.filament.colorHex) }
+        XCTAssertEqual(ranked.map(\.match), [.sameName, .sameName, .sameName])
+        XCTAssertEqual(colors, ["Black", "#AB12CD", "No color"])
+        XCTAssertEqual(FilamentSuggestionMatcher.colorDescription("#12"), "No color")
     }
 
     private func prepareNewFilament() {
@@ -475,10 +489,11 @@ final class AddSpoolViewModelTests: XCTestCase {
     }
 
     private func filament(
-        id: Int, name: String = "PLA Red", material: String = "PLA", vendor: String? = "Prusament"
+        id: Int, name: String = "PLA Red", material: String = "PLA", vendor: String? = "Prusament",
+        colorHex: String? = "#FF0000"
     ) -> SpoolmanFilament {
         SpoolmanFilament(
-            id: id, name: name, material: material, colorHex: "#FF0000",
+            id: id, name: name, material: material, colorHex: colorHex,
             vendor: vendor, density: 1.24, diameter: 1.75, weight: 1000,
             spoolWeight: 200, price: nil, settingsExtruderTemp: nil,
             settingsBedTemp: nil, articleNumber: nil, gtin: nil,
