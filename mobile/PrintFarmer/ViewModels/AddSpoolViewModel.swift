@@ -25,7 +25,10 @@ final class AddSpoolViewModel {
     // Reference data
     var materials: [SpoolmanMaterial] = []
     var vendors: [SpoolmanVendor] = []
-    var filaments: [SpoolmanFilament] = []
+    var filaments: [SpoolmanFilament] = [] {
+        didSet { filamentCandidates = FilamentSuggestionMatcher.candidates(from: filaments) }
+    }
+    private var filamentCandidates: [FilamentSuggestionMatcher.Candidate] = []
 
     // State
     var isLoading = false
@@ -107,6 +110,33 @@ final class AddSpoolViewModel {
             && diameterMm.isFinite && diameterMm > 0
             && colorHex.range(of: "^#?[0-9a-fA-F]{6}$", options: .regularExpression) != nil
             && (selectedVendor.isEmpty || selectedVendorId != nil)
+    }
+
+    /// Existing filaments that may already be the product being created. Suggestions are
+    /// informational only; nothing is selected until `useSuggestedFilament(id:)` is called.
+    /// Compute once per render and pass the result down.
+    var filamentSuggestionList: FilamentSuggestionList {
+        guard hasLoadedReferenceData, isCreatingFilament, !isFilamentSelectionLocked else {
+            return FilamentSuggestionList()
+        }
+        let ranked = FilamentSuggestionMatcher.rankedSuggestions(
+            in: filamentCandidates, material: selectedMaterial, vendor: selectedVendor, name: filamentName
+        )
+        return FilamentSuggestionList(
+            visible: Array(ranked.prefix(FilamentSuggestionMatcher.limit)),
+            hiddenCount: max(0, ranked.count - FilamentSuggestionMatcher.limit)
+        )
+    }
+
+    /// Switches from creating a filament to the explicitly chosen existing one. Typed
+    /// new-filament fields are kept so the user can switch back.
+    func useSuggestedFilament(id: Int) {
+        guard isCreatingFilament, !isFilamentSelectionLocked, !isSaving,
+              createdSpool == nil, uncertainCreation == nil,
+              filamentSuggestionList.visible.contains(where: { $0.id == id }) else { return }
+        selectedFilamentId = id
+        isCreatingFilament = false
+        errorMessage = nil
     }
 
     private var selectedVendorId: Int? {
@@ -242,6 +272,159 @@ final class AddSpoolViewModel {
         switch error {
         case .unauthorized, .forbidden: return true
         default: return false
+        }
+    }
+}
+
+struct FilamentSuggestion: Identifiable, Equatable {
+    enum Match: Equatable {
+        /// Same name words, ignoring case, spacing, punctuation and word order.
+        case sameName
+        /// Shares at least one name word (or word prefix) with the typed name.
+        case similarName
+        /// Same material, and same vendor when one is chosen; the name does not overlap.
+        case materialVendor
+    }
+
+    let filament: SpoolmanFilament
+    let match: Match
+    var id: Int { filament.id }
+
+    static func == (lhs: FilamentSuggestion, rhs: FilamentSuggestion) -> Bool {
+        lhs.id == rhs.id && lhs.match == rhs.match
+    }
+}
+
+struct FilamentSuggestionList: Equatable {
+    var visible: [FilamentSuggestion] = []
+    var hiddenCount = 0
+    var hasSameName: Bool { visible.first?.match == .sameName }
+}
+
+enum FilamentSuggestionMatcher {
+    static let limit = 5
+
+    /// A filament with its comparison keys normalized once, so typing only re-tokenizes
+    /// the typed name.
+    struct Candidate {
+        let filament: SpoolmanFilament
+        let materialKey: String
+        let vendorKey: String
+        let nameTokens: Set<String>
+        let nameKey: String
+
+        init(_ filament: SpoolmanFilament) {
+            self.filament = filament
+            materialKey = FilamentSuggestionMatcher.comparisonKey(filament.material ?? "")
+            vendorKey = FilamentSuggestionMatcher.comparisonKey(filament.vendor ?? "")
+            nameTokens = FilamentSuggestionMatcher.nameTokens(filament.name ?? "")
+            nameKey = FilamentSuggestionMatcher.comparisonKey(filament.name ?? "")
+        }
+    }
+
+    static func candidates(from filaments: [SpoolmanFilament]) -> [Candidate] {
+        filaments.filter { $0.id > 0 }.map(Candidate.init)
+    }
+
+    static func rankedSuggestions(
+        in filaments: [SpoolmanFilament], material: String, vendor: String, name: String
+    ) -> [FilamentSuggestion] {
+        rankedSuggestions(in: candidates(from: filaments), material: material, vendor: vendor, name: name)
+    }
+
+    /// Ranks existing filaments with the same material (and vendor, when chosen) by how
+    /// closely their names match. Filaments with another material or vendor are never
+    /// offered, however similar their names are.
+    static func rankedSuggestions(
+        in candidates: [Candidate], material: String, vendor: String, name: String
+    ) -> [FilamentSuggestion] {
+        let materialKey = comparisonKey(material)
+        guard !materialKey.isEmpty else { return [] }
+        let vendorKey = comparisonKey(vendor)
+        let typed = nameTokens(name)
+
+        let scored: [ScoredSuggestion] = candidates
+            .filter { candidate in
+                candidate.filament.id > 0
+                    && candidate.materialKey == materialKey
+                    && (vendorKey.isEmpty || candidate.vendorKey == vendorKey)
+            }
+            .map { candidate -> ScoredSuggestion in
+                let tokens = candidate.nameTokens
+                let matched = typed.filter { token in
+                    tokens.contains { $0 == token || (token.count >= 2 && $0.hasPrefix(token)) }
+                }.count
+                let match: FilamentSuggestion.Match
+                if !typed.isEmpty && typed == tokens {
+                    match = .sameName
+                } else if matched > 0 {
+                    match = .similarName
+                } else {
+                    match = .materialVendor
+                }
+                return ScoredSuggestion(
+                    suggestion: FilamentSuggestion(filament: candidate.filament, match: match),
+                    score: matched,
+                    extra: abs(tokens.count - typed.count),
+                    label: candidate.nameKey
+                )
+            }
+
+        return scored.sorted { lhs, rhs in
+            let lhsRank = rank(lhs.suggestion.match), rhsRank = rank(rhs.suggestion.match)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            if lhs.extra != rhs.extra { return lhs.extra < rhs.extra }
+            if lhs.label != rhs.label { return lhs.label < rhs.label }
+            return lhs.suggestion.id < rhs.suggestion.id
+        }
+        .map { $0.suggestion }
+    }
+
+    /// Text description of a filament color so same-name products are distinguishable
+    /// without relying on the swatch alone.
+    @MainActor
+    static func colorDescription(_ colorHex: String?) -> String {
+        guard let hex = normalizedHex(colorHex) else { return "No color" }
+        return AddSpoolViewModel.colorSwatches.first { $0.hex.uppercased() == hex }?.name ?? hex
+    }
+
+    /// `#RRGGBB` in uppercase, or nil when the value is not a six-digit hex color.
+    static func normalizedHex(_ colorHex: String?) -> String? {
+        let digits = (colorHex ?? "").trimmingCharacters(in: CharacterSet.alphanumerics.inverted).uppercased()
+        guard digits.range(of: "^[0-9A-F]{6}$", options: .regularExpression) != nil else { return nil }
+        return "#" + digits
+    }
+
+    /// Case-, diacritic- and width-insensitive text with collapsed whitespace. Punctuation is
+    /// kept so materials such as "PLA" and "PLA+" stay distinct.
+    static func comparisonKey(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    /// Order-independent name words, ignoring case, diacritics and punctuation.
+    static func nameTokens(_ value: String) -> Set<String> {
+        Set(
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
+                .split { !$0.isLetter && !$0.isNumber }
+                .map(String.init)
+        )
+    }
+
+    private struct ScoredSuggestion {
+        let suggestion: FilamentSuggestion
+        let score: Int
+        let extra: Int
+        let label: String
+    }
+
+    private static func rank(_ match: FilamentSuggestion.Match) -> Int {
+        switch match {
+        case .sameName: return 0
+        case .similarName: return 1
+        case .materialVendor: return 2
         }
     }
 }

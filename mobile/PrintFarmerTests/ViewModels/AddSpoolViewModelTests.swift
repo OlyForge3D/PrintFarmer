@@ -348,6 +348,131 @@ final class AddSpoolViewModelTests: XCTestCase {
         XCTAssertEqual(service.createSpoolCallCount, 0)
     }
 
+    // MARK: - Existing filament suggestions
+
+    func testSuggestionsRequireMaterialAndNeverAutoSelect() async {
+        service.filamentsToReturn = [filament(id: 41), filament(id: 42, name: "Galaxy Black")]
+        await viewModel.loadReferenceData()
+        viewModel.isCreatingFilament = true
+        XCTAssertTrue(viewModel.filamentSuggestionList.visible.isEmpty)
+
+        viewModel.selectedMaterial = "PLA"
+        viewModel.filamentName = "red pla"
+
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.map(\.id), [41, 42])
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.map(\.match), [.sameName, .materialVendor])
+        XCTAssertTrue(viewModel.filamentSuggestionList.hasSameName)
+        XCTAssertNil(viewModel.selectedFilamentId)
+        XCTAssertTrue(viewModel.isCreatingFilament)
+    }
+
+    func testNameMatchingIgnoresCaseSpacingPunctuationAndWordOrder() {
+        let candidates = [
+            filament(id: 1, name: "Prusament PLA  Galaxy-Black"),
+            filament(id: 2, name: "Galaxy Silver"),
+            filament(id: 3, name: "Jet Black"),
+            filament(id: 4, name: "Signal White")
+        ]
+        let ranked = FilamentSuggestionMatcher.rankedSuggestions(
+            in: candidates, material: " pla ", vendor: "prusament", name: "black GALAXY pla prusament"
+        )
+        XCTAssertEqual(ranked.map(\.id), [1, 2, 3, 4])
+        XCTAssertEqual(ranked.map(\.match), [.sameName, .similarName, .similarName, .materialVendor])
+
+        let partial = FilamentSuggestionMatcher.rankedSuggestions(
+            in: candidates, material: "PLA", vendor: "", name: "galax"
+        )
+        XCTAssertEqual(partial.prefix(2).map(\.match), [.similarName, .similarName])
+        XCTAssertEqual(Set(partial.prefix(2).map(\.id)), [1, 2])
+    }
+
+    func testSameNameWithDifferentMaterialOrVendorIsNeverSuggested() {
+        let candidates = [
+            filament(id: 1, name: "Red", material: "PETG"),
+            filament(id: 2, name: "Red", material: "PLA+"),
+            filament(id: 3, name: "Red", vendor: "Hatchbox"),
+            filament(id: 4, name: "Red", vendor: nil),
+            filament(id: 0, name: "Red"),
+            filament(id: -5, name: "Red"),
+            filament(id: 6, name: "Red")
+        ]
+        let ranked = FilamentSuggestionMatcher.rankedSuggestions(
+            in: candidates, material: "PLA", vendor: "Prusament", name: "red"
+        )
+        XCTAssertEqual(ranked.map(\.id), [6])
+        XCTAssertEqual(ranked.first?.match, .sameName)
+
+        let anyVendor = FilamentSuggestionMatcher.rankedSuggestions(
+            in: candidates, material: "PLA", vendor: "", name: "red"
+        )
+        XCTAssertEqual(Set(anyVendor.map(\.id)), [3, 4, 6])
+    }
+
+    func testSuggestionsAreCappedAndReportHiddenCount() async {
+        service.filamentsToReturn = (1...8).map { filament(id: $0, name: "Color \($0)") }
+        await viewModel.loadReferenceData()
+        viewModel.isCreatingFilament = true
+        viewModel.selectedMaterial = "PLA"
+
+        XCTAssertEqual(viewModel.filamentSuggestionList.visible.count, FilamentSuggestionMatcher.limit)
+        XCTAssertEqual(viewModel.filamentSuggestionList.hiddenCount, 3)
+    }
+
+    func testTappingSuggestionSwitchesToExistingFilamentWithoutCreatingOne() async {
+        prepareNewFilament()
+        viewModel.errorMessage = "Stale error"
+        viewModel.useSuggestedFilament(id: 42)
+
+        XCTAssertNil(viewModel.errorMessage)
+
+        XCTAssertFalse(viewModel.isCreatingFilament)
+        XCTAssertEqual(viewModel.selectedFilamentId, 42)
+        XCTAssertEqual(viewModel.filamentName, " PLA Red ")
+        await viewModel.saveSpool()
+        XCTAssertTrue(viewModel.didSave)
+        XCTAssertEqual(service.createFilamentCallCount, 0)
+        XCTAssertEqual(service.createSpoolCalledWith?.filamentId, 42)
+    }
+
+    func testUnsuggestedOrBlockedSuggestionTapsAreIgnored() async {
+        service.filamentsToReturn = [filament(id: 41), filament(id: 50, material: "PETG")]
+        await viewModel.loadReferenceData()
+        prepareNewFilament()
+
+        viewModel.useSuggestedFilament(id: 50)
+        viewModel.useSuggestedFilament(id: 999)
+        XCTAssertTrue(viewModel.isCreatingFilament)
+        XCTAssertNil(viewModel.selectedFilamentId)
+
+        service.createFilamentError = NetworkError.timeout
+        await viewModel.saveSpool()
+        viewModel.useSuggestedFilament(id: 41)
+        XCTAssertEqual(viewModel.uncertainCreation, "filament")
+        XCTAssertTrue(viewModel.isCreatingFilament)
+        XCTAssertNil(viewModel.selectedFilamentId)
+        XCTAssertEqual(service.createSpoolCallCount, 0)
+    }
+
+    func testScannedFilamentLockHidesSuggestions() async {
+        viewModel.prefill(from: scan(filamentID: 900))
+        viewModel.isCreatingFilament = true
+        viewModel.selectedMaterial = "PLA"
+        XCTAssertTrue(viewModel.filamentSuggestionList.visible.isEmpty)
+        viewModel.useSuggestedFilament(id: 41)
+        XCTAssertEqual(viewModel.selectedFilamentId, 900)
+    }
+
+    func testSameNameSuggestionsAreDistinguishedByColorText() {
+        let ranked = FilamentSuggestionMatcher.rankedSuggestions(
+            in: [filament(id: 1, colorHex: "#000000"), filament(id: 2, colorHex: "ab12cd"), filament(id: 3, colorHex: nil)],
+            material: "PLA", vendor: "", name: "PLA Red"
+        )
+        let colors = ranked.map { FilamentSuggestionMatcher.colorDescription($0.filament.colorHex) }
+        XCTAssertEqual(ranked.map(\.match), [.sameName, .sameName, .sameName])
+        XCTAssertEqual(colors, ["Black", "#AB12CD", "No color"])
+        XCTAssertEqual(FilamentSuggestionMatcher.colorDescription("#12"), "No color")
+    }
+
     private func prepareNewFilament() {
         viewModel.isCreatingFilament = true
         viewModel.filamentName = " PLA Red "
@@ -363,10 +488,13 @@ final class AddSpoolViewModelTests: XCTestCase {
         )
     }
 
-    private func filament(id: Int) -> SpoolmanFilament {
+    private func filament(
+        id: Int, name: String = "PLA Red", material: String = "PLA", vendor: String? = "Prusament",
+        colorHex: String? = "#FF0000"
+    ) -> SpoolmanFilament {
         SpoolmanFilament(
-            id: id, name: "PLA Red", material: "PLA", colorHex: "#FF0000",
-            vendor: "Prusament", density: 1.24, diameter: 1.75, weight: 1000,
+            id: id, name: name, material: material, colorHex: colorHex,
+            vendor: vendor, density: 1.24, diameter: 1.75, weight: 1000,
             spoolWeight: 200, price: nil, settingsExtruderTemp: nil,
             settingsBedTemp: nil, articleNumber: nil, gtin: nil,
             comment: nil, multiColorHexes: nil, externalId: nil
