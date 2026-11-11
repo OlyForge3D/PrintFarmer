@@ -205,6 +205,39 @@ test('sidebar exposes service status beside identity and refreshes a stale revis
   expect(requests.writes).toEqual([]);
 });
 
+for (const surface of ['detailed', 'sidebar'] as const) {
+  for (const state of ['Idle', 'Shutdown'] as const) {
+    test(`Out of Service ${surface} keeps emergency stop but not firmware restart in ${state}`, async ({ page }, testInfo) => {
+      await page.setViewportSize(testInfo.project.name.startsWith('mobile')
+        ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+      const printer = { ...printers[3], isEnabled: false, isOnline: true, state };
+      const requests = await mountRoutedToolbarPage(page,
+        surface === 'sidebar' ? `/printers/${printer.id}?view=collapsed` : '/printers?view=detailed',
+        {
+          ...printerSeeds,
+          '/api/printers': [printer],
+          '/api/printers/summary': [printer],
+          [`/api/printers/${printer.id}`]: printer,
+          [`/api/printers/${printer.id}/details`]: printer,
+        });
+      await expect(page.getByRole('button', { name: 'Mark Fixture unexpected In Service', exact: true })
+        .last()).toBeVisible();
+      const action = page.getByRole('button', { name: state === 'Shutdown' ? 'Firmware Restart' : 'Emergency Stop', exact: true });
+      await expect(action).toBeVisible();
+      if (state === 'Shutdown') {
+        await expect(action).toBeDisabled();
+      } else {
+        await expect(action).toBeEnabled();
+      }
+      await action.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath('out-of-service-safety-control.png'), fullPage: true });
+      expect(requests.errors).toEqual([]);
+      expect(requests.external).toEqual([]);
+      expect(requests.writes).toEqual([]);
+    });
+  }
+}
+
 test('users without printer administration see service status but no service mutation', async ({ page }) => {
   const requests = await mountRoutedToolbarPage(page, '/printers?view=collapsed', {
     ...printerSeeds,

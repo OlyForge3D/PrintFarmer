@@ -907,7 +907,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 </ControlPadButton>
                 <ControlPadButton
                   variant={isShutdown ? 'secondary' : 'danger'}
-                  disabled={controlActionPending || !canEmergencyStopNow}
+                  disabled={controlActionPending || !canEmergencyStopNow || (isShutdown && !isEnabled)}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
                   aria-label={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}

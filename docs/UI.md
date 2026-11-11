@@ -46,6 +46,9 @@ not a second monitoring flag.
 Out of Service preserves the existing disabled-printer behavior: the printer is
 hidden from normal listings, excluded from monitoring and dispatch, and is not
 commanded to power off. Maintenance remains a separate setting.
+Emergency stop remains available for an online Out of Service printer when
+its backend supports control operations. Service status is not a physical
+safety interlock, and a sent stop command does not prove the printer has stopped.
 
 A printer with an assigned or active job cannot be moved Out of Service. The
 operator must review and resolve that work first; PrintFarmer does not pause or

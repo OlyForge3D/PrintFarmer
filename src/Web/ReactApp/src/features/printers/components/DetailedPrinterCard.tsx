@@ -885,7 +885,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 controlActionPending={controlActionPending}
                 canPauseOrResume={canPauseOrResumeNow}
                 canCancel={canCancelNow}
-                canEmergencyStop={canEmergencyStopNow}
+                canEmergencyStop={canEmergencyStopNow && (!isShutdown || isEnabled)}
                 onControlAction={handleControlAction}
               />
             }
