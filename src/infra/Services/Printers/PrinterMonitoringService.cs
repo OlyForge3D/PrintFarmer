@@ -1,36 +1,35 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Services.Attention;
-using Farm.Infrastructure.Services.SignalR;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.Printers;
 
-/// <summary>One registry printer, its observed status, and active-work protection.</summary>
-public sealed record PrinterMonitoringSnapshot(Printer Printer, PrinterStatusCacheSnapshot? Status, bool HasActiveJob)
-{
-    /// <summary>Effective monitoring exemption, not a connectivity status.</summary>
-    public bool IsExpectedOffline => PrinterMonitoringPolicy.IsExpectedOffline(Printer, Status, HasActiveJob);
-}
+/// <summary>One in-service printer, its observed status, and active-work protection.</summary>
+public sealed record PrinterMonitoringSnapshot(Printer Printer, PrinterStatusCacheSnapshot? Status, bool HasActiveJob);
 
-/// <summary>Shared monitoring interpretation for health and attention consumers.</summary>
+/// <summary>An active job preserved for operator review during availability migration.</summary>
+public sealed record PrinterReviewRequiredJob(Guid JobId, string JobName, Guid PrinterId, string PrinterName);
+
+/// <summary>Shared printer-status and review snapshots for health and attention consumers.</summary>
 public interface IPrinterMonitoringReader
 {
-    /// <summary>Reads registered enabled printers and current safety exemptions.</summary>
+    /// <summary>Returns whether a printer has assigned work or cached active-print evidence.</summary>
+    Task<bool> HasActiveWorkAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>Reads in-service printers and active-work state.</summary>
     Task<IReadOnlyList<PrinterMonitoringSnapshot>> GetSnapshotsAsync(CancellationToken ct);
+
+    /// <summary>Reads active jobs marked for operator review, including out-of-service printers.</summary>
+    Task<IReadOnlyList<PrinterReviewRequiredJob>> GetReviewRequiredJobsAsync(CancellationToken ct);
 }
 
-/// <summary>Composes monitoring intent with live evidence and active-job protection.</summary>
+/// <summary>Composes printer status with persisted active-job review markers.</summary>
 public sealed class PrinterMonitoringService(
     AppDbContext db,
-    IPrinterStatusCacheReader statusCache,
-    IPrinterCacheInvalidator invalidator,
-    IHubContext<PrinterHub> hub,
-    IAttentionBroadcaster attention) : IPrinterMonitoringReader
+    IPrinterStatusCacheReader statusCache) : IPrinterMonitoringReader
 {
-    /// <summary>Active work is never covered by an intentional-shutdown exemption.</summary>
+    /// <summary>Returns whether a job is assigned, starting, printing, or paused.</summary>
     public Task<bool> HasActiveJobAsync(Guid printerId, CancellationToken ct) =>
         db.PrintJobs.AnyAsync(
             job => job.AssignedPrinterId == printerId
@@ -39,7 +38,20 @@ public sealed class PrinterMonitoringService(
                 || job.Status == PrintJobStatus.Printing
                 || job.Status == PrintJobStatus.Paused), ct);
 
-    /// <summary>Returns only exemptions that are currently safe to apply.</summary>
+    /// <summary>Includes cached active print evidence so an operator cannot disable a printing machine.</summary>
+    public async Task<bool> HasActiveWorkAsync(Guid printerId, CancellationToken ct)
+    {
+        if (await HasActiveJobAsync(printerId, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        PrinterStatusCacheSnapshot? snapshot = statusCache.GetSnapshot(printerId);
+        return snapshot?.Status is { IsOnline: true } status
+            && PrinterStateClassifier.IsActivePrintingJob(status.RawActivityState ?? status.State);
+    }
+
+    /// <summary>Returns in-service printers and their active-work state.</summary>
     public async Task<IReadOnlyList<PrinterMonitoringSnapshot>> GetSnapshotsAsync(CancellationToken ct)
     {
         List<Printer> printers = await db.Printers.AsNoTracking()
@@ -55,14 +67,16 @@ public sealed class PrinterMonitoringService(
             printer, statusCache.GetSnapshot(printer.Id), activeIds.Contains(printer.Id))).ToList();
     }
 
-    /// <summary>Invalidates configuration and client projections after a committed intent change.</summary>
-    public async Task NotifyChangedAsync(Guid printerId, CancellationToken ct)
-    {
-        invalidator.Invalidate(printerId);
-        await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-            .SendAsync("printermonitoringchanged", new { printerId }, ct).ConfigureAwait(false);
-        await attention.NotifyChangedAsync(
-            new AttentionChangedPayload($"offline:{printerId}", AttentionChangeKind.Updated, DateTime.UtcNow),
-            ct).ConfigureAwait(false);
-    }
+    /// <summary>Returns marked jobs only while they occupy a printer.</summary>
+    public async Task<IReadOnlyList<PrinterReviewRequiredJob>> GetReviewRequiredJobsAsync(CancellationToken ct) =>
+        await (
+            from job in db.PrintJobs.AsNoTracking()
+            join printer in db.Printers.AsNoTracking() on job.AssignedPrinterId equals printer.Id
+            where job.RequiresOperatorReview
+                && (job.Status == PrintJobStatus.Assigned
+                    || job.Status == PrintJobStatus.Starting
+                    || job.Status == PrintJobStatus.Printing
+                    || job.Status == PrintJobStatus.Paused)
+            select new PrinterReviewRequiredJob(job.Id, job.Name, printer.Id, printer.Name))
+        .ToListAsync(ct).ConfigureAwait(false);
 }

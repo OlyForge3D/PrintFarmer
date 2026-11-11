@@ -112,12 +112,16 @@ public sealed class TrackedMotionRetirementMigrationTests
             """ALTER TABLE "QueueDispatchAttempts" ADD COLUMN "BackendSenderSettledAtUtc" TEXT NULL;""");
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "Printers" ADD COLUMN "ShowExternalSpool" INTEGER NOT NULL DEFAULT 0;""");
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "PrintJobs" ADD COLUMN "RequiresOperatorReview" INTEGER NOT NULL DEFAULT 0;""");
         await seedContext.SaveChangesAsync();
         seedContext.ChangeTracker.Clear();
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "QueueDispatchAttempts" DROP COLUMN "BackendSenderSettledAtUtc";""");
         _ = await context.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "Printers" DROP COLUMN "ShowExternalSpool";""");
+        _ = await context.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "PrintJobs" DROP COLUMN "RequiresOperatorReview";""");
 
         await migrator.MigrateAsync();
 
@@ -333,7 +337,6 @@ public sealed class TrackedMotionRetirementMigrationTests
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
-            modelBuilder.Entity<Printer>().Ignore(printer => printer.ExpectedOfflineSinceUtc);
         }
     }
 }

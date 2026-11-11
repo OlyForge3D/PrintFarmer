@@ -74,7 +74,9 @@ public sealed class AdminOverviewService : IAdminOverviewService
         try
         {
             IReadOnlyList<PrinterMonitoringSnapshot> registered = await _monitoring.GetSnapshotsAsync(cancellationToken);
-            printerConnectivity = MergeMonitoring(printerConnectivity, registered, checkedAt);
+            IReadOnlyList<PrinterReviewRequiredJob> reviewRequiredJobs =
+                await _monitoring.GetReviewRequiredJobsAsync(cancellationToken);
+            printerConnectivity = MergeMonitoring(printerConnectivity, registered, reviewRequiredJobs, checkedAt);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -229,9 +231,8 @@ public sealed class AdminOverviewService : IAdminOverviewService
     private static SubsystemHealthDto BuildBackendsTile(PrinterConnectivitySnapshot connectivity)
     {
         int failedCount = connectivity.Printers.Count(p => p.ConnectionState != PrinterConnectionState.Connected
-            && !connectivity.ExpectedOfflineIds.Contains(p.PrinterId)
             && !connectivity.UnknownIds.Contains(p.PrinterId));
-        int totalCount = connectivity.Printers.Count - connectivity.ExpectedOfflineIds.Count;
+        int totalCount = connectivity.Printers.Count;
         SubsystemStatus status = failedCount == 0 && connectivity.ProviderErrorCount == 0
             ? connectivity.UnknownIds.Count > 0 ? SubsystemStatus.Unknown
             : SubsystemStatus.Healthy
@@ -240,12 +241,8 @@ public sealed class AdminOverviewService : IAdminOverviewService
                 : SubsystemStatus.Degraded;
 
         string detail = totalCount == 0
-            ? connectivity.ProviderErrorCount == 0 ? "No printers expected online" : "Printer status unavailable"
-            : string.Create(CultureInfo.InvariantCulture, $"{totalCount - failedCount - connectivity.UnknownIds.Count} / {totalCount} reachable");
-        if (connectivity.ExpectedOfflineIds.Count > 0)
-        {
-            detail += string.Create(CultureInfo.InvariantCulture, $"; {connectivity.ExpectedOfflineIds.Count} expected offline");
-        }
+            ? connectivity.ProviderErrorCount == 0 ? "No printers in service" : "Printer status unavailable"
+            : string.Create(CultureInfo.InvariantCulture, $"{totalCount - failedCount - connectivity.UnknownIds.Count} / {totalCount} in service reachable");
 
         if (connectivity.UnknownIds.Count > 0)
         {
@@ -409,6 +406,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
             }
         }
 
+        AppendReviewRequiredJobAttention(printerConnectivity, items);
         AppendPrinterConnectivityAttention(printerConnectivity, items);
 
         // Sort: Error > Warning > Info, then stable by Title.
@@ -500,8 +498,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
         }
 
         foreach (PrinterConnectionHealth printer in connectivity.Printers.Where(
-                     p => p.ConnectionState != PrinterConnectionState.Connected
-                         && !connectivity.ExpectedOfflineIds.Contains(p.PrinterId)))
+                     p => p.ConnectionState != PrinterConnectionState.Connected))
         {
             items.Add(new AttentionItemDto
             {
@@ -520,37 +517,57 @@ public sealed class AdminOverviewService : IAdminOverviewService
         }
     }
 
+    private static void AppendReviewRequiredJobAttention(
+        PrinterConnectivitySnapshot connectivity,
+        List<AttentionItemDto> items)
+    {
+        foreach (PrinterReviewRequiredJob job in connectivity.ReviewRequiredJobs)
+        {
+            items.Add(new AttentionItemDto
+            {
+                Key = $"printer-{job.PrinterId}-job-{job.JobId}-review",
+                Severity = AttentionSeverity.Warning,
+                Title = $"Review active job '{job.JobName}'",
+                Detail = "This active job needs operator review after a service-status conflict. The printer may still be In Service; no pause or cancellation was requested. Review and resolve the job before changing service status. This issue clears when the job is no longer active.",
+                ActionLabel = "Review printer",
+                ActionRoute = $"/printers/{job.PrinterId}",
+            });
+        }
+    }
+
     private sealed record PrinterConnectivitySnapshot(
         IReadOnlyList<PrinterConnectionHealth> Printers,
         int ProviderErrorCount)
     {
-        public HashSet<Guid> ExpectedOfflineIds { get; init; } = [];
-
         public HashSet<Guid> UnknownIds { get; init; } = [];
+
+        public IReadOnlyList<PrinterReviewRequiredJob> ReviewRequiredJobs { get; init; } = [];
+
+        public HashSet<Guid> ReviewRequiredPrinterIds { get; init; } = [];
     }
 
     private static PrinterConnectivitySnapshot MergeMonitoring(
         PrinterConnectivitySnapshot connectivity,
         IReadOnlyList<PrinterMonitoringSnapshot> registered,
+        IReadOnlyList<PrinterReviewRequiredJob> reviewRequiredJobs,
         DateTime utcNow)
     {
         Dictionary<Guid, PrinterConnectionHealth> reported = connectivity.Printers
             .GroupBy(printer => printer.PrinterId).ToDictionary(group => group.Key, group => group.First());
         List<PrinterConnectionHealth> printers = [];
-        HashSet<Guid> expected = [];
         HashSet<Guid> unknown = [];
         foreach (PrinterMonitoringSnapshot snapshot in registered)
         {
             Printer printer = snapshot.Printer;
+            if (!printer.IsEnabled)
+            {
+                continue;
+            }
+
             bool hasProvider = reported.TryGetValue(printer.Id, out PrinterConnectionHealth? health);
             bool fresh = snapshot.Status is { } status && status.UpdatedAtUtc <= utcNow
                 && utcNow - status.UpdatedAtUtc <= PrinterStatusFreshness.MaximumAge;
-            if (snapshot.IsExpectedOffline
-                && (!hasProvider || health!.ConnectionState == PrinterConnectionState.Offline))
-            {
-                expected.Add(printer.Id);
-            }
-            else if (!fresh && !hasProvider)
+            if (!fresh && !hasProvider)
             {
                 unknown.Add(printer.Id);
             }
@@ -565,10 +582,14 @@ public sealed class AdminOverviewService : IAdminOverviewService
             });
         }
 
+        HashSet<Guid> reviewRequiredPrinterIds = reviewRequiredJobs
+            .Select(job => job.PrinterId)
+            .ToHashSet();
         return new PrinterConnectivitySnapshot(printers, connectivity.ProviderErrorCount)
         {
-            ExpectedOfflineIds = expected,
             UnknownIds = unknown,
+            ReviewRequiredJobs = reviewRequiredJobs,
+            ReviewRequiredPrinterIds = reviewRequiredPrinterIds,
         };
     }
 

@@ -57,13 +57,13 @@ public sealed class OfflineAttentionSource(
     public async Task<IReadOnlyList<AttentionItemDto>> GetItemsAsync(CancellationToken cancellationToken)
     {
         List<Printer> printers = await _printers.GetAllAsync(cancellationToken);
-        HashSet<Guid> expectedOffline = (await monitoring.GetSnapshotsAsync(cancellationToken))
-            .Where(snapshot => snapshot.IsExpectedOffline).Select(snapshot => snapshot.Printer.Id).ToHashSet();
+        HashSet<Guid> activeJobPrinterIds = (await monitoring.GetSnapshotsAsync(cancellationToken))
+            .Where(snapshot => snapshot.HasActiveJob).Select(snapshot => snapshot.Printer.Id).ToHashSet();
         List<AttentionItemDto> items = new();
 
         foreach (Printer printer in printers)
         {
-            if (!printer.IsEnabled || expectedOffline.Contains(printer.Id))
+            if (!printer.IsEnabled)
             {
                 continue;
             }
@@ -79,6 +79,11 @@ public sealed class OfflineAttentionSource(
             {
                 new AttentionActionDto(AttentionActionKind.Snooze, "Snooze", RequiresConfirmation: false),
             };
+            bool hasActiveWork = activeJobPrinterIds.Contains(printer.Id);
+            string title = hasActiveWork ? "Printer offline with active work" : "Printer offline";
+            string detail = hasActiveWork
+                ? $"{printer.Name} has active work while offline. Review the job before changing its service status."
+                : $"{printer.Name} is not responding. Action: check power, network, and firmware, then re-scan.";
 
             items.Add(new AttentionItemDto(
                 Id: AttentionIdPrefixes.Build(AttentionIdPrefixes.Offline, printer.Id),
@@ -86,8 +91,8 @@ public sealed class OfflineAttentionSource(
                 Severity: AttentionSeverity.Warning,
                 PrinterId: printer.Id,
                 PrinterName: printer.Name,
-                Title: "Printer offline",
-                Detail: $"{printer.Name} is not responding. Action: check power, network, and firmware, then re-scan.",
+                Title: title,
+                Detail: detail,
                 OccurredAt: StableOfflineOccurredAt,
                 Actions: actions,
                 AllowFreshOccurrenceBypass: false));

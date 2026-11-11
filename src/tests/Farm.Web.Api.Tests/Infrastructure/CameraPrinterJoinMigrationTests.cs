@@ -147,7 +147,6 @@ public sealed class CameraPrinterJoinMigrationTests
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
-            modelBuilder.Entity<Printer>().Ignore(printer => printer.ExpectedOfflineSinceUtc);
         }
     }
 }

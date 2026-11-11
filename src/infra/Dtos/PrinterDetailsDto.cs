@@ -67,5 +67,4 @@ public record PrinterDetailsDto(
 
     // Presentation-only: show the filament box external spool slot.
     bool ShowExternalSpool = false,
-    bool PrintGuardEnabled = false,
-    DateTime? ExpectedOfflineSinceUtc = null);
+    bool PrintGuardEnabled = false);

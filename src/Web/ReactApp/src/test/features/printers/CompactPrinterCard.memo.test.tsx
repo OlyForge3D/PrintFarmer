@@ -16,10 +16,6 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ hasPermission: () => true }),
 }));
 
-vi.mock('@/features/printers/hooks/usePrinterMonitoring', () => ({
-  usePrinterMonitoring: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
 const progressBarRender = vi.hoisted(() => vi.fn());
 const printerTagsFromFleetMock = vi.hoisted(() =>
   vi.fn((): { data: TagDto[]; isPending: boolean; isError: boolean; error: null } => (

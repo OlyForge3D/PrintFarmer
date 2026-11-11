@@ -41,6 +41,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using IPrinterMonitoringReader = Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MmuControlAction = Farm.Infrastructure.Services.Printers.MmuControlAction;
 using MmuControlProtocol = Farm.Infrastructure.Services.Printers.MmuControlProtocol;
@@ -1363,8 +1364,7 @@ public partial class PrintersController(
             false,
             rowVersion,
             p.ShowExternalSpool,
-            p.PrintGuardEnabled,
-            p.ExpectedOfflineSinceUtc);
+            p.PrintGuardEnabled);
     }
 
     /// <summary>
@@ -1858,6 +1858,19 @@ public partial class PrintersController(
         if (BindPrinterIfMatch(p) is { } precondition)
         {
             return precondition;
+        }
+
+        if (dto.IsEnabled == false && p.IsEnabled)
+        {
+            IPrinterMonitoringReader monitoring = HttpContext.RequestServices.GetRequiredService<IPrinterMonitoringReader>();
+            if (await monitoring.HasActiveWorkAsync(id, ct).ConfigureAwait(false))
+            {
+                return Conflict(new
+                {
+                    error = "printer_has_active_work",
+                    detail = "This printer has active or assigned work. Review and resolve the job before marking the printer Out of Service.",
+                });
+            }
         }
 
         // Validate toolhead metrology bounds up front so a rejected write never partially

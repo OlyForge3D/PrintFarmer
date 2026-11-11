@@ -60,7 +60,7 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
-import { PrinterMonitoringControl } from '@/features/printers/components/PrinterMonitoringControl';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import {
   canCancel,
@@ -93,11 +93,12 @@ export interface DetailedPrinterCardProps {
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
 }
 
 // Memoized: with stable callbacks and structural sharing upstream, a card only
 // re-renders when its own printer's data actually changed.
-export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
+export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit, onToggleEnabled }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
   const motion = usePrinterMovement(printer);
   const { ready: spoolmanReady } = useSpoolmanConfigured();
@@ -579,7 +580,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
           {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
-        <PrinterMonitoringControl printer={printer} />
+        <div className="mt-2">
+          <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
+        </div>
       </div>
 
       {/* Identity + actions: the action grid sits beside the cover at the cover's
@@ -651,7 +654,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               disabled={!hasCameraUrls || !isEnabled}
               className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-              title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
+              title={!isEnabled ? 'Printer Out of Service' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
             >
             </Button>
@@ -882,7 +885,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 controlActionPending={controlActionPending}
                 canPauseOrResume={canPauseOrResumeNow}
                 canCancel={canCancelNow}
-                canEmergencyStop={canEmergencyStopNow}
+                canEmergencyStop={canEmergencyStopNow && (!isShutdown || isEnabled)}
                 onControlAction={handleControlAction}
               />
             }

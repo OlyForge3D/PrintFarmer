@@ -4022,20 +4022,6 @@ export class ApiClient {
   }
 
   // ============ 3D Models API methods ============
-  /** Acknowledge a shutdown without altering power, dispatch or maintenance. */
-  async setPrinterExpectedOffline(
-    printerId: string,
-    expectedOffline: boolean,
-    reviewedRowVersion: string,
-  ): Promise<{ id: string; expectedOfflineSinceUtc: string | null; rowVersion: string }> {
-    const response = await this.client.put(
-      `/printers/${printerId}/expected-offline`,
-      expectedOffline,
-      { headers: { 'If-Match': this.reviewedEtag(reviewedRowVersion, 'The reviewed printer') } },
-    );
-    return response.data;
-  }
-
   /**
    * Get all 3D models
    */

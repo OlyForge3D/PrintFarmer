@@ -117,6 +117,8 @@ public sealed class AdminOverviewContractTests : IAsyncLifetime
         Mock<IPrinterMonitoringReader> monitoring = new();
         _ = monitoring.Setup(reader => reader.GetSnapshotsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<PrinterMonitoringSnapshot> { new(offlinePrinter, null, false) });
+        _ = monitoring.Setup(reader => reader.GetReviewRequiredJobsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PrinterReviewRequiredJob>());
 
         // Forces at least one real, deterministic attention item through EACH of the two
         // production code paths that populate AttentionItemDto — see class remarks — so the

@@ -569,6 +569,7 @@ public class EfPrintJobManagementRepositoryTests
 
         await using (AppDbContext seedContext = new(options))
         {
+            seedContext.Printers.Add(new PrinterBuilder().WithId(printerId).Build());
             seedContext.PrintJobs.AddRange(highPriorityQueued, printing, lowPriorityQueued);
             await seedContext.SaveChangesAsync();
         }
@@ -630,6 +631,7 @@ public class EfPrintJobManagementRepositoryTests
 
         await using (AppDbContext seedContext = new(options))
         {
+            seedContext.Printers.Add(new PrinterBuilder().WithId(printerId).Build());
             seedContext.PrintJobs.AddRange(activeQueued, assigned, starting, paused, completed, failed, cancelled);
             await seedContext.SaveChangesAsync();
         }
@@ -703,6 +705,9 @@ public class EfPrintJobManagementRepositoryTests
 
         await using (AppDbContext seedContext = new(options))
         {
+            seedContext.Printers.AddRange(
+                new PrinterBuilder().WithId(printerA).Build(),
+                new PrinterBuilder().WithId(printerB).Build());
             seedContext.PrintJobs.AddRange(printerAPrinting, printerAQueued, printerBQueued1, printerBQueued2);
             await seedContext.SaveChangesAsync();
         }

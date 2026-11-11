@@ -208,15 +208,6 @@ export class PrinterSignalRService {
     connection.on("printerupdated", (status: PrinterStatusUpdate) => {
       this.handlePrinterStatusPayload(status);
     });
-    connection.on("printermonitoringchanged", () => {
-      this.printerMonitoringChangedCallbacks.forEach(callback => {
-        try {
-          callback();
-        } catch (error) {
-          console.error('Printer monitoring callback error:', error);
-        }
-      });
-    });
 
     // Batched replay of cached statuses sent once by SubscribeToPrintersAsync
     // (issue #1764), instead of one "printerupdated" frame per authorized printer.
@@ -464,7 +455,6 @@ export class PrinterSignalRService {
   private queueResourcesChangedCallbacks: QueueResourcesChangedCallback[] = [];
   private gcodeLibraryUpdatedCallbacks: GcodeLibraryUpdatedCallback[] = [];
   private camerasUpdatedCallbacks: CamerasUpdatedCallback[] = [];
-  private printerMonitoringChangedCallbacks: Array<() => void> = [];
   private subscribedPrinters = new Set<string>();
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
@@ -1099,15 +1089,6 @@ export class PrinterSignalRService {
     };
   }
 
-  /** Refetch canonical printer configuration after explicit or automatic monitoring changes. */
-  public onPrinterMonitoringChanged(callback: () => void): () => void {
-    this.printerMonitoringChangedCallbacks.push(callback);
-    return () => {
-      const index = this.printerMonitoringChangedCallbacks.indexOf(callback);
-      if (index >= 0) this.printerMonitoringChangedCallbacks.splice(index, 1);
-    };
-  }
-
   public getQueueSubscriptionSnapshot(): {
     printerIds: string[];
     jobIds: string[];
@@ -1571,7 +1552,6 @@ export class PrinterSignalRService {
     this.queueResourcesChangedCallbacks = [];
     this.gcodeLibraryUpdatedCallbacks = [];
     this.camerasUpdatedCallbacks = [];
-    this.printerMonitoringChangedCallbacks = [];
     this.clearQueueSubscriptionState();
     for (const timer of this.offlineGraceTimers.values()) {
       clearTimeout(timer);

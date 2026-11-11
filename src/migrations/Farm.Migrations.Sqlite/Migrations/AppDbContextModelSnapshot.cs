@@ -5372,6 +5372,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("RequiresOperatorReview")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER")
@@ -6042,9 +6047,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ExcludedRegionsJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")

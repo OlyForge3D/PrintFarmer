@@ -29,12 +29,15 @@ public class AdminOverviewServiceTests
     private readonly Mock<HealthCheckService> _healthCheckService = new();
     private readonly List<IPrinterConnectionHealthProvider> _connectionHealthProviders = new();
     private readonly List<PrinterMonitoringSnapshot> _monitoringSnapshots = [];
+    private readonly List<PrinterReviewRequiredJob> _reviewRequiredJobs = [];
 
     private AdminOverviewService CreateService()
     {
         Mock<IPrinterMonitoringReader> monitoring = new();
         monitoring.Setup(reader => reader.GetSnapshotsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(_monitoringSnapshots);
+        monitoring.Setup(reader => reader.GetReviewRequiredJobsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_reviewRequiredJobs);
         return new(_healthCheckService.Object, _connectionHealthProviders,
             NullLogger<AdminOverviewService>.Instance, monitoring.Object);
     }
@@ -55,7 +58,7 @@ public class AdminOverviewServiceTests
     // ─── Happy path ───────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ExpectedOffline_ExcludedFromHealthDenominatorAndWarnings()
+    public async Task OutOfServicePrintersAreExcludedFromHealthDenominatorAndWarnings()
     {
         SetPrinterConnectivity(ConnectedPrinter("online"), new PrinterConnectionHealth
         {
@@ -64,25 +67,25 @@ public class AdminOverviewServiceTests
             Backend = PrinterBackend.Moonraker,
             ConnectionState = PrinterConnectionState.Offline,
         });
-        _monitoringSnapshots[1].Printer.ExpectedOfflineSinceUtc = DateTime.UtcNow.AddMinutes(-1);
+        _monitoringSnapshots[1].Printer.IsEnabled = false;
         SetHealthyReport();
 
         AdminOverviewDto result = await CreateService().GetOverviewAsync();
 
-        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("1 / 1 reachable; 1 expected offline");
+        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("1 / 1 in service reachable");
         result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().Be(SubsystemStatus.Healthy);
         result.Attention.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task AllExpectedOffline_IsNeutralWithoutInventingReachablePrinters()
+    public async Task AllPrintersOutOfService_IsNeutralWithoutInventingReachablePrinters()
     {
-        _monitoringSnapshots.Add(new(new Printer { Name = "Shutdown", ExpectedOfflineSinceUtc = DateTime.UtcNow }, null, false));
+        _monitoringSnapshots.Add(new(new Printer { Name = "Out of service", IsEnabled = false }, null, false));
         SetHealthyReport();
 
         AdminOverviewDto result = await CreateService().GetOverviewAsync();
 
-        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("No printers expected online; 1 expected offline");
+        result.Subsystems.Single(tile => tile.Key == "backends").Detail.Should().Be("No printers in service");
         result.Attention.Should().BeEmpty();
     }
 
@@ -100,11 +103,13 @@ public class AdminOverviewServiceTests
     }
 
     [Fact]
-    public async Task ExpectedOffline_DoesNotHideActiveWorkOrProviderFailures()
+    public async Task ReviewRequiredJobRemainsActionableAlongsideProviderFailures()
     {
-        Printer printer = new() { Name = "Active", ExpectedOfflineSinceUtc = DateTime.UtcNow.AddMinutes(-1) };
+        Printer printer = new() { Name = "Active", IsEnabled = true };
         _monitoringSnapshots.Add(new(printer,
             new(new PrinterStatusDto(printer.Id, false, "Offline"), DateTime.UtcNow), true));
+        Guid jobId = Guid.NewGuid();
+        _reviewRequiredJobs.Add(new(jobId, "Active job", printer.Id, printer.Name));
         Mock<IPrinterConnectionHealthProvider> broken = new();
         broken.Setup(value => value.GetConnectionHealth()).Throws(new InvalidOperationException("Provider unavailable"));
         _connectionHealthProviders.Add(broken.Object);
@@ -113,6 +118,9 @@ public class AdminOverviewServiceTests
         AdminOverviewDto result = await CreateService().GetOverviewAsync();
 
         result.Subsystems.Single(tile => tile.Key == "backends").Status.Should().NotBe(SubsystemStatus.Healthy);
+        result.Attention.Should().Contain(item => item.Key == $"printer-{printer.Id}-job-{jobId}-review"
+            && item.Title == "Review active job 'Active job'"
+            && item.ActionRoute == $"/printers/{printer.Id}");
         result.Attention.Should().Contain(item => item.Key == $"printer-{printer.Id}-unreachable");
         result.Attention.Should().Contain(item => item.Key == "backends-degraded");
     }
@@ -288,7 +296,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("4 / 5 reachable");
+        backends.Detail.Should().Be("4 / 5 in service reachable");
 
         overview.Subsystems.Where(s => s.Key != "backends").Should().OnlyContain(s => s.Status == SubsystemStatus.Healthy);
         overview.OverallStatus.Should().Be(SubsystemStatus.Degraded);
@@ -380,7 +388,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("2 / 3 reachable");
+        backends.Detail.Should().Be("2 / 3 in service reachable");
 
         // Database sub-tile picked from Comprehensive.Data
         SubsystemHealthDto database = overview.Subsystems.Single(s => s.Key == "database");
@@ -440,7 +448,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("1 / 2 reachable");
+        backends.Detail.Should().Be("1 / 2 in service reachable");
 
         string expectedKey = $"printer-{offlinePrinterId}-unreachable";
         overview.Attention.Should().Contain(a => a.Key == expectedKey);
