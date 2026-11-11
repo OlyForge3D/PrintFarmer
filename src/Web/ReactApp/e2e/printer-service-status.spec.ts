@@ -72,6 +72,36 @@ test('compact operational issues preserve counts, critical errors and keyboard d
   expect(requests.writes).toEqual([]);
 });
 
+test('active-job review issue navigates to its printer', async ({ page }, testInfo) => {
+  await page.setViewportSize(testInfo.project.name.startsWith('mobile')
+    ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  const printerId = '00000000-0000-0000-0000-000000000099';
+  const jobId = '00000000-0000-0000-0000-000000000199';
+  const reviewIssue = {
+    key: `printer-${printerId}-job-${jobId}-review`,
+    severity: 'Warning',
+    title: "Review active job 'Fixture active print'",
+    detail: 'This job was active when its printer was marked Out of Service. Review the job before changing service status; this issue clears when the job is no longer active.',
+    actionLabel: 'Review printer',
+    actionRoute: `/printers/${printerId}`,
+  };
+  const requests = await mountRoutedToolbarPage(page, '/admin', {
+    ...toolbarAdminSeeds,
+    '/api/admin/overview': { ...overview, attention: [reviewIssue] },
+  });
+  const group = page.getByTestId('admin-hub-issue-group');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText('Review active job');
+  await group.locator('summary').click();
+  const reviewLink = page.getByRole('link', { name: /Review printer.*Review active job 'Fixture active print'/ });
+  await expect(reviewLink).toBeVisible();
+  await expect(reviewLink).toHaveAttribute('href', `/printers/${printerId}`);
+  await page.screenshot({ path: testInfo.outputPath('admin-active-job-review.png'), fullPage: true });
+  expect(requests.errors).toEqual([]);
+  expect(requests.external).toEqual([]);
+  expect(requests.writes).toEqual([]);
+});
+
 test('printer availability uses the service status control', async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
     ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
@@ -103,11 +133,18 @@ test('printer availability uses the service status control', async ({ page }, te
   });
   const inService = page.getByRole('row').filter({ hasText: 'Fixture unexpected' });
   const outOfService = page.getByRole('row').filter({ hasText: 'Fixture out of service B' });
-  await expect(inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' })).toBeVisible();
-  await expect(outOfService.getByRole('button', { name: 'Mark Fixture out of service B In Service' })).toBeVisible();
+  const markOutOfService = inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' });
+  const markInService = outOfService.getByRole('button', { name: 'Mark Fixture out of service B In Service' });
+  await expect(markOutOfService).toBeVisible();
+  await expect(markInService).toBeVisible();
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
-  await inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' }).click();
+  if (testInfo.project.name.startsWith('mobile')) {
+    await markOutOfService.scrollIntoViewIfNeeded();
+    await expect(markOutOfService).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath('printers-service-status-control-mobile.png'), fullPage: true });
+  }
+  await markOutOfService.click();
   await expect(page.getByText('Fixture unexpected is now Out of Service')).toBeVisible();
   expect(mutations).toEqual([{
     body: { isEnabled: false },
