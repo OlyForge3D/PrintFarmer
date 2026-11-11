@@ -153,6 +153,17 @@ test(`printer availability uses the service status control in ${view} view`, asy
   const markInService = page.getByRole('button', { name: 'Out of Service: Mark Fixture out of service B In Service', exact: true });
   await expect(markOutOfService).toBeVisible();
   await expect(markInService).toBeVisible();
+  if (view === 'table') {
+    await expect(page.getByRole('columnheader')).toHaveText([
+      '', 'Printer', 'Service', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
+    ]);
+    await expect(markOutOfService).toHaveAttribute('aria-pressed', 'true');
+    await expect(markInService).toHaveAttribute('aria-pressed', 'false');
+    await expect(markOutOfService.locator('svg')).toHaveClass(/text-pf-success/);
+    await expect(markInService.locator('svg')).toHaveClass(/text-pf-text-secondary/);
+    await expect(markOutOfService).not.toHaveText('In Service');
+    await expect(page.getByRole('columnheader', { name: 'Last Updated' })).toHaveCount(0);
+  }
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
   const geometry = await markOutOfService.boundingBox();
@@ -238,15 +249,22 @@ for (const surface of ['detailed', 'sidebar'] as const) {
   }
 }
 
-test('users without printer administration see service status but no service mutation', async ({ page }) => {
-  const requests = await mountRoutedToolbarPage(page, '/printers?view=collapsed', {
+for (const view of ['collapsed', 'table'] as const) {
+test(`users without printer administration see service status but no service mutation in ${view}`, async ({ page }) => {
+  const requests = await mountRoutedToolbarPage(page, `/printers?view=${view}`, {
     ...printerSeeds,
     '/api/auth/me': { ...toolbarRouteUser, roles: [], permissions: ['printers:read'] },
   });
   await expect(page.getByText('Fixture unexpected', { exact: true })).toBeVisible();
-  await expect(page.getByText('In Service', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('Out of Service', { exact: true })).toBeVisible();
+  if (view === 'table') {
+    await expect(page.getByRole('img', { name: 'In Service', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('img', { name: 'Out of Service', exact: true })).toBeVisible();
+  } else {
+    await expect(page.getByText('In Service', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Out of Service', { exact: true })).toBeVisible();
+  }
   await expect(page.getByRole('button', { name: /^(In Service|Out of Service): Mark .* (In|Out of) Service$/ })).toHaveCount(0);
   expect(requests.errors).toEqual([]);
   expect(requests.writes).toEqual([]);
 });
+}

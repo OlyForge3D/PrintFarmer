@@ -43,6 +43,11 @@ Administrators use the **In Service / Out of Service** control beside printer
 identity in compact cards, detailed cards, the table and the details sidebar.
 Other users see a read-only status. It is the existing `IsEnabled` setting,
 not a second monitoring flag.
+In table view, a narrow **Service** column immediately after **Printer** shows a
+green filled power plug for In Service and a neutral outline plug for Out of
+Service. Authorized users can toggle the glyph; other users see status only.
+The operational **Status** column is unchanged; the former **Last Updated**
+column has been removed.
 Out of Service preserves the existing disabled-printer behavior: the printer is
 hidden from normal listings, excluded from monitoring and dispatch, and is not
 commanded to power off. Maintenance remains a separate setting.

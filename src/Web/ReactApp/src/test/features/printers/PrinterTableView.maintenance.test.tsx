@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
+import { act, render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
@@ -50,6 +50,43 @@ describe('PrinterTableView - maintenance button', () => {
   };
 
   useAllAutoDispatchStatusesMock.mockReturnValue({ data: [] as AutoDispatchStatus[] });
+
+  it('places service immediately after printer and removes Last Updated without changing operational status', () => {
+    render(<PrinterTableView printers={[{ ...basePrinter, state: 'Printing' }]} onEdit={vi.fn()} onDelete={vi.fn()}
+      onBulkSetMaintenance={vi.fn()} onOpenMaintenance={vi.fn()} />);
+    const headers = screen.getAllByRole('columnheader');
+    expect(headers.map(header => header.textContent?.trim())).toEqual([
+      '', 'Printer', 'Service', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
+    ]);
+    expect(headers[2]).not.toHaveAttribute('aria-sort');
+    const cells = within(screen.getByRole('row', { name: /Printer 1/ })).getAllByRole('cell');
+    expect(within(cells[1]).queryByRole('img', { name: 'In Service' })).not.toBeInTheDocument();
+    expect(within(cells[2]).getByRole('img', { name: 'In Service' })).toBeInTheDocument();
+    expect(cells[3]).toHaveTextContent('Printing');
+    expect(screen.queryByText('Last Updated')).not.toBeInTheDocument();
+    expect(screen.queryByText('Online', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [true, true, true],
+    [false, true, false],
+    [true, false, false],
+  ])('preserves toggle wiring with showEnableColumn=%s and callback=%s', async (showEnableColumn, hasCallback, canToggle) => {
+    const onToggleEnabled = vi.fn();
+    render(<PrinterTableView printers={[basePrinter]} onEdit={vi.fn()} onDelete={vi.fn()}
+      onBulkSetMaintenance={vi.fn()} onOpenMaintenance={vi.fn()} showEnableColumn={showEnableColumn}
+      onToggleEnabled={hasCallback ? onToggleEnabled : undefined} />);
+    const button = screen.queryByRole('button', { name: 'In Service: Mark Printer 1 Out of Service' });
+    if (canToggle) {
+      expect(button).toBeInTheDocument();
+      await act(async () => { fireEvent.click(button!); });
+      expect(onToggleEnabled).toHaveBeenCalledExactlyOnceWith(basePrinter);
+    } else {
+      expect(button).not.toBeInTheDocument();
+      expect(screen.getByRole('img', { name: 'In Service' })).toBeInTheDocument();
+      expect(onToggleEnabled).not.toHaveBeenCalled();
+    }
+  });
 
   it('exposes shared full-cell sort buttons for the displayed name, state and backend only', () => {
     const onSort = vi.fn();

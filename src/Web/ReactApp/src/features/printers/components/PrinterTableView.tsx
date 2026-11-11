@@ -237,6 +237,9 @@ export function PrinterTableView({
                 onSort={() => onSort?.('name')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Printer
               </TableHeaderCell>
+              <th scope="col" className="w-12 px-1 py-3">
+                <span className="sr-only">Service</span>
+              </th>
               <TableHeaderCell sortable={Boolean(onSort)} sortKey="state" sortDirection={sortMode === 'state' ? sortDirection : null}
                 onSort={() => onSort?.('state')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Status
@@ -250,9 +253,6 @@ export function PrinterTableView({
               </th>
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Temperatures
-              </th>
-              <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
-                Last Updated
               </th>
               {/** Actions header */}
               <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
@@ -311,9 +311,9 @@ export function PrinterTableView({
                         </div>
                       </div>
                     </div>
-                    <div className="mt-2">
-                      <PrinterServiceStatus printer={printer} onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
-                    </div>
+                  </td>
+                  <td className="w-12 px-1 py-4 text-center">
+                    <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
                   </td>
 
                   {/* Status */}
@@ -391,13 +391,6 @@ export function PrinterTableView({
                       <div>H: {formatTemperature(displayPrinter.hotendTemp, displayPrinter.hotendTarget)}</div>
                       <div>B: {formatTemperature(displayPrinter.bedTemp, displayPrinter.bedTarget)}</div>
                     </div>
-                  </td>
-
-                  {/* Last Updated */}
-                  <td className="px-4 py-4">
-                    <span className="text-sm text-pf-text-tertiary">
-                      {displayPrinter.isOnline ? 'Online' : 'Offline'}
-                    </span>
                   </td>
 
                   {/* Actions */}
