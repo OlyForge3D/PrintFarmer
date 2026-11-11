@@ -148,6 +148,15 @@ public sealed class DatabaseMigrationTests
         reviewByJob["Completed"].Should().BeFalse();
         reviewByJob["Online printing"].Should().BeFalse();
 
+        (await context.Printers.Where(printer => printer.Id == idlePrinterId)
+            .Select(printer => printer.Revision).SingleAsync()).Should().Be(2);
+        (await context.Printers.Where(printer => printer.Id == onlinePrinterId)
+            .Select(printer => printer.Revision).SingleAsync()).Should().Be(1);
+        (await context.PrintJobs.Where(job => job.Name == "Assigned")
+            .Select(job => job.Revision).SingleAsync()).Should().Be(2);
+        (await context.PrintJobs.Where(job => job.Name == "Online printing")
+            .Select(job => job.Revision).SingleAsync()).Should().Be(1);
+
         await migrator.MigrateAsync("20261110155826_AddPrinterExpectedOffline");
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
@@ -155,7 +164,7 @@ public sealed class DatabaseMigrationTests
             + "WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL "
             + "AND \"Id\" IN (SELECT \"AssignedPrinterId\" FROM \"PrintJobs\" "
             + "WHERE \"Status\" IN (1, 2, 3, 4));";
-        (await command.ExecuteScalarAsync()).Should().Be(2L);
+        (await command.ExecuteScalarAsync()).Should().Be(0L);
         command.CommandText = "SELECT \"IsEnabled\" FROM \"Printers\" WHERE \"Name\" = 'Expected offline idle';";
         (await command.ExecuteScalarAsync()).Should().Be(0L);
     }

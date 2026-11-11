@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mountRoutedToolbarPage } from './fixtures/toolbar-routed';
+import { mountRoutedToolbarPage, toolbarRouteUser } from './fixtures/toolbar-routed';
 import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 
 const since = '2026-10-30T12:00:00Z';
@@ -9,6 +9,20 @@ const printers = Array.from({ length: 4 }, (_, index) => ({
   backend: 'Moonraker', isEnabled: index !== 2, isOnline: index === 0,
   state: index === 0 ? 'Idle' : 'Offline', rowVersion: 'Zml4dHVyZQ==',
 }));
+
+const printerSeeds = {
+  ...toolbarAdminSeeds,
+  '/api/printers': printers,
+  '/api/printers/camera-urls': [],
+  '/api/printers/backend-capabilities': [],
+  '/api/printers/summary': printers,
+  [`/api/printers/${printers[3].id}`]: printers[3],
+  [`/api/printers/${printers[3].id}/details`]: printers[3],
+  '/api/auto-dispatch/status': [],
+  '/api/locations': [],
+  '/api/tags': [],
+  '/api/settings/OperatorFeatures': { enabled: false },
+};
 
 const overview = {
   checkedAt: since, overallStatus: 'Degraded',
@@ -81,7 +95,7 @@ test('active-job review issue navigates to its printer', async ({ page }, testIn
     key: `printer-${printerId}-job-${jobId}-review`,
     severity: 'Warning',
     title: "Review active job 'Fixture active print'",
-    detail: 'This job was active when its printer was marked Out of Service. Review the job before changing service status; this issue clears when the job is no longer active.',
+    detail: 'This active job needs operator review after a service-status conflict. The printer may still be In Service; no pause or cancellation was requested. Review and resolve the job before changing service status. This issue clears when the job is no longer active.',
     actionLabel: 'Review printer',
     actionRoute: `/printers/${printerId}`,
   };
@@ -102,14 +116,14 @@ test('active-job review issue navigates to its printer', async ({ page }, testIn
   expect(requests.writes).toEqual([]);
 });
 
-test('printer availability uses the service status control', async ({ page }, testInfo) => {
+for (const view of ['table', 'collapsed', 'detailed'] as const) {
+test(`printer availability uses the service status control in ${view} view`, async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
     ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   const rows = structuredClone(printers);
   rows[2].isEnabled = false;
-  await page.addInitScript(() => localStorage.setItem('printerViewMode', 'table'));
-  const requests = await mountRoutedToolbarPage(page, '/printers', {
-    ...toolbarAdminSeeds,
+  const requests = await mountRoutedToolbarPage(page, `/printers?view=${view}`, {
+    ...printerSeeds,
     '/api/printers': rows,
     '/api/printers/camera-urls': [],
     '/api/printers/backend-capabilities': [],
@@ -124,6 +138,10 @@ test('printer availability uses the service status control', async ({ page }, te
   const mutations: { body: unknown; revision: string | undefined; method: string }[] = [];
   await page.route(`**/api/printers/${rows[3].id}`, async route => {
     const request = route.request();
+    if (request.method() === 'GET') {
+      await route.fulfill({ json: rows[3] });
+      return;
+    }
     mutations.push({
       body: request.postDataJSON(),
       revision: request.headers()['if-match'],
@@ -131,27 +149,71 @@ test('printer availability uses the service status control', async ({ page }, te
     });
     await route.fulfill({ json: { ...rows[3], isEnabled: false } });
   });
-  const inService = page.getByRole('row').filter({ hasText: 'Fixture unexpected' });
-  const outOfService = page.getByRole('row').filter({ hasText: 'Fixture out of service B' });
-  const markOutOfService = inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' });
-  const markInService = outOfService.getByRole('button', { name: 'Mark Fixture out of service B In Service' });
+  const markOutOfService = page.getByRole('button', { name: 'Mark Fixture unexpected Out of Service', exact: true });
+  const markInService = page.getByRole('button', { name: 'Mark Fixture out of service B In Service', exact: true });
   await expect(markOutOfService).toBeVisible();
   await expect(markInService).toBeVisible();
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
-  if (testInfo.project.name.startsWith('mobile')) {
-    await markOutOfService.scrollIntoViewIfNeeded();
-    await expect(markOutOfService).toBeInViewport();
-    await page.screenshot({ path: testInfo.outputPath('printers-service-status-control-mobile.png'), fullPage: true });
-  }
+  const geometry = await markOutOfService.boundingBox();
+  expect(geometry?.height).toBeGreaterThanOrEqual(44);
+  expect(geometry?.width).toBeGreaterThanOrEqual(44);
+  expect(geometry!.x).toBeGreaterThanOrEqual(0);
+  expect(geometry!.x + geometry!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await markOutOfService.click();
   await expect(page.getByText('Fixture unexpected is now Out of Service')).toBeVisible();
   expect(mutations).toEqual([{
-    body: { isEnabled: false },
+    body: { backend: rows[3].backend, isEnabled: false },
     revision: '"Zml4dHVyZQ=="',
     method: 'PUT',
   }]);
   expect(requests.errors).toEqual([]);
   expect(requests.external).toEqual([]);
+  expect(requests.writes).toEqual([]);
+});
+}
+
+test('sidebar exposes service status beside identity and refreshes a stale revision without reporting success', async ({ page }, testInfo) => {
+  await page.setViewportSize(testInfo.project.name.startsWith('mobile')
+    ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  const requests = await mountRoutedToolbarPage(page, `/printers/${printers[3].id}?view=collapsed`, printerSeeds);
+  const control = page.getByRole('complementary', { name: 'Fixture unexpected details', exact: true })
+    .getByRole('button', { name: 'Mark Fixture unexpected Out of Service', exact: true });
+  await expect(control).toBeVisible();
+  let writes = 0;
+  let refreshes = 0;
+  await page.route('**/api/printers', async route => {
+    refreshes++;
+    await route.fulfill({ json: printers });
+  });
+  await page.route(`**/api/printers/${printers[3].id}`, async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: printers[3] });
+      return;
+    }
+    writes++;
+    await route.fulfill({ status: 412, json: { message: 'Printer changed; refresh and review again.' } });
+  });
+  await page.screenshot({ path: testInfo.outputPath('sidebar-service-status.png'), fullPage: true });
+  await control.click();
+  await expect(page.getByText('This item changed after you reviewed it. Refresh and review before confirming again.')).toBeVisible();
+  await expect(page.getByText('Fixture unexpected is now Out of Service')).toHaveCount(0);
+  await expect.poll(() => refreshes).toBeGreaterThan(0);
+  expect(writes).toBe(1);
+  expect(requests.errors).toEqual([]);
+  expect(requests.external).toEqual([]);
+  expect(requests.writes).toEqual([]);
+});
+
+test('users without printer administration see service status but no service mutation', async ({ page }) => {
+  const requests = await mountRoutedToolbarPage(page, '/printers?view=collapsed', {
+    ...printerSeeds,
+    '/api/auth/me': { ...toolbarRouteUser, roles: [], permissions: ['printers:read'] },
+  });
+  await expect(page.getByText('Fixture unexpected', { exact: true })).toBeVisible();
+  await expect(page.getByText('In Service', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Out of Service', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Mark .* (In|Out of) Service$/ })).toHaveCount(0);
+  expect(requests.errors).toEqual([]);
   expect(requests.writes).toEqual([]);
 });

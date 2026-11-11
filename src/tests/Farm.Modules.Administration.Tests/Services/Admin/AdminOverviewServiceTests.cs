@@ -121,7 +121,7 @@ public class AdminOverviewServiceTests
         result.Attention.Should().Contain(item => item.Key == $"printer-{printer.Id}-job-{jobId}-review"
             && item.Title == "Review active job 'Active job'"
             && item.ActionRoute == $"/printers/{printer.Id}");
-        result.Attention.Should().NotContain(item => item.Key == $"printer-{printer.Id}-unreachable");
+        result.Attention.Should().Contain(item => item.Key == $"printer-{printer.Id}-unreachable");
         result.Attention.Should().Contain(item => item.Key == "backends-degraded");
     }
 
@@ -296,7 +296,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("4 / 5 reachable");
+        backends.Detail.Should().Be("4 / 5 in service reachable");
 
         overview.Subsystems.Where(s => s.Key != "backends").Should().OnlyContain(s => s.Status == SubsystemStatus.Healthy);
         overview.OverallStatus.Should().Be(SubsystemStatus.Degraded);
@@ -388,7 +388,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("2 / 3 reachable");
+        backends.Detail.Should().Be("2 / 3 in service reachable");
 
         // Database sub-tile picked from Comprehensive.Data
         SubsystemHealthDto database = overview.Subsystems.Single(s => s.Key == "database");
@@ -448,7 +448,7 @@ public class AdminOverviewServiceTests
 
         SubsystemHealthDto backends = overview.Subsystems.Single(s => s.Key == "backends");
         backends.Status.Should().Be(SubsystemStatus.Degraded);
-        backends.Detail.Should().Be("1 / 2 reachable");
+        backends.Detail.Should().Be("1 / 2 in service reachable");
 
         string expectedKey = $"printer-{offlinePrinterId}-unreachable";
         overview.Attention.Should().Contain(a => a.Key == expectedKey);

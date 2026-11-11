@@ -47,9 +47,8 @@ public sealed class PrinterMonitoringService(
         }
 
         PrinterStatusCacheSnapshot? snapshot = statusCache.GetSnapshot(printerId);
-        return snapshot?.HasActivePrintAtDisconnect == true
-            || (snapshot?.Status is { } status
-                && PrinterStateClassifier.IsActivePrintingJob(status.RawActivityState ?? status.State));
+        return snapshot?.Status is { IsOnline: true } status
+            && PrinterStateClassifier.IsActivePrintingJob(status.RawActivityState ?? status.State);
     }
 
     /// <summary>Returns in-service printers and their active-work state.</summary>

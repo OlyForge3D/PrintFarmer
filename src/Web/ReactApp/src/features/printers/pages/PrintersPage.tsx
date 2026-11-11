@@ -84,6 +84,25 @@ export function PrintersPage() {
   useFleetPrinterTags();
   useFleetQueueSummaries();
   const queryClient = useQueryClient();
+  const canChangeServiceStatus = hasPermission('printers', 'admin');
+  const handleToggleEnabled = useCallback(async (printer: Printer) => {
+    try {
+      const updated = { backend: printer.backend, isEnabled: printer.isEnabled === false };
+      if (!printer.rowVersion) {
+        throw new Error('Printer revision unavailable; refresh and review again.');
+      }
+      await apiClient.updatePrinter(printer.id, updated, printer.rowVersion);
+      toast.success(`${printer.name || 'Printer'} is now ${updated.isEnabled ? 'In Service' : 'Out of Service'}`);
+      await queryClient.invalidateQueries({ queryKey: ['printers'] });
+    } catch (err) {
+      console.error('Failed to change printer service status', err);
+      if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+        await queryClient.refetchQueries({ queryKey: ['printers'] });
+      }
+      toast.error(mutationErrorMessage(err, 'Failed to change service status'));
+    }
+  }, [queryClient]);
+  const onToggleEnabled = canChangeServiceStatus ? handleToggleEnabled : undefined;
 
   const {
     data: printers,
@@ -703,6 +722,7 @@ export function PrintersPage() {
                 printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
                 backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
                 onClose={handleClosePrinterDetails}
+                onToggleEnabled={onToggleEnabled}
                 layout="content"
               />
             </div>
@@ -738,6 +758,7 @@ export function PrintersPage() {
                       printer={printer}
                       backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                       onExpand={handleOpenPrinterDetails}
+                      onToggleEnabled={onToggleEnabled}
                       onEdit={handleEditPrinter}
                     />
                   )}
@@ -762,6 +783,7 @@ export function PrintersPage() {
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                         onEdit={handleEditPrinter}
+                        onToggleEnabled={onToggleEnabled}
                       />
                     )}
                   />
@@ -787,36 +809,9 @@ export function PrintersPage() {
                     onBulkSetMaintenance={handleBulkSetMaintenance}
                     onOpenDetails={(printer) => handleOpenPrinterDetails(printer.id)}
                     onOpenMaintenance={handleOpenMaintenance}
-                    showEnableColumn={hasPermission('printers', 'admin')}
+                    showEnableColumn={canChangeServiceStatus}
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
-                    onToggleEnabled={async (printer) => {
-                      try {
-                        const updated: import('@/types/api').UpdatePrinterDto = { isEnabled: !printer.isEnabled };
-                        if (!printer.rowVersion) {
-                          throw new Error('Printer revision unavailable; refresh and review again.');
-                        }
-                        await apiClient.updatePrinter(
-                          printer.id,
-                          updated,
-                          printer.rowVersion
-                        );
-                        toast.success(`${printer.name || 'Printer'} is now ${updated.isEnabled ? 'In Service' : 'Out of Service'}`);
-                        await queryClient.invalidateQueries({ queryKey: ['printers'] });
-                      } catch (err) {
-                        console.error('Failed to change printer service status', err);
-                        if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
-                          await queryClient.refetchQueries({
-                            queryKey: ['printers'],
-                          });
-                        }
-                        toast.error(
-                          mutationErrorMessage(
-                            err,
-                            'Failed to change service status'
-                          )
-                        );
-                      }
-                    }}
+                    onToggleEnabled={onToggleEnabled}
                   />
                 </>
               )
@@ -836,6 +831,7 @@ export function PrintersPage() {
               printer={expandedPrinterId ? printersById[expandedPrinterId] : undefined}
               backendCapabilities={expandedPrinterId ? backendCapabilitiesByPrinterId[expandedPrinterId] : undefined}
               onClose={handleClosePrinterDetails}
+              onToggleEnabled={onToggleEnabled}
               layout="content"
             />
           </div>

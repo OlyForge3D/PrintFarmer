@@ -131,13 +131,13 @@ internal static class SqlitePrinterMonitoringSchemaUpgrade
     }
 
     private const string MarkActiveJobsForReviewSql =
-        "UPDATE \"PrintJobs\" SET \"RequiresOperatorReview\" = 1 "
+        "UPDATE \"PrintJobs\" SET \"RequiresOperatorReview\" = 1, \"Revision\" = \"Revision\" + 1 "
         + "WHERE \"AssignedPrinterId\" IN "
         + "(SELECT \"Id\" FROM \"Printers\" WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL) "
         + "AND \"Status\" IN (1, 2, 3, 4);";
 
     private const string DisableIdleExpectedOfflinePrintersSql =
-        "UPDATE \"Printers\" SET \"IsEnabled\" = 0 "
+        "UPDATE \"Printers\" SET \"IsEnabled\" = 0, \"Revision\" = \"Revision\" + 1 "
         + "WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL "
         + "AND NOT EXISTS (SELECT 1 FROM \"PrintJobs\" "
         + "WHERE \"PrintJobs\".\"AssignedPrinterId\" = \"Printers\".\"Id\" "

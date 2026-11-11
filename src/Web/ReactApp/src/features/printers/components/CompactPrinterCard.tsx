@@ -18,6 +18,7 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
+import { PrinterServiceStatus } from '@/features/printers/components/PrinterServiceStatus';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
@@ -48,6 +49,7 @@ interface CompactPrinterCardProps {
   /** Receives the printer ID so parents can pass one stable callback for all cards */
   onExpand: (printerId: string) => void;
   onEdit?: (printer: Printer) => void;
+  onToggleEnabled?: (printer: Printer) => void | Promise<void>;
 }
 
 function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
@@ -76,7 +78,8 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   printer: printerProp,
   backendCapabilities,
   onExpand,
-  onEdit
+  onEdit,
+  onToggleEnabled,
 }: CompactPrinterCardProps) {
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
@@ -251,6 +254,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           )}
           {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
+        <div className="mt-2">
+          <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
+        </div>
         {/* Tags row */}
         {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -378,7 +384,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
+            title={!isEnabled ? 'Printer Out of Service' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button

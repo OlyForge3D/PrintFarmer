@@ -33,20 +33,26 @@ public sealed class PrinterMonitoringTests
         (await monitoring.HasActiveWorkAsync(printer.Id, CancellationToken.None)).Should().BeTrue();
     }
 
-    [Fact]
-    public async Task HasActiveWorkAsync_UsesCachedEvidenceWhenNoPersistedJobExists()
+    [Theory]
+    [InlineData(true, "Printing", true)]
+    [InlineData(true, "Paused", true)]
+    [InlineData(true, "Idle", false)]
+    [InlineData(false, "Printing", false)]
+    [InlineData(false, "Offline", false)]
+    public async Task HasActiveWorkAsync_UsesOnlyOnlineActiveCacheEvidenceWhenNoPersistedJobExists(
+        bool online, string state, bool expected)
     {
         await using AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
         Mock<IPrinterStatusCacheReader> statusCache = new();
         statusCache.Setup(cache => cache.GetSnapshot(printerId))
             .Returns(new PrinterStatusCacheSnapshot(
-                new PrinterStatusDto(printerId, false, "Offline"),
+                new PrinterStatusDto(printerId, online, state),
                 DateTime.UtcNow,
                 HasActivePrintAtDisconnect: true));
         PrinterMonitoringService monitoring = new(db, statusCache.Object);
 
-        (await monitoring.HasActiveWorkAsync(printerId, CancellationToken.None)).Should().BeTrue();
+        (await monitoring.HasActiveWorkAsync(printerId, CancellationToken.None)).Should().Be(expected);
     }
 
     [Fact]
@@ -57,7 +63,7 @@ public sealed class PrinterMonitoringTests
         {
             Name = "Out of service",
             ServerUrl = "http://synthetic.invalid",
-            IsEnabled = false,
+            IsEnabled = true,
         };
         db.Printers.Add(printer);
         db.PrintJobs.AddRange(

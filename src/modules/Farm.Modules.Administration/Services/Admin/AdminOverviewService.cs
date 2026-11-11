@@ -498,8 +498,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
         }
 
         foreach (PrinterConnectionHealth printer in connectivity.Printers.Where(
-                     p => p.ConnectionState != PrinterConnectionState.Connected
-                         && !connectivity.ReviewRequiredPrinterIds.Contains(p.PrinterId)))
+                     p => p.ConnectionState != PrinterConnectionState.Connected))
         {
             items.Add(new AttentionItemDto
             {
@@ -529,7 +528,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
                 Key = $"printer-{job.PrinterId}-job-{job.JobId}-review",
                 Severity = AttentionSeverity.Warning,
                 Title = $"Review active job '{job.JobName}'",
-                Detail = $"This job was active when its printer was marked Out of Service. Review the job before changing service status; this issue clears when the job is no longer active.",
+                Detail = "This active job needs operator review after a service-status conflict. The printer may still be In Service; no pause or cancellation was requested. Review and resolve the job before changing service status. This issue clears when the job is no longer active.",
                 ActionLabel = "Review printer",
                 ActionRoute = $"/printers/{job.PrinterId}",
             });

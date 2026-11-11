@@ -19,11 +19,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                 defaultValue: false);
 
             migrationBuilder.Sql(
-                "UPDATE \"PrintJobs\" SET \"RequiresOperatorReview\" = 1 "
+                "UPDATE \"PrintJobs\" SET \"RequiresOperatorReview\" = 1, \"Revision\" = \"Revision\" + 1 "
                 + "WHERE \"AssignedPrinterId\" IN (SELECT \"Id\" FROM \"Printers\" WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL) "
                 + "AND \"Status\" IN (1, 2, 3, 4);");
             migrationBuilder.Sql(
-                "UPDATE \"Printers\" SET \"IsEnabled\" = 0 "
+                "UPDATE \"Printers\" SET \"IsEnabled\" = 0, \"Revision\" = \"Revision\" + 1 "
                 + "WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL "
                 + "AND NOT EXISTS (SELECT 1 FROM \"PrintJobs\" "
                 + "WHERE \"PrintJobs\".\"AssignedPrinterId\" = \"Printers\".\"Id\" "
@@ -41,11 +41,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                 table: "Printers",
                 type: "TEXT",
                 nullable: true);
-            migrationBuilder.Sql(
-                "UPDATE \"Printers\" SET \"ExpectedOfflineSinceUtc\" = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                + "WHERE \"Id\" IN (SELECT \"AssignedPrinterId\" FROM \"PrintJobs\" "
-                + "WHERE \"RequiresOperatorReview\" = 1 AND \"AssignedPrinterId\" IS NOT NULL "
-                + "AND \"Status\" IN (1, 2, 3, 4));");
+
+            // Review markers do not retain the original printer or timestamp.
+            // Restoring monitoring intent requires a pre-upgrade backup.
             migrationBuilder.DropColumn(
                 name: "RequiresOperatorReview",
                 table: "PrintJobs");

@@ -53,9 +53,9 @@ See [camera bed-clear evidence](./docs/AUTO_DISPATCH.md#camera-bed-clear-evidenc
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
-✅ **Expected Offline Monitoring** - Acknowledge intentional shutdowns individually
-or in bulk; real offline status stays visible and alerts resume after reconnect.
-See [printer monitoring intent](./docs/UI.md#printer-monitoring-intent).
+✅ **Printer Service Status** - Mark printers In Service or Out of Service;
+out-of-service printers are excluded from dispatch and fleet availability alerts.
+See [printer service status](./docs/UI.md#printer-service-status).
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Advisory Print Monitoring** - [Obico per-print capacity routing and independent PrintGuard alerts](./docs/OBICO_ML_API.md#per-print-obico-routing); neither automatically pauses printers
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
