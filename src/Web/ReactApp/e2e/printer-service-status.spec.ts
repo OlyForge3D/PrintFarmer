@@ -149,8 +149,8 @@ test(`printer availability uses the service status control in ${view} view`, asy
     });
     await route.fulfill({ json: { ...rows[3], isEnabled: false } });
   });
-  const markOutOfService = page.getByRole('button', { name: 'Mark Fixture unexpected Out of Service', exact: true });
-  const markInService = page.getByRole('button', { name: 'Mark Fixture out of service B In Service', exact: true });
+  const markOutOfService = page.getByRole('button', { name: 'In Service: Mark Fixture unexpected Out of Service', exact: true });
+  const markInService = page.getByRole('button', { name: 'Out of Service: Mark Fixture out of service B In Service', exact: true });
   await expect(markOutOfService).toBeVisible();
   await expect(markInService).toBeVisible();
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
@@ -178,7 +178,7 @@ test('sidebar exposes service status beside identity and refreshes a stale revis
     ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   const requests = await mountRoutedToolbarPage(page, `/printers/${printers[3].id}?view=collapsed`, printerSeeds);
   const control = page.getByRole('complementary', { name: 'Fixture unexpected details', exact: true })
-    .getByRole('button', { name: 'Mark Fixture unexpected Out of Service', exact: true });
+    .getByRole('button', { name: 'In Service: Mark Fixture unexpected Out of Service', exact: true });
   await expect(control).toBeVisible();
   let writes = 0;
   let refreshes = 0;
@@ -220,7 +220,7 @@ for (const surface of ['detailed', 'sidebar'] as const) {
           [`/api/printers/${printer.id}`]: printer,
           [`/api/printers/${printer.id}/details`]: printer,
         });
-      await expect(page.getByRole('button', { name: 'Mark Fixture unexpected In Service', exact: true })
+      await expect(page.getByRole('button', { name: 'Out of Service: Mark Fixture unexpected In Service', exact: true })
         .last()).toBeVisible();
       const action = page.getByRole('button', { name: state === 'Shutdown' ? 'Firmware Restart' : 'Emergency Stop', exact: true });
       await expect(action).toBeVisible();
@@ -246,7 +246,7 @@ test('users without printer administration see service status but no service mut
   await expect(page.getByText('Fixture unexpected', { exact: true })).toBeVisible();
   await expect(page.getByText('In Service', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Out of Service', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Mark .* (In|Out of) Service$/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(In Service|Out of Service): Mark .* (In|Out of) Service$/ })).toHaveCount(0);
   expect(requests.errors).toEqual([]);
   expect(requests.writes).toEqual([]);
 });

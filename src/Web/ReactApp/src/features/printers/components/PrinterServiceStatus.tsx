@@ -22,9 +22,9 @@ export function PrinterServiceStatus({ printer, onToggleEnabled }: PrinterServic
       type="button"
       variant="subtle"
       size="sm"
-      className="min-h-11 min-w-11"
+      className="min-h-11 min-w-11 text-pf-text-primary"
       loading={pending}
-      aria-label={`Mark ${printer.name} ${inService ? 'Out of Service' : 'In Service'}`}
+      aria-label={`${pending ? 'Please wait…' : label}: Mark ${printer.name} ${inService ? 'Out of Service' : 'In Service'}`}
       onClick={async () => {
         setPending(true);
         try {

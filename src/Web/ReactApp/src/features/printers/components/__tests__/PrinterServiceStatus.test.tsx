@@ -20,9 +20,10 @@ describe('PrinterServiceStatus', () => {
     let finish!: () => void;
     const onToggleEnabled = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
     render(<PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />);
-    const button = screen.getByRole('button', { name: 'Mark Workshop Out of Service' });
+    const button = screen.getByRole('button', { name: 'In Service: Mark Workshop Out of Service' });
     fireEvent.click(button);
     expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleName('Please wait…: Mark Workshop Out of Service');
     fireEvent.click(button);
     expect(onToggleEnabled).toHaveBeenCalledExactlyOnceWith(printer);
     await act(async () => finish());
@@ -34,6 +35,6 @@ describe('PrinterServiceStatus', () => {
     const onToggleEnabled = vi.fn();
     const { rerender } = render(<PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />);
     rerender(<PrinterServiceStatus printer={{ ...printer, isEnabled: false }} onToggleEnabled={onToggleEnabled} />);
-    expect(screen.getByRole('button', { name: 'Mark Workshop In Service' })).toHaveTextContent('Out of Service');
+    expect(screen.getByRole('button', { name: 'Out of Service: Mark Workshop In Service' })).toHaveTextContent('Out of Service');
   });
 });
