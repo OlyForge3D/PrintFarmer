@@ -29,18 +29,29 @@ struct AddSpoolView: View {
                         }
                     }
                 } else {
-                    materialSection
-                        .disabled(viewModel.isFilamentSelectionLocked)
-                    vendorSection
-                        .disabled(viewModel.isFilamentSelectionLocked)
-                    colorSection
-                    weightSection
+                    Group {
+                        filamentSection
+                        if viewModel.isCreatingFilament && !viewModel.isFilamentSelectionLocked {
+                            newFilamentSection
+                            materialSection
+                            vendorSection
+                            colorSection
+                            filamentPropertiesSection
+                        }
+                        weightSection
+                    }
+                    .disabled(viewModel.isSaving || viewModel.createdSpool != nil || viewModel.uncertainCreation != nil)
 
                     if let error = viewModel.errorMessage {
                         Section {
                             Text(error)
                                 .foregroundStyle(Color.pfError)
                                 .font(.caption)
+                        }
+                        if !viewModel.hasLoadedReferenceData {
+                            Button("Retry Loading Options") {
+                                Task { await viewModel.loadReferenceData() }
+                            }
                         }
                     }
                 }
@@ -52,6 +63,7 @@ struct AddSpoolView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(viewModel.isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(viewModel.createdSpool == nil ? "Save" : "Retry Link") {
@@ -76,6 +88,53 @@ struct AddSpoolView: View {
                 viewModel.isViewActive = false
                 saveTask?.cancel()
             }
+            .interactiveDismissDisabled(viewModel.isSaving)
+        }
+    }
+
+    private var filamentSection: some View {
+        Section {
+            if viewModel.isFilamentSelectionLocked {
+                if let filament = viewModel.createdFilament {
+                    Text("Created filament #\(filament.id): \(filament.name ?? filament.material ?? "Filament")")
+                } else {
+                    Text("Using scanned filament #\(viewModel.selectedFilamentId ?? 0)")
+                }
+            } else {
+                Toggle("Create New Filament", isOn: $viewModel.isCreatingFilament)
+                    .accessibilityIdentifier("addSpool.createFilament")
+                if !viewModel.isCreatingFilament {
+                    Picker("Existing Filament", selection: $viewModel.selectedFilamentId) {
+                        Text("Select a filament").tag(Optional<Int>.none)
+                        ForEach(viewModel.filaments.filter { $0.id > 0 }) { filament in
+                            Text([
+                                "#\(filament.id)", filament.name, filament.material,
+                                filament.vendor, filament.colorHex
+                            ].compactMap { $0 }.joined(separator: " · "))
+                                .tag(Optional(filament.id))
+                        }
+                    }
+                    .accessibilityIdentifier("addSpool.filament")
+                    if let message = viewModel.filamentInventoryMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextSecondary)
+                        Button("Reload Filament Options") {
+                            Task { await viewModel.loadReferenceData() }
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Filament")
+        } footer: {
+            Text("Choose the exact filament product, not an existing physical spool. Saving adds a new spool.")
+        }
+    }
+
+    private var newFilamentSection: some View {
+        Section("New Filament") {
+            TextField("Filament Name", text: $viewModel.filamentName)
         }
     }
 
@@ -91,6 +150,10 @@ struct AddSpoolView: View {
                     ForEach(viewModel.materials, id: \.name) { mat in
                         Text(mat.name).tag(mat.name)
                     }
+                    if !viewModel.selectedMaterial.isEmpty,
+                       !viewModel.materials.contains(where: { $0.name == viewModel.selectedMaterial }) {
+                        Text(viewModel.selectedMaterial).tag(viewModel.selectedMaterial)
+                    }
                 }
             }
         }
@@ -100,18 +163,44 @@ struct AddSpoolView: View {
 
     private var vendorSection: some View {
         Section("Vendor") {
-            if viewModel.vendors.isEmpty {
-                TextField("Vendor (optional)", text: $viewModel.selectedVendor)
-            } else {
-                Picker("Vendor", selection: $viewModel.selectedVendor) {
-                    Text("None").tag("")
-                    ForEach(viewModel.vendors, id: \.name) { vendor in
-                        Text(vendor.name).tag(vendor.name)
-                    }
+            Picker("Vendor", selection: $viewModel.selectedVendor) {
+                Text("None").tag("")
+                ForEach(viewModel.vendors, id: \.name) { vendor in
+                    Text(vendor.name).tag(vendor.name)
+                }
+                if !viewModel.selectedVendor.isEmpty,
+                   !viewModel.vendors.contains(where: { $0.name == viewModel.selectedVendor }) {
+                    Text("\(viewModel.selectedVendor) (unavailable)").tag(viewModel.selectedVendor)
                 }
             }
+            if !viewModel.selectedVendor.isEmpty,
+               !viewModel.vendors.contains(where: { $0.name == viewModel.selectedVendor }) {
+                Text("Choose a listed vendor or None. The scanned vendor is not available on this server.")
+                    .font(.caption)
+                    .foregroundStyle(Color.pfError)
+            }
+        }
+    }
 
-            TextField("Filament Name (optional)", text: $viewModel.filamentName)
+    private var filamentPropertiesSection: some View {
+        Section("New Filament Properties") {
+            HStack {
+                Text("Density (g/cm³)")
+                TextField("Density", value: $viewModel.densityGPerCm3, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel("Filament density in grams per cubic centimeter")
+            }
+            HStack {
+                Text("Diameter (mm)")
+                TextField("Diameter", value: $viewModel.diameterMm, format: .number)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel("Filament diameter in millimeters")
+            }
+            Text("Confirm the name, material, color, density and diameter before saving. A new filament will be created first.")
+                .font(.caption)
+                .foregroundStyle(Color.pfTextSecondary)
         }
     }
 
@@ -138,6 +227,9 @@ struct AddSpoolView: View {
                                 )
                         }
                         .accessibilityLabel(swatch.name)
+                        .accessibilityAddTraits(
+                            viewModel.colorHex.lowercased() == swatch.hex.lowercased() ? [.isSelected] : []
+                        )
                     }
                 }
                 .padding(.vertical, 4)

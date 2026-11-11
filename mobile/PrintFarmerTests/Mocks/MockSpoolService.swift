@@ -25,6 +25,10 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         created: false
     )
     var errorToThrow: Error?
+    var createSpoolError: Error?
+    var createFilamentError: Error?
+    var createSpoolCallCount = 0
+    var createFilamentCallCount = 0
 
     // Call tracking
     var listSpoolsCalled = false
@@ -66,7 +70,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     }
 
     func createSpool(_ request: SpoolmanSpoolRequest) async throws -> SpoolmanSpool {
+        createSpoolCallCount += 1
         createSpoolCalledWith = request
+        if let error = createSpoolError { throw error }
         if let error = errorToThrow { throw error }
         guard let spool = spoolToReturn else { throw NetworkError.notFound }
         return spool
@@ -91,7 +97,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     }
 
     func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        createFilamentCallCount += 1
         createFilamentCalledWith = request
+        if let error = createFilamentError { throw error }
         if let error = errorToThrow { throw error }
         guard let filament = filamentToReturn else { throw NetworkError.notFound }
         return filament
@@ -148,6 +156,10 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
             created: false
         )
         errorToThrow = nil
+        createSpoolError = nil
+        createFilamentError = nil
+        createSpoolCallCount = 0
+        createFilamentCallCount = 0
         listSpoolsCalled = false
         onListSpools = nil
         listSpoolsArgs = nil

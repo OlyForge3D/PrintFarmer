@@ -277,6 +277,8 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.pendingOutcome)
         XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "a deep-linked spool ID must never reach Barcode Intake")
         XCTAssertTrue(spoolService.listSpoolsCalled)
+        XCTAssertEqual(spoolService.createSpoolCallCount, 0, "an identified physical spool is opened, not duplicated")
+        XCTAssertEqual(spoolService.createFilamentCallCount, 0)
         XCTAssertEqual(viewModel.recentScans.first?.title, "Spool")
     }
 
