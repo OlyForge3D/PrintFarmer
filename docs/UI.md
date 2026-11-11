@@ -37,6 +37,42 @@ Main overview page showing all printers with real-time status.
 - One-click print controls
 - Auto-refresh on status changes
 
+### Printer service status
+
+Administrators use the **In Service / Out of Service** control beside printer
+identity in compact cards, detailed cards, the table and the details sidebar.
+Other users see a read-only status. It is the existing `IsEnabled` setting,
+not a second monitoring flag.
+Out of Service preserves the existing disabled-printer behavior: the printer is
+hidden from normal listings, excluded from monitoring and dispatch, and is not
+commanded to power off. Maintenance remains a separate setting.
+Emergency stop remains available for an online Out of Service printer when
+its backend supports control operations. Service status is not a physical
+safety interlock, and a sent stop command does not prove the printer has stopped.
+
+A printer with an assigned or active job cannot be moved Out of Service. The
+operator must review and resolve that work first; PrintFarmer does not pause or
+cancel it. Concurrent job assignments and service changes use a shared revision
+barrier so neither can silently bypass this check. Externally observed active
+jobs remain recorded even on an Out of Service printer and require operator
+review; this does not authorize dispatch. If an older expected-offline record is migrated while a job is still
+active, the printer is not disabled and the job appears under **Operational
+issues** with a link to the printer. That issue clears when the job is no longer
+active, is unassigned, or is reassigned to another printer. Older expected-offline records without active work migrate to Out of
+Service; printers without such a record retain their existing status.
+
+The conversion is one-way: down-migration leaves `IsEnabled` unchanged and
+restores an empty expected-offline column, not historical suppression or
+timestamps. Restore a pre-upgrade backup to recover the original intent.
+SQLite conversion is exercised locally; PostgreSQL and SQL Server migrations
+require provider-backed validation before deployment.
+
+The Admin Control Center presents **Operational issues** as compact, grouped
+type/severity disclosures rather than repeated warning cards. Totals and
+severity stay visible; critical errors start expanded. Expand a group for
+per-printer links. The backends health tile reflects only printers In Service;
+missing data and failed refreshes are not an all-clear.
+
 ### Files Page
 `/files` separates owned local assets from files observed on printers.
 

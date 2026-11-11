@@ -661,6 +661,9 @@ public static class ServiceCollectionExtensions
 
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader>(
+            sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());

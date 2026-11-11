@@ -12,6 +12,10 @@ import type { TagDto } from '@/services/tagService';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import type { PrinterQueueSummaryDto } from '@/types/api';
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => true }),
+}));
+
 const progressBarRender = vi.hoisted(() => vi.fn());
 const printerTagsFromFleetMock = vi.hoisted(() =>
   vi.fn((): { data: TagDto[]; isPending: boolean; isError: boolean; error: null } => (

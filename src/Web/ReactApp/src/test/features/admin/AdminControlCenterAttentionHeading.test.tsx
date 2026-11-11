@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -101,7 +101,7 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
     );
   });
 
-  it('renders the "Needs attention" heading and retry state when the overview fetch errors', async () => {
+  it('renders the operational issues heading and retry state when the overview fetch errors', async () => {
     mockedApiGet.mockRejectedValue(new Error('network down'));
 
     renderHub();
@@ -113,11 +113,11 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational issues' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
   });
 
-  it('does render the "Needs attention" heading on a successful load, even with zero items', async () => {
+  it('renders the operational issues heading on a successful load, even with zero items', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview({ attention: [] }) });
 
     renderHub();
@@ -129,7 +129,7 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
 
     // Success path shows the all-clear line under the heading — both present.
     expect(
-      screen.getByRole('heading', { name: 'Needs attention' }),
+      screen.getByRole('heading', { name: 'Operational issues' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
   });
@@ -157,9 +157,9 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
     });
 
     expect(
-      screen.getByRole('heading', { name: 'Needs attention' }),
+      screen.getByRole('heading', { name: 'Operational issues' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('admin-hub-attention')).toBeInTheDocument();
-    expect(screen.getByText('Printer offline')).toBeInTheDocument();
+    expect(within(screen.getByTestId('admin-hub-attention-item')).getByText('Printer offline')).toBeInTheDocument();
   });
 });

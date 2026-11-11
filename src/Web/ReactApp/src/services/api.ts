@@ -4022,7 +4022,6 @@ export class ApiClient {
   }
 
   // ============ 3D Models API methods ============
-
   /**
    * Get all 3D models
    */

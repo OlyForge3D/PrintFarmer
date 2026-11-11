@@ -25,6 +25,7 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
             "CK_PrintJobs_Priority",
             "\"Priority\" >= 0 AND \"Priority\" <= 3"));
         builder.Property(pj => pj.Status).HasConversion<int>();
+        builder.Property(pj => pj.RequiresOperatorReview).HasDefaultValue(false);
         builder.Property(pj => pj.EstimatedPrintTime).HasConversion<long>();
         builder.Property(pj => pj.ActualPrintTime).HasConversion<long>();
 

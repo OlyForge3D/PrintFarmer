@@ -584,7 +584,7 @@ export interface PrinterJobInfo {
 export interface PrinterOperationalState {
   /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
-  /** Whether printer is enabled for operations */
+  /** Whether printer is in service for visibility, monitoring, and dispatch */
   isEnabled?: boolean;
 }
 

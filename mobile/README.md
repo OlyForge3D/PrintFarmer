@@ -306,6 +306,20 @@ printer and spool tags. Filament retains Add spool and continuous barcode
 intake. The toolbar avatar opens **Account**, including **Settings**, **Manage
 Servers**, notifications and offline activity.
 
+**Add Spool** (including the manual form offered by Scan) requires choosing the
+exact existing filament, or enabling **Create New Filament** and confirming its
+name, material, color, density and diameter. A material/vendor resemblance is
+not a product identity. New filament creation completes first; the returned ID
+is used for the spool. Vendor selection uses an existing server vendor or None.
+An identified physical spool still opens that spool instead of creating one.
+
+Failed saves keep the form. A successfully created filament is reused if spool
+authorization must be retried, and **Retry Link** reuses the already-created
+spool. If a creation response is uncertain (including timeout/server failure),
+Save stays disabled: check Filament inventory before starting again to avoid
+duplicates. This mobile fix uses the existing filament/spool API and needs no
+new server migration; it does not add remembered scan-code aliases.
+
 When the server enables printed-parts inventory, the **Printed parts** toolbar
 button in Filament opens stock browsing and quantity adjustment as a secondary
 sheet. This does not add a tab or restore the old inventory segment picker.

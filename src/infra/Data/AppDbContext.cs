@@ -759,6 +759,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        ClearResolvedOperatorReview();
+        EnsurePrinterServiceTransitions();
         EnsurePartInventoryLedgerIsAppendOnly();
         EnsureInventoryIdentitiesAreImmutable();
         EnsureCalibrationHistoryIsImmutable();
@@ -770,11 +772,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         PopulateActualPrintTimeTicksShadowColumn();
         RevisionConcurrency.Advance(ChangeTracker);
         PopulateQueueRevisionSnapshots();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        try
+        {
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+        catch (DbUpdateException exception) when (IsServiceBarrierCreationConflict(exception))
+        {
+            throw new DbUpdateConcurrencyException(
+                "The printer's dispatch state changed. Refresh before changing service status or assigning work.",
+                exception);
+        }
     }
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        ClearResolvedOperatorReview();
+        await EnsurePrinterServiceTransitionsAsync(cancellationToken);
         EnsurePartInventoryLedgerIsAppendOnly();
         EnsureInventoryIdentitiesAreImmutable();
         EnsureCalibrationHistoryIsImmutable();
@@ -786,7 +799,168 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         PopulateActualPrintTimeTicksShadowColumn();
         RevisionConcurrency.Advance(ChangeTracker);
         PopulateQueueRevisionSnapshots();
-        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        try
+        {
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsServiceBarrierCreationConflict(exception))
+        {
+            throw new DbUpdateConcurrencyException(
+                "The printer's dispatch state changed. Refresh before changing service status or assigning work.",
+                exception);
+        }
+    }
+
+    private static bool IsServiceBarrierCreationConflict(DbUpdateException exception) =>
+        exception.Entries.Any(entry => entry.Entity is PrinterDispatchState && entry.State == EntityState.Added)
+        && Services.Idempotency.IdempotencyStore.IsUniqueViolation(exception);
+
+    private (HashSet<Guid> Disabling, HashSet<Guid> Assigning) GetPrinterServiceTransitions()
+    {
+        ChangeTracker.DetectChanges();
+        HashSet<Guid> disabling = ChangeTracker.Entries<Printer>()
+            .Where(entry => entry.State == EntityState.Modified
+                && entry.Property(printer => printer.IsEnabled).OriginalValue
+                && !entry.Entity.IsEnabled)
+            .Select(entry => entry.Entity.Id).ToHashSet();
+        HashSet<Guid> assigning = ChangeTracker.Entries<PrintJob>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified
+                && entry.Entity.AssignedPrinterId.HasValue
+                && IsProtectedWork(entry.Entity.Status)
+                && (entry.State == EntityState.Added
+                    || entry.Property(job => job.AssignedPrinterId).OriginalValue != entry.Entity.AssignedPrinterId
+                    || !IsProtectedWork(entry.Property(job => job.Status).OriginalValue)))
+            .Select(entry => entry.Entity.AssignedPrinterId!.Value).ToHashSet();
+        return (disabling, assigning);
+    }
+
+    private static bool IsProtectedWork(PrintJobStatus status) =>
+        status is PrintJobStatus.Assigned or PrintJobStatus.Starting
+            or PrintJobStatus.Printing or PrintJobStatus.Paused;
+
+    private void ClearResolvedOperatorReview()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (!IsProtectedWork(entry.Entity.Status)
+                || !entry.Entity.AssignedPrinterId.HasValue
+                || (entry.State == EntityState.Modified
+                    && entry.Property(job => job.AssignedPrinterId).OriginalValue != entry.Entity.AssignedPrinterId))
+            {
+                entry.Entity.RequiresOperatorReview = false;
+            }
+        }
+    }
+
+    private IQueryable<PrintJob> ProtectedWork(Guid printerId) =>
+        PrintJobs.AsNoTracking().Where(job => job.AssignedPrinterId == printerId
+            && (job.Status == PrintJobStatus.Assigned || job.Status == PrintJobStatus.Starting
+                || job.Status == PrintJobStatus.Printing || job.Status == PrintJobStatus.Paused));
+
+    private void TouchServiceTransitionBarrier(Guid printerId, PrinterDispatchState? state)
+    {
+        if (state is null)
+        {
+            state = new PrinterDispatchState { PrinterId = printerId };
+            PrinterDispatchStates.Add(state);
+        }
+
+        // This revision and the job/printer write commit in the same EF transaction.
+        // Load it before checking work/enabled state: overlapping writers must contend
+        // even when a caller validated its destination earlier in the request.
+        state.QueueRevision++;
+    }
+
+    private void EnsurePrinterServiceTransitions()
+    {
+        (HashSet<Guid> disabling, HashSet<Guid> assigning) = GetPrinterServiceTransitions();
+        foreach (Guid printerId in disabling.Union(assigning).Order())
+        {
+            PrinterDispatchState? state = PrinterDispatchStates.Local
+                .FirstOrDefault(candidate => candidate.PrinterId == printerId)
+                ?? PrinterDispatchStates
+                .FirstOrDefault(candidate => candidate.PrinterId == printerId);
+            TouchServiceTransitionBarrier(printerId, state);
+            if (disabling.Contains(printerId)
+                && (assigning.Contains(printerId) || ProtectedWork(printerId).Any()))
+            {
+                throw new DbUpdateConcurrencyException(
+                    "The printer acquired active or assigned work. Refresh before changing its service status.");
+            }
+
+            if (assigning.Contains(printerId) && !IsDestinationInService(printerId))
+            {
+                RequireObservedWorkReview(printerId);
+            }
+        }
+    }
+
+    private async Task EnsurePrinterServiceTransitionsAsync(CancellationToken cancellationToken)
+    {
+        (HashSet<Guid> disabling, HashSet<Guid> assigning) = GetPrinterServiceTransitions();
+        foreach (Guid printerId in disabling.Union(assigning).Order())
+        {
+            PrinterDispatchState? state = PrinterDispatchStates.Local
+                .FirstOrDefault(candidate => candidate.PrinterId == printerId)
+                ?? await PrinterDispatchStates
+                .FirstOrDefaultAsync(candidate => candidate.PrinterId == printerId, cancellationToken);
+            TouchServiceTransitionBarrier(printerId, state);
+            if (disabling.Contains(printerId)
+                && (assigning.Contains(printerId) || await ProtectedWork(printerId).AnyAsync(cancellationToken)))
+            {
+                throw new DbUpdateConcurrencyException(
+                    "The printer acquired active or assigned work. Refresh before changing its service status.");
+            }
+
+            if (assigning.Contains(printerId)
+                && !await IsDestinationInServiceAsync(printerId, cancellationToken))
+            {
+                RequireObservedWorkReview(printerId);
+            }
+        }
+    }
+
+    private void RequireObservedWorkReview(Guid printerId)
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified
+                && entry.Entity.AssignedPrinterId == printerId && IsProtectedWork(entry.Entity.Status)))
+        {
+            PrintJob job = entry.Entity;
+
+            // Physical observations are not dispatch requests; keep them visible even
+            // when the printer was taken out of service before telemetry arrived.
+            if ((job.IsExternalPrint || job.WasSeededFromHistory)
+                && job.Status is PrintJobStatus.Printing or PrintJobStatus.Paused
+                && job.ActualStartTime.HasValue && !string.IsNullOrWhiteSpace(job.ExternalJobId))
+            {
+                job.RequiresOperatorReview = true;
+                continue;
+            }
+
+            throw new DbUpdateConcurrencyException(
+                "The printer is out of service. Refresh before assigning work.");
+        }
+    }
+
+    private bool IsDestinationInService(Guid printerId)
+    {
+        EntityEntry<Printer>? tracked = ChangeTracker.Entries<Printer>()
+            .FirstOrDefault(entry => entry.Entity.Id == printerId);
+        return tracked is { Entity.IsEnabled: false } ? false
+            : tracked?.State == EntityState.Added ? tracked.Entity.IsEnabled
+            : Printers.AsNoTracking().Any(printer => printer.Id == printerId && printer.IsEnabled);
+    }
+
+    private async Task<bool> IsDestinationInServiceAsync(Guid printerId, CancellationToken cancellationToken)
+    {
+        EntityEntry<Printer>? tracked = ChangeTracker.Entries<Printer>()
+            .FirstOrDefault(entry => entry.Entity.Id == printerId);
+        return tracked is { Entity.IsEnabled: false } ? false
+            : tracked?.State == EntityState.Added ? tracked.Entity.IsEnabled
+            : await Printers.AsNoTracking().AnyAsync(
+                printer => printer.Id == printerId && printer.IsEnabled, cancellationToken);
     }
 
     private void EnsureCalibrationHistoryIsImmutable()

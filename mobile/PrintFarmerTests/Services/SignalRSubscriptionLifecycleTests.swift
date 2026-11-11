@@ -3797,8 +3797,10 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
                 ]
             )
 
+            // Wait for this disconnect's publication, not the initial seed (#3764).
+            let preDisconnectWatermark = states.count()
             await service.disconnect()
-            await states.waitFor(state: .disconnected)
+            await states.waitFor(state: .disconnected, afterCount: preDisconnectWatermark)
             await service.lifecycleInvariants.waitForReconnectOwnersZero()
             // #809: disconnect() cancels the outgoing transport/receive
             // tasks but does not await their `defer`-based exit counters;

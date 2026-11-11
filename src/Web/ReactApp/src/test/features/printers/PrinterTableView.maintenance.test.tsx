@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
 import { PrinterBackend, type AutoDispatchStatus, type Printer } from '@/types/api';
 
@@ -19,6 +21,13 @@ vi.mock('@/common/hooks/usePrinterDisplay', () => ({
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
   useAllAutoDispatchStatuses: () => useAllAutoDispatchStatusesMock(),
 }));
+
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return rtlRender(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 describe('PrinterTableView - maintenance button', () => {
   afterEach(() => {

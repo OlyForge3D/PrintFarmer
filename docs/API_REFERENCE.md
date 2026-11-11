@@ -48,6 +48,19 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 
 (Extend with additional DTO details as needed.)
 
+## Printer service status
+
+`PUT /api/printers/{id}` accepts `isEnabled` in the `UpdatePrinterDto` body.
+`true` means In Service; `false` means Out of Service. The update requires the
+printer's current revision in `If-Match`; missing preconditions return 428 and
+stale revisions return 412.
+
+Out of Service uses the existing disabled-printer behavior: the printer is
+hidden from normal listings and excluded from monitoring and dispatch. It does
+not issue a power command or change maintenance state. A request to disable a
+printer with active or assigned work returns 409; the job is preserved for
+operator review.
+
 ## Spoolman Barcode Resolution
 
 - `GET /api/spoolman/filaments/by-barcode?code=` resolves a scanned retail barcode

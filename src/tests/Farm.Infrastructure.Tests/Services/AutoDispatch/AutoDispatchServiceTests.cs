@@ -116,6 +116,10 @@ public sealed class AutoDispatchServiceTests : IDisposable
         Printer printer = await CreatePrinterAsync();
         await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
         await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+        long dispatchRevision = await _db.PrinterDispatchStates
+            .Where(state => state.PrinterId == printer.Id)
+            .Select(state => state.Revision)
+            .SingleAsync();
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
@@ -127,9 +131,13 @@ public sealed class AutoDispatchServiceTests : IDisposable
 
         Func<Task> act = async () => _ = await service.MarkPreClearAsync(printer.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
-        (await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id))
-            .DispatchState.Should().BeNull();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*occupies printer*");
+        PrinterDispatchState persistedState = await _db.PrinterDispatchStates
+            .AsNoTracking().SingleAsync(state => state.PrinterId == printer.Id);
+        persistedState.AutoDispatchState.Should().Be(AutoDispatchState.None);
+        persistedState.BedPreConfirmed.Should().BeFalse();
+        persistedState.Revision.Should().Be(dispatchRevision);
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
     }
 
@@ -178,6 +186,10 @@ public sealed class AutoDispatchServiceTests : IDisposable
         Printer printer = await CreatePrinterAsync();
         await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
         await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+        long dispatchRevision = await _db.PrinterDispatchStates
+            .Where(state => state.PrinterId == printer.Id)
+            .Select(state => state.Revision)
+            .SingleAsync();
 
         var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
@@ -191,8 +203,11 @@ public sealed class AutoDispatchServiceTests : IDisposable
 
         await service.TransitionToPendingReadyAsync(printer.Id);
 
-        (await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id))
-            .DispatchState.Should().BeNull();
+        PrinterDispatchState persistedState = await _db.PrinterDispatchStates
+            .AsNoTracking().SingleAsync(state => state.PrinterId == printer.Id);
+        persistedState.AutoDispatchState.Should().Be(AutoDispatchState.None);
+        persistedState.BedPreConfirmed.Should().BeFalse();
+        persistedState.Revision.Should().Be(dispatchRevision);
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
                 It.IsAny<string>(),
