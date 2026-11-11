@@ -7,11 +7,10 @@
 - **Delimiter**: Comma (`,`)
 - **Header**: First row must contain column names (case-insensitive)
 
-CSV and JSON configuration exports intentionally omit expected-offline monitoring
-acknowledgements. Imports do not accept or infer shutdown intent: new printers
-default to expected online. Existing-printer duplicate detection is unchanged.
-Review the actual printer state and use **Mark expected offline** after
-import instead of carrying a stale acknowledgement to another printer or server.
+CSV and JSON configuration exports do not carry a separate expected-offline
+acknowledgement. Imports do not infer service state: new printers default to In
+Service, and an explicit `isenabled=false` imports them Out of Service.
+Existing-printer duplicate detection is unchanged.
 
 ## Required Fields
 
@@ -30,7 +29,7 @@ These fields must be present in every row:
 | `manufacturername` | string | "Prusa" | "Unknown" | Manufacturer name (portable between systems) |
 | `modelname` | string | "MK4" | "Unknown" | Model name (portable between systems) |
 | `notes` | string | "Office printer" | null | Admin notes (max 1000 chars) |
-| `isenabled` | boolean | true/false | true | Controls visibility to users; false = pending approval |
+| `isenabled` | boolean | true/false | true | In Service when true; Out of Service when false |
 | `backendport` | integer | 7125 | null | Port for printer API |
 | `frontendport` | integer | 80 | null | Port for web UI |
 | `camerastreamurl` | string | "rtsp://192.168.1.100/stream" | null | Camera stream URL |

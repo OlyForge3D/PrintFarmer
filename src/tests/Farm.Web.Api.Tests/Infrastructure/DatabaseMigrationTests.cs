@@ -84,10 +84,80 @@ public sealed class DatabaseMigrationTests
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
             "20261106201513_AddObicoPrintRouting",
-            "20261110155826_AddPrinterExpectedOffline");
+            "20261110155826_AddPrinterExpectedOffline",
+            "20261111013812_ConsolidatePrinterServiceStatus");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_ConvertsExpectedOfflineIntentWithoutDisablingPrintersWithAssignedOrActiveJobs()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261110155826_AddPrinterExpectedOffline");
+
+        Guid idlePrinterId = Guid.NewGuid();
+        Guid assignedPrinterId = Guid.NewGuid();
+        Guid printingPrinterId = Guid.NewGuid();
+        Guid completedPrinterId = Guid.NewGuid();
+        Guid onlinePrinterId = Guid.NewGuid();
+        Manufacturer manufacturer = new() { Name = "Migration maker" };
+        PrinterModel model = new() { Name = "Migration model", Manufacturer = manufacturer };
+        context.Printers.AddRange(
+            new Printer { Id = idlePrinterId, Name = "Expected offline idle", ServerUrl = "http://idle.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = assignedPrinterId, Name = "Expected offline assigned", ServerUrl = "http://assigned.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = printingPrinterId, Name = "Expected offline printing", ServerUrl = "http://printing.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = completedPrinterId, Name = "Expected offline completed", ServerUrl = "http://completed.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model },
+            new Printer { Id = onlinePrinterId, Name = "Online", ServerUrl = "http://online.invalid", IsEnabled = true, Manufacturer = manufacturer, Model = model });
+        context.Manufacturers.Add(manufacturer);
+        _ = await context.SaveChangesAsync();
+
+        await context.Database.ExecuteSqlRawAsync(
+            "UPDATE \"Printers\" SET \"ExpectedOfflineSinceUtc\" = '2026-11-10T00:00:00Z' "
+            + "WHERE \"Id\" <> {0};",
+            onlinePrinterId);
+        DateTime now = DateTime.UtcNow;
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Assigned', {assignedPrinterId}, 1, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Printing', {printingPrinterId}, 3, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Completed', {completedPrinterId}, 5, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+        await context.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT INTO \"PrintJobs\" (\"Id\", \"Revision\", \"Name\", \"AssignedPrinterId\", \"Status\", \"Priority\", \"QueuePosition\", \"CreatedAt\", \"UpdatedAt\", \"QueuedAt\", \"WasSeededFromHistory\", \"IsExternalPrint\", \"Copies\", \"CompletedCopies\") VALUES ({Guid.NewGuid()}, 1, 'Online printing', {onlinePrinterId}, 3, 0, 0, {now}, {now}, {now}, 0, 0, 1, 0)");
+
+        await migrator.MigrateAsync();
+        context.ChangeTracker.Clear();
+        Dictionary<Guid, bool> enabledByPrinter = await context.Printers
+            .AsNoTracking()
+            .ToDictionaryAsync(printer => printer.Id, printer => printer.IsEnabled);
+        Dictionary<string, bool> reviewByJob = await context.PrintJobs
+            .AsNoTracking()
+            .ToDictionaryAsync(job => job.Name, job => job.RequiresOperatorReview);
+
+        enabledByPrinter[idlePrinterId].Should().BeFalse();
+        enabledByPrinter[completedPrinterId].Should().BeFalse();
+        enabledByPrinter[assignedPrinterId].Should().BeTrue();
+        enabledByPrinter[printingPrinterId].Should().BeTrue();
+        enabledByPrinter[onlinePrinterId].Should().BeTrue();
+        reviewByJob["Assigned"].Should().BeTrue();
+        reviewByJob["Printing"].Should().BeTrue();
+        reviewByJob["Completed"].Should().BeFalse();
+        reviewByJob["Online printing"].Should().BeFalse();
+
+        await migrator.MigrateAsync("20261110155826_AddPrinterExpectedOffline");
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT COUNT(*) FROM \"Printers\" "
+            + "WHERE \"ExpectedOfflineSinceUtc\" IS NOT NULL "
+            + "AND \"Id\" IN (SELECT \"AssignedPrinterId\" FROM \"PrintJobs\" "
+            + "WHERE \"Status\" IN (1, 2, 3, 4));";
+        (await command.ExecuteScalarAsync()).Should().Be(2L);
+        command.CommandText = "SELECT \"IsEnabled\" FROM \"Printers\" WHERE \"Name\" = 'Expected offline idle';";
+        (await command.ExecuteScalarAsync()).Should().Be(0L);
     }
 
     [Fact]
@@ -823,7 +893,8 @@ public sealed class DatabaseMigrationTests
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
             "20261106201513_AddObicoPrintRouting",
-            "20261110155826_AddPrinterExpectedOffline");
+            "20261110155826_AddPrinterExpectedOffline",
+            "20261111013812_ConsolidatePrinterServiceStatus");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1390,6 +1461,7 @@ public sealed class DatabaseMigrationTests
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201434_AddObicoPrintRouting",
                 "20261110155721_AddPrinterExpectedOffline",
+                "20261111013829_ConsolidatePrinterServiceStatus",
             ]
             :
             [
@@ -1439,6 +1511,7 @@ public sealed class DatabaseMigrationTests
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201456_AddObicoPrintRouting",
                 "20261110155749_AddPrinterExpectedOffline",
+                "20261111013847_ConsolidatePrinterServiceStatus",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
@@ -1710,7 +1783,6 @@ public sealed class DatabaseMigrationTests
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
-            modelBuilder.Entity<Printer>().Ignore(printer => printer.ExpectedOfflineSinceUtc);
         }
     }
 }

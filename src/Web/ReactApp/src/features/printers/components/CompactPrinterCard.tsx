@@ -18,7 +18,6 @@ import { FailureDetectionBadge } from '@/features/printers/components/FailureDet
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { PrinterTroubleshootingButton } from '@/features/printers/components/PrinterTroubleshootingButton';
-import { PrinterMonitoringControl } from '@/features/printers/components/PrinterMonitoringControl';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
@@ -252,7 +251,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           )}
           {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
-        <PrinterMonitoringControl printer={printer} />
         {/* Tags row */}
         {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">

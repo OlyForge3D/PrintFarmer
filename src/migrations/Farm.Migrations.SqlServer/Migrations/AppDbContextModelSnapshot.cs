@@ -5411,6 +5411,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<bool>("RequiresOperatorReview")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")
@@ -6087,9 +6092,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
-                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")
                         .HasColumnType("datetime2");

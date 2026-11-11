@@ -1,14 +1,13 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { mountRoutedToolbarPage } from './fixtures/toolbar-routed';
 import { toolbarAdminSeeds } from './fixtures/toolbar-routes-admin';
 
 const since = '2026-10-30T12:00:00Z';
 const printers = Array.from({ length: 4 }, (_, index) => ({
   id: `00000000-0000-0000-0000-${String(index).padStart(12, '0')}`,
-  name: ['Fixture CoreXY', 'Fixture shutdown A', 'Fixture shutdown B', 'Fixture unexpected'][index],
-  backend: 'Moonraker', isEnabled: index !== 3, isOnline: index === 0,
+  name: ['Fixture CoreXY', 'Fixture out of service A', 'Fixture out of service B', 'Fixture unexpected'][index],
+  backend: 'Moonraker', isEnabled: index !== 2, isOnline: index === 0,
   state: index === 0 ? 'Idle' : 'Offline', rowVersion: 'Zml4dHVyZQ==',
-  expectedOfflineSinceUtc: index === 1 || index === 2 ? since : null,
 }));
 
 const overview = {
@@ -17,7 +16,7 @@ const overview = {
     { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
     { key: 'database', name: 'Database', status: 'Healthy', detail: 'SQLite' },
     { key: 'signalr', name: 'SignalR Hub', status: 'Healthy', detail: 'Available' },
-    { key: 'backends', name: 'Printer Backends', status: 'Degraded', detail: '1 / 10 reachable; 2 expected offline' },
+    { key: 'backends', name: 'Printer Backends', status: 'Degraded', detail: '1 / 10 in service reachable' },
   ],
   attention: Array.from({ length: 9 }, (_, index) => ({
     key: `printer-00000000-0000-0000-0000-${String(index).padStart(12, '0')}-unreachable`,
@@ -26,15 +25,6 @@ const overview = {
     actionLabel: 'Open printer', actionRoute: `/printers/${printers[3].id}`,
   })),
 };
-
-async function expectMobileMonitoringTargets(page: Page) {
-  if (page.viewportSize()!.width >= 640) return;
-  for (const button of await page.getByRole('button', { name: /^(Mark expected offline|Expect online)$/ }).all()) {
-    const bounds = await button.boundingBox();
-    expect(bounds?.width).toBeGreaterThanOrEqual(44);
-    expect(bounds?.height).toBeGreaterThanOrEqual(44);
-  }
-}
 
 test('compact operational issues preserve counts, critical errors and keyboard disclosures', async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
@@ -49,7 +39,7 @@ test('compact operational issues preserve counts, critical errors and keyboard d
   const summary = group.locator('summary');
   const height = await group.evaluate(element => element.getBoundingClientRect().height);
   expect(height).toBeLessThan(110);
-  await expect(page.getByText('1 / 10 reachable; 2 expected offline')).toBeVisible();
+  await expect(page.getByText('1 / 10 in service reachable')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('admin-collapsed.png'), fullPage: true });
 
   await summary.focus();
@@ -82,10 +72,11 @@ test('compact operational issues preserve counts, critical errors and keyboard d
   expect(requests.writes).toEqual([]);
 });
 
-test('printer monitoring remains neutral and supports reviewed reversible bulk actions', async ({ page }, testInfo) => {
+test('printer availability uses the service status control', async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
     ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
   const rows = structuredClone(printers);
+  rows[2].isEnabled = false;
   await page.addInitScript(() => localStorage.setItem('printerViewMode', 'table'));
   const requests = await mountRoutedToolbarPage(page, '/printers', {
     ...toolbarAdminSeeds,
@@ -100,54 +91,29 @@ test('printer monitoring remains neutral and supports reviewed reversible bulk a
     '/api/tags': [],
     '/api/settings/OperatorFeatures': { enabled: false },
   });
-  const mutations: { body: unknown; revision: string | undefined }[] = [];
-  await page.route('**/api/printers/*/expected-offline', async route => {
+  const mutations: { body: unknown; revision: string | undefined; method: string }[] = [];
+  await page.route(`**/api/printers/${rows[3].id}`, async route => {
     const request = route.request();
-    const id = new URL(request.url()).pathname.split('/')[3];
-    const row = rows.find(printer => printer.id === id)!;
-    mutations.push({ body: request.postDataJSON(), revision: request.headers()['if-match'] });
-    row.expectedOfflineSinceUtc = request.postDataJSON() ? since : null;
-    await route.fulfill({ json: { id, expectedOfflineSinceUtc: row.expectedOfflineSinceUtc, rowVersion: row.rowVersion } });
+    mutations.push({
+      body: request.postDataJSON(),
+      revision: request.headers()['if-match'],
+      method: request.method(),
+    });
+    await route.fulfill({ json: { ...rows[3], isEnabled: false } });
   });
-  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Mark expected offline', exact: true })).toHaveCount(1);
-  await expectMobileMonitoringTargets(page);
-  await page.getByText('Expected offline', { exact: true }).first().scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath('printers-monitoring.png'), fullPage: true });
-  const unexpected = page.getByRole('row').filter({ hasText: 'Fixture unexpected' });
-  await unexpected.getByRole('button', { name: 'Mark expected offline', exact: true }).focus();
-  await page.keyboard.press('Enter');
-  await expect(unexpected.getByText('Expected offline', { exact: true })).toBeVisible();
-  expect(mutations).toEqual([{ body: true, revision: '"Zml4dHVyZQ=="' }]);
-
-  await page.getByRole('button', { name: 'Select Fixture shutdown A', exact: true }).click();
-  await page.getByRole('button', { name: 'Select Fixture shutdown B', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Bulk action selector' }).selectOption('expected-online');
-  await page.getByRole('button', { name: 'Apply', exact: true }).click();
-  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(1);
-  expect(mutations.slice(1)).toEqual([
-    { body: false, revision: '"Zml4dHVyZQ=="' },
-    { body: false, revision: '"Zml4dHVyZQ=="' },
-  ]);
-  await page.getByRole('button', { name: 'Collapsed Card View', exact: true }).click();
-  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(1);
-  await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 15_000 });
-  await page.getByText('Expected offline', { exact: true }).scrollIntoViewIfNeeded();
-  await expectMobileMonitoringTargets(page);
-  await page.screenshot({ path: testInfo.outputPath('printers-compact-monitoring.png'), fullPage: true });
-  const compact = page.getByRole('article').filter({ hasText: 'Fixture unexpected' });
-  await compact.getByRole('button', { name: 'Open details sidebar', exact: true }).click();
-  const sidebar = page.getByRole('complementary', { name: 'Fixture unexpected details', exact: true });
-  await expect(sidebar.getByRole('button', { name: 'Expect online', exact: true })).toBeVisible();
-  await expectMobileMonitoringTargets(page);
-  await sidebar.getByRole('button', { name: 'Expect online', exact: true }).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath('printers-sidebar-monitoring.png'), fullPage: true });
-  await sidebar.getByRole('button', { name: 'Close sidebar', exact: true }).click();
-  await page.getByRole('button', { name: 'Detailed Cards', exact: true }).click();
-  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(1);
-  await expectMobileMonitoringTargets(page);
-  await page.getByText('Expected offline', { exact: true }).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath('printers-detailed-monitoring.png'), fullPage: true });
+  const inService = page.getByRole('row').filter({ hasText: 'Fixture unexpected' });
+  const outOfService = page.getByRole('row').filter({ hasText: 'Fixture out of service B' });
+  await expect(inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' })).toBeVisible();
+  await expect(outOfService.getByRole('button', { name: 'Mark Fixture out of service B In Service' })).toBeVisible();
+  await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
+  await inService.getByRole('button', { name: 'Mark Fixture unexpected Out of Service' }).click();
+  await expect(page.getByText('Fixture unexpected is now Out of Service')).toBeVisible();
+  expect(mutations).toEqual([{
+    body: { isEnabled: false },
+    revision: '"Zml4dHVyZQ=="',
+    method: 'PUT',
+  }]);
   expect(requests.errors).toEqual([]);
   expect(requests.external).toEqual([]);
   expect(requests.writes).toEqual([]);

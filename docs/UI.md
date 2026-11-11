@@ -37,46 +37,27 @@ Main overview page showing all printers with real-time status.
 - One-click print controls
 - Auto-refresh on status changes
 
-### Printer monitoring intent
+### Printer service status
 
-For an intentionally shut-down printer, use **Mark expected offline** on its
-card, table row, or details sidebar. Administrators with `printers:admin` can
-also select printers and use the same action in bulk. **Expect online** reverses
-the acknowledgement. Bulk updates report successes and per-printer failures
-separately; refresh and review a conflicting revision before trying it again.
-Table monitoring actions keep the selection for review and explicit reversal.
+Administrators use the **In Service / Out of Service** control in the printer
+table. It is the existing `IsEnabled` setting, not a second monitoring flag.
+Out of Service preserves the existing disabled-printer behavior: the printer is
+hidden from normal listings, excluded from monitoring and dispatch, and is not
+commanded to power off. Maintenance remains a separate setting.
 
-The acknowledgement persists across server restarts. It excludes only expected
-shutdowns from connectivity warnings and the Admin Center health denominator;
-printers remain visible and truthfully offline, with a neutral **Expected
-offline** label. This is not a power command, maintenance mode, or dispatch
-setting, and it does not pause jobs or rewrite schedules. A known offline
-printer can be acknowledged independently of its Enabled or maintenance setting.
-
-Only a known offline printer without active/assigned work can be acknowledged.
-Active-print disconnects, unknown/error states, and provider/service failures
-remain actionable. A fresh backend observation begun after the acknowledgement
-automatically restores normal monitoring. Cached/replayed online samples cannot
-clear it. A later outage is unexpected again, including a reconnect followed by
-another disconnect between reconciliation passes.
+A printer with an assigned or active job cannot be moved Out of Service. The
+operator must review and resolve that work first; PrintFarmer does not pause or
+cancel it. If an older expected-offline record is migrated while a job is still
+active, the printer is not disabled and the job appears under **Operational
+issues** with a link to the printer. That issue clears when the job is no longer
+active. Older expected-offline records without active work migrate to Out of
+Service; printers without such a record retain their existing status.
 
 The Admin Control Center presents **Operational issues** as compact, grouped
 type/severity disclosures rather than repeated warning cards. Totals and
-severity stay visible; critical errors start expanded. Expand an offline group
-for per-printer links. The health tile separately reports reachable/expected
-online counts and expected-offline/unknown counts. Missing data and failed
-refreshes are not an all-clear.
-
-The API mutation is `PUT /api/printers/{id}/expected-offline` with a JSON boolean
-and the reviewed printer's `If-Match` revision. It requires `printers:admin`
-and resource access, returns the updated `expectedOfflineSinceUtc` and
-`rowVersion`, and uses `409` for unsafe acknowledgement, `428` for a missing
-revision, and `412` for a conflict. Read DTOs expose the nullable UTC timestamp;
-null means expected online. The authorized `printermonitoringchanged` SignalR
-event invalidates printer and attention projections.
-Monitoring changes (including automatic reconnect clearing) advance the printer
-revision. An edit form opened earlier can therefore require a refresh before save;
-the revision check deliberately prevents overwriting newer operator intent.
+severity stay visible; critical errors start expanded. Expand a group for
+per-printer links. The backends health tile reflects only printers In Service;
+missing data and failed refreshes are not an all-clear.
 
 ### Files Page
 `/files` separates owned local assets from files observed on printers.

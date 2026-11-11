@@ -663,7 +663,6 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterMonitoringReader>(
             sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterMonitoringService>());
-        _ = services.AddHostedService<Farm.Infrastructure.Services.Printers.PrinterMonitoringReconnectService>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());

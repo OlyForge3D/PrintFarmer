@@ -17,8 +17,6 @@ import { OfflineTroubleshootingGuide } from '@/features/printers/components/Offl
 import { TableHeaderCell } from '@/common/components/ui/Table';
 import type { SortDirection } from '@/common/hooks/useTableSort';
 import { getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
-import { PrinterMonitoringControl } from '@/features/printers/components/PrinterMonitoringControl';
-import { usePrinterMonitoring } from '@/features/printers/hooks/usePrinterMonitoring';
 
 interface PrinterTableViewProps {
   printers: Printer[];
@@ -50,11 +48,10 @@ export function PrinterTableView({
   onSort,
 }: PrinterTableViewProps) {
   const { hasPermission } = useAuth();
-  const monitoring = usePrinterMonitoring();
   const displayPrinters = usePrinterDisplays(printers);
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
-  const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off' | 'expected-offline' | 'expected-online'>('none');
+  const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
   const [troubleshootPrinterId, setTroubleshootPrinterId] = useState<string | null>(null);
   const troubleshootRef = useRef<HTMLDivElement>(null);
   const autoDispatchStatusByPrinterId = useMemo(
@@ -101,10 +98,6 @@ export function PrinterTableView({
     const selectedPrinterObjects = printers.filter(p => selectedPrinters.has(p.id));
     
     switch (bulkAction) {
-      case 'expected-offline':
-      case 'expected-online':
-        monitoring.mutate({ printers: selectedPrinterObjects, expectedOffline: bulkAction === 'expected-offline' });
-        return;
       case 'delete':
         onDelete(selectedPrinterObjects);
         break;
@@ -118,7 +111,7 @@ export function PrinterTableView({
     
     setSelectedPrinters(new Set());
     setBulkAction('none');
-  }, [bulkAction, selectedPrinters, printers, onDelete, onBulkSetMaintenance, monitoring]);
+  }, [bulkAction, selectedPrinters, printers, onDelete, onBulkSetMaintenance]);
 
   const getStatusColor = (
     isOnline: boolean,
@@ -185,12 +178,6 @@ export function PrinterTableView({
               )}
               <option value="maintenance-on">Mark as In Maintenance</option>
               <option value="maintenance-off">Remove Maintenance Status</option>
-              {hasPermission('printers', 'admin') && (
-                <>
-                  <option value="expected-offline">Mark expected offline until reconnect</option>
-                  <option value="expected-online">Expect online</option>
-                </>
-              )}
             </select>
           </div>
           
@@ -198,7 +185,7 @@ export function PrinterTableView({
             <Button
               type="button"
               onClick={handleBulkAction}
-              disabled={bulkAction === 'none' || monitoring.isPending}
+              disabled={bulkAction === 'none'}
               variant="success"
               size="sm"
               className="flex items-center gap-1"
@@ -266,10 +253,10 @@ export function PrinterTableView({
               <th className="text-left px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
                 Last Updated
               </th>
-              {/** Optionally show Enabled column for admins */}
+              {/** Service availability control for admins */}
               {showEnableColumn && (
                 <th className="text-center px-4 py-3 text-sm font-bold text-pf-text-primary uppercase tracking-wide">
-                  Enabled
+                  Service
                 </th>
               )}
               {/** Actions header */}
@@ -333,7 +320,6 @@ export function PrinterTableView({
 
                   {/* Status */}
                   <td className="px-4 py-4">
-                    <PrinterMonitoringControl printer={displayPrinter} />
                     <div className="flex items-center gap-1">
                       <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
                         {statusLabel}
@@ -424,13 +410,15 @@ export function PrinterTableView({
                           onClick={() => onToggleEnabled(printer)}
                           variant="subtle"
                           size="sm"
-                          className="p-2! h-auto!"
-                          title={printer.isEnabled ? 'Disable printer' : 'Enable printer'}
+                          className="inline-flex items-center gap-1 p-2! h-auto!"
+                          title={printer.isEnabled ? 'Mark Out of Service' : 'Mark In Service'}
+                          aria-label={`Mark ${printer.name} ${printer.isEnabled ? 'Out of Service' : 'In Service'}`}
                         >
                           {printer.isEnabled ? <CheckCircleIcon className="w-4 h-4" /> : <CircleIcon className="w-4 h-4" />}
+                          <span>{printer.isEnabled ? 'In Service' : 'Out of Service'}</span>
                         </Button>
                       ) : (
-                        <span className="text-sm text-pf-text-tertiary">{printer.isEnabled ? 'Yes' : 'No'}</span>
+                        <span className="text-sm text-pf-text-tertiary">{printer.isEnabled ? 'In Service' : 'Out of Service'}</span>
                       )}
                     </td>
                   )}

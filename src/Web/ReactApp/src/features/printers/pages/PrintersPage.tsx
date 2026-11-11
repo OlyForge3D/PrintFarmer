@@ -791,7 +791,7 @@ export function PrintersPage() {
                     onSelectionChange={(ids) => setSelectedPrinterIds(ids)}
                     onToggleEnabled={async (printer) => {
                       try {
-                        const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
+                        const updated: import('@/types/api').UpdatePrinterDto = { isEnabled: !printer.isEnabled };
                         if (!printer.rowVersion) {
                           throw new Error('Printer revision unavailable; refresh and review again.');
                         }
@@ -800,10 +800,10 @@ export function PrintersPage() {
                           updated,
                           printer.rowVersion
                         );
-                        toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
+                        toast.success(`${printer.name || 'Printer'} is now ${updated.isEnabled ? 'In Service' : 'Out of Service'}`);
                         await queryClient.invalidateQueries({ queryKey: ['printers'] });
                       } catch (err) {
-                        console.error('Failed to toggle enabled', err);
+                        console.error('Failed to change printer service status', err);
                         if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
                           await queryClient.refetchQueries({
                             queryKey: ['printers'],
@@ -812,7 +812,7 @@ export function PrintersPage() {
                         toast.error(
                           mutationErrorMessage(
                             err,
-                            'Failed to toggle enabled state'
+                            'Failed to change service status'
                           )
                         );
                       }

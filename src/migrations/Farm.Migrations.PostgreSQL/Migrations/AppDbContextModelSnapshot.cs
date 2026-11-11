@@ -5393,6 +5393,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<bool>("RequiresOperatorReview")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")
@@ -6064,9 +6069,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("ExpectedOfflineSinceUtc")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("FirmwareDetectedAtUtc")
                         .HasColumnType("timestamp with time zone");

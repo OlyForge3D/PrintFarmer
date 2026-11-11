@@ -481,7 +481,6 @@ public sealed class PrinterFileCatalogPersistenceTests
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.Entity<Printer>().Ignore(printer => printer.PrintGuardEnabled);
-            modelBuilder.Entity<Printer>().Ignore(printer => printer.ExpectedOfflineSinceUtc);
         }
     }
 }
