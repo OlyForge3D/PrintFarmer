@@ -6,6 +6,12 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Scan / Add Spool saving (#3768)** — Choose an exact existing filament or
+  create one from confirmed required data before saving a spool. Save no longer
+  sends a missing filament ID or silently picks the first material/vendor match.
+  Successful creation IDs survive retry; uncertain writes require checking
+  inventory rather than blindly creating duplicates.
+
 - **Live queue and camera updates (#3684)** — Reordering the queue no longer
   breaks live queue updates: `jobqueueupdate` now decodes the reorder payload
   (`queuedAtUtc` timestamps, null `printerId` for unassigned jobs) as well as
