@@ -6,12 +6,7 @@ final class AddSpoolViewModel {
     // Form fields
     var filamentName = ""
     var selectedMaterial = "" {
-        didSet {
-            if let density = materials.first(where: { $0.name == selectedMaterial })?.density,
-               density.isFinite, density > 0 {
-                densityGPerCm3 = density
-            }
-        }
+        didSet { applyMaterialDensity() }
     }
     var selectedVendor = ""
     var colorHex = "#10b981"
@@ -19,7 +14,11 @@ final class AddSpoolViewModel {
     var spoolWeightG: Double = 200
     var diameterMm: Double = 1.75
     var extruderTempC: Int?
-    var densityGPerCm3 = SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter
+    var densityGPerCm3 = SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter {
+        didSet {
+            if !isApplyingMaterialDensity { hasEditedDensity = true }
+        }
+    }
     var isCreatingFilament = false
     var selectedFilamentId: Int?
 
@@ -51,6 +50,16 @@ final class AddSpoolViewModel {
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "AddSpool")
     private var spoolService: (any SpoolServiceProtocol)?
+    private var hasEditedDensity = false
+    private var isApplyingMaterialDensity = false
+
+    private func applyMaterialDensity() {
+        guard let density = materials.first(where: { $0.name == selectedMaterial })?.density,
+              density.isFinite, density > 0 else { return }
+        isApplyingMaterialDensity = true
+        densityGPerCm3 = density
+        isApplyingMaterialDensity = false
+    }
 
     func configure(spoolService: any SpoolServiceProtocol) {
         self.spoolService = spoolService
@@ -140,6 +149,7 @@ final class AddSpoolViewModel {
             let f = try await fils
             guard isViewActive else { return }
             materials = m
+            if !hasEditedDensity { applyMaterialDensity() }
             vendors = v
             filaments = f
             hasLoadedReferenceData = true

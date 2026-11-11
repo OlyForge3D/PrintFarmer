@@ -164,6 +164,34 @@ final class AddSpoolViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.densityGPerCm3, 1.3)
     }
 
+    func testScannedMaterialGetsKnownDensityAfterReferenceLoad() async {
+        viewModel.prefill(from: scan(filamentID: nil))
+        viewModel.isCreatingFilament = true
+        viewModel.filamentName = "Scanned PETG"
+        viewModel.selectedVendor = ""
+        service.materialsToReturn = [
+            SpoolmanMaterial(id: 1, name: "PETG", density: 1.27, colorHex: nil)
+        ]
+
+        await viewModel.loadReferenceData()
+        await viewModel.saveSpool()
+
+        XCTAssertTrue(viewModel.didSave)
+        XCTAssertEqual(service.createFilamentCalledWith?.density, 1.27)
+    }
+
+    func testReferenceLoadPreservesManuallyEditedDensityForScannedMaterial() async {
+        viewModel.prefill(from: scan(filamentID: nil))
+        viewModel.densityGPerCm3 = 1.3
+        service.materialsToReturn = [
+            SpoolmanMaterial(id: 1, name: "PETG", density: 1.27, colorHex: nil)
+        ]
+
+        await viewModel.loadReferenceData()
+
+        XCTAssertEqual(viewModel.densityGPerCm3, 1.3)
+    }
+
     func testReferenceLoadFailurePreservesFormAndRequiresSuccessfulReload() async {
         prepareNewFilament()
         service.errorToThrow = NetworkError.unauthorized
