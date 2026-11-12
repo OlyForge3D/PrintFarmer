@@ -175,7 +175,7 @@ describe('CompactPrinterCard printer image', () => {
   it('renders the model cover image and identity above the progress bar', async () => {
     render(
       <CompactPrinterCard
-        printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4' })}
+        printer={makePrinter({ manufacturerName: 'Prusa', modelName: 'MK4', ipAddress: '2001:db8:1234:5678:90ab:cdef:1234:5678' })}
         onExpand={vi.fn()}
       />,
       { wrapper: createWrapper() },
@@ -186,6 +186,10 @@ describe('CompactPrinterCard printer image', () => {
     expect(image).toHaveAttribute('src', '/covers/Prusa/MK4.png');
     expect(screen.getByText('MK4')).toBeInTheDocument();
     expect(screen.getByText('Prusa')).toBeInTheDocument();
+    const manufacturer = screen.getByText('Prusa');
+    const address = screen.getByText('2001:db8:1234:5678:90ab:cdef:1234:5678');
+    expect(manufacturer.nextElementSibling).toBe(address);
+    expect(address.tagName).toBe('P');
 
     const imageRow = screen.getByTestId('compact-printer-image');
     const progress = screen.getByTestId('print-progress');

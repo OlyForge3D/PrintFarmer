@@ -55,6 +55,13 @@ export function PrinterTableView({
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
   const [troubleshootPrinterId, setTroubleshootPrinterId] = useState<string | null>(null);
   const troubleshootRef = useRef<HTMLDivElement>(null);
+  const troubleshootPrinter = printers.find(printer => printer.id === troubleshootPrinterId);
+  const canTroubleshoot = troubleshootPrinter?.isEnabled !== false
+    && displayPrinters.some(printer => printer.id === troubleshootPrinterId && !printer.isOnline);
+
+  if (troubleshootPrinterId && !canTroubleshoot) {
+    setTroubleshootPrinterId(null);
+  }
   const autoDispatchStatusByPrinterId = useMemo(
     () => new Map((allAutoDispatchStatuses ?? []).map((status) => [status.printerId, status])),
     [allAutoDispatchStatuses],
@@ -237,9 +244,6 @@ export function PrinterTableView({
                 onSort={() => onSort?.('name')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Printer
               </TableHeaderCell>
-              <th scope="col" className="w-12 px-1 py-3">
-                <span className="sr-only">Service</span>
-              </th>
               <TableHeaderCell sortable={Boolean(onSort)} sortKey="state" sortDirection={sortMode === 'state' ? sortDirection : null}
                 onSort={() => onSort?.('state')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Status
@@ -312,9 +316,6 @@ export function PrinterTableView({
                       </div>
                     </div>
                   </td>
-                  <td className="w-12 px-1 py-4 text-center">
-                    <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
-                  </td>
 
                   {/* Status */}
                   <td className="px-4 py-4">
@@ -322,7 +323,7 @@ export function PrinterTableView({
                       <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
                         {statusLabel}
                       </div>
-                      {!(displayPrinter.isOnline ?? false) && (
+                      {!(displayPrinter.isOnline ?? false) && printer.isEnabled !== false && (
                         <div className="relative" ref={troubleshootPrinterId === printer.id ? troubleshootRef : undefined}>
                           <Button
                             type="button"
@@ -396,6 +397,7 @@ export function PrinterTableView({
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
+                      <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
                       {onOpenDetails && (
                         <Button
                           type="button"

@@ -578,15 +578,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
-          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
-        </div>
-        <div className="mt-2">
-          <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
+          {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
       </div>
 
-      {/* Identity + actions: the action grid sits beside the cover at the cover's
-          height (3 rows x 32px = h-24), so no row of the card is spent on icons. */}
+      {/* Identity + actions */}
       <div className="mb-4 mt-3">
         <div className="flex items-stretch gap-3">
           <div className="flex min-w-0 flex-1 items-end gap-3" data-testid="detailed-printer-image">
@@ -600,13 +596,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
               />
             </div>
-            {(printer.modelName || printer.manufacturerName) && (
+            {(printer.modelName || printer.manufacturerName || printer.ipAddress) && (
               <div className="min-w-0 pb-0.5 leading-tight">
                 {printer.modelName && (
                   <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
                 )}
                 {printer.manufacturerName && (
                   <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
+                )}
+                {printer.ipAddress && (
+                  <p className="break-all font-mono text-xs text-pf-text-secondary">{printer.ipAddress}</p>
                 )}
               </div>
             )}
@@ -617,6 +616,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           role="toolbar"
           aria-label="Printer actions"
         >
+            <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />
             {browserUrl ? (
               <a
                 href={browserUrl}
