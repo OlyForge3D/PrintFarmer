@@ -45,9 +45,13 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [creatingFilament], timeout: 3), .completed)
 
-        let form = app.collectionViews.firstMatch
-        XCTAssertTrue(form.waitForExistence(timeout: 5))
-        XCTAssertTrue(form.switches["addSpool.createFilament"].exists)
+        // Keep an index-bound container when the identifying row scrolls off screen.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.switches["addSpool.createFilament"].exists
+        }) else {
+            XCTFail("The Add Spool form must contain the Create New Filament switch")
+            return
+        }
         let red = app.buttons["Red"]
         for _ in 0..<12 {
             if red.exists && red.isHittable { break }
