@@ -148,6 +148,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         let create = app.buttons["mapBarcode.showCreate"]
         XCTAssertTrue(create.exists, "a catalog failure must not block creating a filament")
         XCTAssertFalse(app.buttons["mapBarcode.selectMaterial"].exists)
+        attachScreenshot(named: "fnsku-catalog-load-failure")
         create.tap()
         XCTAssertTrue(app.textFields["Filament Name"].waitForExistence(timeout: 5))
         let chooseExisting = app.buttons["Choose Existing Instead"]
@@ -184,8 +185,10 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         openScanAndScan()
         XCTAssertTrue(app.staticTexts["mapBarcode.loadError"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists)
+        attachScreenshot(named: "fnsku-partial-catalog-failure")
         chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
         XCTAssertTrue(app.buttons["mapBarcode.addSpool"].isEnabled)
+        attachScreenshot(named: "fnsku-partial-catalog-selection")
     }
 
     func testFnskuUncertainSpoolOutcomeSurvivesPartialCatalogFailure() {
@@ -202,6 +205,10 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.staticTexts["mapBarcode.error"].exists)
         XCTAssertFalse(app.buttons["mapBarcode.retryLoad"].exists, "a catalog retry must not hide an uncertain spool outcome")
         XCTAssertFalse(app.buttons["mapBarcode.retry"].exists)
+        let list = app.collectionViews["mapBarcode.list"]
+        for _ in 0..<4 where !done.isHittable { list.swipeDown() }
+        XCTAssertTrue(done.isHittable)
+        attachScreenshot(named: "fnsku-uncertain-partial-catalog")
         done.tap()
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForNonExistence(timeout: 8))
     }
