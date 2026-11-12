@@ -669,7 +669,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               className={`h-11 w-11 p-0 rounded transition-colors ${
                 autoDispatchStatus?.enabled
                   ? 'text-pf-accent'
-                  : 'text-pf-text-secondary hover:text-pf-text-primary'
+                  : 'text-pf-text-secondary enabled:hover:text-pf-text-primary'
               } disabled:opacity-50 inline-flex items-center justify-center`}
               aria-label={`Toggle auto-dispatch for ${printer.name}`}
               aria-pressed={autoDispatchStatus?.enabled ?? false}

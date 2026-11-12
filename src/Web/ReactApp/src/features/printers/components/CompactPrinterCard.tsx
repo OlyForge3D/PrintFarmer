@@ -412,7 +412,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             className={`h-11 w-11 p-0 rounded transition-colors inline-flex items-center justify-center ${
               autoDispatchStatus?.enabled
                 ? 'text-pf-accent'
-                : 'text-pf-text-secondary hover:text-pf-text-primary'
+                : 'text-pf-text-secondary enabled:hover:text-pf-text-primary'
             } disabled:opacity-50`}
             aria-label={`Toggle auto-dispatch for ${printer.name}`}
             aria-pressed={autoDispatchStatus?.enabled ?? false}
