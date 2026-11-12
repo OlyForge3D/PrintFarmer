@@ -653,38 +653,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               size="sm"
               onClick={() => setShowCamera(!showCamera)}
               disabled={!hasCameraUrls || !isEnabled}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
               title={!isEnabled ? 'Printer Out of Service' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
               iconCenter={<CameraIcon className="h-4 w-4" />}
-            >
-            </Button>
-
-            {support.supportsHistory && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleViewHistory}
-                disabled={!canOpenHistoryNow}
-                className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-                title="View print history"
-                aria-label="View print history"
-                iconCenter={<HistoryIcon className="h-4 w-4" />}
-              >
-              </Button>
-            )}
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowFiles(true)}
-              disabled={!canOpenFilesNow}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-              title="View printer files"
-              aria-label="View printer files"
-              iconCenter={<FileIcon className="h-4 w-4" />}
             >
             </Button>
 
@@ -693,7 +665,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               variant="unstyled"
               onClick={handleAutoDispatchToggle}
               disabled={setAutoDispatchEnabled.isPending}
-              className={`h-8 w-8 p-0 rounded transition-colors ${
+              className={`h-11 w-11 p-0 rounded transition-colors ${
                 autoDispatchStatus?.enabled
                   ? 'text-pf-accent'
                   : 'text-pf-text-secondary hover:text-pf-text-primary'
@@ -707,8 +679,34 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               type="button"
               variant="ghost"
               size="sm"
+              onClick={() => setShowFiles(true)}
+              disabled={!canOpenFilesNow}
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              title="View printer files"
+              aria-label="View printer files"
+              iconCenter={<FileIcon className="h-4 w-4" />}
+            >
+            </Button>
+            {support.supportsHistory && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleViewHistory}
+                disabled={!canOpenHistoryNow}
+                className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+                title="View print history"
+                aria-label="View print history"
+                iconCenter={<HistoryIcon className="h-4 w-4" />}
+              >
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onEdit?.(printer)}
-              className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
               title="Edit details"
               aria-label="Edit details"
               iconCenter={<EditIcon className="h-4 w-4" />}

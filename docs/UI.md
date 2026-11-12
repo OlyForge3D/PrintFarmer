@@ -51,6 +51,11 @@ column has been removed.
 
 Both card styles place **Open in Browser** at the far right of the header and
 the remaining actions in a two-column right-hand grid, without an overflow menu.
+Compact cards place **Open details sidebar** immediately before the browser action.
+Their single-row header matches the detailed header height while retaining 44px
+header controls. Both main action grids use uniform 44px square controls in
+row-major order: service status, camera, auto-dispatch, files, history and edit.
+History remains capability-gated; Tags remains compact-only after the shared actions.
 Unavailable browser actions retain their explanatory tooltip. Both card styles show
 the printer's configured IP address beneath its manufacturer when available.
 Out of Service preserves the existing disabled-printer behavior: the printer is

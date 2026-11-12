@@ -206,7 +206,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         </div>
       )}
       {/* Colored header — background tinted by printer state */}
-      <div className={`px-3 pt-3 pb-2 rounded-t-lg ${headerClassName}`}>
+      <div className={`px-3 py-1 rounded-t-lg ${headerClassName}`}>
           {/* Top row: Name + Status Pill + failure-detection status */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
@@ -238,7 +238,17 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             </span>
           )}
           {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onExpand(printer.id)}
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              title="Open details sidebar"
+              aria-label="Open details sidebar"
+              iconCenter={<PanelRightOpen className="h-4 w-4" />}
+            />
             {browserUrl ? (
               <a
                 href={browserUrl}
@@ -382,16 +392,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           aria-label="Printer actions"
         >
           <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onExpand(printer.id)}
-            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-            title="Open details sidebar"
-            aria-label="Open details sidebar"
-            iconCenter={<PanelRightOpen className="h-4 w-4" />}
-          />
           <Button
             type="button"
             variant="ghost"
