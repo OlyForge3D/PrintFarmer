@@ -148,7 +148,12 @@ The shipped cases are:
 | Map/Remember Code scanned value | `mapBarcode.code` |
 | Map/Remember Code scrollable list | `mapBarcode.list` |
 | Map/Remember Code material selection or input | `mapBarcode.material` |
-| Map/Remember Code existing filament row | `mapBarcode.filament.<filament-id>` |
+| Map/Remember Code existing material picker | `mapBarcode.selectMaterial` |
+| Map/Remember Code existing vendor picker | `mapBarcode.selectVendor` |
+| Map/Remember Code existing filament picker | `mapBarcode.selectFilament` |
+| Map/Remember Code add selected spool | `mapBarcode.addSpool` |
+| Map/Remember Code retry loading catalog | `mapBarcode.retryLoad` |
+| Map/Remember Code catalog loading error | `mapBarcode.loadError` |
 | Map/Remember Code show create form | `mapBarcode.showCreate` |
 | Map/Remember Code create submit | `mapBarcode.create` |
 | Map/Remember Code save error message | `mapBarcode.error` |

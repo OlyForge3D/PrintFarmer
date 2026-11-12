@@ -2,6 +2,75 @@ import Foundation
 import os
 
 @MainActor @Observable
+final class FilamentCatalogSelection {
+    enum Option: Hashable {
+        case unspecified
+        case value(String)
+
+        var label: String {
+            switch self {
+            case .unspecified: return "Not specified"
+            case .value(let value): return value
+            }
+        }
+
+        init(_ value: String?) {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            self = trimmed.isEmpty ? .unspecified : .value(trimmed)
+        }
+    }
+
+    var filaments: [SpoolmanFilament] = [] {
+        didSet {
+            material = nil
+            vendor = nil
+            filamentId = nil
+        }
+    }
+    var material: Option? {
+        didSet {
+            if material != oldValue { vendor = nil; filamentId = nil }
+        }
+    }
+    var vendor: Option? {
+        didSet {
+            if vendor != oldValue { filamentId = nil }
+        }
+    }
+    var filamentId: Int?
+
+    var materials: [Option] {
+        sortedOptions(filaments.map { Option($0.material) })
+    }
+
+    var vendors: [Option] {
+        guard let material else { return [] }
+        return sortedOptions(filaments.filter { Option($0.material) == material }.map { Option($0.vendor) })
+    }
+
+    var matchingFilaments: [SpoolmanFilament] {
+        guard let material, let vendor else { return [] }
+        return filaments.filter { Option($0.material) == material && Option($0.vendor) == vendor }
+            .sorted {
+                let comparison = Option($0.name).label.localizedCaseInsensitiveCompare(Option($1.name).label)
+                return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+            }
+    }
+
+    var selectedFilament: SpoolmanFilament? {
+        matchingFilaments.first { $0.id == filamentId }
+    }
+
+    private func sortedOptions(_ options: [Option]) -> [Option] {
+        Array(Set(options)).sorted {
+            let comparison = $0.label.localizedCaseInsensitiveCompare($1.label)
+            if comparison != .orderedSame { return comparison == .orderedAscending }
+            return String(describing: $0) < String(describing: $1)
+        }
+    }
+}
+
+@MainActor @Observable
 final class BarcodeIntakeViewModel {
     var isScanning = false
     var lastScannedBarcode: String?

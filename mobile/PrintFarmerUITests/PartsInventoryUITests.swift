@@ -38,15 +38,28 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         let createFilament = app.switches["addSpool.createFilament"]
         XCTAssertTrue(createFilament.waitForExistence(timeout: 8))
         if createFilament.value as? String != "1" {
-            createFilament.tap()
+            createFilament.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         }
+        let creatingFilament = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"), object: createFilament
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [creatingFilament], timeout: 3), .completed)
 
-        let red = app.buttons["Red"]
-        for _ in 0..<4 {
-            if red.exists && red.isHittable { break }
-            app.swipeUp()
+        // Keep an index-bound container when the identifying row scrolls off screen.
+        guard let form = app.collectionViews.allElementsBoundByIndex.first(where: {
+            $0.switches["addSpool.createFilament"].exists
+        }) else {
+            XCTFail("The Add Spool form must contain the Create New Filament switch")
+            return
         }
-        XCTAssertTrue(red.isHittable)
+        let red = app.buttons["Red"]
+        let hex = app.textFields["#RRGGBB"]
+        for _ in 0..<12 {
+            if red.exists && red.isHittable && hex.exists { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(red.isHittable, "The Red swatch must be reachable in the Add Spool form")
+        XCTAssertTrue(hex.exists, "The hex field below the swatches must be realized before reading its value")
         for name in ["Black", "White", "Red"] {
             let swatch = app.buttons[name]
             XCTAssertTrue(swatch.exists, name)
@@ -60,7 +73,7 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
             predicate: NSPredicate(format: "selected == true"), object: red
         )
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
-        XCTAssertEqual(app.textFields["#RRGGBB"].value as? String, "#E53E3E")
+        XCTAssertEqual(hex.value as? String, "#E53E3E")
         XCTAssertFalse(app.buttons["Black"].isSelected)
     }
 
