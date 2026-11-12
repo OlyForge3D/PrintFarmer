@@ -188,13 +188,38 @@ test(`printer availability uses the service status control in ${view} view`, asy
     const cardBox = await card.boundingBox();
     const browserBox = await browser.boundingBox();
     const identityBox = await identity.first().boundingBox();
+    const headerBox = await browser.locator('xpath=../../..').boundingBox();
+    expect(headerBox!.height).toBe(52);
     expect(Math.abs(browserBox!.x + browserBox!.width - (cardBox!.x + cardBox!.width - 13))).toBeLessThan(2);
     expect(browserBox!.y + browserBox!.height).toBeLessThanOrEqual(identityBox!.y);
+    if (view === 'collapsed') {
+      const sidebar = card.getByRole('button', { name: 'Open details sidebar', exact: true });
+      await expect(toolbar.getByRole('button', { name: 'Open details sidebar' })).toHaveCount(0);
+      const sidebarBox = await sidebar.boundingBox();
+      expect(sidebarBox!.width).toBe(44);
+      expect(sidebarBox!.height).toBe(44);
+      expect(sidebarBox!.y).toBe(browserBox!.y);
+      expect(sidebarBox!.x + sidebarBox!.width).toBeLessThanOrEqual(browserBox!.x);
+      await sidebar.focus();
+      await page.keyboard.press('Tab');
+      await expect(browser).toBeFocused();
+    } else {
+      await expect(card.getByRole('button', { name: 'Open details sidebar' })).toHaveCount(0);
+    }
     await browser.focus();
     await expect(browser).toBeFocused();
     await expect(page.getByRole('button', { name: 'More options' })).toHaveCount(0);
     const actions = toolbar.locator(':scope > button, :scope > a, :scope > span');
-    await expect(actions).toHaveCount(view === 'collapsed' ? 8 : 6);
+    await expect(actions).toHaveCount(view === 'collapsed' ? 7 : 6);
+    expect(await actions.evaluateAll(elements => elements.map(element => element.getAttribute('aria-label')))).toEqual([
+      'In Service: Mark Fixture CoreXY Out of Service',
+      'Show camera preview',
+      'Toggle auto-dispatch for Fixture CoreXY',
+      'View printer files',
+      'View print history',
+      view === 'collapsed' ? 'Edit Printer' : 'Edit details',
+      ...(view === 'collapsed' ? ['Manage Tags'] : []),
+    ]);
     const boxes = await actions.evaluateAll(elements => elements.map(element => {
       const { x, y, width, height } = element.getBoundingClientRect();
       return { x, y, width, height };
@@ -204,8 +229,8 @@ test(`printer availability uses the service status control in ${view} view`, asy
     expect(toolbarBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
     expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
     for (const [index, box] of boxes.entries()) {
-      expect(box.width).toBeGreaterThanOrEqual(view === 'collapsed' ? 44 : 32);
-      expect(box.height).toBeGreaterThanOrEqual(view === 'collapsed' ? 44 : 32);
+      expect(box.width).toBe(44);
+      expect(box.height).toBe(44);
       expect(Math.abs(box.x - boxes[index % 2].x)).toBeLessThan(1);
       if (index % 2 === 1) {
         expect(box.x).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width);

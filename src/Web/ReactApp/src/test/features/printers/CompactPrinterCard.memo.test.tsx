@@ -366,7 +366,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
-  it('keeps the Open details sidebar action in compact mode', async () => {
+  it('opens the details sidebar from the header immediately before Open in Browser', async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn();
 
@@ -378,7 +378,12 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Open details sidebar' }));
+    const sidebar = screen.getByRole('button', { name: 'Open details sidebar' });
+    const browser = screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i });
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(sidebar);
+    expect(screen.getByRole('group', { name: 'Printer actions' })).not.toContainElement(sidebar);
+    expect(sidebar.nextElementSibling).toBe(browser);
+    await user.click(sidebar);
 
     expect(onExpand).toHaveBeenCalledWith('printer-1');
   });
