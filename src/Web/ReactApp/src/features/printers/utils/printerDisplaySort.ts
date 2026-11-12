@@ -9,11 +9,9 @@ export type PrinterSortMode = 'state' | 'name' | 'backend';
  * Creating an `Intl.Collator` has real setup cost, so building one per
  * `localeCompare` call inside an O(n log n) comparator scales badly for
  * large fleets; one instance reused across renders and sort calls keeps the
- * same default-locale ordering as the plain `String.prototype.localeCompare()`
- * calls it replaces (no options are passed, matching `localeCompare()`'s
- * defaults exactly).
+ * locale-aware, case-insensitive ordering across card and table views.
  */
-const PRINTER_NAME_COLLATOR = new Intl.Collator();
+const PRINTER_NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'accent' });
 
 /** Precomputed, per-printer sort fields so the comparator does no repeated work. */
 interface DecoratedPrinterForSort {
@@ -24,12 +22,13 @@ interface DecoratedPrinterForSort {
 
 /** State priority for sorting: lower number = higher in list */
 export function getStateSortPriority(printer: Printer, pendingIds: ReadonlySet<string>): number {
-  if (pendingIds.has(printer.id)) return 0;       // PendingReady (attention)
-  if (!printer.isOnline) return 4;                 // Offline
+  if (!printer.isOnline) return 5;
+  if (pendingIds.has(printer.id)) return 1;
   const state = (printer.state || '').toLowerCase();
-  if (state.includes('printing')) return 1;        // Printing
-  if (state.includes('paused')) return 2;           // Paused
-  return 3;                                         // Idle / other online
+  if (state === 'printing' || state === 'paused') return 0;
+  if (printer.inMaintenance) return 4;
+  if (state === 'error') return 2;
+  return 3;
 }
 
 /** Helper function to get backend name from a wire or legacy value. */
@@ -51,8 +50,7 @@ export function getBackendName(backend: PrinterBackend | string | number): strin
  *    computed once per printer instead of once per comparator invocation,
  *    and all name comparisons share one `Intl.Collator` instead of
  *    allocating one per `localeCompare` call.
- * Sorting is stable (`Array.prototype.sort` has been spec-guaranteed stable
- * since ES2019), so ties keep their relative input order exactly as before.
+ * Names compare case-insensitively; IDs make equal-name ordering deterministic.
  */
 export function sortPrintersForDisplay(
   printers: readonly Printer[],
@@ -62,6 +60,9 @@ export function sortPrintersForDisplay(
 ): Printer[] {
   const activeMode = direction === null ? 'state' : sortMode;
   const multiplier = direction === 'desc' ? -1 : 1;
+  const compareNames = (a: Printer, b: Printer) =>
+    PRINTER_NAME_COLLATOR.compare(a.name ?? '', b.name ?? '')
+      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const decorated: DecoratedPrinterForSort[] = printers.map(printer => ({
     printer,
     statePriority: getStateSortPriority(printer, pendingPrinterIds),
@@ -70,15 +71,15 @@ export function sortPrintersForDisplay(
   decorated.sort((a, b) => {
     if (activeMode === 'state') {
       if (a.statePriority !== b.statePriority) return multiplier * (a.statePriority - b.statePriority);
-      return PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
+      return compareNames(a.printer, b.printer);
     }
     if (activeMode === 'name') {
-      return multiplier * PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
+      return multiplier * compareNames(a.printer, b.printer);
     }
     if (activeMode === 'backend') {
       const cmp = PRINTER_NAME_COLLATOR.compare(a.backendName, b.backendName);
       if (cmp !== 0) return multiplier * cmp;
-      return PRINTER_NAME_COLLATOR.compare(a.printer.name ?? '', b.printer.name ?? '');
+      return compareNames(a.printer, b.printer);
     }
     return 0;
   });

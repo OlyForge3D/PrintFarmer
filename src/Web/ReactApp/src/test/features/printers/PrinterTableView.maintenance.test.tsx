@@ -51,20 +51,35 @@ describe('PrinterTableView - maintenance button', () => {
 
   useAllAutoDispatchStatusesMock.mockReturnValue({ data: [] as AutoDispatchStatus[] });
 
-  it('places service immediately after printer and removes Last Updated without changing operational status', () => {
+  it('places service first in Actions without a separate column or changing operational status', () => {
     render(<PrinterTableView printers={[{ ...basePrinter, state: 'Printing' }]} onEdit={vi.fn()} onDelete={vi.fn()}
       onBulkSetMaintenance={vi.fn()} onOpenMaintenance={vi.fn()} />);
     const headers = screen.getAllByRole('columnheader');
     expect(headers.map(header => header.textContent?.trim())).toEqual([
-      '', 'Printer', 'Service', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
+      '', 'Printer', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
     ]);
-    expect(headers[2]).not.toHaveAttribute('aria-sort');
+    expect(headers[6]).not.toHaveAttribute('aria-sort');
     const cells = within(screen.getByRole('row', { name: /Printer 1/ })).getAllByRole('cell');
     expect(within(cells[1]).queryByRole('img', { name: 'In Service' })).not.toBeInTheDocument();
-    expect(within(cells[2]).getByRole('img', { name: 'In Service' })).toBeInTheDocument();
-    expect(cells[3]).toHaveTextContent('Printing');
+    const serviceIndicator = within(cells[6]).getByRole('img', { name: 'In Service' });
+    expect(cells[6].firstElementChild?.firstElementChild).toContainElement(serviceIndicator);
+    expect(cells[2]).toHaveTextContent('Printing');
     expect(screen.queryByText('Last Updated')).not.toBeInTheDocument();
     expect(screen.queryByText('Online', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('only offers offline help In Service and clears an open popover when unplugged', () => {
+    const props = { onEdit: vi.fn(), onDelete: vi.fn(), onBulkSetMaintenance: vi.fn(), onOpenMaintenance: vi.fn() };
+    const offline = { ...basePrinter, isOnline: false };
+    const { rerender } = render(<PrinterTableView {...props} printers={[offline]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Troubleshoot Printer 1' }));
+    expect(screen.getByRole('list', { name: 'Common troubleshooting steps' })).toBeInTheDocument();
+    rerender(<PrinterTableView {...props} printers={[{ ...offline, isEnabled: false }]} />);
+    expect(screen.queryByRole('button', { name: 'Troubleshoot Printer 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Common troubleshooting steps' })).not.toBeInTheDocument();
+    rerender(<PrinterTableView {...props} printers={[offline]} />);
+    expect(screen.getByRole('button', { name: 'Troubleshoot Printer 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Common troubleshooting steps' })).not.toBeInTheDocument();
   });
 
   it.each([

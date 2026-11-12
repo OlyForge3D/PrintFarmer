@@ -165,6 +165,7 @@ describe('PrinterCardGrid', () => {
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
 
     multiColumnViewport = true;
+    containerWidth = 656;
     act(() => observedResizes.forEach((notify) => notify()));
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(30));
   });
@@ -185,8 +186,10 @@ describe('PrinterCardGrid', () => {
   it.each([
     ['detailed', 1183, 2],
     ['detailed', 1184, 3],
-    ['compact', 1423, 4],
-    ['compact', 1424, 5],
+    ['compact', 1663, 4],
+    ['compact', 1664, 5],
+    ['compact', 655, 1],
+    ['compact', 656, 2],
   ] as const)('fits %s columns at the %ipx density boundary', async (mode, width, columns) => {
     containerWidth = width;
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
@@ -195,8 +198,13 @@ describe('PrinterCardGrid', () => {
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(Math.ceil(printers.length / columns)));
     const cards = screen.getAllByRole('listitem');
     const expectedWidth = (width - (columns - 1) * 16) / columns;
-    expect(Number.parseFloat(cards[0].style.width)).toBeCloseTo(expectedWidth);
-    expect(cards[1].style.transform).toBe(`translate(${expectedWidth + 16}px, 0px)`);
+    if (columns === 1) {
+      expect(cards[0]).toHaveStyle({ width: '100%' });
+      expect(cards[1].style.transform).toBe('translate(0px, 360px)');
+    } else {
+      expect(Number.parseFloat(cards[0].style.width)).toBeCloseTo(expectedWidth);
+      expect(cards[1].style.transform).toBe(`translate(${expectedWidth + 16}px, 0px)`);
+    }
     expect(expectedWidth * columns + (columns - 1) * 16).toBeCloseTo(width);
   });
 
