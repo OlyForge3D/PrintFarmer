@@ -16,6 +16,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- **Unknown scan filament selection (#3783)** — Choose an existing filament
+  through alphabetically sorted material, matching vendor, and matching
+  filament name, rather than a flat list. Changing an earlier selection clears
+  later selections; the exact filament ID is retained.
+
 - **Scan / Add Spool saving (#3768)** — Choose an exact existing filament or
   create one from confirmed required data before saving a spool. Save no longer
   sends a missing filament ID or silently picks the first material/vendor match.

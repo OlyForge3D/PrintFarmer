@@ -103,8 +103,7 @@ enum UITestBootstrap {
     /// Followed by a code value: installs a scanner stub that returns that
     /// code, so XCUI can drive the scan result paths without a camera.
     static let scanCodeLaunchArgument = "--uitesting-scan-code"
-    /// Followed by `alias-save-unreachable` or `spool-create-timeout`: injects
-    /// that remembered-code failure into the demo intake service.
+    /// Selects remembered-code or catalog-loading faults for intake UI tests.
     static let scanIntakeFaultLaunchArgument = "--uitesting-scan-intake-fault"
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
@@ -389,6 +388,19 @@ enum UITestBootstrap {
            arguments.indices.contains(index + 1),
            let fault = DemoBarcodeIntakeService.Fault(rawValue: arguments[index + 1]) {
             services.barcodeIntakeService = DemoBarcodeIntakeService(fault: fault)
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           arguments[index + 1] == "catalog-load-unreachable" {
+            services.spoolService = DemoSpoolService(failFirstFilamentLoad: true)
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           ["vendors-load-unreachable", "vendors-load-spool-timeout"].contains(arguments[index + 1]) {
+            services.spoolService = DemoSpoolService(failFirstVendorLoad: true)
+            if arguments[index + 1] == "vendors-load-spool-timeout" {
+                services.barcodeIntakeService = DemoBarcodeIntakeService(fault: .spoolCreateTimeout)
+            }
         }
         if let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_URL"] {
             guard let url = URL(string: rawURL),

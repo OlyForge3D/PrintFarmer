@@ -187,12 +187,13 @@ private struct UnknownBarcodeView: View {
     let onSelectFilament: @MainActor (SpoolmanFilament) async -> SelectionFailure?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var filaments: [SpoolmanFilament] = []
+    @State private var selection = FilamentCatalogSelection()
     @State private var materials: [SpoolmanMaterial] = []
     @State private var vendors: [SpoolmanVendor] = []
-    @State private var searchText = ""
     @State private var isLoading = false
+    @State private var filamentsLoaded = false
     @State private var isSaving = false
+    @State private var loadErrorMessage: String?
     @State private var errorMessage: String?
     /// The existing filament whose remember/import failed; offered for Retry.
     @State private var failedSelection: SpoolmanFilament?
@@ -212,17 +213,7 @@ private struct UnknownBarcodeView: View {
     @State private var densityGPerCm3: Double = SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter
     @State private var diameterMm: Double = SpoolmanFilamentRequest.defaultDiameterMillimeters
 
-    private var filteredFilaments: [SpoolmanFilament] {
-        guard !searchText.isEmpty else { return filaments }
-        let query = searchText.lowercased()
-        return filaments.filter {
-            ($0.name?.lowercased().contains(query) ?? false)
-            || ($0.material?.lowercased().contains(query) ?? false)
-            || ($0.vendor?.lowercased().contains(query) ?? false)
-            || ($0.gtin?.lowercased().contains(query) ?? false)
-            || ($0.articleNumber?.lowercased().contains(query) ?? false)
-        }
-    }
+    private let selectionTint = Color.adaptive(light: "#047857", dark: "#6ee7b7")
 
     private var canCreateFilament: Bool {
         !filamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -250,6 +241,23 @@ private struct UnknownBarcodeView: View {
                     }
                 }
 
+                if let loadErrorMessage, !outcomeUncertain {
+                    Section {
+                        Text(loadErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfError)
+                            .accessibilityIdentifier("mapBarcode.loadError")
+                        Button("Retry loading filaments") {
+                            guard !isLoading && !isSaving else { return }
+                            isLoading = true
+                            Task { await loadReferenceData() }
+                        }
+                        .tint(selectionTint)
+                        .disabled(isLoading || isSaving)
+                        .accessibilityIdentifier("mapBarcode.retryLoad")
+                    }
+                }
+
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
@@ -258,6 +266,7 @@ private struct UnknownBarcodeView: View {
                             .accessibilityIdentifier("mapBarcode.error")
                         if outcomeUncertain {
                             Button("Done") { dismiss() }
+                                .tint(selectionTint)
                                 .accessibilityIdentifier("mapBarcode.uncertainDone")
                         } else if let failedSelection, !showCreateForm {
                             Button {
@@ -274,6 +283,8 @@ private struct UnknownBarcodeView: View {
 
                 if outcomeUncertain {
                     EmptyView()
+                } else if isLoading {
+                    Section { ProgressView("Loading filaments…") }
                 } else if showCreateForm {
                     createFilamentSection
                 } else {
@@ -287,25 +298,55 @@ private struct UnknownBarcodeView: View {
                         .accessibilityIdentifier("mapBarcode.showCreate")
                     }
 
-                    Section("Existing Filaments") {
-                        if isLoading {
-                            ProgressView("Loading filaments…")
-                        } else if filteredFilaments.isEmpty {
+                    Section("Choose Existing Filament") {
+                        if !filamentsLoaded {
+                            Text("Filaments could not be loaded. Retry to choose an existing filament.")
+                                .foregroundStyle(Color.pfTextSecondary)
+                        } else if selection.materials.isEmpty {
                             ContentUnavailableView("No Filaments", systemImage: "tray")
                         } else {
-                            ForEach(filteredFilaments) { filament in
+                            Picker("Material", selection: $selection.material) {
+                                Text("Select…").tag(Optional<FilamentCatalogSelection.Option>.none)
+                                ForEach(selection.materials, id: \.self) { material in
+                                    Text(material.label).tag(Optional(material))
+                                }
+                            }
+                            .tint(selectionTint)
+                            .accessibilityIdentifier("mapBarcode.selectMaterial")
+                            Picker("Vendor", selection: $selection.vendor) {
+                                Text("Select…").tag(Optional<FilamentCatalogSelection.Option>.none)
+                                ForEach(selection.vendors, id: \.self) { vendor in
+                                    Text(vendor.label).tag(Optional(vendor))
+                                }
+                            }
+                            .tint(selectionTint)
+                            .disabled(selection.material == nil)
+                            .accessibilityIdentifier("mapBarcode.selectVendor")
+                            Picker("Filament name", selection: $selection.filamentId) {
+                                Text("Select…").tag(Optional<Int>.none)
+                                ForEach(selection.matchingFilaments) { filament in
+                                    Text("\(filament.name ?? "Not specified") (#\(filament.id))")
+                                        .tag(Optional(filament.id))
+                                }
+                            }
+                            .tint(selectionTint)
+                            .disabled(selection.vendor == nil)
+                            .accessibilityIdentifier("mapBarcode.selectFilament")
+                            if let filament = selection.selectedFilament {
                                 Button {
                                     selectFilament(filament)
                                 } label: {
-                                    filamentRow(filament)
-                                        .contentShape(Rectangle())
+                                    Label("Add Spool", systemImage: "plus.circle")
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Use filament \(filament.name ?? filament.material ?? String(filament.id))")
-                                .accessibilityIdentifier("mapBarcode.filament.\(filament.id)")
+                                .tint(selectionTint)
+                                .disabled(isSaving)
+                                .accessibilityLabel("\(remembersCode ? "Add spool of" : "Import spool of") \(filament.name ?? "filament #\(filament.id)")")
+                                .accessibilityIdentifier("mapBarcode.addSpool")
+                                filamentRow(filament)
                             }
                         }
                     }
+                    .disabled(isSaving)
                 }
             }
             .accessibilityIdentifier("mapBarcode.list")
@@ -313,14 +354,20 @@ private struct UnknownBarcodeView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .searchable(text: $searchText, prompt: "Search filaments")
+            .onChange(of: selection.material) { _, _ in clearFailedSelection() }
+            .onChange(of: selection.vendor) { _, _ in clearFailedSelection() }
+            .onChange(of: selection.filamentId) { _, _ in clearFailedSelection() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Skip") { dismiss() }
                         .disabled(isSaving)
                 }
             }
-            .task { await loadReferenceData() }
+            .task {
+                guard !isLoading else { return }
+                isLoading = true
+                await loadReferenceData()
+            }
         }
     }
 
@@ -332,7 +379,9 @@ private struct UnknownBarcodeView: View {
             } else {
                 Picker("Material", selection: $selectedMaterial) {
                     Text("Select…").tag("")
-                    ForEach(materials, id: \.name) { material in
+                    ForEach(materials.sorted {
+                        $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    }, id: \.name) { material in
                         Text(material.name).tag(material.name)
                     }
                 }
@@ -348,7 +397,9 @@ private struct UnknownBarcodeView: View {
             } else {
                 Picker("Vendor", selection: $selectedVendorId) {
                     Text("None").tag(Optional<Int>.none)
-                    ForEach(vendors) { vendor in
+                    ForEach(vendors.sorted {
+                        $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    }) { vendor in
                         Text(vendor.name).tag(Optional(vendor.id))
                     }
                 }
@@ -478,28 +529,43 @@ private struct UnknownBarcodeView: View {
                         .foregroundStyle(Color.pfTextSecondary)
                 }
             }
-
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(Color.pfTextTertiary)
         }
     }
 
     private func loadReferenceData() async {
-        isLoading = true
-        errorMessage = nil
+        loadErrorMessage = nil
+        async let loadedFilaments = spoolService.listFilaments()
+        async let loadedMaterials = spoolService.listMaterials()
+        async let loadedVendors = spoolService.listVendors()
+        var failures: [String] = []
         do {
-            async let loadedFilaments = spoolService.listFilaments()
-            async let loadedMaterials = spoolService.listMaterials()
-            async let loadedVendors = spoolService.listVendors()
-            filaments = try await loadedFilaments
+            selection.filaments = try await loadedFilaments
+            filamentsLoaded = true
+        } catch {
+            selection.filaments = []
+            filamentsLoaded = false
+            failures.append("Filaments: \(error.localizedDescription)")
+        }
+        do {
             materials = try await loadedMaterials
+        } catch {
+            materials = []
+            failures.append("Materials: \(error.localizedDescription)")
+        }
+        do {
             vendors = try await loadedVendors
         } catch {
-            errorMessage = error.localizedDescription
+            vendors = []
+            failures.append("Vendors: \(error.localizedDescription)")
         }
+        loadErrorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
         isLoading = false
+    }
+
+    private func clearFailedSelection() {
+        failedSelection = nil
+        errorMessage = nil
     }
 
     private func selectFilament(_ filament: SpoolmanFilament) {

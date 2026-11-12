@@ -580,6 +580,67 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testCatalogCascadesAlphabeticallyAndResetsDownstreamSelection() {
+        let selection = FilamentCatalogSelection()
+        selection.filaments = [
+            makeFilament(id: 5, name: "Zulu", material: "PLA", vendor: "Beta"),
+            makeFilament(id: 4, name: "alpha", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 3, name: "Alpha", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 2, name: "Other", material: "PETG", vendor: "Zulu"),
+            makeFilament(id: 1, name: "Absent", material: nil, vendor: nil),
+        ]
+        XCTAssertEqual(selection.materials.map(\.label), ["Not specified", "PETG", "PLA"])
+        XCTAssertTrue(selection.vendors.isEmpty)
+        XCTAssertTrue(selection.matchingFilaments.isEmpty)
+
+        selection.material = .value("PLA")
+        XCTAssertEqual(selection.vendors.map(\.label), ["Acme", "Beta"])
+        selection.vendor = .value("Acme")
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [3, 4], "equal names keep distinct filament IDs")
+        selection.filamentId = 4
+        XCTAssertEqual(selection.selectedFilament?.id, 4)
+        selection.vendor = .value("Beta")
+        XCTAssertNil(selection.filamentId)
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [5])
+        selection.filamentId = 4
+        XCTAssertNil(selection.selectedFilament, "a stale ID cannot be submitted")
+        selection.material = .value("PETG")
+        XCTAssertNil(selection.vendor)
+        XCTAssertNil(selection.filamentId)
+        XCTAssertEqual(selection.vendors.map(\.label), ["Zulu"])
+        selection.material = .unspecified
+        selection.vendor = .unspecified
+        XCTAssertEqual(selection.matchingFilaments.map(\.id), [1])
+        selection.filaments = []
+        XCTAssertNil(selection.material)
+        XCTAssertNil(selection.vendor)
+        XCTAssertNil(selection.filamentId)
+    }
+
+    @MainActor
+    func testCatalogFilamentNamesSortAndSelectedIdentityIsRemembered() async throws {
+        let (viewModel, service) = makeSubject()
+        let selection = FilamentCatalogSelection()
+        selection.filaments = [
+            makeFilament(id: 9, name: "zinc", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 8, name: "Amber", material: "PLA", vendor: "Acme"),
+            makeFilament(id: 7, name: "blue", material: "PLA", vendor: "Acme"),
+        ]
+        service.filamentsById = Dictionary(uniqueKeysWithValues: selection.filaments.map { ($0.id, $0) })
+        service.spoolToCreate = makeSpool(id: 99, filamentId: 7)
+        await viewModel.handleScannedBarcode("X0022Z40I1")
+        selection.material = .value("PLA")
+        selection.vendor = .value("Acme")
+        XCTAssertEqual(selection.matchingFilaments.map(\.name), ["Amber", "blue", "zinc"])
+        selection.filamentId = 7
+        let selected = try XCTUnwrap(selection.selectedFilament)
+        let imported = await viewModel.importUnknownBarcode(with: selected)
+        XCTAssertTrue(imported)
+        XCTAssertEqual(service.aliases["X0022Z40I1"]?.id, 7)
+        XCTAssertEqual(service.createSpoolCalls, [7])
+    }
+
+    @MainActor
     private func makeSubject() -> (BarcodeIntakeViewModel, MockBarcodeIntakeService) {
         let service = MockBarcodeIntakeService()
         let viewModel = BarcodeIntakeViewModel()
@@ -589,15 +650,18 @@ final class BarcodeIntakeViewModelTests: XCTestCase {
 
     private func makeFilament(
         id: Int,
+        name: String? = "PLA Black",
+        material: String? = "PLA",
+        vendor: String? = "Prusa Research",
         gtin: String? = "00012345678905",
         articleNumber: String? = "PRM-PLA-BK"
     ) -> SpoolmanFilament {
         SpoolmanFilament(
             id: id,
-            name: "PLA Black",
-            material: "PLA",
+            name: name,
+            material: material,
             colorHex: "#000000",
-            vendor: "Prusa Research",
+            vendor: vendor,
             density: 1.24,
             diameter: 1.75,
             weight: 1000,
