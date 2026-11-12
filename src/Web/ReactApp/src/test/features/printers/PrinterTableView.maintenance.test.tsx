@@ -68,6 +68,20 @@ describe('PrinterTableView - maintenance button', () => {
     expect(screen.queryByText('Online', { exact: true })).not.toBeInTheDocument();
   });
 
+  it('only offers offline help In Service and clears an open popover when unplugged', () => {
+    const props = { onEdit: vi.fn(), onDelete: vi.fn(), onBulkSetMaintenance: vi.fn(), onOpenMaintenance: vi.fn() };
+    const offline = { ...basePrinter, isOnline: false };
+    const { rerender } = render(<PrinterTableView {...props} printers={[offline]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Troubleshoot Printer 1' }));
+    expect(screen.getByRole('list', { name: 'Common troubleshooting steps' })).toBeInTheDocument();
+    rerender(<PrinterTableView {...props} printers={[{ ...offline, isEnabled: false }]} />);
+    expect(screen.queryByRole('button', { name: 'Troubleshoot Printer 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Common troubleshooting steps' })).not.toBeInTheDocument();
+    rerender(<PrinterTableView {...props} printers={[offline]} />);
+    expect(screen.getByRole('button', { name: 'Troubleshoot Printer 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Common troubleshooting steps' })).not.toBeInTheDocument();
+  });
+
   it.each([
     [true, true, true],
     [false, true, false],

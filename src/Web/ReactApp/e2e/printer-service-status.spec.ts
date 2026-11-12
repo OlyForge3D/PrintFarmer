@@ -158,6 +158,9 @@ test(`printer availability uses the service status control in ${view} view`, asy
   const markInService = page.getByRole('button', { name: 'Out of Service: Mark Fixture out of service B In Service', exact: true });
   await expect(markOutOfService).toBeVisible();
   await expect(markInService).toBeVisible();
+  const helpName = view === 'table' ? 'Troubleshoot ' : 'Open troubleshooting for ';
+  await expect(page.getByRole('button', { name: `${helpName}Fixture unexpected`, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: `${helpName}Fixture out of service B`, exact: true })).toHaveCount(0);
   if (view === 'table') {
     await expect(page.getByRole('columnheader')).toHaveText([
       '', 'Printer', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
@@ -192,6 +195,11 @@ test(`printer availability uses the service status control in ${view} view`, asy
           expect(box.x).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width);
           expect(Math.abs(box.y - boxes[index - 1].y)).toBeLessThan(1);
         }
+        const card = await toolbar.locator('xpath=ancestor::article').boundingBox();
+        expect(card!.width).toBeGreaterThanOrEqual(320);
+        const toolbarBox = await toolbar.boundingBox();
+        expect(toolbarBox!.x).toBeGreaterThanOrEqual(card!.x);
+        expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(card!.x + card!.width);
         if (index >= 2) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 2].y + boxes[index - 2].height);
       }
       const files = toolbar.getByRole('button', { name: 'View printer files' });

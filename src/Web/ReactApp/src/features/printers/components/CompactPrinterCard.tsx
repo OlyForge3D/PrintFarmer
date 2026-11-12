@@ -237,7 +237,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               Update
             </span>
           )}
-          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
+          {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
         {/* Tags row */}
         {printerTags.length > 0 && (

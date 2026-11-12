@@ -13,7 +13,7 @@ import type { Printer } from '@/types/api';
 export const PRINTER_GRID_VIRTUALIZATION_THRESHOLD = 60;
 
 const GRID_GAP_REM = 1;
-const COMPACT_CARD_WIDTH_REM = 17;
+const COMPACT_CARD_WIDTH_REM = 20;
 const DETAILED_CARD_WIDTH_REM = 24;
 const DEFAULT_ROOT_FONT_SIZE_PX = 16;
 const MULTI_COLUMN_MEDIA_QUERY = '(min-width: 640px)';
@@ -47,7 +47,7 @@ function getColumnCount(width: number, cardWidthPx: number, gapPx: number): numb
 
 function gridClassName(mode: PrinterGridMode): string {
   return mode === 'compact'
-    ? 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-4 transition-opacity duration-200 min-w-0'
+    ? 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 transition-opacity duration-200 min-w-0'
     : 'grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,24rem),1fr))] gap-4 min-w-0';
 }
 

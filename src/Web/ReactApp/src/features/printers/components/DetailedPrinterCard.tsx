@@ -578,7 +578,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             recentEvents={recentEvents}
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
-          {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
+          {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
       </div>
 

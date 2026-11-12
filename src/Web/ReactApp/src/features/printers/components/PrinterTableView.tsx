@@ -55,6 +55,13 @@ export function PrinterTableView({
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
   const [troubleshootPrinterId, setTroubleshootPrinterId] = useState<string | null>(null);
   const troubleshootRef = useRef<HTMLDivElement>(null);
+  const troubleshootPrinter = printers.find(printer => printer.id === troubleshootPrinterId);
+  const canTroubleshoot = troubleshootPrinter?.isEnabled !== false
+    && displayPrinters.some(printer => printer.id === troubleshootPrinterId && !printer.isOnline);
+
+  if (troubleshootPrinterId && !canTroubleshoot) {
+    setTroubleshootPrinterId(null);
+  }
   const autoDispatchStatusByPrinterId = useMemo(
     () => new Map((allAutoDispatchStatuses ?? []).map((status) => [status.printerId, status])),
     [allAutoDispatchStatuses],
@@ -316,7 +323,7 @@ export function PrinterTableView({
                       <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
                         {statusLabel}
                       </div>
-                      {!(displayPrinter.isOnline ?? false) && (
+                      {!(displayPrinter.isOnline ?? false) && printer.isEnabled !== false && (
                         <div className="relative" ref={troubleshootPrinterId === printer.id ? troubleshootRef : undefined}>
                           <Button
                             type="button"
