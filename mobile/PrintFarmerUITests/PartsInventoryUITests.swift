@@ -40,13 +40,16 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         if createFilament.value as? String != "1" {
             createFilament.tap()
         }
+        XCTAssertEqual(createFilament.value as? String, "1")
 
+        let form = app.collectionViews.containing(.switch, identifier: "addSpool.createFilament").firstMatch
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
         let red = app.buttons["Red"]
-        for _ in 0..<4 {
+        for _ in 0..<12 {
             if red.exists && red.isHittable { break }
-            app.swipeUp()
+            form.swipeUp()
         }
-        XCTAssertTrue(red.isHittable)
+        XCTAssertTrue(red.isHittable, "The Red swatch must be reachable in the Add Spool form")
         for name in ["Black", "White", "Red"] {
             let swatch = app.buttons[name]
             XCTAssertTrue(swatch.exists, name)
