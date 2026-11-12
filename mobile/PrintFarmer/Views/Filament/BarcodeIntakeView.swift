@@ -252,6 +252,7 @@ private struct UnknownBarcodeView: View {
                             isLoading = true
                             Task { await loadReferenceData() }
                         }
+                        .tint(selectionTint)
                         .disabled(isLoading || isSaving)
                         .accessibilityIdentifier("mapBarcode.retryLoad")
                     }
@@ -265,6 +266,7 @@ private struct UnknownBarcodeView: View {
                             .accessibilityIdentifier("mapBarcode.error")
                         if outcomeUncertain {
                             Button("Done") { dismiss() }
+                                .tint(selectionTint)
                                 .accessibilityIdentifier("mapBarcode.uncertainDone")
                         } else if let failedSelection, !showCreateForm {
                             Button {
