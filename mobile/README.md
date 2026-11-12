@@ -185,7 +185,7 @@ Run each first-scan selector separately and reset the isolated fixture's
 and fails explicitly on stale fixtures or lookup errors. Seed filaments 41 and
 42 with material `PLA`, vendor `Fixture Vendor`, and name `PLA explicitly chosen`
 for the existing-filament scenario; the duplicate names exercise ID selection.
-it explicitly selects 42, relaunches the app and confirms another spool.
+The test selects 42, relaunches the app and confirms another spool.
 The new-filament scenario submits the form only in connected mode because the
 standard demo spool service is intentionally read-only. Verify the API database
 and distinct upstream spool IDs separately, and identify any fixture upstream

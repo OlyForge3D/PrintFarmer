@@ -191,9 +191,9 @@ private struct UnknownBarcodeView: View {
     @State private var materials: [SpoolmanMaterial] = []
     @State private var vendors: [SpoolmanVendor] = []
     @State private var isLoading = false
-    @State private var loadFailed = false
     @State private var filamentsLoaded = false
     @State private var isSaving = false
+    @State private var loadErrorMessage: String?
     @State private var errorMessage: String?
     /// The existing filament whose remember/import failed; offered for Retry.
     @State private var failedSelection: SpoolmanFilament?
@@ -212,6 +212,8 @@ private struct UnknownBarcodeView: View {
     @State private var spoolWeightG: Double = 200
     @State private var densityGPerCm3: Double = SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter
     @State private var diameterMm: Double = SpoolmanFilamentRequest.defaultDiameterMillimeters
+
+    private let selectionTint = Color.adaptive(light: "#047857", dark: "#6ee7b7")
 
     private var canCreateFilament: Bool {
         !filamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -239,21 +241,28 @@ private struct UnknownBarcodeView: View {
                     }
                 }
 
+                if let loadErrorMessage, !outcomeUncertain {
+                    Section {
+                        Text(loadErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(Color.pfError)
+                            .accessibilityIdentifier("mapBarcode.loadError")
+                        Button("Retry loading filaments") {
+                            guard !isLoading && !isSaving else { return }
+                            isLoading = true
+                            Task { await loadReferenceData() }
+                        }
+                        .disabled(isLoading || isSaving)
+                        .accessibilityIdentifier("mapBarcode.retryLoad")
+                    }
+                }
+
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
                             .font(.caption)
                             .foregroundStyle(Color.pfError)
                             .accessibilityIdentifier("mapBarcode.error")
-                        if loadFailed {
-                            Button("Retry loading filaments") {
-                                guard !isLoading && !isSaving else { return }
-                                isLoading = true
-                                Task { await loadReferenceData() }
-                            }
-                            .disabled(isLoading || isSaving)
-                            .accessibilityIdentifier("mapBarcode.retryLoad")
-                        }
                         if outcomeUncertain {
                             Button("Done") { dismiss() }
                                 .accessibilityIdentifier("mapBarcode.uncertainDone")
@@ -300,7 +309,7 @@ private struct UnknownBarcodeView: View {
                                     Text(material.label).tag(Optional(material))
                                 }
                             }
-                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
+                            .tint(selectionTint)
                             .accessibilityIdentifier("mapBarcode.selectMaterial")
                             Picker("Vendor", selection: $selection.vendor) {
                                 Text("Select…").tag(Optional<FilamentCatalogSelection.Option>.none)
@@ -308,7 +317,7 @@ private struct UnknownBarcodeView: View {
                                     Text(vendor.label).tag(Optional(vendor))
                                 }
                             }
-                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
+                            .tint(selectionTint)
                             .disabled(selection.material == nil)
                             .accessibilityIdentifier("mapBarcode.selectVendor")
                             Picker("Filament name", selection: $selection.filamentId) {
@@ -318,7 +327,7 @@ private struct UnknownBarcodeView: View {
                                         .tag(Optional(filament.id))
                                 }
                             }
-                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
+                            .tint(selectionTint)
                             .disabled(selection.vendor == nil)
                             .accessibilityIdentifier("mapBarcode.selectFilament")
                             if let filament = selection.selectedFilament {
@@ -327,6 +336,7 @@ private struct UnknownBarcodeView: View {
                                 } label: {
                                     Label("Add Spool", systemImage: "plus.circle")
                                 }
+                                .tint(selectionTint)
                                 .disabled(isSaving)
                                 .accessibilityLabel("\(remembersCode ? "Add spool of" : "Import spool of") \(filament.name ?? "filament #\(filament.id)")")
                                 .accessibilityIdentifier("mapBarcode.addSpool")
@@ -522,8 +532,7 @@ private struct UnknownBarcodeView: View {
     }
 
     private func loadReferenceData() async {
-        loadFailed = false
-        errorMessage = nil
+        loadErrorMessage = nil
         async let loadedFilaments = spoolService.listFilaments()
         async let loadedMaterials = spoolService.listMaterials()
         async let loadedVendors = spoolService.listVendors()
@@ -548,14 +557,13 @@ private struct UnknownBarcodeView: View {
             vendors = []
             failures.append("Vendors: \(error.localizedDescription)")
         }
-        loadFailed = !failures.isEmpty
-        errorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
+        loadErrorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
         isLoading = false
     }
 
     private func clearFailedSelection() {
         failedSelection = nil
-        if !loadFailed { errorMessage = nil }
+        errorMessage = nil
     }
 
     private func selectFilament(_ filament: SpoolmanFilament) {

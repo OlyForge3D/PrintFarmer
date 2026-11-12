@@ -142,7 +142,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
             "--uitesting-scan-intake-fault", "catalog-load-unreachable",
         ])
         openScanAndScan()
-        XCTAssertTrue(app.staticTexts["mapBarcode.error"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["mapBarcode.loadError"].waitForExistence(timeout: 8))
         let retry = app.buttons["mapBarcode.retryLoad"]
         XCTAssertTrue(retry.exists)
         let create = app.buttons["mapBarcode.showCreate"]
@@ -158,7 +158,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         for _ in 0..<5 where !retry.isHittable { list.swipeDown() }
         retry.tap()
         XCTAssertTrue(app.buttons["mapBarcode.selectMaterial"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["mapBarcode.error"].exists)
+        XCTAssertFalse(app.staticTexts["mapBarcode.loadError"].exists)
     }
 
     func testFnskuChangingSelectionClearsFailedRetry() {
@@ -182,10 +182,28 @@ final class ScanStationUITests: PrintFarmerUITestCase {
             "--uitesting-scan-intake-fault", "vendors-load-unreachable",
         ])
         openScanAndScan()
-        XCTAssertTrue(app.staticTexts["mapBarcode.error"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["mapBarcode.loadError"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists)
         chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
         XCTAssertTrue(app.buttons["mapBarcode.addSpool"].isEnabled)
+    }
+
+    func testFnskuUncertainSpoolOutcomeSurvivesPartialCatalogFailure() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "vendors-load-spool-timeout",
+        ])
+        openScanAndScan()
+        XCTAssertTrue(app.staticTexts["mapBarcode.loadError"].waitForExistence(timeout: 8))
+        chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
+        app.buttons["mapBarcode.addSpool"].tap()
+        let done = app.buttons["mapBarcode.uncertainDone"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["mapBarcode.error"].exists)
+        XCTAssertFalse(app.buttons["mapBarcode.retryLoad"].exists, "a catalog retry must not hide an uncertain spool outcome")
+        XCTAssertFalse(app.buttons["mapBarcode.retry"].exists)
+        done.tap()
+        XCTAssertTrue(app.navigationBars["Remember Code"].waitForNonExistence(timeout: 8))
     }
 
     func testFnskuUncertainSpoolOutcomeWithholdsRetry() {
