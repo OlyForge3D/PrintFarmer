@@ -38,8 +38,9 @@ The mobile app is not a second web console.
   Spoolman GTIN) before a spool is imported. UPC-E is expanded to its UPC-A
   GTIN first. A non-GTIN code such as an Amazon FNSKU sticker (Code 128/39
   text or a non-link QR payload) opens barcode intake in **Remember Code**
-  mode: the first scan asks the user to pick an existing filament or create a
-  new one, saves the exact code against that filament ID in PrintFarmer (a
+  mode: the first scan asks the user to choose an existing filament by
+  alphabetically ordered material, matching vendor, and matching filament name,
+  or create a new filament. It saves the exact code against the chosen filament ID in PrintFarmer (a
   case-sensitive alias, kept separate from the Spoolman GTIN and NFC
   mappings), then adds a spool of it. A later scan of the same code shows the
   remembered filament and adds another spool once the user confirms. Lookup or

@@ -41,12 +41,14 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.staticTexts["Unrecognized Code"].exists, "the field-reported FNSKU must not dead-end")
         XCTAssertEqual(app.staticTexts["mapBarcode.code"].label, "X0022Z40I1")
         XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists, "creating a new filament is offered")
-        let filament = !isLive
-            ? app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
-            : app.buttons["mapBarcode.filament.42"]
-        XCTAssertTrue(filament.waitForExistence(timeout: 8), "picking an existing filament is offered")
-        attachScreenshot(named: "fnsku-first-scan-remember-code")
-        filament.tap()
+        attachScreenshot(named: "fnsku-first-scan-cascading-empty")
+        chooseExistingFilament(
+            material: "PLA",
+            vendor: isLive ? "Fixture Vendor" : "Prusa Research",
+            name: isLive ? "PLA explicitly chosen (#42)" : "Prusament PLA (#1)"
+        )
+        attachScreenshot(named: "fnsku-first-scan-cascading-selection")
+        app.buttons["mapBarcode.addSpool"].tap()
 
         XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "a spool was created")
         XCTAssertFalse(app.navigationBars["Remember Code"].exists)
@@ -120,9 +122,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         ])
         openScanAndScan()
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
-        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
-        XCTAssertTrue(filament.waitForExistence(timeout: 8))
-        filament.tap()
+        chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
+        app.buttons["mapBarcode.addSpool"].tap()
 
         let retry = app.buttons["mapBarcode.retry"]
         XCTAssertTrue(retry.waitForExistence(timeout: 8), "a definite failure offers a labelled Retry in the sheet")
@@ -142,9 +143,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         ])
         openScanAndScan()
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
-        let filament = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mapBarcode.filament.'")).firstMatch
-        XCTAssertTrue(filament.waitForExistence(timeout: 8))
-        filament.tap()
+        chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
+        app.buttons["mapBarcode.addSpool"].tap()
 
         let done = app.buttons["mapBarcode.uncertainDone"]
         XCTAssertTrue(done.waitForExistence(timeout: 8))
@@ -192,6 +192,25 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func chooseExistingFilament(material: String, vendor: String, name: String) {
+        let materialPicker = app.buttons["mapBarcode.selectMaterial"]
+        XCTAssertTrue(materialPicker.waitForExistence(timeout: 8))
+        materialPicker.tap()
+        app.buttons[material].firstMatch.tap()
+        let vendorPicker = app.buttons["mapBarcode.selectVendor"]
+        XCTAssertTrue(vendorPicker.isEnabled)
+        vendorPicker.tap()
+        app.buttons[vendor].firstMatch.tap()
+        let filamentPicker = app.buttons["mapBarcode.selectFilament"]
+        XCTAssertTrue(filamentPicker.isEnabled)
+        filamentPicker.tap()
+        app.buttons[name].firstMatch.tap()
+        let add = app.buttons["mapBarcode.addSpool"]
+        let list = app.collectionViews["mapBarcode.list"]
+        for _ in 0..<3 where !add.isHittable { list.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
     }
 
     private func configureLiveIntakeIfRequested() async throws -> Bool {
