@@ -579,6 +579,36 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           />
           {recentFailure && <FailureDetectionBadge event={recentFailure} />}
           {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
+          <div className="ml-auto shrink-0">
+            {browserUrl ? (
+              <a
+                href={browserUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
+                aria-label={`Open printer ${printer.name} in new tab`}
+                title={`Open printer ${printer.name}`}
+              >
+                <ExternalLinkIcon className="h-4 w-4" />
+              </a>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled
+                explainedDisabled
+                className="h-8 w-8 p-0 text-pf-text-secondary"
+                aria-label={isInternalOnlyBrowserUrl
+                  ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                  : `Printer browser URL unavailable for ${printer.name}`}
+                title={isInternalOnlyBrowserUrl
+                  ? 'Not available for simulated test printers'
+                  : 'Printer browser URL is unavailable'}
+                iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -612,40 +642,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           </div>
 
         <div
-          className="grid shrink-0 grid-flow-col grid-rows-3 content-start gap-x-1"
+          className="grid shrink-0 grid-cols-2 content-start gap-x-1"
           role="toolbar"
           aria-label="Printer actions"
         >
             <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />
-            {browserUrl ? (
-              <a
-                href={browserUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
-                aria-label={`Open printer ${printer.name} in new tab`}
-                title={`Open printer ${printer.name}`}
-              >
-                <ExternalLinkIcon className="h-4 w-4" />
-              </a>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled
-                explainedDisabled
-                className="h-8 w-8 p-0 text-pf-text-secondary"
-                aria-label={isInternalOnlyBrowserUrl
-                  ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
-                  : `Printer browser URL unavailable for ${printer.name}`}
-                title={isInternalOnlyBrowserUrl
-                  ? 'Not available for simulated test printers'
-                  : 'Printer browser URL is unavailable'}
-                iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
-              />
-            )}
-
             <Button
               type="button"
               variant="ghost"

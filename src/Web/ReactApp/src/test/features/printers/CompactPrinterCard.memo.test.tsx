@@ -314,7 +314,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(progressBarRender).toHaveBeenCalledTimes(2);
   });
 
-  it('links Open in Browser directly to the printer frontend URL', () => {
+  it('links Open in Browser from the header rather than the action group', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter()}
@@ -324,8 +324,12 @@ describe('CompactPrinterCard memoization', () => {
     );
 
     expect(screen.queryByRole('button', { name: 'More options' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i }))
-      .toHaveAttribute('href', 'http://printer-1.local');
+    const link = screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i });
+    expect(link).toHaveAttribute('href', 'http://printer-1.local');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(link);
+    expect(screen.getByRole('group', { name: 'Printer actions' })).not.toContainElement(link);
   });
 
   it('routes the compact Review action to printer setup when failure detection is misconfigured', async () => {
@@ -420,6 +424,7 @@ describe('CompactPrinterCard memoization', () => {
     });
     expect(fallbackButton).not.toBeDisabled();
     expect(fallbackButton).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(fallbackButton);
   });
 
   it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', () => {
@@ -438,6 +443,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(disabledButton).not.toBeDisabled();
     expect(disabledButton).toHaveAttribute('aria-disabled', 'true');
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
+    expect(screen.getByText('Printer 1').parentElement).toContainElement(disabledButton);
   });
 
   it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {
