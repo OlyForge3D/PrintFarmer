@@ -314,7 +314,6 @@ private struct UnknownBarcodeView: View {
                             .disabled(selection.vendor == nil)
                             .accessibilityIdentifier("mapBarcode.selectFilament")
                             if let filament = selection.selectedFilament {
-                                filamentRow(filament)
                                 Button {
                                     selectFilament(filament)
                                 } label: {
@@ -322,6 +321,7 @@ private struct UnknownBarcodeView: View {
                                 }
                                 .disabled(isSaving)
                                 .accessibilityIdentifier("mapBarcode.addSpool")
+                                filamentRow(filament)
                             }
                         }
                     }
@@ -504,11 +504,7 @@ private struct UnknownBarcodeView: View {
                         .foregroundStyle(Color.pfTextSecondary)
                 }
             }
-
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(Color.pfTextTertiary)
         }
     }
 
