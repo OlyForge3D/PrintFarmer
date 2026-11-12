@@ -53,11 +53,13 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
             return
         }
         let red = app.buttons["Red"]
+        let hex = app.textFields["#RRGGBB"]
         for _ in 0..<12 {
-            if red.exists && red.isHittable { break }
+            if red.exists && red.isHittable && hex.exists { break }
             form.swipeUp()
         }
         XCTAssertTrue(red.isHittable, "The Red swatch must be reachable in the Add Spool form")
+        XCTAssertTrue(hex.exists, "The hex field below the swatches must be realized before reading its value")
         for name in ["Black", "White", "Red"] {
             let swatch = app.buttons[name]
             XCTAssertTrue(swatch.exists, name)
@@ -71,7 +73,7 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
             predicate: NSPredicate(format: "selected == true"), object: red
         )
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 3), .completed)
-        XCTAssertEqual(app.textFields["#RRGGBB"].value as? String, "#E53E3E")
+        XCTAssertEqual(hex.value as? String, "#E53E3E")
         XCTAssertFalse(app.buttons["Black"].isSelected)
     }
 
