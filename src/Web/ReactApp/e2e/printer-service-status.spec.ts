@@ -177,7 +177,7 @@ test(`printer availability uses the service status control in ${view} view`, asy
     const identity = page.getByTestId(view === 'collapsed' ? 'compact-printer-image' : 'detailed-printer-image');
     await expect(identity.first().getByText('192.0.2.10', { exact: true })).toBeVisible();
     await expect(identity.nth(1).getByText('2001:db8:1234:5678:90ab:cdef:1234:5678', { exact: true })).toBeVisible();
-    const toolbar = page.getByRole('toolbar', { name: 'Printer actions' }).first();
+    const toolbar = page.getByRole(view === 'collapsed' ? 'group' : 'toolbar', { name: 'Printer actions' }).first();
     await expect(toolbar.getByRole('button', { name: /^In Service: Mark/ })).toHaveText('');
     if (view === 'collapsed') {
       await expect(page.getByRole('button', { name: 'More options' })).toHaveCount(0);

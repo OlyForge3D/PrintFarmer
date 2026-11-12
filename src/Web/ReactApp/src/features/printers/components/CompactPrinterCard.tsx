@@ -282,7 +282,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                   <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
                 )}
                 {printer.ipAddress && (
-                  <p className="break-all text-xs text-pf-text-secondary">{printer.ipAddress}</p>
+                  <p className="break-all font-mono text-xs text-pf-text-secondary">{printer.ipAddress}</p>
                 )}
               </div>
             )}
@@ -348,7 +348,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         {/* Right: action buttons */}
         <div
           className="grid shrink-0 grid-cols-2 content-start items-center gap-0.5 ml-2 mt-2"
-          role="toolbar"
+          role="group"
           aria-label="Printer actions"
         >
           <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />

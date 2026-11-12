@@ -605,7 +605,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                   <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
                 )}
                 {printer.ipAddress && (
-                  <p className="break-all text-xs text-pf-text-secondary">{printer.ipAddress}</p>
+                  <p className="break-all font-mono text-xs text-pf-text-secondary">{printer.ipAddress}</p>
                 )}
               </div>
             )}

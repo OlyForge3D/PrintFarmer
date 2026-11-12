@@ -379,12 +379,12 @@ describe('CompactPrinterCard memoization', () => {
     expect(onExpand).toHaveBeenCalledWith('printer-1');
   });
 
-  it('exposes files, history, editing and tagging directly in the action toolbar', async () => {
+  it('exposes files, history, editing and tagging directly in the action group', async () => {
     const user = userEvent.setup();
     const printer = createPrinter();
     const onEdit = vi.fn();
     render(<CompactPrinterCard printer={printer} onExpand={vi.fn()} onEdit={onEdit} />);
-    const toolbar = within(screen.getByRole('toolbar', { name: 'Printer actions' }));
+    const toolbar = within(screen.getByRole('group', { name: 'Printer actions' }));
 
     await user.click(toolbar.getByRole('button', { name: 'View printer files' }));
     expect(screen.getByRole('dialog', { name: 'Printer files' })).toBeInTheDocument();
