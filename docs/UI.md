@@ -49,8 +49,9 @@ there is no separate Service column. Authorized users can toggle the glyph; othe
 The operational **Status** column is unchanged; the former **Last Updated**
 column has been removed.
 
-Compact cards expose every action in a two-column right-hand grid, without an overflow
-menu. Detailed cards retain their existing action grid. Both card styles show
+Both card styles place **Open in Browser** at the far right of the header and
+the remaining actions in a two-column right-hand grid, without an overflow menu.
+Unavailable browser actions retain their explanatory tooltip. Both card styles show
 the printer's configured IP address beneath its manufacturer when available.
 Out of Service preserves the existing disabled-printer behavior: the printer is
 excluded from monitoring and dispatch, and is not commanded to power off.

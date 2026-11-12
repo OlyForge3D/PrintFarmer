@@ -238,6 +238,36 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             </span>
           )}
           {!isOnline && printer.isEnabled !== false && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
+          <div className="ml-auto shrink-0">
+            {browserUrl ? (
+              <a
+                href={browserUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xs text-pf-text-secondary hover:text-pf-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
+                aria-label={`Open in Browser for printer ${printer.name} in new tab`}
+                title="Open in Browser"
+              >
+                <ExternalLinkIcon className="h-4 w-4" />
+              </a>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-11 w-11 p-0 text-pf-text-secondary"
+                disabled
+                explainedDisabled
+                aria-label={isInternalOnlyBrowserUrl
+                  ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                  : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
+                title={isInternalOnlyBrowserUrl
+                  ? 'Not available for simulated test printers'
+                  : 'Printer browser URL is unavailable'}
+                iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
+              />
+            )}
+          </div>
         </div>
         {/* Tags row */}
         {printerTags.length > 0 && (
@@ -410,34 +440,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               title="View print history"
               aria-label="View print history"
               iconCenter={<HistoryIcon className="h-4 w-4" />}
-            />
-          )}
-          {browserUrl ? (
-            <a
-              href={browserUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xs text-pf-text-secondary hover:text-pf-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
-              aria-label={`Open in Browser for printer ${printer.name} in new tab`}
-              title="Open in Browser"
-            >
-              <ExternalLinkIcon className="h-4 w-4" />
-            </a>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-11 w-11 p-0 text-pf-text-secondary"
-              disabled
-              explainedDisabled
-              aria-label={isInternalOnlyBrowserUrl
-                ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
-                : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
-              title={isInternalOnlyBrowserUrl
-                ? 'Not available for simulated test printers'
-                : 'Printer browser URL is unavailable'}
-              iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
             />
           )}
           <Button

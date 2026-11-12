@@ -179,48 +179,58 @@ test(`printer availability uses the service status control in ${view} view`, asy
     await expect(identity.nth(1).getByText('2001:db8:1234:5678:90ab:cdef:1234:5678', { exact: true })).toBeVisible();
     const toolbar = page.getByRole(view === 'collapsed' ? 'group' : 'toolbar', { name: 'Printer actions' }).first();
     await expect(toolbar.getByRole('button', { name: /^In Service: Mark/ })).toHaveText('');
-    if (view === 'collapsed') {
-      await expect(page.getByRole('button', { name: 'More options' })).toHaveCount(0);
-      const actions = toolbar.locator(':scope > button, :scope > a, :scope > span');
-      await expect(actions).toHaveCount(9);
-      const boxes = await actions.evaluateAll(elements => elements.map(element => {
-        const { x, y, width, height } = element.getBoundingClientRect();
-        return { x, y, width, height };
-      }));
-      for (const [index, box] of boxes.entries()) {
-        expect(box.width).toBeGreaterThanOrEqual(44);
-        expect(box.height).toBeGreaterThanOrEqual(44);
-        expect(Math.abs(box.x - boxes[index % 2].x)).toBeLessThan(1);
-        if (index % 2 === 1) {
-          expect(box.x).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width);
-          expect(Math.abs(box.y - boxes[index - 1].y)).toBeLessThan(1);
-        }
-        const card = await toolbar.locator('xpath=ancestor::article').boundingBox();
-        expect(card!.width).toBeGreaterThanOrEqual(320);
-        const toolbarBox = await toolbar.boundingBox();
-        expect(toolbarBox!.x).toBeGreaterThanOrEqual(card!.x);
-        expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(card!.x + card!.width);
-        if (index >= 2) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 2].y + boxes[index - 2].height);
+    const card = toolbar.locator('xpath=ancestor::article');
+    const browser = card.getByRole('link', { name: /in new tab$/ });
+    await expect(browser).toHaveAttribute('href', 'http://192.0.2.10');
+    await expect(browser).toHaveAttribute('target', '_blank');
+    await expect(browser).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(toolbar.getByRole('link')).toHaveCount(0);
+    const cardBox = await card.boundingBox();
+    const browserBox = await browser.boundingBox();
+    const identityBox = await identity.first().boundingBox();
+    expect(Math.abs(browserBox!.x + browserBox!.width - (cardBox!.x + cardBox!.width - 13))).toBeLessThan(2);
+    expect(browserBox!.y + browserBox!.height).toBeLessThanOrEqual(identityBox!.y);
+    await browser.focus();
+    await expect(browser).toBeFocused();
+    await expect(page.getByRole('button', { name: 'More options' })).toHaveCount(0);
+    const actions = toolbar.locator(':scope > button, :scope > a, :scope > span');
+    await expect(actions).toHaveCount(view === 'collapsed' ? 8 : 6);
+    const boxes = await actions.evaluateAll(elements => elements.map(element => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    }));
+    const toolbarBox = await toolbar.boundingBox();
+    expect(cardBox!.width).toBeGreaterThanOrEqual(320);
+    expect(toolbarBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    for (const [index, box] of boxes.entries()) {
+      expect(box.width).toBeGreaterThanOrEqual(view === 'collapsed' ? 44 : 32);
+      expect(box.height).toBeGreaterThanOrEqual(view === 'collapsed' ? 44 : 32);
+      expect(Math.abs(box.x - boxes[index % 2].x)).toBeLessThan(1);
+      if (index % 2 === 1) {
+        expect(box.x).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width);
+        expect(Math.abs(box.y - boxes[index - 1].y)).toBeLessThan(1);
       }
-      const files = toolbar.getByRole('button', { name: 'View printer files' });
-      await files.focus();
-      await expect(files).toBeFocused();
+      if (index >= 2) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 2].y + boxes[index - 2].height);
     }
+    const files = toolbar.getByRole('button', { name: 'View printer files' });
+    await files.focus();
+    await expect(files).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
-  if (view === 'collapsed') {
+  if (view !== 'table') {
     const cards = page.locator('article[data-pf-card]');
     const dimensions = await cards.evaluateAll(elements => elements.map(element => {
       const { width, height } = element.getBoundingClientRect();
       return { width, height };
     }));
-    await testInfo.attach('compact-card-dimensions', {
+    await testInfo.attach(`${view}-card-dimensions`, {
       body: JSON.stringify(dimensions), contentType: 'application/json',
     });
-    await cards.first().screenshot({ path: testInfo.outputPath('compact-in-service-card.png') });
-    await cards.nth(2).screenshot({ path: testInfo.outputPath('compact-out-of-service-ipv6-card.png') });
+    await cards.first().screenshot({ path: testInfo.outputPath(`${view}-in-service-card.png`) });
+    await cards.nth(2).screenshot({ path: testInfo.outputPath(`${view}-out-of-service-ipv6-card.png`) });
   }
   if (view === 'table') {
     await markOutOfService.scrollIntoViewIfNeeded();
