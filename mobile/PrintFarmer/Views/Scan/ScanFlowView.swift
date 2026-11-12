@@ -278,8 +278,8 @@ private struct UnrecognizedScanView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var description: String {
-        message ?? "\"\(code)\" isn't a spool label or a known filament product barcode (UPC/EAN/GTIN). "
-            + "You can still add the spool manually. This code won't be remembered for future scans."
+        message ?? "\"\(code)\" isn't a spool label, a filament barcode, or a code PrintFarmer can remember. "
+            + "You can still add the spool manually."
     }
 
     var body: some View {
@@ -295,6 +295,8 @@ private struct UnrecognizedScanView: View {
                     Label("Add Spool", systemImage: "plus.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Color.pfButtonPrimary)
+                .foregroundStyle(Color.pfButtonPrimaryText)
                 .accessibilityIdentifier("scan.unrecognized.addSpool")
             }
             .navigationTitle(message == nil ? "Unrecognized" : "Not Found")

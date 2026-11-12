@@ -4,6 +4,16 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Remembered scan codes (#3754)** — Scanning a non-GTIN code such as an
+  Amazon FNSKU sticker (e.g. `X0022Z40I1`) now opens barcode intake instead of
+  dead-ending. The first scan lets you pick an existing filament or create a
+  new one; PrintFarmer remembers the exact code for that filament and adds a
+  spool. Later scans of the same code offer to add another spool of that
+  filament. Remembered codes are stored in PrintFarmer, separately from the
+  Spoolman GTIN mapping, and digit-only codes are never remembered.
+
 ### Fixed
 
 - **Scan / Add Spool saving (#3768)** — Choose an exact existing filament or

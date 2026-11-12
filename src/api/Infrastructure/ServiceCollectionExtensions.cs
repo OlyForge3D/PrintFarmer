@@ -229,6 +229,7 @@ public static class ServiceCollectionExtensions
 
         // Optional barcode scan diagnostics
         _ = services.AddScoped<IBarcodeScanLogService, Farm.Infrastructure.Services.Spoolman.BarcodeScanLogService>();
+        _ = services.AddScoped<IScanCodeAliasService, Farm.Infrastructure.Services.Spoolman.ScanCodeAliasService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();

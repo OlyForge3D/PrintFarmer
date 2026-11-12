@@ -103,6 +103,9 @@ enum UITestBootstrap {
     /// Followed by a code value: installs a scanner stub that returns that
     /// code, so XCUI can drive the scan result paths without a camera.
     static let scanCodeLaunchArgument = "--uitesting-scan-code"
+    /// Followed by `alias-save-unreachable` or `spool-create-timeout`: injects
+    /// that remembered-code failure into the demo intake service.
+    static let scanIntakeFaultLaunchArgument = "--uitesting-scan-intake-fault"
     static let queueReorderLaunchArgument = "--uitesting-queue-reorder"
     static let issue3259VisualAcceptanceLaunchArgument =
         "--uitesting-issue3259-visual-acceptance"
@@ -381,6 +384,26 @@ enum UITestBootstrap {
         if let index = arguments.firstIndex(of: scanCodeLaunchArgument),
            arguments.indices.contains(index + 1) {
             services.barcodeScannerService = UITestStubBarcodeScanner(code: arguments[index + 1])
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           let fault = DemoBarcodeIntakeService.Fault(rawValue: arguments[index + 1]) {
+            services.barcodeIntakeService = DemoBarcodeIntakeService(fault: fault)
+        }
+        if let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_URL"] {
+            guard let url = URL(string: rawURL),
+                  url.scheme == "http",
+                  url.host == "127.0.0.1",
+                  let token = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_TOKEN"],
+                  !token.isEmpty else {
+                preconditionFailure("Live intake UI tests require a loopback API URL and fixture token")
+            }
+            let client = APIClient(
+                baseURL: url,
+                authenticated: AuthenticatedIdentity(accessToken: token, serverID: UUID())
+            )
+            services.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
+            services.spoolService = SpoolService(apiClient: client)
         }
         if mode == .authenticatedQueueReorder {
             services.jobService = QueueReorderUITestJobService()

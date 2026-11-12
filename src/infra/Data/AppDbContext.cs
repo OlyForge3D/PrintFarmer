@@ -41,6 +41,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<BarcodeScanLog> BarcodeScanLogs => Set<BarcodeScanLog>();
 
+    public DbSet<ScanCodeAlias> ScanCodeAliases => Set<ScanCodeAlias>();
+
     // Tags
     public DbSet<Tag> Tags => Set<Tag>();
 
@@ -535,6 +537,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             // .NormalizeBinCode) and back the unique index IX_Bins_Code; identical class.
             _ = modelBuilder.Entity<Bin>(entity =>
                 entity.Property(b => b.Code).UseCollation(caseSensitiveCollation));
+
+            // Remembered scan codes are exact-match identities behind IX_ScanCodeAliases_Code,
+            // so "x0022z40i1" must not resolve to or collide with "X0022Z40I1".
+            _ = modelBuilder.Entity<ScanCodeAlias>(entity =>
+                entity.Property(a => a.Code).UseCollation(caseSensitiveCollation));
 
             // Natural idempotency backstop: (PartInventoryId, OperationKey) unique index.
             // OperationKey is persisted client-verbatim (trimmed only — never NFKC-folded),

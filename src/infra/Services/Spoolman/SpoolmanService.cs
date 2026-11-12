@@ -889,6 +889,49 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
     }
 
     /// <inheritdoc/>
+    public async Task<SpoolmanFilamentDto?> FindFilamentByIdAsync(int filamentId, CancellationToken ct)
+    {
+        SpoolmanConfigDto? cfg = GetConfig();
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.BaseUrl))
+        {
+            throw new SpoolmanApiException("Spoolman is not configured.");
+        }
+
+        string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament/{filamentId}";
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            using HttpResponseMessage response = await http.GetAsync(url, cts.Token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new SpoolmanApiException(response.StatusCode, $"get filament {filamentId}", null);
+            }
+
+            string json = await response.Content.ReadAsStringAsync(cts.Token);
+            using JsonDocument doc = JsonDocument.Parse(json);
+            return SpoolmanJsonParser.ParseFilament(doc.RootElement);
+        }
+        catch (SpoolmanApiException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SpoolmanApiException($"Spoolman filament {filamentId} could not be loaded.", ex);
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<SpoolmanVendorDto>> ListVendorsAsync(CancellationToken ct)
     {
         SpoolmanConfigDto? cfg = GetConfig();

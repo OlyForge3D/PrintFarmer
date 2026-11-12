@@ -226,6 +226,35 @@ final class APIClientTests: XCTestCase {
 
     // MARK: - JWT Token Injection
 
+    // MARK: - Remembered scan-code wire contract
+
+    /// The server serializes `ScanCodeAliasLookupState` as PascalCase strings
+    /// (global `JsonStringEnumConverter`, no naming policy). Decode literal
+    /// server payloads through the production client so a casing drift fails.
+    func testCodeAliasLookupDecodesServerPascalCaseStates() async throws {
+        let service = BarcodeIntakeService(apiClient: apiClient)
+
+        mockAPIClient.stubResponse(json: """
+        {"code":"X0022Z40I1","state":"Found","alias":{"id":3,"code":"X0022Z40I1","filamentId":8,\
+        "filament":{"id":8,"name":"Matte Black","material":"PLA"}}}
+        """)
+        let found = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(found.state, .found)
+        XCTAssertEqual(found.filament?.id, 8)
+
+        mockAPIClient.stubResponse(json: #"{"code":"X0022Z40I1","state":"NotRemembered","alias":null}"#)
+        let missing = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(missing.state, .notRemembered)
+        XCTAssertNil(missing.filament)
+
+        mockAPIClient.stubResponse(json: """
+        {"code":"X0022Z40I1","state":"FilamentMissing","alias":{"id":3,"code":"X0022Z40I1","filamentId":99,"filament":null}}
+        """)
+        let deleted = try await service.lookupCodeAlias(code: "X0022Z40I1")
+        XCTAssertEqual(deleted.state, .filamentMissing)
+        XCTAssertNil(deleted.filament)
+    }
+
     func testRequestIncludesAuthorizationHeader() async throws {
         let token = "test-jwt-token-123"
         await apiClient.setAuthenticatedSession(

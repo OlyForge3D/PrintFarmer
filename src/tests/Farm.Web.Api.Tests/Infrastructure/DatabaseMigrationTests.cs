@@ -84,6 +84,7 @@ public sealed class DatabaseMigrationTests
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
             "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases",
             "20261110155826_AddPrinterExpectedOffline",
             "20261111013812_ConsolidatePrinterServiceStatus");
         second.LegacySchemaBaselined.Should().BeFalse();
@@ -902,6 +903,7 @@ public sealed class DatabaseMigrationTests
             "20261104222416_AddPrinterPrintGuardEnabled",
             "20261105000821_AddFailureDetectionIncidentProvider",
             "20261106201513_AddObicoPrintRouting",
+            "20261110024730_AddScanCodeAliases",
             "20261110155826_AddPrinterExpectedOffline",
             "20261111013812_ConsolidatePrinterServiceStatus");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
@@ -1469,6 +1471,7 @@ public sealed class DatabaseMigrationTests
                 "20261104222340_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201434_AddObicoPrintRouting",
+                "20261110024722_AddScanCodeAliases",
                 "20261110155721_AddPrinterExpectedOffline",
                 "20261111013829_ConsolidatePrinterServiceStatus",
             ]
@@ -1519,6 +1522,7 @@ public sealed class DatabaseMigrationTests
                 "20261104222359_AddPrinterPrintGuardEnabled",
                 "20261105000821_AddFailureDetectionIncidentProvider",
                 "20261106201456_AddObicoPrintRouting",
+                "20261110024727_AddScanCodeAliases",
                 "20261110155749_AddPrinterExpectedOffline",
                 "20261111013847_ConsolidatePrinterServiceStatus",
             ];

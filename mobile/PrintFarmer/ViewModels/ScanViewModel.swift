@@ -351,8 +351,10 @@ final class ScanViewModel {
         // A code that is not a GTIN (Code 128/39 text, a non-spool QR, a
         // short number) is never sent for filament resolution: the server's
         // GTIN normalizer strips non-digits and could match the wrong
-        // product. A bare number may still be an existing spool ID; anything
-        // else reaches the Unrecognized result, which offers manual creation.
+        // product. A bare number may still be an existing spool ID. Other
+        // codes (e.g. an Amazon FNSKU) go to Barcode Intake, which looks up
+        // the exact-match remembered-code alias stored separately from GTINs.
+        // Only codes that can't be remembered reach the Unrecognized result.
         guard Self.isSupportedProductBarcode(trimmed) else {
             if let spoolId = QRCodeParser.parse(trimmed) {
                 guard let exists = await existingSpoolLookup(id: spoolId) else { return }
@@ -361,6 +363,12 @@ final class ScanViewModel {
                     pendingDeepLinkDestination = .spoolDetail(id: spoolId)
                     return
                 }
+            }
+            if barcodeIntakeService != nil, BarcodeIntakeViewModel.isRememberableScan(trimmed) {
+                guard isViewActive else { return }
+                recordRecentScan(icon: "plus.circle", title: "Spool code", subtitle: trimmed)
+                pendingSpoolBarcode = trimmed
+                return
             }
             recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
             pendingOutcome = .unknownCode(trimmed)
@@ -491,7 +499,12 @@ final class ScanViewModel {
     func addSpool(fromUnrecognized code: String) {
         switch pendingOutcome {
         case .unknownCode(let pending) where pending == code:
-            deferredAddSpool = Self.isSupportedProductBarcode(code) && barcodeIntakeService != nil
+            // Recognized non-spool links (e.g. printer links) are never
+            // remembered as filament codes; they use manual Add Spool.
+            let isAppLink = URL(string: code).flatMap(DeepLinkHandler.parse(url:)) != nil
+            let usesIntake = Self.isSupportedProductBarcode(code)
+                || (!isAppLink && BarcodeIntakeViewModel.isRememberableCode(code))
+            deferredAddSpool = usesIntake && barcodeIntakeService != nil
                 ? .intake(code)
                 : .manual(code)
         case .missingSpool(_, let pending) where pending == code:

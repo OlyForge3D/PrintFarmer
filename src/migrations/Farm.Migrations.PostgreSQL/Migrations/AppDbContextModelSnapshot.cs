@@ -8045,6 +8045,42 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.ScanCodeAlias", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.Property<int>("FilamentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("FilamentId");
+
+                    b.ToTable("ScanCodeAliases");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.Spool", b =>
                 {
                     b.Property<Guid>("Id")

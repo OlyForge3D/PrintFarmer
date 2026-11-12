@@ -122,10 +122,14 @@ final class ScanViewModelTests: XCTestCase {
         viewModel.pendingOutcome = nil
         viewModel.resultPresentationDidDismiss()
         await viewModel.dispatch("SPL-AB12")
+        // A rememberable code now opens Barcode Intake rather than a result sheet.
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "SPL-AB12")
+        XCTAssertNil(viewModel.pendingOutcome)
 
         viewModel.completeNFCTagLink(uid: tag.uid, to: makeSpool(id: 5))
 
-        XCTAssertEqual(viewModel.pendingOutcome?.id, "unknown-SPL-AB12")
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "SPL-AB12", "the newer intake is untouched")
+        XCTAssertNil(viewModel.pendingOutcome)
         XCTAssertNil(viewModel.pendingDeepLinkDestination)
     }
 
@@ -250,17 +254,16 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testNonProductCodeResolvedByPermissiveServerDoesNotOpenIntake() async {
+    func testNonProductCodeWithEmbeddedGtinDigitsUsesRememberedCodeIntakeNeverGtin() async {
         let (viewModel, barcodeService, _) = makeSubject()
         barcodeService.filamentToResolve = makeFilament(id: 9, name: "PETG Blue")
 
         await viewModel.dispatch("LOT/850078714923")
 
-        XCTAssertNil(viewModel.pendingSpoolBarcode, "only supported product barcodes may open intake")
-        guard case .unknownCode = viewModel.pendingOutcome else {
-            return XCTFail("Expected .unknownCode outcome for a non-product code")
-        }
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "LOT/850078714923", "intake looks the exact code up as a remembered alias")
+        XCTAssertNil(viewModel.pendingOutcome)
         XCTAssertTrue(barcodeService.importCalls.isEmpty)
+        XCTAssertTrue(barcodeService.aliasSaveCalls.isEmpty, "scanning alone never remembers anything")
         XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "a non-GTIN code must never be sent for resolution")
     }
 
@@ -537,18 +540,27 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testDispatchUnrecognizedTextCodeSetsUnknownOutcome() async {
+    func testDispatchCodeTooLongToRememberSetsUnknownOutcome() async {
         let (viewModel, barcodeService, spoolService) = makeSubject()
-        barcodeService.filamentToResolve = nil
+        let code = String(repeating: "A", count: BarcodeIntakeViewModel.maxRememberedCodeLength + 1)
 
-        await viewModel.dispatch("garbage-code")
+        await viewModel.dispatch(code)
 
-        guard case .unknownCode(let code) = viewModel.pendingOutcome else {
+        guard case .unknownCode(let unknown) = viewModel.pendingOutcome else {
             return XCTFail("Expected .unknownCode outcome")
         }
-        XCTAssertEqual(code, "garbage-code")
-        XCTAssertNil(viewModel.pendingSpoolBarcode, "non-GTIN text cannot be persisted as a barcode mapping")
+        XCTAssertEqual(unknown, code)
+        XCTAssertNil(viewModel.pendingSpoolBarcode, "a code the server can't remember must not enter intake")
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
         XCTAssertFalse(spoolService.listSpoolsCalled)
+
+        viewModel.resultPresentationDidAppear()
+        viewModel.addSpool(fromUnrecognized: code)
+        viewModel.resultPresentationDidDismiss()
+        guard case .addSpoolManually(let manual) = viewModel.pendingOutcome else {
+            return XCTFail("Add Spool must still open manual creation")
+        }
+        XCTAssertEqual(manual, code)
     }
 
     @MainActor
@@ -591,11 +603,10 @@ final class ScanViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testNonGtinSymbologyPayloadsAreUnrecognizedWithoutResolvingOrErroring() async {
+    func testNonGtinSymbologyPayloadsOpenRememberedCodeIntakeWithoutGtinResolution() async {
         let cases: [(symbology: String, payload: String)] = [
             ("Amazon FNSKU Code 128 from the field report", "X0022Z40I1"),
             ("Code 128 alphanumeric", "SPL-AB12"),
-            ("Code 128 numeric (not a GTIN, no such spool)", "12345"),
             ("Code 128 with embedded GTIN digits", "LOT/850078714923"),
             ("Code 39", "PLA-BLK-1KG"),
             ("non-spool QR", "https://example.com/filament/pla-black")
@@ -608,13 +619,9 @@ final class ScanViewModelTests: XCTestCase {
 
             await viewModel.dispatch(payload)
 
-            guard case .unknownCode(let code) = viewModel.pendingOutcome else {
-                XCTFail("\(symbology) must reach the Unrecognized result, not a dead-end error")
-                continue
-            }
-            XCTAssertEqual(code, payload, symbology)
+            XCTAssertEqual(viewModel.pendingSpoolBarcode, payload, "\(symbology) must reach intake, not a dead end")
+            XCTAssertNil(viewModel.pendingOutcome, symbology)
             XCTAssertNil(viewModel.errorMessage, symbology)
-            XCTAssertNil(viewModel.pendingSpoolBarcode, "\(symbology) must never enter GTIN intake")
             XCTAssertTrue(
                 barcodeService.resolveBarcodes.isEmpty,
                 "\(symbology): the server strips non-digits, so a non-GTIN must never be resolved"
@@ -626,9 +633,9 @@ final class ScanViewModelTests: XCTestCase {
     // MARK: - Add Spool from the Unrecognized result
 
     @MainActor
-    func testUnrecognizedNonGtinOffersManualAddSpoolAfterTheResultSheetDismisses() async {
+    func testUnrecognizedRememberableCodeOffersIntakeFromAddSpool() async {
         let (viewModel, barcodeService, _) = makeSubject()
-        await viewModel.dispatch("X0022Z40I1")
+        viewModel.pendingOutcome = .unknownCode("X0022Z40I1")
         viewModel.resultPresentationDidAppear()
 
         viewModel.addSpool(fromUnrecognized: "X0022Z40I1")
@@ -636,13 +643,64 @@ final class ScanViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.pendingOutcome, "the Unrecognized sheet dismisses first")
         XCTAssertNil(viewModel.pendingSpoolBarcode)
         viewModel.resultPresentationDidDismiss()
-        guard case .addSpoolManually(let code) = viewModel.pendingOutcome else {
-            return XCTFail("Add Spool must open manual spool creation for a non-GTIN code")
-        }
-        XCTAssertEqual(code, "X0022Z40I1")
-        XCTAssertNil(viewModel.pendingSpoolBarcode, "a non-GTIN must never enter GTIN intake")
+        XCTAssertEqual(viewModel.pendingSpoolBarcode, "X0022Z40I1")
         XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty, "a non-GTIN must never be written to the GTIN mapping")
-        XCTAssertTrue(barcodeService.importCalls.isEmpty, "nothing is created until the user saves")
+        XCTAssertTrue(barcodeService.aliasSaveCalls.isEmpty, "nothing is remembered until the user chooses a filament")
+        XCTAssertTrue(barcodeService.importCalls.isEmpty)
+    }
+
+    @MainActor
+    func testUnrecognizedPrinterLinkOffersManualAddSpoolNeverIntake() async {
+        let link = "printfarmer://printer/\(UUID().uuidString)/ready"
+        let (viewModel, barcodeService, _) = makeSubject()
+        await viewModel.dispatch(link)
+        viewModel.resultPresentationDidAppear()
+
+        viewModel.addSpool(fromUnrecognized: link)
+        viewModel.resultPresentationDidDismiss()
+
+        guard case .addSpoolManually(let code) = viewModel.pendingOutcome else {
+            return XCTFail("a printer link must never be remembered as a filament code")
+        }
+        XCTAssertEqual(code, link)
+        XCTAssertNil(viewModel.pendingSpoolBarcode)
+        XCTAssertTrue(barcodeService.aliasLookups.isEmpty)
+    }
+
+    @MainActor
+    func testFnskuScanRemembersExplicitFilamentAndRescanAddsAnotherSpool() async {
+        let barcodeService = MockBarcodeIntakeService()
+        barcodeService.filamentsById = [12: makeFilament(id: 12, name: "PLA Galaxy")]
+        barcodeService.spoolToCreate = makeSpool(id: 601)
+        let (scan, _, _) = makeSubject(barcodeService: barcodeService)
+
+        await scan.dispatch("X0022Z40I1")
+        XCTAssertEqual(scan.pendingSpoolBarcode, "X0022Z40I1")
+        XCTAssertTrue(barcodeService.aliasSaveCalls.isEmpty, "scanning alone must never persist or create anything")
+
+        let intake = BarcodeIntakeViewModel()
+        intake.configure(barcodeService: barcodeService)
+        await intake.handleScannedBarcode(scan.pendingSpoolBarcode ?? "")
+        XCTAssertEqual(intake.pendingUnknownBarcode, "X0022Z40I1")
+        let added = await intake.importUnknownBarcode(filamentId: 12)
+        XCTAssertTrue(added)
+        XCTAssertEqual(barcodeService.aliasSaveCalls.map(\.code), ["X0022Z40I1"])
+        XCTAssertEqual(barcodeService.createSpoolCalls, [12])
+
+        let (rescan, _, _) = makeSubject(barcodeService: barcodeService)
+        await rescan.dispatch("X0022Z40I1")
+        let again = BarcodeIntakeViewModel()
+        again.configure(barcodeService: barcodeService)
+        await again.handleScannedBarcode(rescan.pendingSpoolBarcode ?? "")
+        XCTAssertEqual(again.pendingAliasMatch?.filament.id, 12, "a rescan preselects the remembered filament")
+        XCTAssertNil(again.pendingUnknownBarcode)
+        let confirmed = await again.confirmAliasMatch()
+        XCTAssertTrue(confirmed)
+        XCTAssertEqual(barcodeService.createSpoolCalls, [12, 12], "the rescan adds a second spool of the same filament")
+        XCTAssertEqual(barcodeService.aliasSaveCalls.count, 1, "the rescan doesn't rewrite the alias")
+        XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty, "the FNSKU never reaches GTIN resolution")
+        XCTAssertTrue(barcodeService.saveMappingCalls.isEmpty)
+        XCTAssertTrue(barcodeService.importCalls.isEmpty)
     }
 
     @MainActor
@@ -695,19 +753,19 @@ final class ScanViewModelTests: XCTestCase {
     @MainActor
     func testAddSpoolIgnoresACodeThatIsNotThePendingUnrecognizedResult() async {
         let (viewModel, _, _) = makeSubject()
-        await viewModel.dispatch("SPL-AB12")
+        await viewModel.dispatch("90210")
 
         viewModel.addSpool(fromUnrecognized: "OTHER")
         viewModel.resultPresentationDidDismiss()
 
-        XCTAssertEqual(viewModel.pendingOutcome?.id, "unknown-SPL-AB12")
+        XCTAssertEqual(viewModel.pendingOutcome?.id, "unknown-90210")
     }
 
     @MainActor
     func testDeferredAddSpoolIsDroppedWhenTheScanViewRetiredDuringDismissal() async {
         let (viewModel, _, _) = makeSubject()
-        await viewModel.dispatch("SPL-AB12")
-        viewModel.addSpool(fromUnrecognized: "SPL-AB12")
+        await viewModel.dispatch("90210")
+        viewModel.addSpool(fromUnrecognized: "90210")
 
         viewModel.isViewActive = false
         viewModel.resultPresentationDidDismiss()
@@ -724,14 +782,14 @@ final class ScanViewModelTests: XCTestCase {
         viewModel.requestExternalScan(UUID())
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
         viewModel.requestExternalScan(UUID())
-        await completeScan(viewModel, scanner, returning: .barcode("SPL-AB12"))
+        await completeScan(viewModel, scanner, returning: .barcode("90210"))
         viewModel.resultPresentationDidAppear()
 
-        viewModel.addSpool(fromUnrecognized: "SPL-AB12")
+        viewModel.addSpool(fromUnrecognized: "90210")
         viewModel.scan()
         XCTAssertFalse(viewModel.isScanning, "no scan may start while Add Spool is pending")
         viewModel.resultPresentationDidDismiss()
-        XCTAssertEqual(viewModel.pendingOutcome?.id, "manual-SPL-AB12")
+        XCTAssertEqual(viewModel.pendingOutcome?.id, "manual-90210")
         XCTAssertEqual(scanner.callCount, 1, "the queued scan waits for the Add Spool sheet")
 
         viewModel.resultPresentationDidAppear()
@@ -898,7 +956,7 @@ extension ScanViewModelTests {
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
 
         viewModel.requestExternalScan(UUID())
-        await completeScan(viewModel, scanner, returning: .barcode("CODE-OVERLAP"))
+        await completeScan(viewModel, scanner, returning: .barcode("90210"))
 
         XCTAssertTrue(barcodeService.resolveBarcodes.isEmpty)
         XCTAssertEqual(viewModel.recentScans.first?.title, "Unrecognized")

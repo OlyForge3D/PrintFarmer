@@ -143,3 +143,14 @@ The shipped cases are:
 | Primary scanner action | `scan.primary` |
 | Scanner NFC hint | `scan.nfc.hint` |
 | Unrecognized scan Add Spool action | `scan.unrecognized.addSpool` |
+| Remembered-code Add Spool confirmation | `barcodeIntake.aliasAddSpool` |
+| Remembered-code Not Now | `barcodeIntake.aliasCancel` |
+| Map/Remember Code scanned value | `mapBarcode.code` |
+| Map/Remember Code scrollable list | `mapBarcode.list` |
+| Map/Remember Code material selection or input | `mapBarcode.material` |
+| Map/Remember Code existing filament row | `mapBarcode.filament.<filament-id>` |
+| Map/Remember Code show create form | `mapBarcode.showCreate` |
+| Map/Remember Code create submit | `mapBarcode.create` |
+| Map/Remember Code save error message | `mapBarcode.error` |
+| Map/Remember Code retry after a definite failure | `mapBarcode.retry` |
+| Map/Remember Code done after an uncertain spool outcome | `mapBarcode.uncertainDone` |
