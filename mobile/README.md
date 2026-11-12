@@ -182,8 +182,9 @@ UI-test launches; the scanner and unrelated shell services remain fixtures.
 
 Run each first-scan selector separately and reset the isolated fixture's
 `X0022Z40I1` alias before **each** run. The preflight requires `NotRemembered`
-and fails explicitly on stale fixtures or lookup errors. Seed two filaments
-with the same material/vendor and IDs 41/42 for the existing-filament scenario;
+and fails explicitly on stale fixtures or lookup errors. Seed filaments 41 and
+42 with material `PLA`, vendor `Fixture Vendor`, and name `PLA explicitly chosen`
+for the existing-filament scenario; the duplicate names exercise ID selection.
 it explicitly selects 42, relaunches the app and confirms another spool.
 The new-filament scenario submits the form only in connected mode because the
 standard demo spool service is intentionally read-only. Verify the API database

@@ -192,6 +192,7 @@ private struct UnknownBarcodeView: View {
     @State private var vendors: [SpoolmanVendor] = []
     @State private var isLoading = false
     @State private var loadFailed = false
+    @State private var filamentsLoaded = false
     @State private var isSaving = false
     @State private var errorMessage: String?
     /// The existing filament whose remember/import failed; offered for Retry.
@@ -246,8 +247,11 @@ private struct UnknownBarcodeView: View {
                             .accessibilityIdentifier("mapBarcode.error")
                         if loadFailed {
                             Button("Retry loading filaments") {
+                                guard !isLoading && !isSaving else { return }
+                                isLoading = true
                                 Task { await loadReferenceData() }
                             }
+                            .disabled(isLoading || isSaving)
                             .accessibilityIdentifier("mapBarcode.retryLoad")
                         }
                         if outcomeUncertain {
@@ -270,8 +274,6 @@ private struct UnknownBarcodeView: View {
                     EmptyView()
                 } else if isLoading {
                     Section { ProgressView("Loading filaments…") }
-                } else if loadFailed {
-                    EmptyView()
                 } else if showCreateForm {
                     createFilamentSection
                 } else {
@@ -286,7 +288,10 @@ private struct UnknownBarcodeView: View {
                     }
 
                     Section("Choose Existing Filament") {
-                        if selection.materials.isEmpty {
+                        if !filamentsLoaded {
+                            Text("Filaments could not be loaded. Retry to choose an existing filament.")
+                                .foregroundStyle(Color.pfTextSecondary)
+                        } else if selection.materials.isEmpty {
                             ContentUnavailableView("No Filaments", systemImage: "tray")
                         } else {
                             Picker("Material", selection: $selection.material) {
@@ -295,6 +300,7 @@ private struct UnknownBarcodeView: View {
                                     Text(material.label).tag(Optional(material))
                                 }
                             }
+                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
                             .accessibilityIdentifier("mapBarcode.selectMaterial")
                             Picker("Vendor", selection: $selection.vendor) {
                                 Text("Select…").tag(Optional<FilamentCatalogSelection.Option>.none)
@@ -302,6 +308,7 @@ private struct UnknownBarcodeView: View {
                                     Text(vendor.label).tag(Optional(vendor))
                                 }
                             }
+                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
                             .disabled(selection.material == nil)
                             .accessibilityIdentifier("mapBarcode.selectVendor")
                             Picker("Filament name", selection: $selection.filamentId) {
@@ -311,6 +318,7 @@ private struct UnknownBarcodeView: View {
                                         .tag(Optional(filament.id))
                                 }
                             }
+                            .tint(Color.adaptive(light: "#047857", dark: "#6ee7b7"))
                             .disabled(selection.vendor == nil)
                             .accessibilityIdentifier("mapBarcode.selectFilament")
                             if let filament = selection.selectedFilament {
@@ -320,6 +328,7 @@ private struct UnknownBarcodeView: View {
                                     Label("Add Spool", systemImage: "plus.circle")
                                 }
                                 .disabled(isSaving)
+                                .accessibilityLabel("\(remembersCode ? "Add spool of" : "Import spool of") \(filament.name ?? "filament #\(filament.id)")")
                                 .accessibilityIdentifier("mapBarcode.addSpool")
                                 filamentRow(filament)
                             }
@@ -342,7 +351,11 @@ private struct UnknownBarcodeView: View {
                         .disabled(isSaving)
                 }
             }
-            .task { await loadReferenceData() }
+            .task {
+                guard !isLoading else { return }
+                isLoading = true
+                await loadReferenceData()
+            }
         }
     }
 
@@ -509,21 +522,34 @@ private struct UnknownBarcodeView: View {
     }
 
     private func loadReferenceData() async {
-        isLoading = true
         loadFailed = false
         errorMessage = nil
+        async let loadedFilaments = spoolService.listFilaments()
+        async let loadedMaterials = spoolService.listMaterials()
+        async let loadedVendors = spoolService.listVendors()
+        var failures: [String] = []
         do {
-            async let loadedFilaments = spoolService.listFilaments()
-            async let loadedMaterials = spoolService.listMaterials()
-            async let loadedVendors = spoolService.listVendors()
             selection.filaments = try await loadedFilaments
+            filamentsLoaded = true
+        } catch {
+            selection.filaments = []
+            filamentsLoaded = false
+            failures.append("Filaments: \(error.localizedDescription)")
+        }
+        do {
             materials = try await loadedMaterials
+        } catch {
+            materials = []
+            failures.append("Materials: \(error.localizedDescription)")
+        }
+        do {
             vendors = try await loadedVendors
         } catch {
-            loadFailed = true
-            errorMessage = error.localizedDescription
+            vendors = []
+            failures.append("Vendors: \(error.localizedDescription)")
         }
-
+        loadFailed = !failures.isEmpty
+        errorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
         isLoading = false
     }
 

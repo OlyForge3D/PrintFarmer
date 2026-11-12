@@ -40,7 +40,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.navigationBars["Remember Code"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["Unrecognized Code"].exists, "the field-reported FNSKU must not dead-end")
         XCTAssertEqual(app.staticTexts["mapBarcode.code"].label, "X0022Z40I1")
-        XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists, "creating a new filament is offered")
+        XCTAssertTrue(app.buttons["mapBarcode.showCreate"].waitForExistence(timeout: 8), "creating a new filament is offered")
         attachScreenshot(named: "fnsku-first-scan-cascading-empty")
         chooseExistingFilament(
             material: "PLA",
@@ -134,6 +134,58 @@ final class ScanStationUITests: PrintFarmerUITestCase {
 
         XCTAssertTrue(app.staticTexts["Imported This Session (1)"].waitForExistence(timeout: 8), "retry adds exactly one spool")
         XCTAssertFalse(app.navigationBars["Remember Code"].exists)
+    }
+
+    func testFnskuCatalogLoadFailureAllowsCreateAndRetry() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "catalog-load-unreachable",
+        ])
+        openScanAndScan()
+        XCTAssertTrue(app.staticTexts["mapBarcode.error"].waitForExistence(timeout: 8))
+        let retry = app.buttons["mapBarcode.retryLoad"]
+        XCTAssertTrue(retry.exists)
+        let create = app.buttons["mapBarcode.showCreate"]
+        XCTAssertTrue(create.exists, "a catalog failure must not block creating a filament")
+        XCTAssertFalse(app.buttons["mapBarcode.selectMaterial"].exists)
+        create.tap()
+        XCTAssertTrue(app.textFields["Filament Name"].waitForExistence(timeout: 5))
+        let chooseExisting = app.buttons["Choose Existing Instead"]
+        let list = app.collectionViews["mapBarcode.list"]
+        for _ in 0..<5 where !chooseExisting.isHittable { list.swipeUp() }
+        XCTAssertTrue(chooseExisting.isHittable)
+        chooseExisting.tap()
+        for _ in 0..<5 where !retry.isHittable { list.swipeDown() }
+        retry.tap()
+        XCTAssertTrue(app.buttons["mapBarcode.selectMaterial"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["mapBarcode.error"].exists)
+    }
+
+    func testFnskuChangingSelectionClearsFailedRetry() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "alias-save-unreachable",
+        ])
+        openScanAndScan()
+        chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
+        app.buttons["mapBarcode.addSpool"].tap()
+        XCTAssertTrue(app.buttons["mapBarcode.retry"].waitForExistence(timeout: 8))
+        app.buttons["mapBarcode.selectMaterial"].tap()
+        app.buttons["PETG"].firstMatch.tap()
+        XCTAssertFalse(app.buttons["mapBarcode.retry"].exists, "the failed filament must not be retried after selection changes")
+        XCTAssertFalse(app.buttons["mapBarcode.addSpool"].exists)
+    }
+
+    func testFnskuVendorLoadFailureKeepsLoadedFilamentsSelectable() {
+        relaunchAppForTest(additionalArguments: [
+            "--uitesting-scan-code", "X0022Z40I1",
+            "--uitesting-scan-intake-fault", "vendors-load-unreachable",
+        ])
+        openScanAndScan()
+        XCTAssertTrue(app.staticTexts["mapBarcode.error"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["mapBarcode.showCreate"].exists)
+        chooseExistingFilament(material: "PLA", vendor: "Prusa Research", name: "Prusament PLA (#1)")
+        XCTAssertTrue(app.buttons["mapBarcode.addSpool"].isEnabled)
     }
 
     func testFnskuUncertainSpoolOutcomeWithholdsRetry() {

@@ -390,6 +390,16 @@ enum UITestBootstrap {
            let fault = DemoBarcodeIntakeService.Fault(rawValue: arguments[index + 1]) {
             services.barcodeIntakeService = DemoBarcodeIntakeService(fault: fault)
         }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           arguments[index + 1] == "catalog-load-unreachable" {
+            services.spoolService = DemoSpoolService(failFirstFilamentLoad: true)
+        }
+        if let index = arguments.firstIndex(of: scanIntakeFaultLaunchArgument),
+           arguments.indices.contains(index + 1),
+           arguments[index + 1] == "vendors-load-unreachable" {
+            services.spoolService = DemoSpoolService(failFirstVendorLoad: true)
+        }
         if let rawURL = ProcessInfo.processInfo.environment["PRINTFARMER_UITEST_INTAKE_URL"] {
             guard let url = URL(string: rawURL),
                   url.scheme == "http",

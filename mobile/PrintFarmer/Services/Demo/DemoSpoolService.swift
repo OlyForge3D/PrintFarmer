@@ -4,8 +4,15 @@ import Foundation
 
 final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     private let allSpools: [SpoolmanSpool]
+    private let failFirstFilamentLoad: Bool
+    private let failFirstVendorLoad: Bool
+    private let lock = NSLock()
+    private var filamentLoadFailed = false
+    private var vendorLoadFailed = false
 
-    init(spoolOverrides: [SpoolmanSpool] = []) {
+    init(spoolOverrides: [SpoolmanSpool] = [], failFirstFilamentLoad: Bool = false, failFirstVendorLoad: Bool = false) {
+        self.failFirstFilamentLoad = failFirstFilamentLoad
+        self.failFirstVendorLoad = failFirstVendorLoad
         let overrides = Dictionary(uniqueKeysWithValues: spoolOverrides.map { ($0.id, $0) })
         allSpools = DemoData.spools.map { overrides[$0.id] ?? $0 }
     }
@@ -37,7 +44,13 @@ final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     func deleteSpool(id: Int) async throws {}
 
     func listFilaments() async throws -> [SpoolmanFilament] {
-        [
+        let failNow = lock.withLock {
+            guard failFirstFilamentLoad, !filamentLoadFailed else { return false }
+            filamentLoadFailed = true
+            return true
+        }
+        if failNow { throw NetworkError.serverUnreachable }
+        return [
             SpoolmanFilament(id: 1, name: "Prusament PLA", material: "PLA", colorHex: "#000000",
                              vendor: "Prusa Research", density: 1.24, diameter: 1.75, weight: 1000,
                              spoolWeight: 200, price: 24.99, settingsExtruderTemp: 215,
@@ -71,7 +84,13 @@ final class DemoSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     }
 
     func listVendors() async throws -> [SpoolmanVendor] {
-        [
+        let failNow = lock.withLock {
+            guard failFirstVendorLoad, !vendorLoadFailed else { return false }
+            vendorLoadFailed = true
+            return true
+        }
+        if failNow { throw NetworkError.serverUnreachable }
+        return [
             SpoolmanVendor(id: 1, name: "Prusa Research", externalId: nil),
             SpoolmanVendor(id: 2, name: "eSun", externalId: nil),
             SpoolmanVendor(id: 3, name: "Hatchbox", externalId: nil),
