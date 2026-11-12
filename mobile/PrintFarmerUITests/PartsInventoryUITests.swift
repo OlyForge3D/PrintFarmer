@@ -38,12 +38,16 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         let createFilament = app.switches["addSpool.createFilament"]
         XCTAssertTrue(createFilament.waitForExistence(timeout: 8))
         if createFilament.value as? String != "1" {
-            createFilament.tap()
+            createFilament.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         }
-        XCTAssertEqual(createFilament.value as? String, "1")
+        let creatingFilament = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"), object: createFilament
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [creatingFilament], timeout: 3), .completed)
 
-        let form = app.collectionViews.containing(.switch, identifier: "addSpool.createFilament").firstMatch
+        let form = app.collectionViews.firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 5))
+        XCTAssertTrue(form.switches["addSpool.createFilament"].exists)
         let red = app.buttons["Red"]
         for _ in 0..<12 {
             if red.exists && red.isHittable { break }
