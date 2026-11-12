@@ -39,18 +39,29 @@ Main overview page showing all printers with real-time status.
 
 ### Printer service status
 
-Administrators use the **In Service / Out of Service** control beside printer
-identity in compact cards, detailed cards, the table and the details sidebar.
+Administrators use the **In Service / Out of Service** control in the action area
+of compact cards, detailed cards and the table, or beside identity in the details sidebar.
 Other users see a read-only status. It is the existing `IsEnabled` setting,
 not a second monitoring flag.
-In table view, a narrow **Service** column immediately after **Printer** shows a
-green filled power plug for In Service and a neutral outline plug for Out of
-Service. Authorized users can toggle the glyph; other users see status only.
+Cards and table actions show a green filled power plug for In Service and a neutral
+outline plug for Out of Service. The plug is first in the table's **Actions** column;
+there is no separate Service column. Authorized users can toggle the glyph; other users see status only.
 The operational **Status** column is unchanged; the former **Last Updated**
 column has been removed.
+
+Compact cards expose every action in a two-column right-hand grid, without an overflow
+menu. Detailed cards retain their existing action grid. Both card styles show
+the printer's configured IP address beneath its manufacturer when available.
 Out of Service preserves the existing disabled-printer behavior: the printer is
-hidden from normal listings, excluded from monitoring and dispatch, and is not
-commanded to power off. Maintenance remains a separate setting.
+excluded from monitoring and dispatch, and is not commanded to power off.
+Offline Out of Service printers do not show the yellow troubleshooting action;
+unexpectedly offline In Service printers retain it. Maintenance remains a separate setting.
+Sorting does not hide printers. The default order in all three views is active
+(printing or paused), pending, error, ready/other, maintenance, then offline.
+Within each group, names sort A-Z ignoring case, with printer ID breaking ties.
+An offline printer stays in the offline group regardless of service status.
+Pending takes precedence over active, and maintenance over error, matching mobile.
+Explicit saved sort choices remain in effect.
 Emergency stop remains available for an online Out of Service printer when
 its backend supports control operations. Service status is not a physical
 safety interlock, and a sent stop command does not prove the printer has stopped.

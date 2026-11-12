@@ -8,6 +8,11 @@ const printers = Array.from({ length: 4 }, (_, index) => ({
   name: ['Fixture CoreXY', 'Fixture out of service A', 'Fixture out of service B', 'Fixture unexpected'][index],
   backend: 'Moonraker', isEnabled: index !== 2, isOnline: index === 0,
   state: index === 0 ? 'Idle' : 'Offline', rowVersion: 'Zml4dHVyZQ==',
+  manufacturerName: 'Fixture manufacturer with a long display name',
+  modelName: 'Fixture CoreXY model',
+  ipAddress: index === 0 ? '192.0.2.10' : '2001:db8:1234:5678:90ab:cdef:1234:5678',
+  frontendUrl: 'http://192.0.2.10',
+  cameraStreamUrl: '/fixture-camera.jpg',
 }));
 
 const printerSeeds = {
@@ -153,19 +158,74 @@ test(`printer availability uses the service status control in ${view} view`, asy
   const markInService = page.getByRole('button', { name: 'Out of Service: Mark Fixture out of service B In Service', exact: true });
   await expect(markOutOfService).toBeVisible();
   await expect(markInService).toBeVisible();
+  const helpName = view === 'table' ? 'Troubleshoot ' : 'Open troubleshooting for ';
+  await expect(page.getByRole('button', { name: `${helpName}Fixture unexpected`, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: `${helpName}Fixture out of service B`, exact: true })).toHaveCount(0);
   if (view === 'table') {
     await expect(page.getByRole('columnheader')).toHaveText([
-      '', 'Printer', 'Service', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
+      '', 'Printer', 'Status', 'Backend', 'Progress', 'Temperatures', 'Actions',
     ]);
+    await expect(markOutOfService.locator('xpath=ancestor::td').locator('button').first())
+      .toHaveAttribute('aria-label', 'In Service: Mark Fixture unexpected Out of Service');
     await expect(markOutOfService).toHaveAttribute('aria-pressed', 'true');
     await expect(markInService).toHaveAttribute('aria-pressed', 'false');
     await expect(markOutOfService.locator('svg')).toHaveClass(/text-pf-success/);
     await expect(markInService.locator('svg')).toHaveClass(/text-pf-text-secondary/);
     await expect(markOutOfService).not.toHaveText('In Service');
     await expect(page.getByRole('columnheader', { name: 'Last Updated' })).toHaveCount(0);
+  } else {
+    const identity = page.getByTestId(view === 'collapsed' ? 'compact-printer-image' : 'detailed-printer-image');
+    await expect(identity.first().getByText('192.0.2.10', { exact: true })).toBeVisible();
+    await expect(identity.nth(1).getByText('2001:db8:1234:5678:90ab:cdef:1234:5678', { exact: true })).toBeVisible();
+    const toolbar = page.getByRole(view === 'collapsed' ? 'group' : 'toolbar', { name: 'Printer actions' }).first();
+    await expect(toolbar.getByRole('button', { name: /^In Service: Mark/ })).toHaveText('');
+    if (view === 'collapsed') {
+      await expect(page.getByRole('button', { name: 'More options' })).toHaveCount(0);
+      const actions = toolbar.locator(':scope > button, :scope > a, :scope > span');
+      await expect(actions).toHaveCount(9);
+      const boxes = await actions.evaluateAll(elements => elements.map(element => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      }));
+      for (const [index, box] of boxes.entries()) {
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+        expect(Math.abs(box.x - boxes[index % 2].x)).toBeLessThan(1);
+        if (index % 2 === 1) {
+          expect(box.x).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width);
+          expect(Math.abs(box.y - boxes[index - 1].y)).toBeLessThan(1);
+        }
+        const card = await toolbar.locator('xpath=ancestor::article').boundingBox();
+        expect(card!.width).toBeGreaterThanOrEqual(320);
+        const toolbarBox = await toolbar.boundingBox();
+        expect(toolbarBox!.x).toBeGreaterThanOrEqual(card!.x);
+        expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(card!.x + card!.width);
+        if (index >= 2) expect(box.y).toBeGreaterThanOrEqual(boxes[index - 2].y + boxes[index - 2].height);
+      }
+      const files = toolbar.getByRole('button', { name: 'View printer files' });
+      await files.focus();
+      await expect(files).toBeFocused();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
   await expect(page.getByText('Expected offline', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('printers-service-status.png'), fullPage: true });
+  if (view === 'collapsed') {
+    const cards = page.locator('article[data-pf-card]');
+    const dimensions = await cards.evaluateAll(elements => elements.map(element => {
+      const { width, height } = element.getBoundingClientRect();
+      return { width, height };
+    }));
+    await testInfo.attach('compact-card-dimensions', {
+      body: JSON.stringify(dimensions), contentType: 'application/json',
+    });
+    await cards.first().screenshot({ path: testInfo.outputPath('compact-in-service-card.png') });
+    await cards.nth(2).screenshot({ path: testInfo.outputPath('compact-out-of-service-ipv6-card.png') });
+  }
+  if (view === 'table') {
+    await markOutOfService.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('printers-service-actions.png'), fullPage: true });
+  }
   const geometry = await markOutOfService.boundingBox();
   expect(geometry?.height).toBeGreaterThanOrEqual(44);
   expect(geometry?.width).toBeGreaterThanOrEqual(44);
@@ -256,13 +316,8 @@ test(`users without printer administration see service status but no service mut
     '/api/auth/me': { ...toolbarRouteUser, roles: [], permissions: ['printers:read'] },
   });
   await expect(page.getByText('Fixture unexpected', { exact: true })).toBeVisible();
-  if (view === 'table') {
-    await expect(page.getByRole('img', { name: 'In Service', exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('img', { name: 'Out of Service', exact: true })).toBeVisible();
-  } else {
-    await expect(page.getByText('In Service', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Out of Service', { exact: true })).toBeVisible();
-  }
+  await expect(page.getByRole('img', { name: 'In Service', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Out of Service', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /^(In Service|Out of Service): Mark .* (In|Out of) Service$/ })).toHaveCount(0);
   expect(requests.errors).toEqual([]);
   expect(requests.writes).toEqual([]);
