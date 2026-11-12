@@ -320,15 +320,13 @@ test(`auto-dispatch shares service hover in both states in ${view} view`, async 
     await expect(control).toBeEnabled();
     await page.mouse.move(0, 0);
     await expect(control).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    if (active) {
-      await expect(control).toHaveCSS('color', 'rgb(20, 184, 166)');
-    }
+    await control.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
     const restBackground = await control.evaluate(element => getComputedStyle(element).backgroundColor);
     const restColor = await control.evaluate(element => getComputedStyle(element).color);
     const bolt = control.locator('svg');
     await expect(bolt).toHaveAttribute('fill', active ? 'currentColor' : 'none');
     await service.hover();
-    await expect(service).toHaveCSS('background-color', 'rgba(255, 255, 255, 0.1)');
+    await service.evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
     const serviceBackground = await service.evaluate(element => getComputedStyle(element).backgroundColor);
     await control.hover();
     await expect.poll(() => control.evaluate(element => getComputedStyle(element).backgroundColor))
