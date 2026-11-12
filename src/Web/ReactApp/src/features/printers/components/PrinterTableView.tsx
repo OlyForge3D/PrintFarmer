@@ -237,9 +237,6 @@ export function PrinterTableView({
                 onSort={() => onSort?.('name')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Printer
               </TableHeaderCell>
-              <th scope="col" className="w-12 px-1 py-3">
-                <span className="sr-only">Service</span>
-              </th>
               <TableHeaderCell sortable={Boolean(onSort)} sortKey="state" sortDirection={sortMode === 'state' ? sortDirection : null}
                 onSort={() => onSort?.('state')} className="text-pf-text-primary [&>button]:text-sm [&>button]:font-bold [&>button]:tracking-wide">
                 Status
@@ -311,9 +308,6 @@ export function PrinterTableView({
                         </div>
                       </div>
                     </div>
-                  </td>
-                  <td className="w-12 px-1 py-4 text-center">
-                    <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
                   </td>
 
                   {/* Status */}
@@ -396,6 +390,7 @@ export function PrinterTableView({
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
+                      <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={showEnableColumn ? onToggleEnabled : undefined} />
                       {onOpenDetails && (
                         <Button
                           type="button"

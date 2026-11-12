@@ -6,7 +6,6 @@ import {
   EditIcon,
   CameraIcon,
   ExternalLinkIcon,
-  MoreVerticalIcon,
   TagIcon,
 } from '@/common/components/icons/MdiIcons';
 import { Button, TagChip } from '@/common/components/ui';
@@ -95,22 +94,8 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false);
   const collapsedProgressRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close ellipsis menu when clicking outside
-  useEffect(() => {
-    if (!showMenu) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMenu]);
 
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
   // Polling for the shared failure-detection status query is controlled once
@@ -254,9 +239,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           )}
           {!isOnline && <PrinterTroubleshootingButton key={printer.id} printer={printer} />}
         </div>
-        <div className="mt-2">
-          <PrinterServiceStatus printer={printer} onToggleEnabled={onToggleEnabled} />
-        </div>
         {/* Tags row */}
         {printerTags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
@@ -291,13 +273,16 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                 className="h-full w-full object-contain p-1.5 drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]"
               />
             </div>
-            {(printer.modelName || printer.manufacturerName) && (
+            {(printer.modelName || printer.manufacturerName || printer.ipAddress) && (
               <div className="min-w-0 pb-0.5 leading-tight">
                 {printer.modelName && (
                   <p className="truncate text-sm font-medium text-pf-text-primary" title={printer.modelName}>{printer.modelName}</p>
                 )}
                 {printer.manufacturerName && (
                   <p className="truncate text-xs text-pf-text-secondary" title={printer.manufacturerName}>{printer.manufacturerName}</p>
+                )}
+                {printer.ipAddress && (
+                  <p className="break-all text-xs text-pf-text-secondary">{printer.ipAddress}</p>
                 )}
               </div>
             )}
@@ -360,18 +345,19 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
         </div>
 
-        {/* Right: action buttons column */}
+        {/* Right: action buttons */}
         <div
-          className="flex flex-col items-center gap-0.5 ml-2 mt-2"
+          className="grid shrink-0 grid-cols-2 content-start items-center gap-0.5 ml-2 mt-2"
           role="toolbar"
           aria-label="Printer actions"
         >
+          <PrinterServiceStatus printer={printer} iconOnly onToggleEnabled={onToggleEnabled} />
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={() => onExpand(printer.id)}
-            className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             title="Open details sidebar"
             aria-label="Open details sidebar"
             iconCenter={<PanelRightOpen className="h-4 w-4" />}
@@ -382,7 +368,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             size="sm"
             onClick={() => setShowCamera(!showCamera)}
             disabled={!hasCameraUrls || !isEnabled}
-            className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
             title={!isEnabled ? 'Printer Out of Service' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
@@ -392,7 +378,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             variant="unstyled"
             onClick={handleAutoDispatchToggle}
             disabled={setAutoDispatchEnabled.isPending}
-            className={`h-8 w-8 p-0 rounded transition-colors inline-flex items-center justify-center ${
+            className={`h-11 w-11 p-0 rounded transition-colors inline-flex items-center justify-center ${
               autoDispatchStatus?.enabled
                 ? 'text-pf-accent'
                 : 'text-pf-text-secondary hover:text-pf-text-primary'
@@ -402,11 +388,83 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             title={autoDispatchStatus?.enabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled'}
             iconCenter={<Zap className="w-4 h-4" fill={autoDispatchStatus?.enabled ? 'currentColor' : 'none'} />}
           />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            onClick={() => setShowFiles(true)}
+            disabled={!canOpenFilesNow}
+            title="View printer files"
+            aria-label="View printer files"
+            iconCenter={<FileIcon className="h-4 w-4" />}
+          />
+          {support.supportsHistory && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+              onClick={() => setShowHistory(true)}
+              disabled={!canOpenHistoryNow}
+              title="View print history"
+              aria-label="View print history"
+              iconCenter={<HistoryIcon className="h-4 w-4" />}
+            />
+          )}
+          {browserUrl ? (
+            <a
+              href={browserUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xs text-pf-text-secondary hover:text-pf-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
+              aria-label={`Open in Browser for printer ${printer.name} in new tab`}
+              title="Open in Browser"
+            >
+              <ExternalLinkIcon className="h-4 w-4" />
+            </a>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-11 w-11 p-0 text-pf-text-secondary"
+              disabled
+              explainedDisabled
+              aria-label={isInternalOnlyBrowserUrl
+                ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
+              title={isInternalOnlyBrowserUrl
+                ? 'Not available for simulated test printers'
+                : 'Printer browser URL is unavailable'}
+              iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
+            />
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            onClick={() => onEdit?.(printer)}
+            title="Edit Printer"
+            aria-label="Edit Printer"
+            iconCenter={<EditIcon className="h-4 w-4" />}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-11 w-11 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
+            onClick={() => setShowTagModal(true)}
+            title="Manage Tags"
+            aria-label="Manage Tags"
+            iconCenter={<TagIcon className="h-4 w-4" />}
+          />
         </div>
       </div>
 
-      {/* Bottom row: filament info + ellipsis menu */}
-      <div className="flex items-center px-3 pb-3 border-t border-white/5 pt-2" ref={menuRef}>
+      {/* Filament footer */}
+      <div className="flex items-center px-3 pb-3 border-t border-white/5 pt-2">
         <div className="flex items-center gap-2 flex-1 min-w-0 text-xs text-pf-text-secondary">
           {(() => {
             const mmuGates = (printer as PrinterDisplay).mmuStatus?.gates;
@@ -508,101 +566,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
         </div>
-        <div className="relative shrink-0 ml-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowMenu(v => !v)}
-            className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-            title="More options"
-            aria-label="More options"
-            aria-haspopup="true"
-            aria-expanded={showMenu}
-            iconCenter={<MoreVerticalIcon className="h-4 w-4" />}
-          />
-          {showMenu && (
-            <div className="absolute right-0 bottom-full mb-1 z-50 min-w-45 bg-pf-bg-1 border border-white/10 rounded-lg shadow-xl py-1 text-sm">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
-                  onClick={() => { setShowFiles(true); setShowMenu(false); }}
-                  disabled={!canOpenFilesNow}
-                  iconLeft={<FileIcon className="h-4 w-4 shrink-0" />}
-                >
-                  View Files
-                </Button>
-                {support.supportsHistory && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
-                    onClick={() => { setShowHistory(true); setShowMenu(false); }}
-                    disabled={!canOpenHistoryNow}
-                    iconLeft={<HistoryIcon className="h-4 w-4 shrink-0" />}
-                  >
-                    History
-                  </Button>
-                )}
-                {browserUrl ? (
-                  <a
-                    href={browserUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-pf-text-secondary hover:text-pf-text-primary hover:bg-white/5"
-                    aria-label={`Open in Browser for printer ${printer.name} in new tab`}
-                    onClick={() => setShowMenu(false)}
-                  >
-                    <ExternalLinkIcon className="h-4 w-4 shrink-0" />
-                    Open in Browser
-                  </a>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary"
-                    disabled
-                    explainedDisabled
-                    aria-label={isInternalOnlyBrowserUrl
-                      ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
-                      : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
-                    title={isInternalOnlyBrowserUrl
-                      ? 'Not available for simulated test printers'
-                      : 'Printer browser URL is unavailable'}
-                    iconLeft={<ExternalLinkIcon className="h-4 w-4 shrink-0" />}
-                  >
-                    Open in Browser
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
-                  onClick={() => { onEdit?.(printer); setShowMenu(false); }}
-                  iconLeft={<EditIcon className="h-4 w-4 shrink-0" />}
-                >
-                  Edit Printer
-                </Button>
-                <div className="h-px bg-white/10 my-1" />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary enabled:hover:text-pf-text-primary enabled:hover:bg-white/5"
-                  onClick={() => { setShowTagModal(true); setShowMenu(false); }}
-                  iconLeft={<TagIcon className="h-4 w-4 shrink-0" />}
-                >
-                  Manage Tags
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
+      </div>
 
       {/* History Modal */}
       <PrinterHistoryModal
