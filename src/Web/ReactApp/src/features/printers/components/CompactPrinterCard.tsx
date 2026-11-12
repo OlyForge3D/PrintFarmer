@@ -405,7 +405,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           />
           <Button
             type="button"
-            variant="unstyled"
+            variant="ghost"
             onClick={handleAutoDispatchToggle}
             disabled={setAutoDispatchEnabled.isPending}
             className={`h-11 w-11 p-0 rounded transition-colors inline-flex items-center justify-center ${

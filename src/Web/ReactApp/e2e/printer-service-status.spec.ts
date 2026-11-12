@@ -279,6 +279,85 @@ test(`printer availability uses the service status control in ${view} view`, asy
 });
 }
 
+for (const view of ['collapsed', 'detailed'] as const) {
+test(`auto-dispatch shares service hover in both states in ${view} view`, async ({ page }, testInfo) => {
+  await page.setViewportSize(testInfo.project.name.startsWith('mobile')
+    ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+  let enabled = false;
+  const status = () => ({
+    globalEnabled: true,
+    printers: [{
+      printerId: printers[0].id, printerName: printers[0].name, enabled,
+      state: enabled ? 'Idle' : 'Disabled', queueDepth: 0, isReady: true,
+      readyGateChecks: [], dispatchStateETag: 'dispatch-fixture', printerETag: printers[0].rowVersion,
+    }],
+  });
+  const requests = await mountRoutedToolbarPage(page, `/printers?view=${view}`, {
+    ...printerSeeds,
+    '/api/printers': [printers[0]],
+    '/api/printers/summary': [printers[0]],
+    '/api/auto-dispatch/status': status(),
+  });
+  const mutations: { body: unknown; revision: string | undefined; printerRevision: string | undefined }[] = [];
+  let releaseMutation = () => {};
+  await page.route('**/api/auto-dispatch/status', route => route.fulfill({ json: status() }));
+  await page.route(`**/api/auto-dispatch/${printers[0].id}/enabled`, async route => {
+    const request = route.request();
+    mutations.push({
+      body: request.postDataJSON(), revision: request.headers()['if-match'],
+      printerRevision: request.headers()['x-printer-if-match'],
+    });
+    await new Promise<void>(resolve => { releaseMutation = resolve; });
+    enabled = !enabled;
+    await route.fulfill({ status: 204 });
+  });
+  const toolbar = page.getByRole(view === 'collapsed' ? 'group' : 'toolbar', { name: 'Printer actions' });
+  const card = toolbar.locator('xpath=ancestor::article');
+  const control = toolbar.getByRole('button', { name: 'Toggle auto-dispatch for Fixture CoreXY', exact: true });
+  const service = toolbar.getByRole('button', { name: 'In Service: Mark Fixture CoreXY Out of Service', exact: true });
+  for (const active of [false, true]) {
+    await expect(control).toHaveAttribute('aria-pressed', String(active));
+    await expect(control).toBeEnabled();
+    await page.mouse.move(0, 0);
+    await expect(control).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    if (active) {
+      await expect(control).toHaveCSS('color', 'rgb(20, 184, 166)');
+    }
+    const restBackground = await control.evaluate(element => getComputedStyle(element).backgroundColor);
+    const restColor = await control.evaluate(element => getComputedStyle(element).color);
+    const bolt = control.locator('svg');
+    await expect(bolt).toHaveAttribute('fill', active ? 'currentColor' : 'none');
+    await service.hover();
+    await expect(service).toHaveCSS('background-color', 'rgba(255, 255, 255, 0.1)');
+    const serviceBackground = await service.evaluate(element => getComputedStyle(element).backgroundColor);
+    await control.hover();
+    await expect.poll(() => control.evaluate(element => getComputedStyle(element).backgroundColor))
+      .toBe(serviceBackground);
+    expect(serviceBackground).not.toBe(restBackground);
+    if (active) {
+      expect(await control.evaluate(element => getComputedStyle(element).color)).toBe(restColor);
+    }
+    const box = await control.boundingBox();
+    expect(box?.width).toBe(44);
+    expect(box?.height).toBe(44);
+    await card.screenshot({ path: testInfo.outputPath(`auto-dispatch-${active ? 'enabled' : 'disabled'}-hover.png`) });
+    await control.focus();
+    await expect(control).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(control).toBeDisabled();
+    await expect.poll(() => mutations.length).toBe(active ? 2 : 1);
+    releaseMutation();
+    await expect(control).toHaveAttribute('aria-pressed', String(!active));
+  }
+  expect(mutations).toEqual([true, false].map(nextEnabled => ({
+    body: { enabled: nextEnabled }, revision: '"dispatch-fixture"', printerRevision: '"Zml4dHVyZQ=="',
+  })));
+  expect(requests.errors).toEqual([]);
+  expect(requests.external).toEqual([]);
+  expect(requests.writes).toEqual([]);
+});
+}
+
 test('sidebar exposes service status beside identity and refreshes a stale revision without reporting success', async ({ page }, testInfo) => {
   await page.setViewportSize(testInfo.project.name.startsWith('mobile')
     ? { width: 390, height: 844 } : { width: 1440, height: 1000 });

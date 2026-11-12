@@ -56,6 +56,8 @@ Their single-row header matches the detailed header height while retaining 44px
 header controls. Both main action grids use uniform 44px square controls in
 row-major order: service status, camera, auto-dispatch, files, history and edit.
 History remains capability-gated; Tags remains compact-only after the shared actions.
+Auto-dispatch shares the other actions' ghost hover treatment in both states,
+while its enabled state retains the accent-colored, filled bolt.
 Unavailable browser actions retain their explanatory tooltip. Both card styles show
 the printer's configured IP address beneath its manufacturer when available.
 Out of Service preserves the existing disabled-printer behavior: the printer is
