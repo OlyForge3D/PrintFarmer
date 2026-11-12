@@ -98,6 +98,14 @@ Printer, slicer, worker, queue, artifact, capability, and real-time response
 contracts never return API keys, usernames, passwords, worker keys, internal
 paths, backend endpoints, or private service URLs.
 
+`GET /api/printers` includes `ipAddress` for each accessible printer when its
+stored connection URL has a numeric IPv4 or IPv6 host. The value is only the
+normalized address (IPv6 without brackets), never a URL, port, path, query,
+fragment or embedded credentials. Hostnames are not resolved during list
+requests; hostname-only, missing, invalid and non-HTTP(S) addresses return no IP
+value. The field is independent of online status and does not restore the
+suppressed `backendUrl`, `originalServerUrl` or credentials.
+
 ## User Printer-Control Preference
 
 `GET /api/settings/user` returns the authenticated user's `printerControlMode`:
