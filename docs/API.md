@@ -1886,6 +1886,29 @@ validation, storage, cancellation, or database commit fails.
 
 The updated ETag is also returned in the `ETag` response header.
 
+### Add Local-Library G-code Files to a Project
+
+The Files page's Add to Project action sends one
+`POST /api/projects/{id}/files` with the complete nonempty array of file requests.
+All request fields are forwarded, including material, filament, quantity,
+notes and plate metadata. Empty client selections return `[]` without a request
+(the endpoint itself rejects an empty list with `400 Bad Request`).
+
+The existing endpoint skips missing G-code IDs, files already in the project
+and repeated IDs within the batch. Its response is the actual added DTO array,
+with no guaranteed ordering; the success notification counts those DTOs, not
+selected IDs, including zero when everything was skipped. Project list and
+detail caches are invalidated on success.
+
+Unlike the former serial single-file requests, the batch uses at most one
+database save, not independently committed per-file additions. HTTP failures
+propagate to the existing error notification, leave the modal open and do not
+trigger success invalidations or automatic singleton retries. True single-file
+callers retain their singleton helper.
+
+For 50 selections this reduces POST count from 50 to 1 (98% fewer requests),
+not a measured wall-clock speedup.
+
 ### Bulk Delete Local-Library Files
 
 The Files page sends at most one bulk request per source. It never replays
