@@ -18,6 +18,12 @@ Authorization: Bearer <token>
 
 Tokens are obtained via login and typically stored in secure HttpOnly cookies.
 
+Passkey login requires a currently active account; disabled accounts receive
+neither an access token nor a refresh token. The main API checks persisted account
+status on every bearer authentication, including SignalR connection requests.
+Previously issued access tokens are rejected once the account is deactivated.
+An unavailable account-status store fails authentication closed.
+
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run
 setup flows, health and capability probes, browser thumbnail resources, and

@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -240,6 +241,23 @@ internal static class ProgramHelpers
             OnTokenValidated = async context =>
             {
                 string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
+                try
+                {
+                    AppDbContext db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                    if (!Guid.TryParse(sub, out Guid userId) ||
+                        !await db.Users.AnyAsync(user => user.Id == userId && user.IsActive, context.HttpContext.RequestAborted))
+                    {
+                        context.Fail("User account is disabled or no longer exists.");
+                        return;
+                    }
+                }
+                catch (Exception)
+                {
+                    // Account eligibility is required even if its backing store is unavailable.
+                    context.Fail("Unable to validate user account.");
+                    return;
+                }
+
                 string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
                 try
                 {
