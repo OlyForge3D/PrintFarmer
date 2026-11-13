@@ -402,7 +402,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
         using HttpResponseMessage response = await UploadAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         AssertNoSideEffects();
     }
 
