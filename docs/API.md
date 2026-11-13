@@ -1897,8 +1897,8 @@ notes and plate metadata. Empty client selections return `[]` without a request
 The existing endpoint skips missing G-code IDs, files already in the project
 and repeated IDs within the batch. Its response is the actual added DTO array,
 with no guaranteed ordering; the success notification counts those DTOs, not
-selected IDs, including zero when everything was skipped. Project list and
-detail caches are invalidated on success.
+selected IDs, including zero when everything was skipped. On success the client
+invalidates the `['projects']` and `['project', projectId]` query keys.
 
 Unlike the former serial single-file requests, the batch uses at most one
 database save, not independently committed per-file additions. HTTP failures
