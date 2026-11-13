@@ -39,12 +39,13 @@ export function AddToProjectModal({ files, fileIds, isOpen, onClose }: AddToProj
       }));
       return projectService.addFilesToProject(projectId, requests);
     },
-    onSuccess: (_data, { projectId }) => {
+    onSuccess: (addedFiles, { projectId }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       const project = projects.find((p) => p.id === projectId);
+      const addedCount = addedFiles.length;
       toast.success(
-        `Added ${fileCount} file${fileCount !== 1 ? 's' : ''} to "${project?.name ?? 'project'}"`
+        `Added ${addedCount} file${addedCount !== 1 ? 's' : ''} to "${project?.name ?? 'project'}"`
       );
       handleClose();
     },
