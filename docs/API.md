@@ -22,10 +22,11 @@ Passkey login requires a currently active account; disabled accounts receive
 neither an access token nor a refresh token. The main API checks persisted account
 status on every bearer authentication, including SignalR connection requests.
 Previously issued access tokens are rejected once the account is deactivated.
-An unavailable account-status store fails authentication closed.
-Database failures are logged with their original exception; caller cancellation
-and unrelated programming errors propagate rather than becoming account-rejection
-responses.
+Recognized database/store failures are logged with their original exception and
+fail authentication closed. Unrecognized or untyped infrastructure failures
+propagate as server errors and never authorize the token. Caller cancellation
+and unrelated programming errors also propagate rather than becoming
+account-rejection responses.
 
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run

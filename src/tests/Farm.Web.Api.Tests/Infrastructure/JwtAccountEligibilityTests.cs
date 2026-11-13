@@ -145,6 +145,33 @@ public class JwtAccountEligibilityTests
     }
 
     [Fact]
+    public async Task OnTokenValidated_RequestCancelledWithDatabaseFailure_PropagatesWithoutLogging()
+    {
+        using CancellationTokenSource cancellation = new();
+        SqliteException failure = new("Query cancelled", 0);
+        Mock<ILogger<Program>> logger = new();
+        using ServiceProvider services = new ServiceCollection()
+            .AddSingleton(logger.Object)
+            .AddDbContext<AppDbContext>(options => options
+                .UseSqlite("Data Source=:memory:")
+                .AddInterceptors(new FailingQueryInterceptor(failure, () => cancellation.Cancel())))
+            .BuildServiceProvider();
+        TokenValidatedContext context = CreateTokenValidatedContext(services, cancellation.Token);
+
+        SqliteException propagated = await Assert.ThrowsAsync<SqliteException>(
+            () => ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context));
+
+        Assert.Same(failure, propagated);
+        Assert.Null(context.Result);
+        logger.Verify(log => log.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
+    }
+
+    [Fact]
     public async Task OnTokenValidated_UnexpectedFailure_PropagatesOriginalException()
     {
         InvalidOperationException failure = new("Invalid account-store registration");
@@ -177,13 +204,17 @@ public class JwtAccountEligibilityTests
         };
     }
 
-    private sealed class FailingQueryInterceptor(Exception failure) : DbCommandInterceptor
+    private sealed class FailingQueryInterceptor(Exception failure, Action? onExecuting = null) : DbCommandInterceptor
     {
         public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
             DbCommand command,
             CommandEventData eventData,
             InterceptionResult<DbDataReader> result,
-            CancellationToken cancellationToken = default) => throw failure;
+            CancellationToken cancellationToken = default)
+        {
+            onExecuting?.Invoke();
+            throw failure;
+        }
     }
 
     private static async Task<WebApplication> CreateAppAsync(bool failAccountLookup = false)

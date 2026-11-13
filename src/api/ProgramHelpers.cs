@@ -260,12 +260,14 @@ internal static class ProgramHelpers
                         return;
                     }
                 }
-                catch (DbException exception)
+                catch (DbException exception) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
                 {
                     FailAccountValidation(context, exception);
                     return;
                 }
-                catch (InvalidOperationException exception) when (exception.InnerException is DbException or TimeoutException)
+                catch (InvalidOperationException exception) when (
+                    !context.HttpContext.RequestAborted.IsCancellationRequested
+                    && exception.InnerException is (DbException or TimeoutException))
                 {
                     // EF's non-retrying PostgreSQL/SQL Server strategies wrap transient store failures.
                     FailAccountValidation(context, exception);
