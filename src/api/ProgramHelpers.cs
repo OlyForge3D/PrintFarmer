@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -162,6 +163,14 @@ internal static class ProgramHelpers
 
     internal static JwtBearerEvents CreateJwtEvents(ILogger? startupUls, ILogger<Program>? startupLogger)
     {
+        void FailAccountValidation(TokenValidatedContext context, Exception exception)
+        {
+            ILogger logger = startupUls ?? startupLogger
+                ?? context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogError(exception, "[JWT][OnTokenValidated] Unable to validate user account.");
+            context.Fail("Unable to validate user account.");
+        }
+
         return new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -251,10 +260,15 @@ internal static class ProgramHelpers
                         return;
                     }
                 }
-                catch (Exception)
+                catch (DbException exception)
                 {
-                    // Account eligibility is required even if its backing store is unavailable.
-                    context.Fail("Unable to validate user account.");
+                    FailAccountValidation(context, exception);
+                    return;
+                }
+                catch (InvalidOperationException exception) when (exception.InnerException is DbException or TimeoutException)
+                {
+                    // EF's non-retrying PostgreSQL/SQL Server strategies wrap transient store failures.
+                    FailAccountValidation(context, exception);
                     return;
                 }
 

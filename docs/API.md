@@ -23,6 +23,9 @@ neither an access token nor a refresh token. The main API checks persisted accou
 status on every bearer authentication, including SignalR connection requests.
 Previously issued access tokens are rejected once the account is deactivated.
 An unavailable account-status store fails authentication closed.
+Database failures are logged with their original exception; caller cancellation
+and unrelated programming errors propagate rather than becoming account-rejection
+responses.
 
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run

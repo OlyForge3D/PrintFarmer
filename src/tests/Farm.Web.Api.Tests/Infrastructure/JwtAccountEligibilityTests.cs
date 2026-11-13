@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Data.Common;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
@@ -6,15 +7,20 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
@@ -87,6 +93,99 @@ public class JwtAccountEligibilityTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("database")]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
+    public async Task OnTokenValidated_AccountStoreFailure_FailsClosedAndLogsOriginalException(string scenario)
+    {
+        Exception failure = scenario switch
+        {
+            "wrapped-database" => new InvalidOperationException("Transient store failure", new SqliteException("Store unavailable", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Transient store failure", new TimeoutException("Store timeout")),
+            _ => new SqliteException("Store unavailable", 14)
+        };
+        Mock<ILogger<Program>> logger = new();
+        using ServiceProvider services = new ServiceCollection()
+            .AddSingleton(logger.Object)
+            .AddDbContext<AppDbContext>(options => options
+                .UseSqlite("Data Source=:memory:")
+                .AddInterceptors(new FailingQueryInterceptor(failure)))
+            .BuildServiceProvider();
+        TokenValidatedContext context = CreateTokenValidatedContext(services);
+
+        await ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context);
+
+        Assert.NotNull(context.Result);
+        Assert.False(context.Result.Succeeded);
+        Assert.Equal("Unable to validate user account.", context.Result.Failure?.Message);
+        logger.Verify(log => log.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.Is<Exception>(exception => ReferenceEquals(exception, failure)),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task OnTokenValidated_RequestCancelled_PropagatesCancellation()
+    {
+        using CancellationTokenSource cancellation = new();
+        await cancellation.CancelAsync();
+        using ServiceProvider services = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite("Data Source=:memory:"))
+            .BuildServiceProvider();
+        TokenValidatedContext context = CreateTokenValidatedContext(services, cancellation.Token);
+
+        OperationCanceledException failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context));
+
+        Assert.Equal(cancellation.Token, failure.CancellationToken);
+        Assert.Null(context.Result);
+    }
+
+    [Fact]
+    public async Task OnTokenValidated_UnexpectedFailure_PropagatesOriginalException()
+    {
+        InvalidOperationException failure = new("Invalid account-store registration");
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<AppDbContext>(_ => throw failure)
+            .BuildServiceProvider();
+        TokenValidatedContext context = CreateTokenValidatedContext(services);
+
+        InvalidOperationException propagated = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context));
+
+        Assert.Same(failure, propagated);
+        Assert.Null(context.Result);
+    }
+
+    private static TokenValidatedContext CreateTokenValidatedContext(
+        IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        DefaultHttpContext httpContext = new()
+        {
+            RequestServices = services,
+            RequestAborted = cancellationToken
+        };
+        AuthenticationScheme scheme = new(
+            JwtBearerDefaults.AuthenticationScheme, null, typeof(JwtBearerHandler));
+        return new TokenValidatedContext(httpContext, scheme, new JwtBearerOptions())
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())]))
+        };
+    }
+
+    private sealed class FailingQueryInterceptor(Exception failure) : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default) => throw failure;
+    }
+
     private static async Task<WebApplication> CreateAppAsync(bool failAccountLookup = false)
     {
         string databaseName = Guid.NewGuid().ToString();
@@ -101,7 +200,7 @@ public class JwtAccountEligibilityTests
         builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Environment);
         if (failAccountLookup)
         {
-            builder.Services.AddScoped<AppDbContext>(_ => throw new InvalidOperationException("Account store unavailable"));
+            builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite("Data Source=:memory:"));
         }
         else
         {
