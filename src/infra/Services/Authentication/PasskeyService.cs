@@ -178,6 +178,13 @@ public class PasskeyService(
             },
             ct);
 
+        // Read persisted eligibility after assertion verification, not the tracked owner
+        // that may have been loaded before an administrator disabled the account.
+        if (!await db.Users.AnyAsync(user => user.Id == credential.UserId && user.IsActive, ct))
+        {
+            return new AuthenticationResult(false, Error: "User account is disabled");
+        }
+
         DateTime nowUtc = DateTime.UtcNow;
         credential.SignCount = assertionResult.SignCount;
         credential.LastUsedAt = nowUtc;

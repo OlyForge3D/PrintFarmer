@@ -83,6 +83,12 @@
 
 ### Fixes
 
+- Reject passkey login for inactive accounts without issuing access or refresh
+  tokens. Main-API bearer authentication now checks current account status so
+  previously issued tokens stop working after deactivation (#3652). Recognized
+  account-store failures are logged and fail closed without masking cancellation
+  or unrelated programming errors.
+
 - Preserve native filament setting types when saving editor changes, including
   boolean vectors, percent suffixes and unedited extruder entries (#3643).
 

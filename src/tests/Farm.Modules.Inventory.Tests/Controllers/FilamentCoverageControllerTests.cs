@@ -178,8 +178,9 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
                 services.AddSingleton(coverage.Object);
             });
         });
+        using HttpClient authenticatedClient = await disabledFactory.CreateAuthenticatedClientAsync();
         using HttpClient client = host.CreateClient();
-        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
+        client.DefaultRequestHeaders.Authorization = authenticatedClient.DefaultRequestHeaders.Authorization;
 
         HttpResponseMessage response = await client.GetAsync(FleetRoute);
 
@@ -207,8 +208,9 @@ public class FilamentCoverageControllerTests : IClassFixture<CustomWebApplicatio
                 services.AddSingleton(coverage.Object);
             });
         });
+        using HttpClient authenticatedClient = await disabledFactory.CreateAuthenticatedClientAsync();
         using HttpClient client = host.CreateClient();
-        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
+        client.DefaultRequestHeaders.Authorization = authenticatedClient.DefaultRequestHeaders.Authorization;
 
         HttpResponseMessage response = await client.GetAsync(string.Format(CultureInfo.InvariantCulture, PerPrinterRouteFormat, Guid.NewGuid()));
 
