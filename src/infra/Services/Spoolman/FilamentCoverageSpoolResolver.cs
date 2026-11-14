@@ -306,36 +306,12 @@ public sealed class FilamentCoverageSpoolResolver(
                 continue;
             }
 
+            IBackendClient client;
             try
             {
-                IBackendClient client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
-                if (client is not ISupportsSpoolman native)
-                {
-                    foreach (CanonicalSpoolIdentity identity in sourceGroup)
-                    {
-                        result[identity] = new(null, true, ReasonSourceUnavailable);
-                    }
-
-                    continue;
-                }
-
-                string nativeBaseUrl = sourceGroup.Key.EndsWith('/')
-                    ? sourceGroup.Key
-                    : sourceGroup.Key + "/";
-                SourceKey key = new(true, (int)PrinterBackend.Moonraker, sourceGroup.Key);
-                SourceRequest request = new(native, nativeBaseUrl);
-                foreach (CanonicalSpoolIdentity identity in sourceGroup)
-                {
-                    _ = request.SpoolIds.Add(identity.SpoolId);
-                }
-
-                requests[key] = request;
+                client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
             {
                 _logger.LogDebug(
                     ex,
@@ -345,7 +321,31 @@ public sealed class FilamentCoverageSpoolResolver(
                 {
                     result[identity] = new(null, true, ReasonSourceUnavailable);
                 }
+
+                continue;
             }
+
+            if (client is not ISupportsSpoolman native)
+            {
+                foreach (CanonicalSpoolIdentity identity in sourceGroup)
+                {
+                    result[identity] = new(null, true, ReasonSourceUnavailable);
+                }
+
+                continue;
+            }
+
+            string nativeBaseUrl = sourceGroup.Key.EndsWith('/')
+                ? sourceGroup.Key
+                : sourceGroup.Key + "/";
+            SourceKey key = new(true, (int)PrinterBackend.Moonraker, sourceGroup.Key);
+            SourceRequest request = new(native, nativeBaseUrl);
+            foreach (CanonicalSpoolIdentity identity in sourceGroup)
+            {
+                _ = request.SpoolIds.Add(identity.SpoolId);
+            }
+
+            requests[key] = request;
         }
 
         Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources =

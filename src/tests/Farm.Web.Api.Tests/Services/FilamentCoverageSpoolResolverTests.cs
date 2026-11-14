@@ -442,6 +442,63 @@ public class FilamentCoverageSpoolResolverTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveAsync_NativeFactoryUnavailable_PreservesHealthyCentralSource(bool unsupportedBackend)
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClientFactory> factory = new();
+        Exception failure = unsupportedBackend
+            ? new ArgumentException("unsupported backend")
+            : new InvalidOperationException("backend not registered");
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker)).Throws(failure);
+        Mock<ISpoolmanService> central = new();
+        central.Setup(service => service.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central.Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>([Spool(42, 321)], 1));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity native = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
+        CanonicalSpoolIdentity managed = new(SpoolSourceKind.Central, "http://central.local", 42);
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync([native, managed], CancellationToken.None);
+
+        result[native].ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        result[native].Spool.Should().BeNull();
+        result[managed].Spool!.RemainingWeightG.Should().Be(321);
+        result[managed].ErrorReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UnexpectedNativeFactoryFailure_Propagates()
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Throws(new NotSupportedException("unexpected failure"));
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity identity = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
+
+        Func<Task> resolve = async () => await resolver.ResolveAsync([identity], CancellationToken.None);
+
+        await resolve.Should().ThrowAsync<NotSupportedException>();
+    }
+
     [Fact]
     public async Task ResolveSpoolAsync_CanonicalNativeIdentity_PreservesConfiguredSubPath()
     {
