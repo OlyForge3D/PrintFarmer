@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -28,6 +29,49 @@ namespace Farm.Web.Api.Tests.Infrastructure;
 public class JwtAccountEligibilityTests
 {
     private const string SigningKey = "AccountEligibilityTests-Only-NotAProductionKey12345";
+
+    [Theory]
+    [InlineData("/api/protected", false)]
+    [InlineData("/hubs/protected", false)]
+    [InlineData("/api/protected", true)]
+    [InlineData("/hubs/protected", true)]
+    public async Task AuthenticateAsync_ActiveAccountWithRevocationDenied_ReturnsUnauthorized(string path, bool lookupFails)
+    {
+        await using WebApplication app = await CreateAppAsync(failRevocationLookup: lookupFails);
+        Guid userId = Guid.NewGuid();
+        string token = CreateToken(userId.ToString());
+        using (IServiceScope scope = app.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = "revoked-user",
+                Email = "revoked@example.com",
+                PasswordHash = "unused",
+                IsActive = true
+            });
+            await db.SaveChangesAsync();
+            if (!lookupFails)
+            {
+                ITokenRevocationService revocation = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
+                Assert.True(await revocation.RevokeTokenAsync(token, userId, userId, "Test revocation"));
+            }
+        }
+
+        using HttpClient client = app.GetTestClient();
+        if (path.StartsWith("/hubs", StringComparison.Ordinal))
+        {
+            path += $"?access_token={token}";
+        }
+        else
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+
+        using HttpResponseMessage response = await client.GetAsync(path);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 
     [Theory]
     [InlineData("/api/protected")]
@@ -171,16 +215,20 @@ public class JwtAccountEligibilityTests
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
     }
 
-    [Fact]
-    public async Task OnTokenValidated_UnexpectedFailure_PropagatesOriginalException()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnTokenValidated_InvalidOrDisposedAccountStore_PropagatesOriginalException(bool disposed)
     {
-        InvalidOperationException failure = new("Invalid account-store registration");
+        InvalidOperationException failure = disposed
+            ? new ObjectDisposedException("account-store")
+            : new InvalidOperationException("Invalid account-store registration");
         using ServiceProvider services = new ServiceCollection()
             .AddScoped<AppDbContext>(_ => throw failure)
             .BuildServiceProvider();
         TokenValidatedContext context = CreateTokenValidatedContext(services);
 
-        InvalidOperationException propagated = await Assert.ThrowsAsync<InvalidOperationException>(
+        Exception? propagated = await Record.ExceptionAsync(
             () => ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context));
 
         Assert.Same(failure, propagated);
@@ -217,7 +265,7 @@ public class JwtAccountEligibilityTests
         }
     }
 
-    private static async Task<WebApplication> CreateAppAsync(bool failAccountLookup = false)
+    private static async Task<WebApplication> CreateAppAsync(bool failAccountLookup = false, bool failRevocationLookup = false)
     {
         string databaseName = Guid.NewGuid().ToString();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -229,6 +277,18 @@ public class JwtAccountEligibilityTests
             ["Jwt:Audience"] = "PrintFarmer"
         });
         builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Environment);
+        builder.Services.AddSingleton(Mock.Of<IAuthAuditService>());
+        if (failRevocationLookup)
+        {
+            Mock<ITokenRevocationService> revocation = new(MockBehavior.Strict);
+            revocation.Setup(service => service.IsTokenRevokedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new DbUpdateException("Revocation store unavailable."));
+            builder.Services.AddSingleton(revocation.Object);
+        }
+        else
+        {
+            builder.Services.AddScoped<ITokenRevocationService, TokenRevocationService>();
+        }
         if (failAccountLookup)
         {
             builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite("Data Source=:memory:"));

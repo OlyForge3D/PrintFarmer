@@ -82,114 +82,102 @@ public class TokenRevocationService(
         string? ipAddress = null,
         CancellationToken cancellationToken = default)
     {
+        DateTime now = DateTime.UtcNow;
+        List<RefreshToken> activeRefreshTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == userId && !rt.IsRevoked && rt.ExpiresAt > now)
+            .ToListAsync(cancellationToken);
+
+        foreach (RefreshToken refreshToken in activeRefreshTokens)
+        {
+            refreshToken.IsRevoked = true;
+            refreshToken.RevokedAt = now;
+            refreshToken.RevokedByIp = ipAddress ?? "system";
+        }
+
+        RevokedToken revocationMarker = new()
+        {
+            Id = Guid.NewGuid(),
+            TokenHash = TokenRevocationMarker.CreateTokenHash(userId),
+            UserId = userId,
+            RevokedAt = now,
+            RevokedByUserId = revokedByUserId,
+            Reason = $"All tokens revoked: {reason}",
+            ExpiresAt = now.AddDays(30),
+            IpAddress = ipAddress
+        };
+
+        _ = _context.RevokedTokens.Add(revocationMarker);
         try
         {
-            // For revoking all tokens, we create a special marker with userId but no specific token hash
-            // This will require checking userId in the middleware
-
-            // Alternative approach: Get all active refresh tokens for the user and revoke them
-            List<RefreshToken> activeRefreshTokens = await _context.RefreshTokens
-                .Where(rt => rt.UserId == userId && !rt.IsRevoked && rt.ExpiresAt > DateTime.UtcNow)
-                .ToListAsync(cancellationToken);
-
-            int revokedCount = 0;
-
-            foreach (RefreshToken? refreshToken in activeRefreshTokens)
-            {
-                // Mark refresh token as revoked
-                refreshToken.IsRevoked = true;
-                refreshToken.RevokedAt = DateTime.UtcNow;
-                refreshToken.RevokedByIp = ipAddress ?? "system";
-                revokedCount++;
-            }
-
-            // Also create a time-based revocation marker for JWT tokens
-            // Any JWT issued before this timestamp for this user will be considered revoked
-            RevokedToken revocationMarker = new()
-            {
-                Id = Guid.NewGuid(),
-                TokenHash = $"ALL_TOKENS_{userId}_{DateTime.UtcNow.Ticks}", // Special marker
-                UserId = userId,
-                RevokedAt = DateTime.UtcNow,
-                RevokedByUserId = revokedByUserId,
-                Reason = $"All tokens revoked: {reason}",
-                ExpiresAt = DateTime.UtcNow.AddDays(30), // Keep marker for 30 days
-                IpAddress = ipAddress
-            };
-
-            _ = _context.RevokedTokens.Add(revocationMarker);
             _ = await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            _context.ChangeTracker.Clear();
+            throw;
+        }
 
-            // Audit log the mass revocation
+        int revokedCount = activeRefreshTokens.Count;
+        try
+        {
             await _authAuditService.LogTokenRevokedAsync(
                 userId,
                 revokedByUserId,
                 $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
                 ipAddress);
-
-            _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, LogSanitizer.Sanitize(reason));
-            return revokedCount + 1; // Include the marker
         }
-        catch (Exception ex)
+        catch (Exception ex) when (AuthenticationStoreFailure.IsRecoverable(ex, cancellationToken))
         {
-            _logging.LogError(ex, "[TokenRevocation] Error revoking all tokens for UserId: {UserId}", userId);
-            return 0;
+            _logging.LogError(ex, "Failed to write token-revocation audit for user {UserId}", userId);
         }
+
+        _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, LogSanitizer.Sanitize(reason));
+        return revokedCount + 1;
     }
 
     public async Task<bool> IsTokenRevokedAsync(string token, CancellationToken cancellationToken = default)
     {
-        try
+        string tokenHash = GetTokenHash(token);
+
+        // Check if specific token is revoked
+        bool isRevoked = await _context.RevokedTokens
+            .AnyAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
+
+        if (isRevoked)
         {
-            string tokenHash = GetTokenHash(token);
+            return true;
+        }
 
-            // Check if specific token is revoked
-            bool isRevoked = await _context.RevokedTokens
-                .AnyAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
+        // Check if user has a "revoke all" marker
+        Guid? userId = GetUserIdFromToken(token);
+        if (userId.HasValue)
+        {
+            // The JWT "nbf" claim (token issued-at) only carries whole-second resolution -
+            // JsonWebTokenHandler floors it when writing the token. RevokedAt is stored with
+            // full sub-second precision, so a strict ">" comparison between the two is
+            // ambiguous whenever both events fall in the same second: a revocation marker
+            // created at, say, 12:00:00.000000 exactly ties with a token's floored nbf of
+            // 12:00:00, and the tie fails the strict ">" check even though the token should
+            // be revoked. Truncate RevokedAt down to the same second-level granularity as
+            // nbf and use ">=" so same-second ties deterministically resolve to "revoked"
+            // (fail-safe) instead of depending on where the marker lands within the second.
+            DateTime tokenIssuedAt = GetTokenIssuedAt(token);
 
-            if (isRevoked)
+            List<DateTime> revocationMarkerTimestamps = await _context.RevokedTokens
+                .Where(rt => rt.UserId == userId.Value && rt.TokenHash.StartsWith("ALL_TOKENS_"))
+                .Select(rt => rt.RevokedAt)
+                .ToListAsync(cancellationToken);
+
+            bool hasRevocationMarker = revocationMarkerTimestamps
+                .Any(revokedAt => TruncateToSecond(revokedAt) >= tokenIssuedAt);
+
+            if (hasRevocationMarker)
             {
                 return true;
             }
-
-            // Check if user has a "revoke all" marker
-            Guid? userId = GetUserIdFromToken(token);
-            if (userId.HasValue)
-            {
-                // The JWT "nbf" claim (token issued-at) only carries whole-second resolution -
-                // JsonWebTokenHandler floors it when writing the token. RevokedAt is stored with
-                // full sub-second precision, so a strict ">" comparison between the two is
-                // ambiguous whenever both events fall in the same second: a revocation marker
-                // created at, say, 12:00:00.000000 exactly ties with a token's floored nbf of
-                // 12:00:00, and the tie fails the strict ">" check even though the token should
-                // be revoked. Truncate RevokedAt down to the same second-level granularity as
-                // nbf and use ">=" so same-second ties deterministically resolve to "revoked"
-                // (fail-safe) instead of depending on where the marker lands within the second.
-                DateTime tokenIssuedAt = GetTokenIssuedAt(token);
-
-                List<DateTime> revocationMarkerTimestamps = await _context.RevokedTokens
-                    .Where(rt => rt.UserId == userId.Value && rt.TokenHash.StartsWith("ALL_TOKENS_"))
-                    .Select(rt => rt.RevokedAt)
-                    .ToListAsync(cancellationToken);
-
-                bool hasRevocationMarker = revocationMarkerTimestamps
-                    .Any(revokedAt => TruncateToSecond(revokedAt) >= tokenIssuedAt);
-
-                if (hasRevocationMarker)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
-        catch (Exception ex)
-        {
-            _logging.LogError(ex, "[TokenRevocation] Error checking token revocation status");
 
-            // On error, allow the token (fail open) - existing JWT validation will still apply
-            return false;
-        }
+        return false;
     }
 
     public async Task<int> CleanupExpiredRevocationsAsync(CancellationToken cancellationToken = default)

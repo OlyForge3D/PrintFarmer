@@ -213,21 +213,6 @@ public interface IUsersRepository
     Task<List<(string Resource, string Action)>> GetDeniedPermissionsAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>
-    /// Updates a user's password after verifying the current password.
-    /// </summary>
-    /// <param name="userId">The user's unique identifier.</param>
-    /// <param name="currentPassword">The current password for verification.</param>
-    /// <param name="newPasswordHash">The new password hash to set.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>True if the password was updated successfully.</returns>
-    Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default);
-
-    /// <summary>
-    /// Revokes all active refresh sessions without changing JWT access-token revocation.
-    /// </summary>
-    Task RevokeUserRefreshTokensAsync(Guid userId, string? ipAddress = null, CancellationToken ct = default);
-
-    /// <summary>
     /// Gets the latest user-wide access-token revocation marker timestamp.
     /// </summary>
     Task<DateTime?> GetLatestTokenRevocationTimeAsync(Guid userId, CancellationToken ct = default);

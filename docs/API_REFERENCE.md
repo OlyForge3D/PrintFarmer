@@ -35,11 +35,25 @@ that session. A previously rotated token revokes its active descendant in the sa
 session family; unrelated sessions and other users' sessions are not affected.
 Reusing a rotated token at the refresh endpoint revokes all of the user's refresh
 sessions and access tokens issued at or before the revocation marker's second.
-Access tokens issued in a later second remain valid. Successful password changes
-and password resets revoke all refresh sessions, but do not revoke existing JWT
-access tokens. The React client refreshes access tokens proactively and retries one
-authenticated request after a 401; refresh tokens are stored separately from
-access tokens in local storage.
+Access tokens issued in a later second remain valid. Successful self-service or
+administrator password changes and password resets revoke all refresh sessions
+and access tokens issued at or before the revocation marker's second. Subsequent
+API requests using those JWTs and new or reconnecting SignalR handshakes are
+rejected. Already-established SignalR WebSocket connections are not force-closed
+and remain connected until they disconnect; long-polling transport requests
+revalidate the JWT and subsequent polls are rejected after revocation. The React
+client refreshes access tokens proactively and retries one authenticated request
+after a 401; refresh tokens are stored separately from access tokens in local
+storage.
+
+Both the main API and standalone slicer host check persisted account eligibility
+on authenticated requests and new SignalR handshakes. Deactivating an account
+therefore rejects its existing JWT on future requests and reconnects without
+waiting for the slicer host's five-second revocation cache. The user-management
+deactivation workflow also revokes access and refresh sessions; deleting a user
+removes its refresh sessions and its missing account invalidates existing JWTs.
+Account-store or revocation-store failures deny authentication and are logged;
+established WebSockets are not force-closed.
 
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include
