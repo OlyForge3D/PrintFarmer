@@ -118,16 +118,16 @@ the feature contribution against its merge base.
 
 The wrapper resolves changed source, shared config, discovered `DESIGN.md` and
 sidecar files before vendor reads; real paths must remain inside the checkout.
-When static parser modules are available, it also contains linked stylesheet
-reads and recursively checks local CSS `@import` paths that the wrapper inspects.
+For HTML inputs, parser modules are required to contain linked stylesheet reads
+and recursively check local CSS `@import` paths that the wrapper inspects.
 This import-graph check is deliberately stricter than the vendored detector,
 which reads linked stylesheets but does not follow CSS imports. Excessive or
 oversized stylesheets fail explicitly: recursive imports are capped at 256
 files, and every local stylesheet is capped at 1 MiB. If parser modules are
-missing, the detector keeps its existing text-engine fallback and does not read
-linked CSS. The root tooling lockfile includes the parser modules, and CI
-installs them after the changed-file scan and before the test suite so
-parser-enabled boundary regressions cannot pass through the regex fallback.
+missing or expose an invalid API, the wrapper fails the scan before the vendored
+text-engine fallback can run. The root tooling lockfile includes the parser
+modules, and CI installs them before the changed-file scan so parser-enabled
+boundary checks cannot silently fall through to regex parsing.
 
 The vendored Impeccable detector is integrity-pinned and retains its upstream
 license and notice. Its web rules are deterministic source checks, not a browser

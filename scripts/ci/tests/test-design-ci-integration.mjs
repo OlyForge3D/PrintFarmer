@@ -84,6 +84,9 @@ test('required CI tooling job runs the detector, not only an optional workflow',
   const detectorScan = detectorSteps.findIndex((step) => step.name === 'Run changed UI design checks');
   assert.ok(detectorSetupNode >= 0 && detectorInstallDependencies > detectorSetupNode,
     'Standalone detector must set up Node and install dependencies');
+  assert.equal(detectorSteps[detectorSetupNode].uses,
+    'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+    'Standalone detector must use the verified immutable setup-node action pin');
   assert.equal(detectorSteps[detectorInstallDependencies].run, 'npm ci --ignore-scripts');
   assert.ok(detectorInstallDependencies < detectorScan,
     'Standalone detector must install parser dependencies before scanning');
