@@ -48,19 +48,22 @@ public sealed class IdleWindowService : IIdleWindowService
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<IdleWindowService> _logger;
     private readonly IMutationWatermarkReader? _watermarkReader;
+    private readonly TimeProvider _clock;
 
     public IdleWindowService(
         IQueueDataService queue,
         IDispatchScorer dispatchScorer,
         IDbContextFactory<AppDbContext> dbFactory,
         ILogger<IdleWindowService> logger,
-        IMutationWatermarkReader? watermarkReader = null)
+        IMutationWatermarkReader? watermarkReader = null,
+        TimeProvider? clock = null)
     {
         _queue = queue;
         _dispatchScorer = dispatchScorer;
         _dbFactory = dbFactory;
         _logger = logger;
         _watermarkReader = watermarkReader;
+        _clock = clock ?? TimeProvider.System;
     }
 
     public async Task<IReadOnlyList<IdleWindow>> GetIdleWindowsAsync(TimeSpan minWindow, CancellationToken ct = default)
@@ -75,7 +78,7 @@ public sealed class IdleWindowService : IIdleWindowService
             .CaptureAsync(_watermarkReader, _logger, "idle-window inputs", ct)
             .ConfigureAwait(false);
         List<long?> requiredOrigins = [rootOrigin];
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _clock.GetUtcNow().UtcDateTime;
 
         List<Printer> printers = await _queue.GetAvailablePrintersAsync(ct);
         if (printers.Count == 0)
@@ -87,7 +90,7 @@ public sealed class IdleWindowService : IIdleWindowService
         // in a single DB round-trip.
         bool globalDispatchEnabled;
         double minScore;
-        List<PrintJob> globalCandidates;
+        List<IdleWindowJobInput> globalCandidates;
         Dictionary<Guid, PrinterDispatchState?> dispatchStates;
 
         await using (AppDbContext db = await _dbFactory.CreateDbContextAsync(ct))
@@ -112,6 +115,8 @@ public sealed class IdleWindowService : IIdleWindowService
                 .ThenBy(j => j.QueuePosition)
                 .ThenBy(j => j.QueuedAt)
                 .Take(20)
+                .Select(j => new IdleWindowJobInput(
+                    j.Id, j.AssignedPrinterId, j.Status, j.Priority, j.QueuePosition, j.QueuedAt))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -135,11 +140,16 @@ public sealed class IdleWindowService : IIdleWindowService
         // window instead of silently seeing the printer drop out of the set.
         HashSet<Guid> indeterminate = new();
 
+        List<IdleWindowJobInput> liveInputs = await _queue
+            .GetIdleWindowJobInputsAsync(printers.Select(p => p.Id).ToArray(), ct)
+            .ConfigureAwait(false);
+        ILookup<Guid?, IdleWindowJobInput> assignedByPrinter = liveInputs.ToLookup(j => j.AssignedPrinterId);
+
         foreach (Printer printer in printers)
         {
             ct.ThrowIfCancellationRequested();
 
-            List<PrintJob> assigned = await _queue.GetPrintJobsForPrinterAsync(printer.Id, ct).ConfigureAwait(false);
+            IEnumerable<IdleWindowJobInput> assigned = assignedByPrinter[printer.Id];
 
             // Fix 1: If the printer has ANY active job (Starting/Printing/Paused),
             // it is not idle right now — emit no window.
@@ -188,12 +198,12 @@ public sealed class IdleWindowService : IIdleWindowService
             OriginWatermark.Combine([.. requiredOrigins]));
     }
 
-    private static DateTime? ProjectNextBoundary(IEnumerable<PrintJob> assigned, DateTime now)
+    private static DateTime? ProjectNextBoundary(IEnumerable<IdleWindowJobInput> assigned, DateTime now)
     {
         // Fix 1: if any queued/assigned job exists on this printer, the window ends
         // immediately (now) regardless of whether that job has an ETA. A queued job
         // waiting to start means the printer's idle window is 0-length or less.
-        PrintJob? next = assigned
+        IdleWindowJobInput? next = assigned
             .Where(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned)
             .OrderBy(j => j.QueuePosition)
             .FirstOrDefault();
@@ -219,8 +229,8 @@ public sealed class IdleWindowService : IIdleWindowService
         Printer printer,
         PrinterDispatchState? dispatchState,
         bool globalDispatchEnabled,
-        List<PrintJob> globalCandidates,
-        List<PrintJob> assignedJobs,
+        List<IdleWindowJobInput> globalCandidates,
+        IEnumerable<IdleWindowJobInput> assignedJobs,
         double minScore,
         Dictionary<Guid, IReadOnlyDictionary<Guid, DispatchScore>?> scorerCache,
         List<long?> requiredOrigins,
@@ -253,7 +263,7 @@ public sealed class IdleWindowService : IIdleWindowService
 
         // Candidates: global unassigned + jobs already assigned to this printer that
         // are still queued — mirrors the dispatcher's candidate selection exactly.
-        List<PrintJob> candidates = globalCandidates
+        List<IdleWindowJobInput> candidates = globalCandidates
             .Concat(assignedJobs.Where(j => j.Status == PrintJobStatus.Queued))
             .DistinctBy(j => j.Id)
             .OrderBy(j => j.Priority)
@@ -274,7 +284,7 @@ public sealed class IdleWindowService : IIdleWindowService
         // instead of a false negative.
         bool anyScorerFailed = false;
 
-        foreach (PrintJob job in candidates)
+        foreach (IdleWindowJobInput job in candidates)
         {
             ct.ThrowIfCancellationRequested();
 

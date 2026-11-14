@@ -36,6 +36,9 @@ public interface IQueueDataService
     /// <param name="ct">Cancellation token for the operation.</param>
     Task<List<PrintJob>> GetPrintJobsForPrinterAsync(Guid printerId, CancellationToken ct);
 
+    /// <summary>Reads fresh live job facts for idle-window evaluation, without terminal history or navigations.</summary>
+    Task<List<IdleWindowJobInput>> GetIdleWindowJobInputsAsync(IReadOnlyCollection<Guid> printerIds, CancellationToken ct);
+
     /// <summary>
     /// Get the currently printing or starting job for a printer.
     /// </summary>
