@@ -331,14 +331,35 @@ test('accepts parser-enabled linked stylesheets with local imports and remote re
   assert.deepEqual(result.scannedFiles, ['src/Web/ReactApp/src/page.html']);
 });
 
-test('rejects parser-enabled uppercase stylesheet attributes that escape the checkout', async (t) => {
+test('rejects parser-enabled uppercase href followed by an escaping lowercase duplicate', async (t) => {
   await assertStaticHtmlParserAvailable();
   const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
   const htmlPath = path.join(sourceRoot, 'page.html');
   const outsideStylesheetPath = path.join(outsideRoot, 'private.css');
   const href = path.relative(sourceRoot, outsideStylesheetPath).replaceAll(path.sep, '/');
   fs.writeFileSync(outsideStylesheetPath, 'body { color: red; }');
-  fs.writeFileSync(htmlPath, `<html><head><link REL="stylesheet" HREF="${href}"></head><body></body></html>`);
+  fs.writeFileSync(
+    htmlPath,
+    `<html><head><link rel="stylesheet" HREF="styles/safe.css" href="${href}"></head><body></body></html>`,
+  );
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /linked stylesheet outside the checkout/,
+  );
+});
+
+test('rejects parser-enabled lowercase stylesheet rel after a non-stylesheet uppercase duplicate', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const outsideStylesheetPath = path.join(outsideRoot, 'private.css');
+  const href = path.relative(sourceRoot, outsideStylesheetPath).replaceAll(path.sep, '/');
+  fs.writeFileSync(outsideStylesheetPath, 'body { color: red; }');
+  fs.writeFileSync(
+    htmlPath,
+    `<html><head><link REL="alternate" rel="stylesheet" href="${href}"></head><body></body></html>`,
+  );
 
   await assert.rejects(
     () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),

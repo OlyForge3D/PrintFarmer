@@ -459,7 +459,7 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
   if (!modules) return;
 
   const document = modules.parseDocument(html, {
-    lowerCaseAttributeNames: true,
+    lowerCaseAttributeNames: false,
     lowerCaseTags: true,
   });
   const links = modules.selectAll('link', document.children || []);
