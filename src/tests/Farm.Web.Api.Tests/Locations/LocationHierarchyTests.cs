@@ -428,8 +428,6 @@ public class LocationHierarchyTests : IDisposable
         wouldCreateCycle.Should().BeTrue("Floor 1 is a descendant of HQ — moving HQ under Floor 1 is circular");
 
         // TODO: When Ripley implements MoveLocationAsync with validation:
-        // Func<Task> act = () => locationService.MoveLocationAsync(hqId, new MoveLocationDto { NewParentId = floor1Id }, ct);
-        // await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
@@ -465,8 +463,6 @@ public class LocationHierarchyTests : IDisposable
         hasChildren.Should().BeTrue("Floor 1 has children — delete should be blocked");
 
         // TODO: When Ripley's DeleteLocation validates children:
-        // Func<Task> act = () => locationService.DeleteLocationAsync(floor1Id, ct);
-        // await act.Should().ThrowAsync<InvalidOperationException>("cannot delete location with children");
     }
 
     [Fact]
@@ -553,9 +549,6 @@ public class LocationHierarchyTests : IDisposable
 
         // TODO: When Ripley adds max depth validation to CreateLocationAsync:
         // Creating level maxDepth+1 should throw
-        // Func<Task> act = () => locationService.CreateLocationAsync(
-        //     new CreateLocationDto { Name = "Too Deep", ParentId = deepest.Id }, ct);
-        // await act.Should().ThrowAsync<InvalidOperationException>("exceeds max depth");
     }
 
     [Fact]

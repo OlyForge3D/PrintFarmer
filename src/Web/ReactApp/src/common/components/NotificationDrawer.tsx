@@ -28,11 +28,6 @@ export function NotificationDrawer({ isOpen, onClose }: NotificationDrawerProps)
     if (!notification.isRead) {
       await markAsReadMutation.mutateAsync(notification.id);
     }
-    // Navigate to relevant resource if needed
-    if (notification.jobId) {
-      // Could navigate to job details page
-      // navigate(`/queue/${notification.jobId}`);
-    }
   };
 
   const handleMarkAllAsRead = async () => {

@@ -117,23 +117,12 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
             // Note: Toolhead default components are now resolved within SeedComponentModelsAsync
             // via ResolveToolheadDefaultComponentsFromYamlAsync which reads defaults from toolheads.yaml
-
-            // Fallback: fill in any printer models not covered by YAML with hardcoded mappings
-            // await SeedPrinterModelToolheadsAsync();
             _logger.LogInformation("[DB] Successfully seeded from YAML files");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[DB] Failed to seed from YAML files, falling back to hardcoded seed data: {Message}", ex.Message);
         }
-
-        // Fallback to original hardcoded seeding
-        // await SeedFilamentTypesAsync();  // Must come before SeedCatalogDataAsync
-        // await SeedCatalogDataAsync();    // This creates printer model/filament type relationships
-        // await SeedComponentModelsAsync(); // Seed hotend, extruder, toolhead, nozzle models
-        // await SeedPrinterModelToolheadsAsync(); // Link printer models to OEM hotends/extruders
-        // await SeedAuthenticationDataAsync();
-        // await SeedRootFoldersAsync();    // Seed root "/" folders for gcode and models to prevent race conditions
     }
 
     private async Task SeedAuthenticationDataAsync()
