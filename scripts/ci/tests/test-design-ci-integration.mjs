@@ -8,7 +8,7 @@ import yaml from 'js-yaml';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('CodeQL analyzes the pinned upstream vendor folder', () => {
+test('CodeQL config keeps the pinned vendor folder query-eligible', () => {
   const source = read('.github/codeql/codeql-config.yml');
   const config = yaml.load(source);
   assert.deepEqual(Object.keys(config).sort(), ['name', 'paths-ignore', 'queries']);
