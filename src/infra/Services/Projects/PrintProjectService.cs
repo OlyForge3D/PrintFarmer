@@ -26,39 +26,51 @@ public class PrintProjectService(
         string? search = null,
         CancellationToken ct = default)
     {
-        var query = db.PrintProjects
-            .Include(p => p.Files)
-            .AsNoTracking();
+        var projects = db.PrintProjects.AsNoTracking();
 
         if (status.HasValue)
         {
-            query = query.Where(p => p.Status == status.Value);
+            projects = projects.Where(p => p.Status == status.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            query = query.Where(p => EF.Functions.Like(p.Name, $"%{search}%"));
+            projects = projects.Where(p => EF.Functions.Like(p.Name, $"%{search}%"));
         }
 
-        var projects = await query
-            .OrderByDescending(p => p.CreatedAt)
+        return await (
+            from project in projects
+            join file in db.PrintProjectFiles on project.Id equals file.PrintProjectId into projectFiles
+            from file in projectFiles.DefaultIfEmpty()
+            group file by new
+            {
+                project.Id,
+                project.Name,
+                project.Description,
+                project.Status,
+                project.Priority,
+                project.DueDate,
+                project.CreatedAt,
+                project.CompletedAt
+            }
+            into projectFiles
+            orderby projectFiles.Key.CreatedAt descending
+            select new PrintProjectListDto(
+                projectFiles.Key.Id,
+                projectFiles.Key.Name,
+                projectFiles.Key.Description,
+                projectFiles.Key.Status,
+                projectFiles.Key.Priority,
+                projectFiles.Key.DueDate,
+                projectFiles.Count(file => file != null),
+                projectFiles.Count(file => file != null && file.PrintedCount >= file.PrintCount),
+                projectFiles.Sum(file => file == null ? 0 : file.PrintCount),
+                projectFiles.Sum(file => file == null ? 0 : file.PrintedCount),
+                EstimatedTotalCost: null,
+                CompletedCost: null,
+                projectFiles.Key.CreatedAt,
+                projectFiles.Key.CompletedAt))
             .ToListAsync(ct);
-
-        return projects.Select(p => new PrintProjectListDto(
-            p.Id,
-            p.Name,
-            p.Description,
-            p.Status,
-            p.Priority,
-            p.DueDate,
-            p.Files.Count,
-            p.Files.Count(f => f.PrintedCount >= f.PrintCount),
-            p.Files.Sum(f => f.PrintCount),
-            p.Files.Sum(f => f.PrintedCount),
-            EstimatedTotalCost: null,
-            CompletedCost: null,
-            p.CreatedAt,
-            p.CompletedAt)).ToList();
     }
 
     public async Task<PrintProjectDetailDto?> GetProjectAsync(Guid projectId, CancellationToken ct = default)
