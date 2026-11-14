@@ -13,6 +13,13 @@ public interface IGcodeMetadataExtractorService
     /// </summary>
     Task<GcodeMetadataExtracted> ExtractMetadataAsync(string gcodeContent);
 
+    /// <summary>
+    /// Extracts full-file metadata from a seekable G-code stream without materializing the file as text.
+    /// </summary>
+    /// <exception cref="ArgumentException">The stream is not readable or seekable.</exception>
+    /// <exception cref="BinaryGcodeFormatException">Binary G-code is malformed, oversized, or unsupported.</exception>
+    Task<GcodeMetadataExtracted?> ExtractMetadataFromStreamAsync(Stream gcodeStream, CancellationToken ct = default);
+
     /// <summary>Parses bounded source regions without inferring counts from a partial command body.</summary>
     GcodeMetadataExtractionResult ExtractBoundedMetadata(
         string gcodeContent, bool captureThumbnail, CancellationToken ct = default);

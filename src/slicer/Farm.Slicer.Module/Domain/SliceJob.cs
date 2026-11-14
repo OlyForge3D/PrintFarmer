@@ -6,7 +6,7 @@ namespace Farm.Slicer.Module.Domain;
 /// <summary>
 /// Represents a slicing job request that will be processed by a slicer worker.
 /// </summary>
-public class SliceJob
+public class SliceJob : ISliceJobStatusSource
 {
     public const int MinimumLeaseDurationSeconds = 30;
     public const int MaximumLeaseDurationSeconds = 3600;
