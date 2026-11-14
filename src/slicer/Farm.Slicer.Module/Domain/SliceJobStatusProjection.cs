@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Fields shared by persisted slice jobs and the narrow status-list projection.

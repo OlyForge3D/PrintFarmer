@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using Farm.Infrastructure.Domain;
 using Farm.Slicer.Module.Data.Repositories;
