@@ -527,5 +527,4 @@ public class BinaryGcodeReaderTests
         }
         return ~crc;
     }
-
 }
