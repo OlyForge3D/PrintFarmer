@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -112,13 +113,38 @@ public class JwtEventsAccessTokenQueryTests
         Assert.Equal("prod-query-token", context.Token);
     }
 
-    [Fact]
-    public async Task TokenValidation_RevocationLookupFailure_FailsAuthentication()
+    [Theory]
+    [InlineData("invalid-operation")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("caller-cancellation")]
+    [InlineData("unexpected")]
+    public async Task TokenValidation_RevocationLookupFailure_HandlesOnlyExpectedFailures(string scenario)
     {
+        using CancellationTokenSource cancellation = new();
+        Exception failure = scenario switch
+        {
+            "database" => new SqliteException("Revocation store unavailable.", 14),
+            "update" => new DbUpdateException("Revocation store unavailable."),
+            "timeout" => new TimeoutException("Revocation store unavailable."),
+            "internal-cancellation" => new OperationCanceledException("Revocation store cancelled."),
+            "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+            "unexpected" => new ArgumentException("Revocation implementation fault."),
+            _ => new InvalidOperationException("Revocation store unavailable.")
+        };
         Mock<ITokenRevocationService> revocationService = new(MockBehavior.Strict);
         revocationService
             .Setup(service => service.IsTokenRevokedAsync("access-token", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Revocation store unavailable."));
+            .Returns(async () =>
+            {
+                if (scenario == "caller-cancellation")
+                {
+                    await cancellation.CancelAsync();
+                }
+                return await Task.FromException<bool>(failure);
+            });
         List<string> logs = [];
         Guid userId = Guid.NewGuid();
         using ServiceProvider provider = new ServiceCollection()
@@ -132,7 +158,8 @@ public class JwtEventsAccessTokenQueryTests
 
         DefaultHttpContext httpContext = new()
         {
-            RequestServices = provider
+            RequestServices = provider,
+            RequestAborted = cancellation.Token
         };
         httpContext.Request.Headers.Authorization = "Bearer access-token";
         AuthenticationScheme scheme = new(
@@ -147,8 +174,19 @@ public class JwtEventsAccessTokenQueryTests
         };
 
         JwtBearerEvents events = ProgramHelpers.CreateJwtEvents(null, null);
-        await events.OnTokenValidated(context);
+        Exception? propagated = await Record.ExceptionAsync(() => events.OnTokenValidated(context));
+        revocationService.Verify(service => service.IsTokenRevokedAsync("access-token", cancellation.Token), Times.Once);
+        if (scenario is "caller-cancellation" or "unexpected")
+        {
+            Assert.Same(failure, propagated);
+            Assert.Null(context.Result);
+            Assert.DoesNotContain(logs, entry =>
+                entry.StartsWith("Error: ", StringComparison.Ordinal) &&
+                entry.Contains("Token revocation status could not be verified", StringComparison.Ordinal));
+            return;
+        }
 
+        Assert.Null(propagated);
         Assert.False(context.Result!.Succeeded);
         Assert.Equal("Token revocation status could not be verified.", context.Result.Failure!.Message);
         Assert.Contains(

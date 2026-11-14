@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Data.Common;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
@@ -14,6 +15,7 @@ using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -116,7 +118,9 @@ builder.Services
                         context.Fail("This token has been revoked.");
                     }
                 }
-                catch (Exception exception) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                catch (Exception exception) when (
+                    !context.HttpContext.RequestAborted.IsCancellationRequested &&
+                    exception is (DbException or DbUpdateException or TimeoutException or InvalidOperationException or OperationCanceledException))
                 {
                     context.Fail("Token revocation status could not be verified.");
                     ILogger logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()

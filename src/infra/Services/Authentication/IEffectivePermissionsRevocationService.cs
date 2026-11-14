@@ -25,10 +25,15 @@ public interface IEffectivePermissionsRevocationService
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The number of distinct users whose tokens were revoked.</returns>
     /// <exception cref="EffectivePermissionsRevocationException">
-    /// One or more users could not be revoked. Revocations for other users continue; the
+    /// One or more users could not be revoked because of an expected store/service failure.
+    /// Revocations for other users continue; the
     /// exception reports completed and failed users so callers do not treat a partial batch
     /// as successful.
     /// </exception>
+    /// <remarks>
+    /// Caller cancellation and unexpected programming faults stop the batch and propagate.
+    /// Any users completed before that failure remain revoked; later users have not been processed.
+    /// </remarks>
     Task<int> RevokeUsersAsync(
         IReadOnlyCollection<Guid> userIds,
         Guid actingUserId,

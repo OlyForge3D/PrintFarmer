@@ -1,4 +1,7 @@
-﻿namespace Farm.Infrastructure.Services.Authentication;
+﻿using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
+
+namespace Farm.Infrastructure.Services.Authentication;
 
 /// <inheritdoc cref="IEffectivePermissionsRevocationService"/>
 public sealed class EffectivePermissionsRevocationService(ITokenRevocationService tokenRevocationService)
@@ -37,7 +40,7 @@ public sealed class EffectivePermissionsRevocationService(ITokenRevocationServic
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is DbException or DbUpdateException or TimeoutException or InvalidOperationException or OperationCanceledException)
             {
                 failedUsers[userId] = ex;
             }

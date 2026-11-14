@@ -5,6 +5,8 @@ using Farm.Infrastructure.Services.Users;
 using Farm.Modules.Identity.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -13,9 +15,27 @@ namespace Farm.Web.Api.Tests.Controllers;
 
 public sealed class UsersControllerTests
 {
-    [Fact]
-    public async Task AdminChangeUserPasswordAsync_WhenPostCommitAuditFails_ReturnsSuccess()
+    [Theory]
+    [InlineData("invalid-operation")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("caller-cancellation")]
+    [InlineData("unexpected")]
+    public async Task AdminChangeUserPasswordAsync_PostCommitAuditFailure_HandlesOnlyExpectedFailures(string scenario)
     {
+        using CancellationTokenSource cancellation = new();
+        Exception failure = scenario switch
+        {
+            "database" => new SqliteException("Audit store unavailable.", 14),
+            "update" => new DbUpdateException("Audit store unavailable."),
+            "timeout" => new TimeoutException("Audit store unavailable."),
+            "internal-cancellation" => new OperationCanceledException("Audit store cancelled."),
+            "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+            "unexpected" => new ArgumentException("Audit implementation fault."),
+            _ => new InvalidOperationException("Audit store unavailable.")
+        };
         Guid adminUserId = Guid.NewGuid();
         Guid targetUserId = Guid.NewGuid();
         Mock<IUsersService> usersService = new(MockBehavior.Strict);
@@ -42,13 +62,21 @@ public sealed class UsersControllerTests
                 null,
                 $"admin-password-change:{adminUserId}",
                 It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+            .Returns(async () =>
+            {
+                if (scenario == "caller-cancellation")
+                {
+                    await cancellation.CancelAsync();
+                }
+                await Task.FromException(failure);
+            });
+        Mock<ILogger<UsersController>> logger = new();
         UsersController controller = new(
             usersService.Object,
             Mock.Of<IAuthenticationService>(),
             tokenRevocationService.Object,
             authAuditService.Object,
-            Mock.Of<ILogger<UsersController>>())
+            logger.Object)
         {
             ControllerContext = new ControllerContext
             {
@@ -61,16 +89,25 @@ public sealed class UsersControllerTests
             },
         };
 
-        IActionResult result = await controller.AdminChangeUserPasswordAsync(
-            targetUserId,
-            new AdminChangeUserPasswordRequest
-            {
-                NewPassword = "new-password",
-                ConfirmNewPassword = "new-password",
-            },
-            CancellationToken.None);
+        AdminChangeUserPasswordRequest request = new()
+        {
+            NewPassword = "new-password",
+            ConfirmNewPassword = "new-password",
+        };
 
-        Assert.IsType<OkObjectResult>(result);
+        if (scenario is "caller-cancellation" or "unexpected")
+        {
+            Assert.Same(failure, await Record.ExceptionAsync(() =>
+                controller.AdminChangeUserPasswordAsync(targetUserId, request, cancellation.Token)));
+        }
+        else
+        {
+            Assert.IsType<OkObjectResult>(await controller.AdminChangeUserPasswordAsync(targetUserId, request, cancellation.Token));
+            logger.Verify(log => log.Log(
+                LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+                It.Is<Exception>(exception => ReferenceEquals(exception, failure)),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        }
         tokenRevocationService.Verify(
             service => service.RevokeAllUserTokensAsync(
                 targetUserId,

@@ -7,6 +7,8 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -220,9 +222,16 @@ public class AuthenticationServiceTests
             It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task ChangePasswordAsync_WhenPostCommitAuditFails_StillReturnsSuccess()
+    [Theory]
+    [InlineData("invalid-operation")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("unexpected")]
+    public async Task ChangePasswordAsync_PostCommitAuditFailure_HandlesOnlyExpectedFailures(string scenario)
     {
+        Exception failure = CreateAuditFailure(scenario);
         User user = CreateTestUser();
         _mockUsersRepository.Setup(r => r.GetUserEntityAsync(user.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(user);
@@ -236,12 +245,19 @@ public class AuthenticationServiceTests
             .ReturnsAsync(1);
         _mockAuthAuditService.Setup(service => service.LogPasswordChangeAsync(
             user.Id, "unknown", null, null, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+            .ThrowsAsync(failure);
 
+        if (scenario == "unexpected")
+        {
+            Exception? propagated = await Record.ExceptionAsync(() => _service.ChangePasswordAsync(user.Id, "currentpass", "newpass"));
+            Assert.Same(failure, propagated);
+            return;
+        }
         bool result = await _service.ChangePasswordAsync(user.Id, "currentpass", "newpass");
 
         result.Should().BeTrue();
         user.PasswordHash.Should().Be("$new$hashed$password$");
+        VerifyAuditFailureLogged(failure);
     }
 
     [Fact]
@@ -378,9 +394,16 @@ public class AuthenticationServiceTests
             user.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task ResetPasswordAsync_WhenPostCommitAuditFails_StillReturnsSuccess()
+    [Theory]
+    [InlineData("invalid-operation")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("unexpected")]
+    public async Task ResetPasswordAsync_PostCommitAuditFailure_HandlesOnlyExpectedFailures(string scenario)
     {
+        Exception failure = CreateAuditFailure(scenario);
         User user = CreateTestUser();
         PasswordResetToken token = new()
         {
@@ -401,14 +424,37 @@ public class AuthenticationServiceTests
             .ReturnsAsync(1);
         _mockAuthAuditService.Setup(service => service.LogPasswordResetAsync(
                 user.Id, "127.0.0.1", null, null, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+            .ThrowsAsync(failure);
 
+        if (scenario == "unexpected")
+        {
+            Exception? propagated = await Record.ExceptionAsync(() => _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1"));
+            Assert.Same(failure, propagated);
+            return;
+        }
         bool result = await _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1");
 
         result.Should().BeTrue();
         user.PasswordHash.Should().Be("hashed-new");
         token.IsUsed.Should().BeTrue();
+        VerifyAuditFailureLogged(failure);
     }
+
+    private static Exception CreateAuditFailure(string scenario) => scenario switch
+    {
+        "database" => new SqliteException("Audit store unavailable.", 14),
+        "update" => new DbUpdateException("Audit store unavailable."),
+        "timeout" => new TimeoutException("Audit store unavailable."),
+        "internal-cancellation" => new OperationCanceledException("Audit store cancelled."),
+        "unexpected" => new ArgumentException("Audit implementation fault."),
+        _ => new InvalidOperationException("Audit store unavailable.")
+    };
+
+    private void VerifyAuditFailureLogged(Exception failure) =>
+        _mockLogger.Verify(logger => logger.Log(
+            LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.Is<Exception>(exception => ReferenceEquals(exception, failure)),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
 
     #endregion
 

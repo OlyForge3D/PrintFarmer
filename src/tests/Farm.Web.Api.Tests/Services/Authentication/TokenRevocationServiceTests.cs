@@ -3,11 +3,13 @@ using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Services.Authentication;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -76,6 +78,88 @@ public class TokenRevocationServiceTests
 
         TokenRevocationService service = new(db, logger.Object, authAuditService.Object);
         return (service, db);
+    }
+
+    [Fact]
+    public async Task RevokeAllUserTokensAsync_PostCommitAuditDatabaseFailure_KeepsCommittedRevocationAndLogs()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Username = $"audit-user-{userId:N}",
+            Email = $"audit-user-{userId:N}@example.com",
+            PasswordHash = "old-hash",
+            IsActive = true
+        };
+        db.Users.Add(user);
+        db.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "test-refresh-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(1)
+        });
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE AuthAuditLogs");
+        user.PasswordHash = "new-hash";
+        Mock<ILogger<TokenRevocationService>> logger = new();
+        AuthAuditService audit = new(
+            new EfAuthAuditLogRepository(new PooledDbContextFactory<AppDbContext>(options)),
+            Mock.Of<ILogger<AuthAuditService>>());
+        TokenRevocationService service = new(db, logger.Object, audit);
+
+        int revokedCount = await service.RevokeAllUserTokensAsync(userId, userId, "Test password change");
+
+        Assert.Equal(2, revokedCount);
+        db.ChangeTracker.Clear();
+        Assert.Equal("new-hash", (await db.Users.SingleAsync(user => user.Id == userId)).PasswordHash);
+        Assert.True((await db.RefreshTokens.SingleAsync(refresh => refresh.UserId == userId)).IsRevoked);
+        Assert.True(await db.RevokedTokens.AnyAsync(marker => marker.UserId == userId));
+        logger.Verify(log => log.Log(
+            LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.Is<Exception>(exception => exception is DbUpdateException),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RevokeAllUserTokensAsync_PostCommitUnexpectedFaultOrCallerCancellation_Propagates(bool cancelCaller)
+    {
+        using CancellationTokenSource cancellation = new();
+        Guid userId = Guid.NewGuid();
+        var (_, db) = await CreateServiceAsync(userId);
+        using (db)
+        {
+            Exception failure = cancelCaller
+                ? new OperationCanceledException(cancellation.Token)
+                : new ArgumentException("Audit implementation fault.");
+            Mock<IAuthAuditService> audit = new(MockBehavior.Strict);
+            audit.Setup(service => service.LogTokenRevokedAsync(
+                    userId, userId, It.IsAny<string>(), null, null, It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    if (cancelCaller)
+                    {
+                        await cancellation.CancelAsync();
+                    }
+                    await Task.FromException(failure);
+                });
+            TokenRevocationService service = new(db, Mock.Of<ILogger<TokenRevocationService>>(), audit.Object);
+
+            Exception? propagated = await Record.ExceptionAsync(() =>
+                service.RevokeAllUserTokensAsync(userId, userId, "Test revocation", cancellationToken: cancellation.Token));
+
+            Assert.Same(failure, propagated);
+            Assert.True(await db.RevokedTokens.AnyAsync(marker => marker.UserId == userId));
+        }
     }
 
     [Fact]

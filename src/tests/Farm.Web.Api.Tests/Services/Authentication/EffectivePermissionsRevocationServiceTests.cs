@@ -1,4 +1,6 @@
 ﻿using Farm.Infrastructure.Services.Authentication;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 using Xunit;
 
@@ -6,13 +8,25 @@ namespace Farm.Web.Api.Tests.Services.Authentication;
 
 public sealed class EffectivePermissionsRevocationServiceTests
 {
-    [Fact]
-    public async Task RevokeUsersAsync_WhenAUserFails_ContinuesAndReportsPartialBatch()
+    [Theory]
+    [InlineData("invalid-operation")]
+    [InlineData("database")]
+    [InlineData("update")]
+    [InlineData("timeout")]
+    [InlineData("internal-cancellation")]
+    public async Task RevokeUsersAsync_WhenAnExpectedUserFailureOccurs_ContinuesAndReportsPartialBatch(string scenario)
     {
         Guid firstUserId = Guid.NewGuid();
         Guid failedUserId = Guid.NewGuid();
         Guid lastUserId = Guid.NewGuid();
-        InvalidOperationException failure = new("revocation persistence failed");
+        Exception failure = scenario switch
+        {
+            "database" => new SqliteException("Revocation persistence failed.", 14),
+            "update" => new DbUpdateException("Revocation persistence failed."),
+            "timeout" => new TimeoutException("Revocation persistence failed."),
+            "internal-cancellation" => new OperationCanceledException("Revocation store cancelled."),
+            _ => new InvalidOperationException("Revocation persistence failed.")
+        };
         Mock<ITokenRevocationService> tokenRevocationService = new(MockBehavior.Strict);
         tokenRevocationService
             .Setup(service => service.RevokeAllUserTokensAsync(
@@ -59,5 +73,43 @@ public sealed class EffectivePermissionsRevocationServiceTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RevokeUsersAsync_UnexpectedFailureOrCallerCancellation_StopsBatchAndPropagates(bool cancelCaller)
+    {
+        using CancellationTokenSource cancellation = new();
+        Guid completedUserId = Guid.NewGuid();
+        Guid failedUserId = Guid.NewGuid();
+        Guid unprocessedUserId = Guid.NewGuid();
+        Exception failure = cancelCaller
+            ? new OperationCanceledException(cancellation.Token)
+            : new ArgumentException("Revocation implementation fault.");
+        Mock<ITokenRevocationService> revocation = new(MockBehavior.Strict);
+        revocation.Setup(service => service.RevokeAllUserTokensAsync(
+                completedUserId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), cancellation.Token))
+            .ReturnsAsync(1);
+        revocation.Setup(service => service.RevokeAllUserTokensAsync(
+                failedUserId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), cancellation.Token))
+            .Returns(async () =>
+            {
+                if (cancelCaller)
+                {
+                    await cancellation.CancelAsync();
+                }
+                return await Task.FromException<int>(failure);
+            });
+        EffectivePermissionsRevocationService service = new(revocation.Object);
+
+        Exception? propagated = await Record.ExceptionAsync(() => service.RevokeUsersAsync(
+            [completedUserId, failedUserId, unprocessedUserId], Guid.NewGuid(), "Test revocation", null, cancellation.Token));
+
+        Assert.Same(failure, propagated);
+        revocation.Verify(token => token.RevokeAllUserTokensAsync(
+            completedUserId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), cancellation.Token), Times.Once);
+        revocation.Verify(token => token.RevokeAllUserTokensAsync(
+            unprocessedUserId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), cancellation.Token), Times.Never);
     }
 }

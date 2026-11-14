@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Common;
+using System.Security.Claims;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Contracts.Auth;
@@ -7,6 +8,7 @@ using Farm.Infrastructure.Services.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Modules.Identity.Controllers;
@@ -216,7 +218,9 @@ public class UsersController(
                 $"admin-password-change:{adminUserId}",
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is (DbException or DbUpdateException or TimeoutException or InvalidOperationException) ||
+            (ex is OperationCanceledException && !ct.IsCancellationRequested))
         {
             _logger.LogError(ex, "Failed to write administrator password-change audit for user {UserId}", id);
         }

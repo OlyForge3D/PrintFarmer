@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Common;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
@@ -126,7 +127,9 @@ public class TokenRevocationService(
                 $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
                 ipAddress);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is (DbException or DbUpdateException or TimeoutException or InvalidOperationException) ||
+            (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
             _logging.LogError(ex, "Failed to write token-revocation audit for user {UserId}", userId);
         }
