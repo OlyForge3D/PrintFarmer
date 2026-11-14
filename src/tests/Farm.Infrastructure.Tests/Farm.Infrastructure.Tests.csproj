@@ -5,8 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   <NoWarn>$(NoWarn);S2699</NoWarn>
-  <!-- Default quick-run filter: exclude Docker tests unless explicitly overridden -->
-  <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
+  <!-- Default quick-run filter: exclude Docker tests and opt-in performance benchmarks -->
+  <VSTestTestCaseFilter>Category!='Docker'&amp;Category!='Performance'</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <!-- Coverage is collected on-demand via the VSTest data collector (coverlet.collector),

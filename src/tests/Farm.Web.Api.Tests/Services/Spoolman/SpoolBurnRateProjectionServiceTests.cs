@@ -108,7 +108,7 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
         nativeBResult.SampleCount.Should().Be(1);
         _commandCounter.Commands.Should().HaveCount(3);
         _commandCounter.Commands.Should().OnlyContain(command =>
-            command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase));
+            command.Contains("PrintJobToolheadUsages", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -163,7 +163,7 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
             && result.State == SpoolBurnRateProjectionState.Ready);
         _commandCounter.Commands.Should().HaveCount(sourceCount);
         _commandCounter.Commands.Should().OnlyContain(command =>
-            command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase));
+            command.Contains("PrintJobToolheadUsages", StringComparison.OrdinalIgnoreCase));
         _resolver.Verify(
             service => service.ResolveAsync(
                 It.Is<IReadOnlyCollection<CanonicalSpoolIdentity>>(requested =>
@@ -468,6 +468,38 @@ public sealed class SpoolBurnRateProjectionServiceTests : IAsyncLifetime, IDispo
             .GetProperty("authoritativeGramsConsumed")
             .GetDouble();
         double.IsFinite(serializedConsumption).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ProjectAsync_OverflowingSpoolDoesNotPoisonOtherBatchResults()
+    {
+        CanonicalSpoolIdentity overflowing = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            42);
+        CanonicalSpoolIdentity healthy = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            43);
+        await SeedCompletedSampleAsync(overflowing, double.MaxValue, Now.AddDays(-1));
+        await SeedCompletedSampleAsync(overflowing, double.MaxValue, Now.AddDays(-2));
+        await SeedCompletedSampleAsync(healthy, 30, Now.AddDays(-1));
+        SetupRemaining(overflowing, 1000);
+        SetupRemaining(healthy, 1000);
+        SetMinimumSamples(1);
+
+        await using AppDbContext projectionContext = CreateContext();
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> results =
+            await CreateService(projectionContext).ProjectAsync([overflowing, healthy]);
+
+        results[overflowing].State.Should().Be(SpoolBurnRateProjectionState.InsufficientData);
+        results[overflowing].SampleCount.Should().Be(2);
+        results[overflowing].AuthoritativeGramsConsumed.Should().Be(double.MaxValue);
+        results[overflowing].BurnRateGramsPerDay.Should().BeNull();
+        results[healthy].State.Should().Be(SpoolBurnRateProjectionState.Ready);
+        results[healthy].SampleCount.Should().Be(1);
+        results[healthy].AuthoritativeGramsConsumed.Should().Be(30);
+        results[healthy].BurnRateGramsPerDay.Should().Be(1);
     }
 
     private AppDbContext CreateContext() => new(_options);

@@ -150,7 +150,7 @@ public sealed class SpoolBurnRateProjectionService(
             foreach (int[] spoolIdBatch in spoolIds.Chunk(UsageSpoolIdBatchSize))
             {
                 ct.ThrowIfCancellationRequested();
-                List<UsageAggregate> aggregates = await _db.PrintJobToolheadUsages
+                IAsyncEnumerable<UsageAggregateSample> samples = _db.PrintJobToolheadUsages
                     .AsNoTracking()
                     .Where(usage =>
                         usage.SpoolSourceKind == sourceGroup.Key.SourceKind
@@ -164,21 +164,35 @@ public sealed class SpoolBurnRateProjectionService(
                         && usage.PrintJob.ActualEndTime.HasValue
                         && usage.PrintJob.ActualEndTime.Value >= cutoffUtc
                         && usage.PrintJob.ActualEndTime.Value <= evaluatedAtUtc)
-                    .GroupBy(usage => usage.SpoolmanSpoolId!.Value)
-                    .Select(group => new UsageAggregate(
-                        group.Key,
-                        group.Sum(usage => usage.FilamentUsageGrams!.Value),
-                        group.Count()))
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false);
+                    .Select(usage => new UsageAggregateSample(
+                        usage.SpoolmanSpoolId!.Value,
+                        usage.FilamentUsageGrams!.Value))
+                    .AsAsyncEnumerable();
 
-                foreach (UsageAggregate aggregate in aggregates)
+                // Sum in .NET so one spool's floating-point overflow cannot fail the whole source batch.
+                await foreach (UsageAggregateSample sample in samples
+                    .WithCancellation(ct)
+                    .ConfigureAwait(false))
                 {
                     CanonicalSpoolIdentity identity = new(
                         sourceGroup.Key.SourceKind,
                         sourceGroup.Key.SourceIdentity,
-                        aggregate.SpoolId);
-                    usageByIdentity[identity] = aggregate;
+                        sample.SpoolId);
+                    if (usageByIdentity.TryGetValue(identity, out UsageAggregate aggregate))
+                    {
+                        usageByIdentity[identity] = aggregate with
+                        {
+                            ConsumedGrams = aggregate.ConsumedGrams + sample.ConsumedGrams,
+                            SampleCount = aggregate.SampleCount + 1,
+                        };
+                    }
+                    else
+                    {
+                        usageByIdentity[identity] = new UsageAggregate(
+                            sample.SpoolId,
+                            sample.ConsumedGrams,
+                            1);
+                    }
                 }
             }
         }
@@ -260,6 +274,8 @@ public sealed class SpoolBurnRateProjectionService(
             usage.SampleCount,
             state);
     }
+
+    private readonly record struct UsageAggregateSample(int SpoolId, double ConsumedGrams);
 
     private readonly record struct UsageAggregate(int SpoolId, double ConsumedGrams, int SampleCount);
 }

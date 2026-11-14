@@ -57,7 +57,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
                         $"mixedStates=true",
                         $"readyTasks={result.ReadyTaskCount}",
                         $"sqlStatements={result.SqlStatementCount}",
-                        $"usageAggregateQueries={result.UsageAggregateQueryCount}",
+                        $"usageTableQueries={result.UsageTableQueryCount}",
                         $"centralPages={result.CentralPageCount}",
                         $"centralBodyBytes={result.CentralBodyBytes}",
                         $"nativeCalls={result.NativeCallCount}",
@@ -166,7 +166,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
         List<double> taskFreshnessTimes = [];
         List<long> allocatedBytes = [];
         int? sqlStatementCount = null;
-        int? usageAggregateQueryCount = null;
+        int? usageTableQueryCount = null;
         InventorySnapshot? inventorySnapshot = null;
 
         for (int run = 0; run < WarmupRuns + MeasurementRuns; run++)
@@ -187,8 +187,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
             ShiftPlanCompileResult compileResult = await compiler.CompileAsync(
                 ct: CancellationToken.None);
             int currentSqlStatementCount = commandCounter.Commands.Length;
-            int currentAggregateQueryCount = commandCounter.Commands.Count(command =>
-                command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase));
+            int currentUsageTableQueryCount = commandCounter.Commands.Count(IsUsageTableRead);
             AppDbContext db = compileScope.ServiceProvider.GetRequiredService<AppDbContext>();
             List<UserTask> tasks = await db.UserTasks.AsNoTracking().ToListAsync();
             DateTime materializedAtUtc = TimeProvider.System.GetUtcNow().UtcDateTime;
@@ -209,7 +208,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
                 Assert.StartsWith("spoolrestock:v1:", task.SourceId, StringComparison.Ordinal);
                 Assert.NotNull(task.MetadataJson);
             });
-            Assert.Equal(sourceCount, currentAggregateQueryCount);
+            Assert.Equal(sourceCount, currentUsageTableQueryCount);
             Assert.Equal(6, currentInventory.CentralPageCalls);
             Assert.Equal(sourceCount == 1 ? 0 : 10, currentInventory.NativeCalls);
 
@@ -227,10 +226,10 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
                 allocatedBytes.Add(currentAllocatedBytes);
 
                 sqlStatementCount ??= currentSqlStatementCount;
-                usageAggregateQueryCount ??= currentAggregateQueryCount;
+                usageTableQueryCount ??= currentUsageTableQueryCount;
                 inventorySnapshot ??= currentInventory;
                 Assert.Equal(sqlStatementCount, currentSqlStatementCount);
-                Assert.Equal(usageAggregateQueryCount, currentAggregateQueryCount);
+                Assert.Equal(usageTableQueryCount, currentUsageTableQueryCount);
                 Assert.Equal(inventorySnapshot, currentInventory);
             }
         }
@@ -243,7 +242,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
         return new BenchmarkResult(
             workload.ReadyTaskCount,
             sqlStatementCount!.Value,
-            usageAggregateQueryCount!.Value,
+            usageTableQueryCount!.Value,
             inventorySnapshot!.CentralPageCalls,
             inventorySnapshot.CentralBodyBytes,
             inventorySnapshot.NativeCalls,
@@ -448,6 +447,9 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
         return sorted[index];
     }
 
+    private static bool IsUsageTableRead(string command) =>
+        command.Contains("PrintJobToolheadUsages", StringComparison.OrdinalIgnoreCase);
+
     private enum OccurrenceState
     {
         Ready,
@@ -471,7 +473,7 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
     private sealed record BenchmarkResult(
         int ReadyTaskCount,
         int SqlStatementCount,
-        int UsageAggregateQueryCount,
+        int UsageTableQueryCount,
         int CentralPageCount,
         long CentralBodyBytes,
         int NativeCallCount,

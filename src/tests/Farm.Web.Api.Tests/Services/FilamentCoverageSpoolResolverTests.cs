@@ -181,6 +181,61 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_CanonicalCentralPageStopsWhenConfigurationChangesAfterFirstPage()
+    {
+        string baseUrl = "http://central.local";
+        int pageRequests = 0;
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        central.Setup(service => service.GetConfig())
+            .Returns(() => new SpoolmanConfigDto(baseUrl));
+        central.Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((SpoolmanSpoolQueryParams query, CancellationToken ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                query.Offset.Should().Be(0);
+                pageRequests++;
+                baseUrl = "http://changed-central.local";
+                SpoolmanSpoolDto[] firstPage = Enumerable.Range(1, 500)
+                    .Select(spoolId => new SpoolmanSpoolDto(
+                        spoolId,
+                        $"spool-{spoolId}",
+                        "PLA",
+                        300,
+                        null,
+                        true))
+                    .ToArray();
+                return Task.FromResult(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
+                    firstPage,
+                    totalCount: 1000));
+            });
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            501);
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync([identity], CancellationToken.None);
+
+        result[identity].Spool.Should().BeNull();
+        result[identity].ErrorReason.Should().Be(
+            FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        pageRequests.Should().Be(1);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        central.Verify(service => service.GetConfig(), Times.Exactly(4));
+        central.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ResolveAsync_CanonicalCentralBatchReadsEveryRequiredPageInEachObservation()
     {
         const int totalCount = 1100;
