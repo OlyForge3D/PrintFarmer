@@ -5,6 +5,7 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.StorageManagement;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -284,15 +285,22 @@ public class BinaryGcodeReaderTests
     }
 
     [Fact]
-    public async Task ExtractMetadataFromStreamAsync_BinaryCancellationAfterDecode_Throws()
+    public async Task ExtractMetadataFromStreamAsync_BinaryCancellationDuringParsing_Throws()
     {
         using CancellationTokenSource cancellation = new();
-        using CancellationAfterFinalReadStream stream = new(
-            CreateFile([MetadataBlock(0, "Producer = PrusaSlicer 2.9.4\n")]),
-            cancellation);
+        Mock<ILogger<GcodeMetadataExtractorService>> logger = new();
+        logger.Setup(log => log.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains("Scanning all", StringComparison.Ordinal)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(() => cancellation.Cancel());
+        using MemoryStream stream = new(CreateFile([MetadataBlock(0, "Producer = PrusaSlicer 2.9.4\n")]));
 
+        GcodeMetadataExtractorService extractor = new(logger.Object);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => Extractor().ExtractMetadataFromStreamAsync(stream, cancellation.Token));
+            () => extractor.ExtractMetadataFromStreamAsync(stream, cancellation.Token));
     }
 
     [Fact]
@@ -520,18 +528,4 @@ public class BinaryGcodeReaderTests
         return ~crc;
     }
 
-    private sealed class CancellationAfterFinalReadStream(byte[] content, CancellationTokenSource cancellation)
-        : MemoryStream(content)
-    {
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            ValueTask<int> read = base.ReadAsync(buffer, cancellationToken);
-            if (Position == Length)
-            {
-                cancellation.Cancel();
-            }
-
-            return read;
-        }
-    }
 }
