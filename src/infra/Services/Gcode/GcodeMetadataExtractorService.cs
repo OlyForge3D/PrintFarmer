@@ -70,41 +70,48 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
     /// Extract metadata from G-code file content by parsing comment lines.
     /// Handles metadata from PrusaSlicer, Cura, OrcaSlicer, and generic patterns.
     /// </summary>
-    public async Task<GcodeMetadataExtracted> ExtractMetadataAsync(string gcodeContent)
+    public Task<GcodeMetadataExtracted> ExtractMetadataAsync(string gcodeContent)
     {
-        return await Task.Run(() =>
+        return Task.Run(() => ExtractMetadataFromText(gcodeContent, CancellationToken.None));
+    }
+
+    private GcodeMetadataExtracted ExtractMetadataFromText(string gcodeContent, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _logger.LogInformation("ExtractMetadataAsync: Starting metadata extraction");
+        GcodeMetadataExtracted metadata = new();
+
+        if (string.IsNullOrWhiteSpace(gcodeContent))
         {
-            _logger.LogInformation("ExtractMetadataAsync: Starting metadata extraction");
-            GcodeMetadataExtracted metadata = new();
+            _logger.LogWarning("ExtractMetadataAsync: G-code content is empty or null");
+            return metadata;
+        }
 
-            if (string.IsNullOrWhiteSpace(gcodeContent))
-            {
-                _logger.LogWarning("ExtractMetadataAsync: G-code content is empty or null");
-                return metadata;
-            }
+        try
+        {
+            string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
 
-            try
-            {
-                string[] allLines = gcodeContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            _logger.LogInformation("ExtractMetadataAsync: Scanning all {LineCount} lines", allLines.Length.ToString());
 
-                _logger.LogInformation("ExtractMetadataAsync: Scanning all {LineCount} lines", allLines.Length.ToString());
+            // Single-pass extraction of all key-value metadata properties
+            ExtractAllProperties(allLines, metadata, ct: ct);
+            _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
+            ExtractThumbnail(allLines, metadata, ct: ct);
+            _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
 
-                // Single-pass extraction of all key-value metadata properties
-                ExtractAllProperties(allLines, metadata);
-                _logger.LogInformation("ExtractMetadataAsync: About to extract thumbnail");
-                ExtractThumbnail(allLines, metadata);
-                _logger.LogInformation("ExtractMetadataAsync: Thumbnail extraction complete, ThumbnailData={HasData}", metadata.ThumbnailData != null ? $"{metadata.ThumbnailData.Length} bytes" : "null");
+            _logger.LogInformation("ExtractMetadataAsync: Extracted metadata - Slicer={MetadataSlicerName} {MetadataSlicerVersion}, Material={MetadataMaterial}, NozzleDiameter={MetadataNozzleDiameter}, PrintTime={MetadataEstimatedPrintTimeMinutes}min, Filament={MetadataFilamentWeightGrams}g, LayerHeight={MetadataLayerHeight}, BedTemp={MetadataBedTemperature}°C, PrintTemp={MetadataPrintTemperature}°C", metadata.SlicerName ?? "(unknown)", metadata.SlicerVersion ?? string.Empty, metadata.Material ?? "(unknown)", metadata.NozzleDiameter?.ToString("F1") ?? "0", metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0", metadata.FilamentWeightGrams?.ToString("F1") ?? "0", metadata.LayerHeight?.ToString("F2") ?? "0", metadata.BedTemperature?.ToString("F0") ?? "0", metadata.PrintTemperature?.ToString("F0") ?? "0");
 
-                _logger.LogInformation("ExtractMetadataAsync: Extracted metadata - Slicer={MetadataSlicerName} {MetadataSlicerVersion}, Material={MetadataMaterial}, NozzleDiameter={MetadataNozzleDiameter}, PrintTime={MetadataEstimatedPrintTimeMinutes}min, Filament={MetadataFilamentWeightGrams}g, LayerHeight={MetadataLayerHeight}, BedTemp={MetadataBedTemperature}°C, PrintTemp={MetadataPrintTemperature}°C", metadata.SlicerName ?? "(unknown)", metadata.SlicerVersion ?? string.Empty, metadata.Material ?? "(unknown)", metadata.NozzleDiameter?.ToString("F1") ?? "0", metadata.EstimatedPrintTimeMinutes?.ToString("F0") ?? "0", metadata.FilamentWeightGrams?.ToString("F1") ?? "0", metadata.LayerHeight?.ToString("F2") ?? "0", metadata.BedTemperature?.ToString("F0") ?? "0", metadata.PrintTemperature?.ToString("F0") ?? "0");
-
-                return metadata;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error extracting G-code metadata");
-                return metadata;
-            }
-        });
+            return metadata;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extracting G-code metadata");
+            return metadata;
+        }
     }
 
     /// <inheritdoc />
@@ -120,9 +127,10 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         if (await BinaryGcodeReader.IsBinaryGcodeAsync(gcodeStream, ct))
         {
             string binaryCommentText = await BinaryGcodeReader.ReadAsTextAsync(gcodeStream, ct);
+            ct.ThrowIfCancellationRequested();
             return string.IsNullOrWhiteSpace(binaryCommentText)
                 ? null
-                : await ExtractMetadataAsync(binaryCommentText);
+                : await Task.Run(() => ExtractMetadataFromText(binaryCommentText, ct), ct);
         }
 
         return await Task.Run(() => ExtractMetadataFromTextStream(gcodeStream, startPosition, ct), ct);

@@ -540,7 +540,7 @@ public sealed class ChunkedUploadService(
     /// Finalizes a completed upload by moving file, extracting metadata, and generating thumbnail.
     /// </summary>
     /// <param name="state">Internal upload state containing file paths and hash information</param>
-    /// <returns>Thumbnail path if generated successfully, null otherwise</returns>
+    /// <returns>The optional thumbnail path and metadata extracted during finalization.</returns>
     /// <remarks>
     /// Finalization steps:
     /// 1. Validates hash if algorithm configured (throws exception on mismatch)
@@ -634,7 +634,7 @@ public sealed class ChunkedUploadService(
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("Failed to extract thumbnail for {FinalPath}: {Message}", LogSanitizer.Sanitize(finalPath), LogSanitizer.Sanitize(ex.Message));
+                _logger.LogWarning(ex, "Failed to extract G-code metadata for {FinalPath}; thumbnail saving was skipped", LogSanitizer.Sanitize(finalPath));
 
                 // Continue anyway - thumbnail extraction is optional
             }

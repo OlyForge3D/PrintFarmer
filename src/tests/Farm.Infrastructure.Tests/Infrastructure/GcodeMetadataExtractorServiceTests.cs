@@ -286,6 +286,35 @@ G28
     }
 
     [Fact]
+    public async Task ExtractMetadataFromStreamAsync_TrailingNewline_MatchesStringExtractor()
+    {
+        const string content = "; filament_type = PLA\r\nG1 X1 Y2\r\n";
+        using MemoryStream stream = new(Encoding.UTF8.GetBytes(content));
+
+        GcodeMetadataExtracted expected = await _service.ExtractMetadataAsync(content);
+        GcodeMetadataExtracted actual = (await _service.ExtractMetadataFromStreamAsync(stream))!;
+
+        JsonSerializer.Serialize(actual).Should().Be(JsonSerializer.Serialize(expected));
+        actual.Material.Should().Be("PLA");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataFromStreamAsync_LargestSameFormatThumbnail_MatchesStringSelector()
+    {
+        byte[] smallThumbnail = [1, 2, 3];
+        byte[] largeThumbnail = [4, 5, 6, 7];
+        string content = $"; thumbnail_PNG begin 1x1\n;{Convert.ToBase64String(smallThumbnail)}\n; thumbnail_PNG end\n" +
+            $"; thumbnail_PNG begin 2x2\n;{Convert.ToBase64String(largeThumbnail)}\n; thumbnail_PNG end";
+        using MemoryStream stream = new(Encoding.UTF8.GetBytes(content));
+
+        GcodeMetadataExtracted expected = await _service.ExtractMetadataAsync(content);
+        GcodeMetadataExtracted actual = (await _service.ExtractMetadataFromStreamAsync(stream))!;
+
+        JsonSerializer.Serialize(actual).Should().Be(JsonSerializer.Serialize(expected));
+        actual.ThumbnailData.Should().Equal(largeThumbnail);
+    }
+
+    [Fact]
     public async Task ExtractMetadataAsync_ExtractsThumbnailData()
     {
         // Simple base64-encoded thumbnail (very small PNG)
