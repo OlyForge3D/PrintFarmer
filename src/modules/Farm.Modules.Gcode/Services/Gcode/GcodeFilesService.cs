@@ -583,14 +583,14 @@ public partial class GcodeFilesService(
     /// <param name="originalFileName">Original filename as provided by the uploader.</param>
     /// <param name="thumbnailPath">Optional path to extracted thumbnail image.</param>
     /// <param name="virtualDirectory">Virtual directory path for file organization.</param>
-    /// <param name="chunkedUploadService">Service for handling chunked uploads and metadata extraction.</param>
+    /// <param name="metadata">Metadata extracted while finalizing the chunked upload.</param>
     /// <param name="ct">Cancellation token for async operation.</param>
     public async Task<GcodeFile?> FinalizeChunkedUploadAsync(
         string filePath,
         string? originalFileName,
         string? thumbnailPath,
         string? virtualDirectory,
-        IChunkedUploadService chunkedUploadService,
+        GcodeMetadataExtracted? metadata,
         CancellationToken ct)
     {
         try
@@ -603,9 +603,7 @@ public partial class GcodeFilesService(
                 return null;
             }
 
-            // Extract metadata from the uploaded file
-            GcodeMetadataExtracted? metadata = await chunkedUploadService.ExtractMetadataFromFileAsync(filePath, ct);
-            _logger.LogInformation("FinalizeChunkedUploadAsync: Metadata extracted for {FileName}", originalFileName);
+            _logger.LogInformation("FinalizeChunkedUploadAsync: Using upload metadata for {FileName}", originalFileName);
 
             // Get file info
             FileInfo fileInfo = new(filePath);
