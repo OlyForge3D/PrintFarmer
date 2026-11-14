@@ -61,7 +61,7 @@
     "@tanstack/react-query": "5.105.0",
     "@tanstack/react-virtual": "^3.14.13",
     "@types/qrcode": "^1.5.6",
-    "axios": "^1.21.0",
+    "axios": "^1.21.1",
     "date-fns": "^4.4.0",
     "driver.js": "^1.10.2",
     "fflate": "^0.8.3",
@@ -111,7 +111,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "5.0.5",
     "esbuild": "0.28.2",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "eslint-plugin-local": "file:eslint-rules",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.7",
@@ -129,7 +129,7 @@
     "stats-gl": {
       "three": "0.180.0"
     },
-    "minimatch": ">=10.2.3",
+    "minimatch": "^11.0.1",
     "dompurify": ">=3.4.17 <4.0.0",
     "ws": ">=8.21.0 <9.0.0",
     "form-data": ">=4.0.6 <5.0.0",

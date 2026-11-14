@@ -18,6 +18,16 @@ Authorization: Bearer <token>
 
 Tokens are obtained via login and typically stored in secure HttpOnly cookies.
 
+Passkey login requires a currently active account; disabled accounts receive
+neither an access token nor a refresh token. The main API checks persisted account
+status on every bearer authentication, including SignalR connection requests.
+Previously issued access tokens are rejected once the account is deactivated.
+Recognized database/store failures are logged with their original exception and
+fail authentication closed. Unrecognized or untyped infrastructure failures
+propagate as server errors and never authorize the token. Caller cancellation
+and unrelated programming errors also propagate rather than becoming
+account-rejection responses.
+
 Controller actions fail closed through a global authorization fallback policy.
 Only explicitly reviewed actions opt out, including authentication and first-run
 setup flows, health and capability probes, browser thumbnail resources, and
@@ -1885,6 +1895,29 @@ validation, storage, cancellation, or database commit fails.
 ```
 
 The updated ETag is also returned in the `ETag` response header.
+
+### Add Local-Library G-code Files to a Project
+
+The Files page's Add to Project action sends one
+`POST /api/projects/{id}/files` with the complete nonempty array of file requests.
+All request fields are forwarded, including material, filament, quantity,
+notes and plate metadata. Empty client selections return `[]` without a request
+(the endpoint itself rejects an empty list with `400 Bad Request`).
+
+The existing endpoint skips missing G-code IDs, files already in the project
+and repeated IDs within the batch. Its response is the actual added DTO array,
+with no guaranteed ordering; the success notification counts those DTOs, not
+selected IDs, including zero when everything was skipped. On success the client
+invalidates the `['projects']` and `['project', projectId]` query keys.
+
+Unlike the former serial single-file requests, the batch uses at most one
+database save, not independently committed per-file additions. HTTP failures
+propagate to the existing error notification, leave the modal open and do not
+trigger success invalidations or automatic singleton retries. True single-file
+callers retain their singleton helper.
+
+For 50 selections this reduces POST count from 50 to 1 (98% fewer requests),
+not a measured wall-clock speedup.
 
 ### Bulk Delete Local-Library Files
 

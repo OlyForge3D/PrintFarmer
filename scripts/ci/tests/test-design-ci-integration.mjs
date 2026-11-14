@@ -8,22 +8,20 @@ import yaml from 'js-yaml';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('CodeQL exclusion is limited to the pinned upstream vendor folder', () => {
+test('CodeQL config keeps the pinned vendor folder query-eligible', () => {
   const source = read('.github/codeql/codeql-config.yml');
   const config = yaml.load(source);
+  assert.deepEqual(Object.keys(config).sort(), ['name', 'paths-ignore', 'queries']);
+  assert.equal(config.name, 'PrintFarmer CodeQL Config');
   assert.deepEqual(config.queries, [{ uses: 'security-and-quality' }]);
   assert.deepEqual(config['paths-ignore'], [
     '**/__tests__/**',
     '**/*.test.js', '**/*.test.jsx', '**/*.test.ts', '**/*.test.tsx',
     '**/*.spec.js', '**/*.spec.jsx', '**/*.spec.ts', '**/*.spec.tsx',
     'src/Web/ReactApp/e2e', 'src/Web/ReactApp/src/test',
-    'scripts/design/vendor/impeccable/**',
   ]);
-  assert.match(source, /Unmodified upstream Apache-2\.0 Impeccable 4\.0\.3/);
-  assert.match(source, /including fork heads.*not inherently trusted/);
-  assert.match(source, /excludes all[\s\S]*queries/);
-  assert.ok(source.split(/\r?\n/).some((line) =>
-    line === '  # https://github.com/OlyForge3D/PrintFarmer/issues/3707.'));
+  assert.ok(!config['paths-ignore'].some((pattern) =>
+    pattern.includes('scripts/design/vendor/impeccable')));
   const workflow = yaml.load(read('.github/workflows/codeql.yml'));
   const init = workflow.jobs.analyze.steps.find((step) => step.uses?.startsWith('github/codeql-action/init@'));
   assert.equal(init.with['config-file'], './.github/codeql/codeql-config.yml');

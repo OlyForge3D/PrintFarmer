@@ -73,6 +73,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
             .Setup(service => service.IsTokenRevokedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
+        string databaseName = $"octoprint-optional-auth-{Guid.NewGuid()}";
         var settingsService = new Mock<ISettingsService>();
         settingsService.Setup(service => service.Get<OctoPrintSettings>()).Returns(() => _settings);
         _users.Setup(repository => repository.GetUserEntityAsync(_userId, It.IsAny<CancellationToken>()))
@@ -120,6 +121,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
             .ConfigureServices((context, services) =>
             {
                 services.AddPrintFarmerAuthentication(context.Configuration, context.HostingEnvironment);
+                services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(databaseName));
                 services.AddLogging();
                 services.AddSingleton(_tokenRevocationService.Object);
                 services.AddSingleton<CapturingWarningLoggerProvider>();
@@ -154,6 +156,17 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _host.StartAsync();
+        using IServiceScope scope = _host.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Users.Add(new User
+        {
+            Id = _userId,
+            Username = "slicer-user",
+            Email = "slicer-user@example.com",
+            PasswordHash = "unused",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
         _client = _host.GetTestClient();
     }
 
@@ -396,7 +409,7 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
 
         using HttpResponseMessage response = await UploadAsync();
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         AssertNoSideEffects();
     }
 

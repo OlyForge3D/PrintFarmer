@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -18,6 +19,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -161,6 +163,14 @@ internal static class ProgramHelpers
 
     internal static JwtBearerEvents CreateJwtEvents(ILogger? startupUls, ILogger<Program>? startupLogger)
     {
+        void FailAccountValidation(TokenValidatedContext context, Exception exception)
+        {
+            ILogger logger = startupUls ?? startupLogger
+                ?? context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogError(exception, "[JWT][OnTokenValidated] Unable to validate user account.");
+            context.Fail("Unable to validate user account.");
+        }
+
         return new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -240,6 +250,30 @@ internal static class ProgramHelpers
             OnTokenValidated = async context =>
             {
                 string sub = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "<none>";
+                try
+                {
+                    AppDbContext db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                    if (!Guid.TryParse(sub, out Guid userId) ||
+                        !await db.Users.AnyAsync(user => user.Id == userId && user.IsActive, context.HttpContext.RequestAborted))
+                    {
+                        context.Fail("User account is disabled or no longer exists.");
+                        return;
+                    }
+                }
+                catch (DbException exception) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                {
+                    FailAccountValidation(context, exception);
+                    return;
+                }
+                catch (InvalidOperationException exception) when (
+                    !context.HttpContext.RequestAborted.IsCancellationRequested
+                    && exception.InnerException is (DbException or TimeoutException))
+                {
+                    // EF's non-retrying PostgreSQL/SQL Server strategies wrap transient store failures.
+                    FailAccountValidation(context, exception);
+                    return;
+                }
+
                 string roles = string.Join(',', context.Principal?.FindAll(System.Security.Claims.ClaimTypes.Role)?.Select(c => c.Value) ?? Array.Empty<string>());
                 try
                 {

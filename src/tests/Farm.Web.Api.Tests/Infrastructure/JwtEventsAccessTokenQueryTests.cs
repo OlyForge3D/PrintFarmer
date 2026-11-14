@@ -1,4 +1,6 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api;
 using Farm.Web.Api.Startup;
@@ -6,6 +8,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -117,10 +120,15 @@ public class JwtEventsAccessTokenQueryTests
             .Setup(service => service.IsTokenRevokedAsync("access-token", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Revocation store unavailable."));
         List<string> logs = [];
+        Guid userId = Guid.NewGuid();
         using ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase($"revocation-failure-{Guid.NewGuid()}"))
             .AddSingleton(revocationService.Object)
             .AddSingleton<ILoggerFactory>(new CapturingLoggerFactory(logs))
             .BuildServiceProvider();
+        AppDbContext db = provider.GetRequiredService<AppDbContext>();
+        db.Users.Add(new User { Id = userId, Username = "active-user", Email = "active@example.com", PasswordHash = "unused", IsActive = true });
+        await db.SaveChangesAsync();
 
         DefaultHttpContext httpContext = new()
         {
@@ -134,7 +142,7 @@ public class JwtEventsAccessTokenQueryTests
         TokenValidatedContext context = new(httpContext, scheme, new JwtBearerOptions())
         {
             Principal = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
                 JwtBearerDefaults.AuthenticationScheme))
         };
 
