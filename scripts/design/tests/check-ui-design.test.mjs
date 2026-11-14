@@ -310,6 +310,42 @@ test('rejects parser-enabled linked stylesheets whose symlink target is outside 
   );
 });
 
+test('accepts parser-enabled linked stylesheets with local imports and remote references', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  const partsDirectory = path.join(stylesDirectory, 'parts');
+  fs.mkdirSync(partsDirectory, { recursive: true });
+  fs.writeFileSync(path.join(partsDirectory, 'tokens.css'), ':root { --color: red; }');
+  fs.writeFileSync(
+    path.join(stylesDirectory, 'theme.css'),
+    '@import "parts/tokens.css"; @import "tailwindcss"; @import url("https://example.test/theme.css");',
+  );
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="styles/theme.css"><link rel="stylesheet" href="https://example.test/remote.css"></head><body></body></html>',
+  );
+
+  const result = await scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html'));
+  assert.deepEqual(result.scannedFiles, ['src/Web/ReactApp/src/page.html']);
+});
+
+test('rejects parser-enabled uppercase stylesheet attributes that escape the checkout', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const outsideStylesheetPath = path.join(outsideRoot, 'private.css');
+  const href = path.relative(sourceRoot, outsideStylesheetPath).replaceAll(path.sep, '/');
+  fs.writeFileSync(outsideStylesheetPath, 'body { color: red; }');
+  fs.writeFileSync(htmlPath, `<html><head><link REL="stylesheet" HREF="${href}"></head><body></body></html>`);
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /linked stylesheet outside the checkout/,
+  );
+});
+
 test('rejects parser-enabled stylesheet href traversal outside the checkout', async (t) => {
   await assertStaticHtmlParserAvailable();
   const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
@@ -346,6 +382,52 @@ test('rejects parser-enabled local stylesheet imports that resolve outside the c
   await assert.rejects(
     () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
     /stylesheet @import outside the checkout/,
+  );
+});
+
+test('fails closed when the local stylesheet import graph exceeds its file limit', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  const importsDirectory = path.join(stylesDirectory, 'imports');
+  fs.mkdirSync(importsDirectory, { recursive: true });
+  const imports = Array.from({ length: 257 }, (_, index) => {
+    const name = `style-${index}.css`;
+    fs.writeFileSync(path.join(importsDirectory, name), 'body { color: red; }');
+    return `@import "imports/${name}";`;
+  });
+  fs.writeFileSync(path.join(stylesDirectory, 'theme.css'), imports.join('\n'));
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body></body></html>',
+  );
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /Too many local stylesheets to validate filesystem boundaries safely/,
+  );
+});
+
+test('fails closed when an imported stylesheet exceeds its byte limit', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  fs.mkdirSync(stylesDirectory, { recursive: true });
+  fs.writeFileSync(path.join(stylesDirectory, 'theme.css'), '@import "oversized.css";');
+  fs.writeFileSync(
+    path.join(stylesDirectory, 'oversized.css'),
+    `/*${'x'.repeat(1024 * 1024)}*/`,
+  );
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body></body></html>',
+  );
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /A local stylesheet exceeds the filesystem-boundary validation size limit/,
   );
 });
 
