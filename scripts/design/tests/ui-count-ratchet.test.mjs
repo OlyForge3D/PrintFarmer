@@ -129,8 +129,13 @@ test('baseline provenance must match the scanner committed in the trusted base',
 
 test('committed repository baseline and allowance match their pinned tooling', () => {
   const git = args => {
-    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
-    assert.equal(result.status, 0, result.stderr);
+    const result = spawnSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    assert.equal(result.status, 0, result.error?.message ?? result.stderr);
     return result.stdout;
   };
   const head = git(['rev-parse', 'HEAD']).trim();
