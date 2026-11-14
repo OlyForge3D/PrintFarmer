@@ -12,6 +12,9 @@ public interface IFilamentProfileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<FilamentProfile?> GetByIdAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Gets non-system filament profiles owned by a specific user for a slicer engine.</summary>
+    Task<IReadOnlyList<FilamentProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default);
+
     /// <summary>Gets filament profiles for a slicer engine with optional user filtering.</summary>
     /// <param name="engine">The slicer engine type.</param>
     /// <param name="includeSystem">Whether to include system profiles.</param>
