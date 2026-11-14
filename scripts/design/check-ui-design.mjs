@@ -376,6 +376,83 @@ function realPathWithinRoot(root, filePath, description) {
   return resolvedPath;
 }
 
+function readFileDescriptor(fd, maxBytes, description) {
+  if (maxBytes === undefined) {
+    try {
+      return fs.readFileSync(fd, 'utf8');
+    } catch {
+      fail(`Cannot read ${description} while validating filesystem boundaries.`);
+    }
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const buffer = Buffer.alloc(Math.min(64 * 1024, maxBytes - totalBytes + 1));
+    let bytesRead;
+    try {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+    } catch {
+      fail(`Cannot read ${description} while validating filesystem boundaries.`);
+    }
+    if (bytesRead === 0) break;
+    totalBytes += bytesRead;
+    if (totalBytes > maxBytes) {
+      fail('A local stylesheet exceeds the filesystem-boundary validation size limit.');
+    }
+    chunks.push(buffer.subarray(0, bytesRead));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function readContainedFile(root, filePath, description, maxBytes) {
+  const resolvedPath = realPathWithinRoot(root, filePath, description);
+  if (!resolvedPath) return undefined;
+
+  let fd;
+  try {
+    fd = fs.openSync(
+      resolvedPath,
+      fs.constants.O_RDONLY |
+        (fs.constants.O_NOFOLLOW || 0) |
+        (fs.constants.O_NONBLOCK || 0),
+    );
+  } catch {
+    fail(`Cannot open ${description} while validating filesystem boundaries.`);
+  }
+
+  try {
+    let openedStats;
+    try {
+      openedStats = fs.fstatSync(fd);
+    } catch {
+      fail(`Cannot inspect ${description} while validating filesystem boundaries.`);
+    }
+    if (!openedStats.isFile()) return { path: resolvedPath, content: undefined };
+
+    const currentPath = realPathWithinRoot(root, resolvedPath, description);
+    if (!currentPath) {
+      fail(`Cannot resolve ${description} inside the checkout after opening it.`);
+    }
+    let currentStats;
+    try {
+      currentStats = fs.statSync(currentPath);
+    } catch {
+      fail(`Cannot verify ${description} after opening it.`);
+    }
+    if (openedStats.dev !== currentStats.dev || openedStats.ino !== currentStats.ino) {
+      fail(`Refusing ${description} changed during containment validation.`);
+    }
+
+    return {
+      path: resolvedPath,
+      content: readFileDescriptor(fd, maxBytes, description),
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function assertDesignSystemPathsContained(root, targetPath) {
   const found = findDesignRoot(path.dirname(targetPath));
   if (!found?.hasDesign) return;
@@ -480,18 +557,14 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
     if (isImport) importedStylesheets++;
     inspected.add(resolvedPath);
 
-    const stats = fs.statSync(resolvedPath);
-    if (!stats.isFile()) return;
-    if (isImport && stats.size > maxImportedStylesheetBytes) {
-      fail('A local stylesheet exceeds the filesystem-boundary validation size limit.');
-    }
-
-    let css;
-    try {
-      css = fs.readFileSync(resolvedPath, 'utf8');
-    } catch {
-      fail('Cannot read a local stylesheet while validating filesystem boundaries.');
-    }
+    const stylesheet = readContainedFile(
+      root,
+      resolvedPath,
+      description,
+      isImport ? maxImportedStylesheetBytes : undefined,
+    );
+    if (!stylesheet || stylesheet.content === undefined) return;
+    const css = stylesheet.content;
     for (const importedPath of readStylesheetImportPaths(css, modules.cssTree)) {
       inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import', true);
     }
