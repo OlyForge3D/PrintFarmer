@@ -1,10 +1,14 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
@@ -15,11 +19,19 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Farm.Web.Api.Tests.Services;
 
 public class FilamentCoverageSpoolResolverTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public FilamentCoverageSpoolResolverTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact]
     public async Task ResolveSpoolAsync_CanonicalCentralIdentity_RejectsChangedSource()
     {
@@ -37,9 +49,14 @@ public class FilamentCoverageSpoolResolverTests
 
         FilamentCoverageSpoolSnapshot result =
             await resolver.ResolveSpoolAsync(identity, CancellationToken.None);
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> batchResult =
+            await resolver.ResolveAsync([identity], CancellationToken.None);
 
         result.Spool.Should().BeNull();
         result.ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        batchResult[identity].Spool.Should().BeNull();
+        batchResult[identity].ErrorReason.Should().Be(
+            FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
         central.Verify(
             service => service.ListSpoolsAsync(
                 It.IsAny<SpoolmanSpoolQueryParams>(),
@@ -86,6 +103,400 @@ public class FilamentCoverageSpoolResolverTests
         result.OriginWatermark.Should().Be(37);
         watermarkReader.VerifyAll();
         central.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalCentralIdentities_ReadsInventoryOnceAndPreservesOrigin()
+    {
+        Mock<ISpoolmanService> central = new();
+        central.Setup(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://central.local"));
+        central.Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
+                [
+                    new SpoolmanSpoolDto(41, "spool-41", "PLA", 321, null, true),
+                    new SpoolmanSpoolDto(42, "spool-42", "PETG", 654, null, true),
+                ],
+                2));
+        Mock<IMutationWatermarkReader> watermarkReader = new();
+        watermarkReader.Setup(reader => reader.GetCurrentAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(37);
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            watermarkReader: watermarkReader.Object);
+        CanonicalSpoolIdentity[] identities =
+        [
+            new(SpoolSourceKind.Central, "http://central.local", 41),
+            new(SpoolSourceKind.Central, "http://central.local", 42),
+        ];
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync(identities, CancellationToken.None);
+
+        result[identities[0]].Spool!.RemainingWeightG.Should().Be(321);
+        result[identities[1]].Spool!.RemainingWeightG.Should().Be(654);
+        result.Values.Should().OnlyContain(snapshot => snapshot.OriginWatermark == 37);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        watermarkReader.Verify(
+            reader => reader.GetCurrentAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalCentralIdentityRejectsConfigurationChangeBeforeRead()
+    {
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        central.SetupSequence(service => service.GetConfig())
+            .Returns(new SpoolmanConfigDto("http://central.local"))
+            .Returns(new SpoolmanConfigDto("http://central.local"))
+            .Returns(new SpoolmanConfigDto("http://changed-central.local"));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            42);
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync([identity], CancellationToken.None);
+
+        result[identity].ErrorReason.Should().Be(
+            FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        central.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalCentralPageStopsWhenConfigurationChangesAfterFirstPage()
+    {
+        string baseUrl = "http://central.local";
+        int pageRequests = 0;
+        Mock<ISpoolmanService> central = new(MockBehavior.Strict);
+        central.Setup(service => service.GetConfig())
+            .Returns(() => new SpoolmanConfigDto(baseUrl));
+        central.Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((SpoolmanSpoolQueryParams query, CancellationToken ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                query.Offset.Should().Be(0);
+                pageRequests++;
+                baseUrl = "http://changed-central.local";
+                SpoolmanSpoolDto[] firstPage = Enumerable.Range(1, 500)
+                    .Select(spoolId => new SpoolmanSpoolDto(
+                        spoolId,
+                        $"spool-{spoolId}",
+                        "PLA",
+                        300,
+                        null,
+                        true))
+                    .ToArray();
+                return Task.FromResult(SpoolmanReadResult.Ok<SpoolmanSpoolDto>(
+                    firstPage,
+                    totalCount: 1000));
+            });
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance);
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            501);
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync([identity], CancellationToken.None);
+
+        result[identity].Spool.Should().BeNull();
+        result[identity].ErrorReason.Should().Be(
+            FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        pageRequests.Should().Be(1);
+        central.Verify(
+            service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        central.Verify(service => service.GetConfig(), Times.Exactly(4));
+        central.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalCentralBatchReadsEveryRequiredPageInEachObservation()
+    {
+        const int totalCount = 1100;
+        SpoolmanSpoolDto[] inventory = Enumerable.Range(1, totalCount)
+            .Select(spoolId => new SpoolmanSpoolDto(
+                spoolId,
+                $"spool-{spoolId}",
+                "PLA",
+                300,
+                null,
+                true))
+            .ToArray();
+        foreach (int spoolCount in new[] { 10, 50, 100 })
+        {
+            CapturingSpoolmanHandler handler = new(inventory);
+            using HttpClient httpClient = new(handler);
+            Mock<ISettingsService> settingsService = new();
+            settingsService.Setup(service => service.Get<SpoolmanSettings>())
+                .Returns(new SpoolmanSettings { BaseUrl = "http://central.local" });
+            SpoolmanService central = new(
+                httpClient,
+                settingsService.Object,
+                NullLogger<SpoolmanService>.Instance,
+                new Mock<IEgressGuard>(MockBehavior.Strict).Object);
+            FilamentCoverageSpoolResolver resolver = new(
+                central,
+                new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+                NullLogger<FilamentCoverageSpoolResolver>.Instance);
+            CanonicalSpoolIdentity[] identities = Enumerable.Range(1, spoolCount)
+                .Select(spoolId => new CanonicalSpoolIdentity(
+                    SpoolSourceKind.Central,
+                    "http://central.local",
+                    1000 + spoolId))
+                .ToArray();
+
+            IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> firstObservation =
+                await resolver.ResolveAsync(identities, CancellationToken.None);
+            IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> secondObservation =
+                await resolver.ResolveAsync(identities, CancellationToken.None);
+
+            Assert.All(firstObservation.Values, snapshot => Assert.NotNull(snapshot.Spool));
+            Assert.All(secondObservation.Values, snapshot => Assert.NotNull(snapshot.Spool));
+            handler.RequestOffsets.Should().Equal(0, 500, 1000, 0, 500, 1000);
+            Assert.Equal(6, handler.RequestCount);
+            Assert.True(handler.ResponseBytes > 0);
+            _output.WriteLine(
+                "Central two-phase inventory, spools={0}: requests={1}, responseBytes={2}",
+                spoolCount,
+                handler.RequestCount,
+                handler.ResponseBytes);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalNativeIdentities_UsesOneAuthorizedSourceRead()
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool(
+            "http://moon.local",
+            PrinterBackend.Moonraker,
+            41));
+        await db.SaveChangesAsync();
+        Mock<IBackendClient> native = NativeClient(
+            JsonSerializer.Serialize(new[]
+            {
+                new { id = 41, remaining_weight = 321, material = "PLA" },
+                new { id = 42, remaining_weight = 654, material = "PETG" },
+            }));
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity[] identities =
+        [
+            new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 41),
+            new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42),
+        ];
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync(identities, CancellationToken.None);
+
+        result[identities[0]].Spool!.RemainingWeightG.Should().Be(321);
+        result[identities[1]].Spool!.RemainingWeightG.Should().Be(654);
+        result.Values.Should().OnlyContain(snapshot => snapshot.TracksLiveConsumption);
+        native.As<ISupportsSpoolman>().Verify(
+            service => service.GetSpoolmanSpoolsAsync(
+                "http://moon.local/",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CanonicalMultiSourceReadsStayFixedFor10_50_100Spools()
+    {
+        const int totalCount = 1100;
+        const int nativeSourceCount = 5;
+        SpoolmanSpoolDto[] centralInventory = Enumerable.Range(1, totalCount)
+            .Select(spoolId => new SpoolmanSpoolDto(
+                spoolId,
+                $"spool-{spoolId}",
+                "PLA",
+                300,
+                null,
+                true))
+            .ToArray();
+        CapturingSpoolmanHandler handler = new(centralInventory);
+        using HttpClient httpClient = new(handler);
+        Mock<ISettingsService> settingsService = new();
+        settingsService.Setup(service => service.Get<SpoolmanSettings>())
+            .Returns(new SpoolmanSettings { BaseUrl = "http://central.local" });
+        SpoolmanService central = new(
+            httpClient,
+            settingsService.Object,
+            NullLogger<SpoolmanService>.Instance,
+            new Mock<IEgressGuard>(MockBehavior.Strict).Object);
+        await using AppDbContext db = CreateContext();
+        string[] nativeSourceUrls = Enumerable.Range(1, nativeSourceCount)
+            .Select(sourceIndex => $"http://moon-{sourceIndex}.local")
+            .ToArray();
+        foreach (string sourceUrl in nativeSourceUrls)
+        {
+            db.Printers.Add(PrinterWithSpool(sourceUrl, PrinterBackend.Moonraker, 1));
+        }
+
+        await db.SaveChangesAsync();
+        string nativeJson = JsonSerializer.Serialize(Enumerable.Range(1, totalCount)
+            .Select(spoolId => new
+            {
+                id = spoolId,
+                remaining_weight = 300,
+                material = "PLA",
+            }));
+        ConcurrentDictionary<string, int> nativeRequestCounts = new(StringComparer.Ordinal);
+        Mock<IBackendClient> nativeClient = new();
+        nativeClient.As<ISupportsSpoolman>()
+            .Setup(service => service.GetSpoolmanSpoolsAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string sourceUrl, CancellationToken ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                _ = nativeRequestCounts.AddOrUpdate(sourceUrl, 1, (_, count) => count + 1);
+                return Task.FromResult<string?>(nativeJson);
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Returns(nativeClient.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            central,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        long? expectedCentralResponseBytes = null;
+        long? expectedNativeResponseBytes = null;
+
+        foreach (int spoolCount in new[] { 10, 50, 100 })
+        {
+            handler.Reset();
+            nativeRequestCounts.Clear();
+            CanonicalSpoolIdentity[] identities = Enumerable.Range(0, spoolCount)
+                .Select(index =>
+                {
+                    int sourceIndex = index % (nativeSourceCount + 1);
+                    return sourceIndex == 0
+                        ? new CanonicalSpoolIdentity(
+                            SpoolSourceKind.Central,
+                            "http://central.local",
+                            1001 + index)
+                        : new CanonicalSpoolIdentity(
+                            SpoolSourceKind.MoonrakerNative,
+                            nativeSourceUrls[sourceIndex - 1],
+                            1001 + index);
+                })
+                .ToArray();
+
+            IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> first =
+                await resolver.ResolveAsync(identities, CancellationToken.None);
+            IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> second =
+                await resolver.ResolveAsync(identities, CancellationToken.None);
+
+            Assert.All(first.Values, snapshot => Assert.NotNull(snapshot.Spool));
+            Assert.All(second.Values, snapshot => Assert.NotNull(snapshot.Spool));
+            Assert.Equal(6, handler.RequestCount);
+            Assert.Equal(new[] { 0, 500, 1000, 0, 500, 1000 }, handler.RequestOffsets);
+            Assert.Equal(nativeSourceCount, nativeRequestCounts.Count);
+            Assert.All(nativeRequestCounts.Values, count => Assert.Equal(2, count));
+            long nativeResponseBytes =
+                (long)nativeRequestCounts.Values.Sum() * Encoding.UTF8.GetByteCount(nativeJson);
+            expectedCentralResponseBytes ??= handler.ResponseBytes;
+            expectedNativeResponseBytes ??= nativeResponseBytes;
+            Assert.Equal(expectedCentralResponseBytes, handler.ResponseBytes);
+            Assert.Equal(expectedNativeResponseBytes, nativeResponseBytes);
+            _output.WriteLine(
+                "Six-source two-phase inventory, spools={0}: centralHttpRequests={1}, centralResponseBytes={2}, nativeSourceCalls={3}, nativeResponseBytes={4}",
+                spoolCount,
+                handler.RequestCount,
+                handler.ResponseBytes,
+                nativeRequestCounts.Values.Sum(),
+                nativeResponseBytes);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveAsync_NativeFactoryUnavailable_PreservesHealthyCentralSource(bool unsupportedBackend)
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClientFactory> factory = new();
+        Exception failure = unsupportedBackend
+            ? new ArgumentException("unsupported backend")
+            : new InvalidOperationException("backend not registered");
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker)).Throws(failure);
+        Mock<ISpoolmanService> central = new();
+        central.Setup(service => service.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central.Setup(service => service.ListSpoolsAsync(
+                It.IsAny<SpoolmanSpoolQueryParams>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SpoolmanReadResult.Ok<SpoolmanSpoolDto>([Spool(42, 321)], 1));
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity native = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
+        CanonicalSpoolIdentity managed = new(SpoolSourceKind.Central, "http://central.local", 42);
+
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result =
+            await resolver.ResolveAsync([native, managed], CancellationToken.None);
+
+        result[native].ErrorReason.Should().Be(FilamentCoverageSpoolResolver.ReasonSourceUnavailable);
+        result[native].Spool.Should().BeNull();
+        result[managed].Spool!.RemainingWeightG.Should().Be(321);
+        result[managed].ErrorReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UnexpectedNativeFactoryFailure_Propagates()
+    {
+        await using AppDbContext db = CreateContext();
+        db.Printers.Add(PrinterWithSpool("http://moon.local", PrinterBackend.Moonraker, 42));
+        await db.SaveChangesAsync();
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(service => service.GetClient((int)PrinterBackend.Moonraker))
+            .Throws(new NotSupportedException("unexpected failure"));
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            db);
+        CanonicalSpoolIdentity identity = new(SpoolSourceKind.MoonrakerNative, "http://moon.local", 42);
+
+        Func<Task> resolve = async () => await resolver.ResolveAsync([identity], CancellationToken.None);
+
+        await resolve.Should().ThrowAsync<NotSupportedException>();
     }
 
     [Fact]
@@ -1114,6 +1525,81 @@ public class FilamentCoverageSpoolResolverTests
         offlineNative.As<ISupportsSpoolman>().Verify(
             n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    private sealed class CapturingSpoolmanHandler(SpoolmanSpoolDto[] inventory) : HttpMessageHandler
+    {
+        private readonly List<int> _requestOffsets = [];
+        private int _requestCount;
+        private long _responseBytes;
+
+        public IReadOnlyList<int> RequestOffsets => _requestOffsets;
+
+        public int RequestCount => Volatile.Read(ref _requestCount);
+
+        public long ResponseBytes => Interlocked.Read(ref _responseBytes);
+
+        public void Reset()
+        {
+            _requestOffsets.Clear();
+            _ = Interlocked.Exchange(ref _requestCount, 0);
+            _ = Interlocked.Exchange(ref _responseBytes, 0);
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Uri requestUri = request.RequestUri
+                ?? throw new InvalidOperationException("The Spoolman request omitted its URI.");
+            int offset = ReadQueryInt(requestUri, "offset");
+            int limit = ReadQueryInt(requestUri, "limit");
+            _requestOffsets.Add(offset);
+            _ = Interlocked.Increment(ref _requestCount);
+
+            string json = JsonSerializer.Serialize(inventory
+                .Skip(offset)
+                .Take(limit)
+                .Select(spool => new
+                {
+                    id = spool.Id,
+                    name = spool.Name,
+                    material = spool.Material,
+                    remaining_weight = spool.RemainingWeightG,
+                    in_use = spool.InUse,
+                }));
+            _ = Interlocked.Add(ref _responseBytes, Encoding.UTF8.GetByteCount(json));
+
+            HttpResponseMessage response = new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+            response.Headers.TryAddWithoutValidation(
+                "X-Total-Count",
+                inventory.Length.ToString(CultureInfo.InvariantCulture));
+            return Task.FromResult(response);
+        }
+
+        private static int ReadQueryInt(Uri requestUri, string key)
+        {
+            foreach (string part in requestUri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] nameValue = part.Split('=', 2);
+                if (nameValue.Length == 2
+                    && string.Equals(Uri.UnescapeDataString(nameValue[0]), key, StringComparison.Ordinal)
+                    && int.TryParse(
+                        Uri.UnescapeDataString(nameValue[1]),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out int value))
+                {
+                    return value;
+                }
+            }
+
+            return 0;
+        }
     }
 
     private static Mock<IBackendClient> NativeClient(string? json)

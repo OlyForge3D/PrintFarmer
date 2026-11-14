@@ -228,6 +228,186 @@ public sealed class FilamentCoverageSpoolResolver(
                 ReasonSpoolNotFound);
     }
 
+    public async Task<IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot>> ResolveAsync(
+        IReadOnlyCollection<CanonicalSpoolIdentity> identities,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(identities);
+
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(_watermarkReader, _logger, "source-qualified filament spools", ct)
+            .ConfigureAwait(false);
+        SpoolReadBudget budget = ReadBudget();
+        CanonicalSpoolIdentity[] distinctIdentities = identities.Distinct().ToArray();
+        Dictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> result = [];
+        Dictionary<SourceKey, SourceRequest> requests = [];
+
+        bool hasCentralIdentities = distinctIdentities.Any(identity =>
+            identity.SourceKind == SpoolSourceKind.Central);
+        SpoolmanConfigDto? centralConfig = hasCentralIdentities
+            ? _spoolmanService.GetConfig()
+            : null;
+        string? configuredCentralIdentity = NormalizeCentralSourceIdentity(centralConfig);
+
+        foreach (CanonicalSpoolIdentity identity in distinctIdentities)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (identity.SourceKind != SpoolSourceKind.Central)
+            {
+                continue;
+            }
+
+            if (centralConfig is null || string.IsNullOrWhiteSpace(centralConfig.BaseUrl))
+            {
+                result[identity] = new(null, false, ReasonSpoolmanUnconfigured);
+                continue;
+            }
+
+            if (!string.Equals(
+                    configuredCentralIdentity,
+                    identity.SourceIdentity,
+                    StringComparison.Ordinal))
+            {
+                result[identity] = new(null, false, ReasonSourceUnavailable);
+                continue;
+            }
+
+            SourceKey key = new(false, 0, identity.SourceIdentity);
+            if (!requests.TryGetValue(key, out SourceRequest? request))
+            {
+                request = new SourceRequest(null, centralConfig.BaseUrl)
+                {
+                    ExpectedCentralIdentity = identity.SourceIdentity,
+                };
+                requests[key] = request;
+            }
+
+            _ = request.SpoolIds.Add(identity.SpoolId);
+        }
+
+        CanonicalSpoolIdentity[] nativeIdentities = distinctIdentities
+            .Where(identity => identity.SourceKind == SpoolSourceKind.MoonrakerNative)
+            .ToArray();
+        HashSet<string> configuredNativeIdentities = nativeIdentities.Length == 0
+            ? new(StringComparer.Ordinal)
+            : await LoadConfiguredNativeSourceIdentitiesAsync(ct).ConfigureAwait(false);
+
+        foreach (IGrouping<string, CanonicalSpoolIdentity> sourceGroup in nativeIdentities
+            .GroupBy(identity => identity.SourceIdentity, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!configuredNativeIdentities.Contains(sourceGroup.Key))
+            {
+                foreach (CanonicalSpoolIdentity identity in sourceGroup)
+                {
+                    result[identity] = new(null, true, ReasonSourceUnavailable);
+                }
+
+                continue;
+            }
+
+            IBackendClient client;
+            try
+            {
+                client = _backendClientFactory.GetClient((int)PrinterBackend.Moonraker);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}",
+                    LogSanitizer.Sanitize(sourceGroup.Key));
+                foreach (CanonicalSpoolIdentity identity in sourceGroup)
+                {
+                    result[identity] = new(null, true, ReasonSourceUnavailable);
+                }
+
+                continue;
+            }
+
+            if (client is not ISupportsSpoolman native)
+            {
+                foreach (CanonicalSpoolIdentity identity in sourceGroup)
+                {
+                    result[identity] = new(null, true, ReasonSourceUnavailable);
+                }
+
+                continue;
+            }
+
+            string nativeBaseUrl = sourceGroup.Key.EndsWith('/')
+                ? sourceGroup.Key
+                : sourceGroup.Key + "/";
+            SourceKey key = new(true, (int)PrinterBackend.Moonraker, sourceGroup.Key);
+            SourceRequest request = new(native, nativeBaseUrl);
+            foreach (CanonicalSpoolIdentity identity in sourceGroup)
+            {
+                _ = request.SpoolIds.Add(identity.SpoolId);
+            }
+
+            requests[key] = request;
+        }
+
+        Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources =
+            await ResolveSourceRequestsAsync(requests, originWatermark, budget, ct)
+                .ConfigureAwait(false);
+        foreach (CanonicalSpoolIdentity identity in distinctIdentities)
+        {
+            if (result.ContainsKey(identity))
+            {
+                continue;
+            }
+
+            SourceKey key = identity.SourceKind == SpoolSourceKind.MoonrakerNative
+                ? new(true, (int)PrinterBackend.Moonraker, identity.SourceIdentity)
+                : new(false, 0, identity.SourceIdentity);
+            if (resolvedSources.TryGetValue(key, out Dictionary<int, FilamentCoverageSpoolSnapshot>? source)
+                && source.TryGetValue(identity.SpoolId, out FilamentCoverageSpoolSnapshot? snapshot))
+            {
+                result[identity] = snapshot;
+            }
+            else
+            {
+                result[identity] = new(
+                    null,
+                    identity.SourceKind == SpoolSourceKind.MoonrakerNative,
+                    ReasonSpoolNotFound);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<HashSet<string>> LoadConfiguredNativeSourceIdentitiesAsync(CancellationToken ct)
+    {
+        HashSet<string> identities = new(StringComparer.Ordinal);
+        if (_db is null)
+        {
+            return identities;
+        }
+
+        List<string> configuredUrls = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.Backend == (int)PrinterBackend.Moonraker)
+            .Select(printer => printer.ServerUrl)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (string configuredUrl in configuredUrls)
+        {
+            try
+            {
+                _ = identities.Add(CanonicalSpoolIdentity.NormalizeSourceIdentity(configuredUrl));
+            }
+            catch (ArgumentException)
+            {
+                // Invalid configured URLs cannot authorize an outbound request.
+            }
+        }
+
+        return identities;
+    }
+
     private async Task<bool> IsConfiguredNativeSourceAsync(
         string sourceIdentity,
         CancellationToken ct)
@@ -370,15 +550,53 @@ public sealed class FilamentCoverageSpoolResolver(
             request.SpoolIds.UnionWith(spoolIds);
         }
 
-        // Distinct spool sources are independent HTTP adapters. Resolve them in
-        // parallel without allowing a large farm to create unbounded fan-out.
-        //
-        // The gate alone cannot bound this endpoint: dark sources each hold a slot for
-        // the full per-source timeout, so they serialise into successive timeout waves
-        // and total latency grows with fleet size. The fleet deadline below is what makes
-        // the bound hold at any size — when it expires, sources still in flight degrade
-        // to "unavailable" and the projection returns the coverage it already has.
         SpoolReadBudget budget = ReadBudget();
+        Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources =
+            await ResolveSourceRequestsAsync(requests, originWatermark, budget, ct)
+                .ConfigureAwait(false);
+
+        Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
+        foreach (Printer printer in printers)
+        {
+            SourceAssignment assignment = assignments[printer.Id];
+            Dictionary<int, FilamentCoverageSpoolSnapshot> printerSpools = [];
+
+            foreach (int spoolId in assignment.SpoolIds)
+            {
+                if (assignment.ErrorReason is not null)
+                {
+                    printerSpools[spoolId] = new(null, false, assignment.ErrorReason, OriginWatermark: null);
+                }
+                else if (resolvedSources.TryGetValue(assignment.Key, out Dictionary<int, FilamentCoverageSpoolSnapshot>? source)
+                    && source.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot))
+                {
+                    printerSpools[spoolId] = snapshot;
+                }
+                else
+                {
+                    printerSpools[spoolId] = new(null, assignment.Key.Native, ReasonSpoolNotFound, OriginWatermark: null);
+                }
+            }
+
+            result[printer.Id] = printerSpools;
+        }
+
+        return result;
+    }
+
+    private async Task<Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>>> ResolveSourceRequestsAsync(
+        Dictionary<SourceKey, SourceRequest> requests,
+        long? originWatermark,
+        SpoolReadBudget budget,
+        CancellationToken ct)
+    {
+        if (requests.Count == 0)
+        {
+            return [];
+        }
+
+        // Distinct sources are independent HTTP adapters. Bound both concurrency and the
+        // whole observation so a large or partially unavailable farm cannot stall a pass.
         using CancellationTokenSource fleetCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         fleetCts.CancelAfter(budget.Fleet);
         CancellationToken budgetToken = fleetCts.Token;
@@ -418,7 +636,13 @@ public sealed class FilamentCoverageSpoolResolver(
                 {
                     Dictionary<int, FilamentCoverageSpoolSnapshot> resolved = pair.Key.Native
                         ? await ResolveNativeAsync(pair.Value, originWatermark, budget, budgetToken, ct).ConfigureAwait(false)
-                        : await ResolveCentralAsync(pair.Value.SpoolIds, originWatermark, budget, budgetToken, ct).ConfigureAwait(false);
+                        : await ResolveCentralAsync(
+                            pair.Value.SpoolIds,
+                            originWatermark,
+                            budget,
+                            budgetToken,
+                            ct,
+                            pair.Value.ExpectedCentralIdentity).ConfigureAwait(false);
                     return KeyValuePair.Create(pair.Key, resolved);
                 }
                 finally
@@ -428,36 +652,7 @@ public sealed class FilamentCoverageSpoolResolver(
             }).ToArray();
         KeyValuePair<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>>[] completedSources =
             await Task.WhenAll(pendingSources).ConfigureAwait(false);
-        Dictionary<SourceKey, Dictionary<int, FilamentCoverageSpoolSnapshot>> resolvedSources =
-            completedSources.ToDictionary();
-
-        Dictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result = [];
-        foreach (Printer printer in printers)
-        {
-            SourceAssignment assignment = assignments[printer.Id];
-            Dictionary<int, FilamentCoverageSpoolSnapshot> printerSpools = [];
-
-            foreach (int spoolId in assignment.SpoolIds)
-            {
-                if (assignment.ErrorReason is not null)
-                {
-                    printerSpools[spoolId] = new(null, false, assignment.ErrorReason, OriginWatermark: null);
-                }
-                else if (resolvedSources.TryGetValue(assignment.Key, out Dictionary<int, FilamentCoverageSpoolSnapshot>? source)
-                    && source.TryGetValue(spoolId, out FilamentCoverageSpoolSnapshot? snapshot))
-                {
-                    printerSpools[spoolId] = snapshot;
-                }
-                else
-                {
-                    printerSpools[spoolId] = new(null, assignment.Key.Native, ReasonSpoolNotFound, OriginWatermark: null);
-                }
-            }
-
-            result[printer.Id] = printerSpools;
-        }
-
-        return result;
+        return completedSources.ToDictionary();
     }
 
     private async Task<Dictionary<int, FilamentCoverageSpoolSnapshot>> ResolveNativeAsync(
@@ -528,12 +723,22 @@ public sealed class FilamentCoverageSpoolResolver(
         long? originWatermark,
         SpoolReadBudget budget,
         CancellationToken budgetToken,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? expectedCentralIdentity = null)
     {
         SpoolmanConfigDto? config = _spoolmanService.GetConfig();
         if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
         {
             return Failure(spoolIds, false, ReasonSpoolmanUnconfigured);
+        }
+
+        if (expectedCentralIdentity is not null
+            && !string.Equals(
+                NormalizeCentralSourceIdentity(config),
+                expectedCentralIdentity,
+                StringComparison.Ordinal))
+        {
+            return Failure(spoolIds, false, ReasonSourceUnavailable);
         }
 
         TimeSpan timeout = budget.PerSource;
@@ -550,6 +755,12 @@ public sealed class FilamentCoverageSpoolResolver(
             int totalCount;
             do
             {
+                if (expectedCentralIdentity is not null
+                    && !IsCurrentCentralSource(expectedCentralIdentity))
+                {
+                    return Failure(spoolIds, false, ReasonSourceUnavailable);
+                }
+
                 SpoolmanReadResult<SpoolmanSpoolDto> page = await _spoolmanService.ListSpoolsAsync(
                     new SpoolmanSpoolQueryParams
                     {
@@ -569,6 +780,12 @@ public sealed class FilamentCoverageSpoolResolver(
                 // answer instead of the cancellation it asked for. Re-surfacing it here lets
                 // the catch filters below tell the two apart.
                 linked.Token.ThrowIfCancellationRequested();
+
+                if (expectedCentralIdentity is not null
+                    && !IsCurrentCentralSource(expectedCentralIdentity))
+                {
+                    return Failure(spoolIds, false, ReasonSourceUnavailable);
+                }
 
                 if (!page.Success)
                 {
@@ -638,6 +855,29 @@ public sealed class FilamentCoverageSpoolResolver(
     private static string NormalizeSource(string serverUrl)
         => CanonicalSpoolIdentity.NormalizeSourceIdentity(serverUrl);
 
+    private bool IsCurrentCentralSource(string expectedIdentity) =>
+        string.Equals(
+            NormalizeCentralSourceIdentity(_spoolmanService.GetConfig()),
+            expectedIdentity,
+            StringComparison.Ordinal);
+
+    private static string? NormalizeCentralSourceIdentity(SpoolmanConfigDto? config)
+    {
+        if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            return null;
+        }
+
+        try
+        {
+            return CanonicalSpoolIdentity.NormalizeSourceIdentity(config.BaseUrl);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
     private SourceSelection SelectSource(Printer printer)
     {
         if (printer.Backend != (int)PrinterBackend.Moonraker)
@@ -681,6 +921,8 @@ public sealed class FilamentCoverageSpoolResolver(
         public ISupportsSpoolman? NativeClient { get; } = nativeClient;
 
         public string? ServerUrl { get; } = serverUrl;
+
+        public string? ExpectedCentralIdentity { get; init; }
 
         public HashSet<int> SpoolIds { get; } = [];
     }

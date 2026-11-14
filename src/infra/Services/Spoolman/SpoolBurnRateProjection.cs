@@ -44,6 +44,14 @@ public interface ISpoolBurnRateProjectionService
     Task<SpoolBurnRateProjectionDto> ProjectAsync(
         CanonicalSpoolIdentity identity,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Projects burn rate and reorder-threshold crossing for source-qualified spools,
+    /// aggregating usage and resolving inventory in source batches.
+    /// </summary>
+    Task<IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto>> ProjectAsync(
+        IReadOnlyCollection<CanonicalSpoolIdentity> identities,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -56,6 +64,9 @@ public sealed class SpoolBurnRateProjectionService(
     ISettingsService settingsService,
     TimeProvider? clock = null) : ISpoolBurnRateProjectionService
 {
+    // Keep each ID-IN query below SQLite's variable limit even when sources are large.
+    private const int UsageSpoolIdBatchSize = 500;
+
     private readonly AppDbContext _db = db;
     private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver;
     private readonly ISettingsService _settingsService = settingsService;
@@ -66,30 +77,137 @@ public sealed class SpoolBurnRateProjectionService(
         CanonicalSpoolIdentity identity,
         CancellationToken ct = default)
     {
+        IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> projections =
+            await ProjectAsync([identity], ct).ConfigureAwait(false);
+        if (!projections.TryGetValue(identity, out SpoolBurnRateProjectionDto? projection))
+        {
+            throw new InvalidOperationException(
+                "The spool burn-rate batch omitted the requested source-qualified identity.");
+        }
+
+        return projection;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto>> ProjectAsync(
+        IReadOnlyCollection<CanonicalSpoolIdentity> identities,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(identities);
+
+        CanonicalSpoolIdentity[] distinctIdentities = identities.Distinct().ToArray();
+        if (distinctIdentities.Length == 0)
+        {
+            return new Dictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto>();
+        }
+
         ShiftPlanSettings settings = _settingsService.Get<ShiftPlanSettings>();
         settings.Validate();
 
         DateTime evaluatedAtUtc = _clock.GetUtcNow().UtcDateTime;
         DateTime cutoffUtc = evaluatedAtUtc.AddDays(-settings.SpoolBurnRateLookbackDays);
+        Dictionary<CanonicalSpoolIdentity, UsageAggregate> usageByIdentity =
+            await LoadUsageAggregatesAsync(
+                distinctIdentities,
+                cutoffUtc,
+                evaluatedAtUtc,
+                ct).ConfigureAwait(false);
+        IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> snapshots =
+            await _spoolResolver.ResolveAsync(distinctIdentities, ct).ConfigureAwait(false);
 
-        List<double> samples = await _db.PrintJobToolheadUsages
-            .AsNoTracking()
-            .Where(usage =>
-                usage.SpoolSourceKind == identity.SourceKind
-                && usage.SpoolSourceIdentity == identity.SourceIdentity
-                && usage.SpoolmanSpoolId == identity.SpoolId
-                && usage.IsFilamentUsageAuthoritative
-                && usage.FilamentUsageGrams.HasValue
-                && usage.FilamentUsageGrams.Value > 0
-                && usage.PrintJob.Status == PrintJobStatus.Completed
-                && usage.PrintJob.ActualEndTime.HasValue
-                && usage.PrintJob.ActualEndTime.Value >= cutoffUtc
-                && usage.PrintJob.ActualEndTime.Value <= evaluatedAtUtc)
-            .Select(usage => usage.FilamentUsageGrams!.Value)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        Dictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> projections =
+            new(distinctIdentities.Length);
+        foreach (CanonicalSpoolIdentity identity in distinctIdentities)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!snapshots.TryGetValue(identity, out FilamentCoverageSpoolSnapshot? snapshot))
+            {
+                throw new InvalidOperationException(
+                    "The spool inventory batch omitted a requested source-qualified identity.");
+            }
 
-        double consumedGrams = samples.Sum();
+            usageByIdentity.TryGetValue(identity, out UsageAggregate usage);
+            projections.Add(identity, Project(identity, usage, snapshot, settings, evaluatedAtUtc));
+        }
+
+        return projections;
+    }
+
+    private async Task<Dictionary<CanonicalSpoolIdentity, UsageAggregate>> LoadUsageAggregatesAsync(
+        IReadOnlyCollection<CanonicalSpoolIdentity> identities,
+        DateTime cutoffUtc,
+        DateTime evaluatedAtUtc,
+        CancellationToken ct)
+    {
+        Dictionary<CanonicalSpoolIdentity, UsageAggregate> usageByIdentity = [];
+        foreach (IGrouping<(SpoolSourceKind SourceKind, string SourceIdentity), CanonicalSpoolIdentity> sourceGroup
+            in identities.GroupBy(identity => (identity.SourceKind, identity.SourceIdentity)))
+        {
+            int[] spoolIds = sourceGroup
+                .Select(identity => identity.SpoolId)
+                .Distinct()
+                .ToArray();
+            foreach (int[] spoolIdBatch in spoolIds.Chunk(UsageSpoolIdBatchSize))
+            {
+                ct.ThrowIfCancellationRequested();
+                IAsyncEnumerable<UsageAggregateSample> samples = _db.PrintJobToolheadUsages
+                    .AsNoTracking()
+                    .Where(usage =>
+                        usage.SpoolSourceKind == sourceGroup.Key.SourceKind
+                        && usage.SpoolSourceIdentity == sourceGroup.Key.SourceIdentity
+                        && usage.SpoolmanSpoolId.HasValue
+                        && spoolIdBatch.Contains(usage.SpoolmanSpoolId.Value)
+                        && usage.IsFilamentUsageAuthoritative
+                        && usage.FilamentUsageGrams.HasValue
+                        && usage.FilamentUsageGrams.Value > 0
+                        && usage.PrintJob.Status == PrintJobStatus.Completed
+                        && usage.PrintJob.ActualEndTime.HasValue
+                        && usage.PrintJob.ActualEndTime.Value >= cutoffUtc
+                        && usage.PrintJob.ActualEndTime.Value <= evaluatedAtUtc)
+                    .Select(usage => new UsageAggregateSample(
+                        usage.SpoolmanSpoolId!.Value,
+                        usage.FilamentUsageGrams!.Value))
+                    .AsAsyncEnumerable();
+
+                // Sum in .NET so one spool's floating-point overflow cannot fail the whole source batch.
+                await foreach (UsageAggregateSample sample in samples
+                    .WithCancellation(ct)
+                    .ConfigureAwait(false))
+                {
+                    CanonicalSpoolIdentity identity = new(
+                        sourceGroup.Key.SourceKind,
+                        sourceGroup.Key.SourceIdentity,
+                        sample.SpoolId);
+                    if (usageByIdentity.TryGetValue(identity, out UsageAggregate aggregate))
+                    {
+                        usageByIdentity[identity] = aggregate with
+                        {
+                            ConsumedGrams = aggregate.ConsumedGrams + sample.ConsumedGrams,
+                            SampleCount = aggregate.SampleCount + 1,
+                        };
+                    }
+                    else
+                    {
+                        usageByIdentity[identity] = new UsageAggregate(
+                            sample.SpoolId,
+                            sample.ConsumedGrams,
+                            1);
+                    }
+                }
+            }
+        }
+
+        return usageByIdentity;
+    }
+
+    private static SpoolBurnRateProjectionDto Project(
+        CanonicalSpoolIdentity identity,
+        UsageAggregate usage,
+        FilamentCoverageSpoolSnapshot snapshot,
+        ShiftPlanSettings settings,
+        DateTime evaluatedAtUtc)
+    {
+        double consumedGrams = usage.ConsumedGrams;
         bool hasFiniteConsumption = double.IsFinite(consumedGrams);
         if (!hasFiniteConsumption)
         {
@@ -97,7 +215,7 @@ public sealed class SpoolBurnRateProjectionService(
         }
 
         double? burnRate = hasFiniteConsumption
-            && samples.Count >= settings.SpoolBurnRateMinimumSamples
+            && usage.SampleCount >= settings.SpoolBurnRateMinimumSamples
             ? consumedGrams / settings.SpoolBurnRateLookbackDays
             : null;
         if (burnRate is not > 0 || !double.IsFinite(burnRate.Value))
@@ -105,9 +223,6 @@ public sealed class SpoolBurnRateProjectionService(
             burnRate = null;
         }
 
-        FilamentCoverageSpoolSnapshot snapshot = await _spoolResolver
-            .ResolveSpoolAsync(identity, ct)
-            .ConfigureAwait(false);
         double? remainingGrams = snapshot.Spool?.RemainingWeightG;
         if (remainingGrams is < 0
             || (remainingGrams.HasValue && !double.IsFinite(remainingGrams.Value)))
@@ -156,7 +271,11 @@ public sealed class SpoolBurnRateProjectionService(
             burnRate,
             thresholdCrossingUtc,
             evaluatedAtUtc,
-            samples.Count,
+            usage.SampleCount,
             state);
     }
+
+    private readonly record struct UsageAggregateSample(int SpoolId, double ConsumedGrams);
+
+    private readonly record struct UsageAggregate(int SpoolId, double ConsumedGrams, int SampleCount);
 }

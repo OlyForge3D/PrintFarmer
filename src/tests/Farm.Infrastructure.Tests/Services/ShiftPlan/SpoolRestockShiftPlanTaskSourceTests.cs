@@ -32,6 +32,7 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime, IDisp
     private readonly MutableTimeProvider _clock = new(Now);
     private SqliteConnection _connection = null!;
     private ShiftPlanSettings _settings = null!;
+    private string _centralSourceUrl = "http://central.local";
     private Guid _manufacturerId;
     private Guid _modelId;
 
@@ -68,12 +69,41 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime, IDisp
             .Returns(() => _settings);
         _spoolman
             .Setup(service => service.GetConfig())
-            .Returns(new SpoolmanConfigDto("http://central.local"));
+            .Returns(() => new SpoolmanConfigDto(_centralSourceUrl));
         _gate
             .Setup(service => service.IsEnabledStrictAsync(
                 OperatorFeature.ShiftPlan,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        _projections
+            .Setup(service => service.ProjectAsync(
+                It.IsAny<IReadOnlyCollection<CanonicalSpoolIdentity>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyCollection<CanonicalSpoolIdentity> identities, CancellationToken ct) =>
+            {
+                Dictionary<CanonicalSpoolIdentity, SpoolBurnRateProjectionDto> projections = [];
+                foreach (CanonicalSpoolIdentity identity in identities)
+                {
+                    projections[identity] = await _projections.Object
+                        .ProjectAsync(identity, ct);
+                }
+
+                return projections;
+            });
+        _resolver
+            .Setup(service => service.ResolveAsync(
+                It.IsAny<IReadOnlyCollection<CanonicalSpoolIdentity>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyCollection<CanonicalSpoolIdentity> identities, CancellationToken ct) =>
+            {
+                Dictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot> snapshots = [];
+                foreach (CanonicalSpoolIdentity identity in identities)
+                {
+                    snapshots[identity] = await _resolver.Object.ResolveSpoolAsync(identity, ct);
+                }
+
+                return snapshots;
+            });
     }
 
     public async Task DisposeAsync() => await _connection.DisposeAsync();
@@ -122,6 +152,49 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime, IDisp
         Assert.Equal("ready", root.GetProperty("state").GetString());
         Assert.Equal(3, root.GetProperty("sampleCount").GetInt32());
         Assert.Equal(250, root.GetProperty("thresholdGrams").GetDouble());
+    }
+
+    [Fact]
+    public async Task ProduceAsync_BatchesProjectionAndSecondInventoryObservation()
+    {
+        CanonicalSpoolIdentity[] identities = Enumerable.Range(1, 10)
+            .Select(spoolId => Identity(
+                SpoolSourceKind.Central,
+                "http://central.local",
+                100 + spoolId))
+            .ToArray();
+        foreach (CanonicalSpoolIdentity identity in identities)
+        {
+            await SeedPrinterAsync(
+                PrinterBackend.PrusaLink,
+                $"http://printer-{identity.SpoolId}.local",
+                identity.SpoolId);
+            SetupProjection(Ready(identity, Now.AddHours(2).UtcDateTime));
+            SetupResolvedSpool(identity, $"PLA {identity.SpoolId}");
+        }
+
+        await using AppDbContext db = CreateContext();
+
+        ShiftPlanSourceResult result = await CreateSource(db).ProduceAsync(CancellationToken.None);
+
+        Assert.Equal(identities.Length, result.Specs.Count);
+        _projections.Verify(
+            service => service.ProjectAsync(
+                It.Is<IReadOnlyCollection<CanonicalSpoolIdentity>>(requested =>
+                    requested.Count == identities.Length),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _resolver.Verify(
+            service => service.ResolveAsync(
+                It.Is<IReadOnlyCollection<CanonicalSpoolIdentity>>(requested =>
+                    requested.Count == identities.Length),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _resolver.Verify(
+            service => service.ResolveSpoolAsync(
+                It.IsAny<CanonicalSpoolIdentity>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(identities.Length));
     }
 
     [Theory]
@@ -447,6 +520,32 @@ public sealed class SpoolRestockShiftPlanTaskSourceTests : IAsyncLifetime, IDisp
                 It.IsAny<CanonicalSpoolIdentity>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task ProduceAsync_CentralSourceChangeDuringObservation_FailsClosed()
+    {
+        await SeedPrinterAsync(PrinterBackend.PrusaLink, "http://printer.local", 42);
+        CanonicalSpoolIdentity identity = Identity(
+            SpoolSourceKind.Central,
+            "http://central.local",
+            42);
+        _projections
+            .Setup(service => service.ProjectAsync(
+                identity,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                _centralSourceUrl = "http://changed-central.local";
+                return Ready(identity, Now.AddHours(2).UtcDateTime);
+            });
+        SetupResolvedSpool(identity, "PLA");
+        await using AppDbContext db = CreateContext();
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => CreateSource(db).ProduceAsync(CancellationToken.None));
+
+        Assert.Contains("central Spoolman configuration changed", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -16,6 +16,15 @@ public interface IFilamentCoverageSpoolResolver
         CancellationToken ct);
 
     /// <summary>
+    /// Resolves a set of immutable source-qualified spool identities, grouping reads by
+    /// their exact owning source. A changed central configuration never falls through
+    /// to the new source.
+    /// </summary>
+    Task<IReadOnlyDictionary<CanonicalSpoolIdentity, FilamentCoverageSpoolSnapshot>> ResolveAsync(
+        IReadOnlyCollection<CanonicalSpoolIdentity> identities,
+        CancellationToken ct);
+
+    /// <summary>
     /// Resolves one spool id from the source owned by <paramref name="printer"/>.
     /// Moonraker printers use their native Spoolman source; all other backends use the
     /// centrally managed source. Missing or unavailable native sources never fall back.
