@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Data.Common;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
@@ -114,9 +114,16 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
     private void AssertOwnedNonSystemSql()
     {
         string sql = Assert.Single(_diagnostics.Commands);
-        Assert.Contains("CreatedByUserId", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("IsSystem", sql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("IsPublic", sql, StringComparison.OrdinalIgnoreCase);
+        int whereStart = sql.IndexOf("WHERE", StringComparison.OrdinalIgnoreCase);
+        int orderByStart = sql.IndexOf("ORDER BY", whereStart, StringComparison.OrdinalIgnoreCase);
+        Assert.True(whereStart >= 0);
+        Assert.True(orderByStart > whereStart);
+
+        string predicate = sql[whereStart..orderByStart];
+        Assert.Contains("CreatedByUserId", predicate, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IsSystem", predicate, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IsPublic", predicate, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(" OR ", predicate, StringComparison.OrdinalIgnoreCase);
     }
 
     private void AssertQueryMaterializedOnly<TProfile>(int expectedCount)
