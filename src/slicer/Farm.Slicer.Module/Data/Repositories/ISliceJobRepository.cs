@@ -17,6 +17,13 @@ public interface ISliceJobRepository
     /// <summary>Gets all jobs for a specific user with optional pagination.</summary>
     Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default);
 
+    /// <summary>Gets status fields for a specific user's jobs without loading full job entities.</summary>
+    Task<IReadOnlyList<SliceJobStatusProjection>> GetJobStatusProjectionsByUserIdAsync(
+        Guid userId,
+        int? limit = null,
+        int? offset = null,
+        CancellationToken ct = default);
+
     /// <summary>Gets jobs filtered by status.</summary>
     Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default);
 
