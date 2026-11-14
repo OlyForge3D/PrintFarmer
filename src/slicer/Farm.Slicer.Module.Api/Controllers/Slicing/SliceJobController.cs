@@ -463,7 +463,8 @@ public partial class SliceJobController(
             return BadRequest("Invalid user ID.");
         }
 
-        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetByUserIdAsync(userGuid, limit, offset, ct);
+        IReadOnlyList<SliceJobStatusProjection> jobs =
+            await _jobRepository.GetJobStatusProjectionsByUserIdAsync(userGuid, limit, offset, ct);
         return Ok(jobs.Select(MapToPublicStatusResponse).ToList());
     }
 
@@ -1284,7 +1285,7 @@ public partial class SliceJobController(
             resourceId);
     }
 
-    private SliceJobStatusResponse MapToPublicStatusResponse(SliceJob job)
+    private SliceJobStatusResponse MapToPublicStatusResponse(ISliceJobStatusSource job)
     {
         bool isAdmin = PrintFarmerPermissions.IsFarmAdmin(User);
         return new()
@@ -1325,7 +1326,7 @@ public partial class SliceJobController(
             FilamentUsedGrams = job.FilamentUsedGrams,
             WorkerId = null,
             ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
-            SlicerEngine = SlicerEngineNames.Resolve(job),
+            SlicerEngine = SlicerEngineNames.ResolvePersistedName(job.SlicerEngineName),
             ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
         };
     }

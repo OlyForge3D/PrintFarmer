@@ -57,6 +57,49 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<SliceJobStatusProjection>> GetJobStatusProjectionsByUserIdAsync(
+        Guid userId,
+        int? limit = null,
+        int? offset = null,
+        CancellationToken ct = default)
+    {
+        IQueryable<SliceJob> query = _db.SliceJobs
+            .AsNoTracking()
+            .Where(j => j.UserId == userId)
+            .OrderByDescending(j => j.QueuedAt);
+
+        if (offset.HasValue)
+        {
+            query = query.Skip(offset.Value);
+        }
+
+        if (limit.HasValue)
+        {
+            query = query.Take(limit.Value);
+        }
+
+        return await query
+            .Select(job => new SliceJobStatusProjection
+            {
+                Id = job.Id,
+                Status = job.Status,
+                PrinterId = job.PrinterId,
+                ProgressPercent = job.ProgressPercent,
+                QueuedAt = job.QueuedAt,
+                StartedAt = job.StartedAt,
+                CompletedAt = job.CompletedAt,
+                ErrorMessage = job.ErrorMessage,
+                LayoutDegradationReason = job.LayoutDegradationReason,
+                FailureReason = job.FailureReason,
+                EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+                FilamentUsedGrams = job.FilamentUsedGrams,
+                ModelFileName = job.ModelFileName,
+                SlicerEngineName = job.SlicerEngineName,
+            })
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default)
     {
         IQueryable<SliceJob> query = _db.SliceJobs
