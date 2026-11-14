@@ -38,6 +38,9 @@ public class PrintProjectService(
             projects = projects.Where(p => EF.Functions.Like(p.Name, $"%{search}%"));
         }
 
+        // Description is capped at 2,000 characters, but remains in this composite LINQ key.
+        // Recheck provider plans and GROUP BY limits if that bound or other key columns widen;
+        // consider aggregating by project ID before joining the project columns back.
         var aggregates = await (
             from project in projects
             join file in db.PrintProjectFiles on project.Id equals file.PrintProjectId into projectFiles
