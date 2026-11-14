@@ -35,11 +35,14 @@ that session. A previously rotated token revokes its active descendant in the sa
 session family; unrelated sessions and other users' sessions are not affected.
 Reusing a rotated token at the refresh endpoint revokes all of the user's refresh
 sessions and access tokens issued at or before the revocation marker's second.
-Access tokens issued in a later second remain valid. Successful password changes
-and password resets revoke all refresh sessions, but do not revoke existing JWT
-access tokens. The React client refreshes access tokens proactively and retries one
-authenticated request after a 401; refresh tokens are stored separately from
-access tokens in local storage.
+Access tokens issued in a later second remain valid. Successful self-service or
+administrator password changes and password resets revoke all refresh sessions
+and access tokens issued at or before the revocation marker's second. Subsequent
+API requests using those JWTs and new or reconnecting SignalR handshakes are
+rejected. Already-established SignalR connections are not force-closed and remain
+connected until they disconnect. The React client refreshes access tokens
+proactively and retries one authenticated request after a 401; refresh tokens are
+stored separately from access tokens in local storage.
 
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include
