@@ -221,6 +221,51 @@ public class AuthenticationServiceTests
     }
 
     [Fact]
+    public async Task ChangePasswordAsync_WhenPostCommitAuditFails_StillReturnsSuccess()
+    {
+        User user = CreateTestUser();
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(user.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockPasswordHashing.Setup(p => p.VerifyPassword("currentpass", user.PasswordHash))
+            .Returns(true);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newpass"))
+            .Returns("$new$hashed$password$");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+            user.Id, user.Id, "Password changed by user", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockAuthAuditService.Setup(service => service.LogPasswordChangeAsync(
+            user.Id, "unknown", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+
+        bool result = await _service.ChangePasswordAsync(user.Id, "currentpass", "newpass");
+
+        result.Should().BeTrue();
+        user.PasswordHash.Should().Be("$new$hashed$password$");
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_WhenRevocationFails_PropagatesWithoutWritingPasswordAudit()
+    {
+        User user = CreateTestUser();
+        _mockUsersRepository.Setup(r => r.GetUserEntityAsync(user.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockPasswordHashing.Setup(p => p.VerifyPassword("currentpass", user.PasswordHash))
+            .Returns(true);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newpass"))
+            .Returns("$new$hashed$password$");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+            user.Id, user.Id, "Password changed by user", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("revocation store unavailable"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ChangePasswordAsync(user.Id, "currentpass", "newpass"));
+        _mockAuthAuditService.Verify(service => service.LogPasswordChangeAsync(
+            It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task InitiatePasswordResetAsync_WhenRateLimited_ReturnsTrueWithoutEmailSend()
     {
         // Arrange
@@ -331,6 +376,38 @@ public class AuthenticationServiceTests
         token.IsUsed.Should().BeTrue();
         _mockAuthAuditService.Verify(s => s.LogPasswordResetAsync(
             user.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_WhenPostCommitAuditFails_StillReturnsSuccess()
+    {
+        User user = CreateTestUser();
+        PasswordResetToken token = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            Token = "validtoken",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddHours(1),
+        };
+        _mockUsersRepository.Setup(r => r.GetByEmailAsync(user.Email, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _mockUsersRepository.Setup(r => r.GetPasswordResetTokenAsync(token.Token, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(token);
+        _mockPasswordHashing.Setup(p => p.HashPassword("newPass")).Returns("hashed-new");
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+                user.Id, user.Id, "Password reset", "127.0.0.1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockAuthAuditService.Setup(service => service.LogPasswordResetAsync(
+                user.Id, "127.0.0.1", null, null, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+
+        bool result = await _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1");
+
+        result.Should().BeTrue();
+        user.PasswordHash.Should().Be("hashed-new");
+        token.IsUsed.Should().BeTrue();
     }
 
     #endregion

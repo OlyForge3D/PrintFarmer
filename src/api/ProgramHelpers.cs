@@ -294,8 +294,18 @@ internal static class ProgramHelpers
                 }
                 catch (Exception ex)
                 {
-                    startupLogger?.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
                     context.Fail("Token revocation status could not be verified.");
+                    ILogger? errorLogger = startupLogger
+                        ?? context.HttpContext.RequestServices.GetService<ILoggerFactory>()
+                            ?.CreateLogger("Farm.Web.Api.JwtBearer");
+                    if (startupUls != null)
+                    {
+                        startupUls.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
+                    }
+                    else
+                    {
+                        errorLogger?.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
+                    }
                 }
             },
             OnChallenge = context =>

@@ -201,24 +201,30 @@ public class UsersController(
         }
 
         string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-        int revokedCount = await _tokenRevocation.RevokeAllUserTokensAsync(
+        _ = await _tokenRevocation.RevokeAllUserTokensAsync(
             id,
             adminUserId,
             "Password changed by administrator",
             ipAddress ?? "unknown",
             ct);
-        await _authAuditService.LogPasswordChangeAsync(
-            id,
-            ipAddress,
-            null,
-            $"admin-password-change:{adminUserId}",
-            ct);
+        try
+        {
+            await _authAuditService.LogPasswordChangeAsync(
+                id,
+                ipAddress,
+                null,
+                $"admin-password-change:{adminUserId}",
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write administrator password-change audit for user {UserId}", id);
+        }
 
         _logger.LogInformation(
-            "Admin {AdminUserId} changed password for user {TargetUserId}; revoked {RevokedTokenCount} active sessions",
+            "Admin {AdminUserId} changed password for user {TargetUserId}; revoked active sessions",
             adminUserId,
-            id,
-            revokedCount);
+            id);
 
         return Ok(new { message = "User password changed successfully" });
     }

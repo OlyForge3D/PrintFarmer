@@ -107,14 +107,29 @@ public class TokenRevocationService(
         };
 
         _ = _context.RevokedTokens.Add(revocationMarker);
-        _ = await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            _ = await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            _context.ChangeTracker.Clear();
+            throw;
+        }
 
         int revokedCount = activeRefreshTokens.Count;
-        await _authAuditService.LogTokenRevokedAsync(
-            userId,
-            revokedByUserId,
-            $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
-            ipAddress);
+        try
+        {
+            await _authAuditService.LogTokenRevokedAsync(
+                userId,
+                revokedByUserId,
+                $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
+                ipAddress);
+        }
+        catch (Exception ex)
+        {
+            _logging.LogError(ex, "Failed to write token-revocation audit for user {UserId}", userId);
+        }
 
         _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, LogSanitizer.Sanitize(reason));
         return revokedCount + 1;

@@ -39,10 +39,12 @@ Access tokens issued in a later second remain valid. Successful self-service or
 administrator password changes and password resets revoke all refresh sessions
 and access tokens issued at or before the revocation marker's second. Subsequent
 API requests using those JWTs and new or reconnecting SignalR handshakes are
-rejected. Already-established SignalR connections are not force-closed and remain
-connected until they disconnect. The React client refreshes access tokens
-proactively and retries one authenticated request after a 401; refresh tokens are
-stored separately from access tokens in local storage.
+rejected. Already-established SignalR WebSocket connections are not force-closed
+and remain connected until they disconnect; long-polling transport requests
+revalidate the JWT and subsequent polls are rejected after revocation. The React
+client refreshes access tokens proactively and retries one authenticated request
+after a 401; refresh tokens are stored separately from access tokens in local
+storage.
 
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include

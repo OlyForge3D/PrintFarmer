@@ -1,9 +1,11 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Common;
+using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
@@ -232,6 +234,96 @@ public class TokenRevocationServiceTests
         (await db.PasswordResetTokens.SingleAsync(candidate => candidate.Id == resetToken.Id)).IsUsed.Should().BeFalse();
         (await db.RefreshTokens.SingleAsync(candidate => candidate.Id == refreshToken.Id)).IsRevoked.Should().BeFalse();
         (await db.RevokedTokens.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RevokeAllUserTokensAsync_TransactionCommitFails_RollsBackPasswordResetAndRefreshRevocation()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        FailTransactionCommitInterceptor interceptor = new();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        await using AppDbContext db = new(options);
+        await db.Database.EnsureCreatedAsync();
+
+        Guid userId = Guid.NewGuid();
+        User user = new()
+        {
+            Id = userId,
+            Username = $"user_{userId:N}",
+            Email = $"user_{userId:N}@example.com",
+            IsActive = true,
+            EmailConfirmed = true,
+            CreatedAt = DateTime.UtcNow,
+            PasswordHash = "old-password-hash",
+        };
+        PasswordResetToken resetToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "valid-reset-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddHours(1),
+        };
+        RefreshToken refreshToken = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Token = "active-refresh-token",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(1),
+        };
+        db.Users.Add(user);
+        db.PasswordResetTokens.Add(resetToken);
+        db.RefreshTokens.Add(refreshToken);
+        await db.SaveChangesAsync();
+
+        user.PasswordHash = "new-password-hash";
+        resetToken.IsUsed = true;
+        resetToken.UsedAt = DateTime.UtcNow;
+        interceptor.FailNextCommit = true;
+        TokenRevocationService service = new(
+            db,
+            Mock.Of<ILogger<TokenRevocationService>>(),
+            Mock.Of<IAuthAuditService>());
+
+        await Assert.ThrowsAsync<DbUpdateException>(
+            () => service.RevokeAllUserTokensAsync(userId, userId, "test transaction rollback"));
+
+        Assert.True(interceptor.CommitFailed);
+        db.ChangeTracker.Clear();
+        (await db.Users.SingleAsync(candidate => candidate.Id == userId)).PasswordHash.Should().Be("old-password-hash");
+        (await db.PasswordResetTokens.SingleAsync(candidate => candidate.Id == resetToken.Id)).IsUsed.Should().BeFalse();
+        RefreshToken persistedRefreshToken =
+            await db.RefreshTokens.SingleAsync(candidate => candidate.Id == refreshToken.Id);
+        persistedRefreshToken.IsRevoked.Should().BeFalse();
+        (await db.RevokedTokens.CountAsync()).Should().Be(0);
+    }
+
+    private sealed class FailTransactionCommitInterceptor : DbTransactionInterceptor
+    {
+        public bool FailNextCommit { get; set; }
+
+        public bool CommitFailed { get; private set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (FailNextCommit)
+            {
+                FailNextCommit = false;
+                CommitFailed = true;
+                throw new DbUpdateException("Injected transaction commit failure.");
+            }
+
+            return base.TransactionCommittingAsync(transaction, eventData, result, cancellationToken);
+        }
     }
 
     private sealed class FailRevocationMarkerSaveInterceptor : SaveChangesInterceptor

@@ -23,7 +23,12 @@ public interface IEffectivePermissionsRevocationService
     /// <param name="reason">The reason recorded against each revoked token.</param>
     /// <param name="ipAddress">The IP address the triggering change was made from.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The number of distinct users who had at least one active token revoked.</returns>
+    /// <returns>The number of distinct users whose tokens were revoked.</returns>
+    /// <exception cref="EffectivePermissionsRevocationException">
+    /// One or more users could not be revoked. Revocations for other users continue; the
+    /// exception reports completed and failed users so callers do not treat a partial batch
+    /// as successful.
+    /// </exception>
     Task<int> RevokeUsersAsync(
         IReadOnlyCollection<Guid> userIds,
         Guid actingUserId,

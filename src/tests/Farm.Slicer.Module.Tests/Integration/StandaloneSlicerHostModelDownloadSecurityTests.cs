@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicers.OrcaSlicer.v2_4_0;
@@ -11,7 +12,9 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using SlicerHostProgram = SlicerHost::Program;
@@ -254,6 +257,16 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
             "ArtifactStorage:RootPath",
             Path.Join(_testRoot, "artifacts"));
         _ = builder.UseSetting("ArtifactStorage:EnableStorageAlerts", "false");
+    }
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        DbContextOptionsBuilder<AppDbContext> optionsBuilder = new();
+        _ = optionsBuilder.UseSqlite($"Data Source={_databasePath};Pooling=False");
+        using AppDbContext dbContext = new(optionsBuilder.Options);
+        _ = dbContext.Database.EnsureCreated();
+
+        return base.CreateHost(builder);
     }
 
     public override async ValueTask DisposeAsync()

@@ -96,6 +96,30 @@ public class UsersServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => _usersService.GetUsersAsync(_cancellationToken));
     }
 
+    [Fact]
+    public async Task ChangeUserPasswordAsync_StagesPasswordWithoutSaving()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, PasswordHash = "old-hash" };
+        _usersRepositoryMock
+            .Setup(repository => repository.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(user);
+        _passwordHashingServiceMock
+            .Setup(service => service.HashPassword("new-password"))
+            .Returns("new-hash");
+
+        bool changed = await _usersService.ChangeUserPasswordAsync(
+            userId,
+            "new-password",
+            _cancellationToken);
+
+        Assert.True(changed);
+        Assert.Equal("new-hash", user.PasswordHash);
+        _usersRepositoryMock.Verify(
+            repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     #endregion
 
     #region CreateUserAsync Tests

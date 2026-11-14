@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -115,8 +116,10 @@ public class JwtEventsAccessTokenQueryTests
         revocationService
             .Setup(service => service.IsTokenRevokedAsync("access-token", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Revocation store unavailable."));
+        List<string> logs = [];
         using ServiceProvider provider = new ServiceCollection()
             .AddSingleton(revocationService.Object)
+            .AddSingleton<ILoggerFactory>(new CapturingLoggerFactory(logs))
             .BuildServiceProvider();
 
         DefaultHttpContext httpContext = new()
@@ -140,5 +143,39 @@ public class JwtEventsAccessTokenQueryTests
 
         Assert.False(context.Result!.Succeeded);
         Assert.Equal("Token revocation status could not be verified.", context.Result.Failure!.Message);
+        Assert.Contains(
+            logs,
+            entry => entry.StartsWith("Error: ", StringComparison.Ordinal) &&
+                     entry.Contains("Token revocation status could not be verified", StringComparison.Ordinal));
+    }
+
+    private sealed class CapturingLoggerFactory(ICollection<string> entries) : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(entries);
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class CapturingLogger(ICollection<string> entries) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            entries.Add($"{logLevel}: {formatter(state, exception)}");
+        }
     }
 }

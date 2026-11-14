@@ -337,7 +337,15 @@ public class AuthenticationService(
             userId,
             "Password changed by user");
 
-        await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
+        try
+        {
+            await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write password-change audit for user {UserId}", userId);
+        }
+
         return true;
     }
 
@@ -552,7 +560,15 @@ public class AuthenticationService(
             "Password reset",
             ipAddress);
 
-        await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
+        try
+        {
+            await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write password-reset audit for user {UserId}", user.Id);
+        }
+
         _logger.LogInformation("Password successfully reset for user {UserId}", user.Id);
         return true;
     }

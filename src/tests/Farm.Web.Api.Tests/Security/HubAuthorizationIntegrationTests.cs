@@ -74,7 +74,6 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposab
                     options.AccessTokenProvider = () => Task.FromResult<string?>(token);
                     options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();
                     options.Transports = HttpTransportType.WebSockets;
-                    options.SkipNegotiation = true;
                     options.WebSocketFactory = async (context, cancellationToken) =>
                     {
                         string authenticatedUrl = QueryHelpers.AddQueryString(
@@ -103,17 +102,15 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime, IDisposab
             await scope.DisposeAsync();
         }
 
-        bool reconnectRejected = false;
-        try
-        {
-            await connection.StartAsync();
-        }
-        catch (Exception)
-        {
-            reconnectRejected = true;
-        }
+        HttpRequestException reconnectFailure = await Assert.ThrowsAsync<HttpRequestException>(
+            () => connection.StartAsync());
+        reconnectFailure.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-        reconnectRejected.Should().BeTrue();
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage queryTokenHandshake = await client.PostAsync(
+            $"/hubs/printers/negotiate?negotiateVersion=1&access_token={Uri.EscapeDataString(token)}",
+            content: null);
+        queryTokenHandshake.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
