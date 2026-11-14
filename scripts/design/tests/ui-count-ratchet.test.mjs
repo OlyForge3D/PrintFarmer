@@ -114,6 +114,19 @@ test('trusted execution scans immutable targets, ignores PR tooling/allowance/po
     finding.antipattern === 'side-tab'));
 });
 
+test('baseline provenance must match the scanner committed in the trusted base', t => {
+  const f = fixture(t);
+  f.write('scripts/design/check-ui-design.mjs', 'export const scannerVersion = "changed";\n');
+  f.git(['add', 'scripts/design/check-ui-design.mjs']);
+  f.git(['commit', '--quiet', '-m', 'Change trusted scanner']);
+  const trustedBase = f.git(['rev-parse', 'HEAD']);
+
+  assert.throws(
+    () => runCountRatchet({ root: f.directory, trustedBase, head: trustedBase }),
+    /Baseline tooling provenance mismatch: scripts\/design\/check-ui-design\.mjs/,
+  );
+});
+
 test('PR-added shared and inline waivers cannot buy a lower total or hide new debt', t => {
   const f = fixture(t);
   const head = f.target({

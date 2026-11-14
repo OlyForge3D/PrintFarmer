@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import {
@@ -58,6 +58,36 @@ async function assertStaticHtmlParserAvailable() {
   assert.equal(typeof domutils.textContent, 'function');
 }
 
+function runHtmlParserFailureFixture(t, loaderSource, expectedError) {
+  const { root, sourceRoot, tempRoot } = makeBoundaryFixture(t);
+  fs.mkdirSync(path.join(root, '.impeccable'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.impeccable', 'config.json'), '{}');
+  fs.writeFileSync(path.join(sourceRoot, 'page.html'), '<html><body></body></html>');
+  fs.writeFileSync(path.join(tempRoot, 'htmlparser2-invalid.mjs'), 'export const parseDocument = undefined;\n');
+  const loaderPath = path.join(tempRoot, 'parser-loader.mjs');
+  fs.writeFileSync(loaderPath, loaderSource);
+  const entryUrl = pathToFileURL(path.resolve(here, '..', 'check-ui-design.mjs')).href;
+  const script = `
+    import { scanChangedUiFiles } from ${JSON.stringify(entryUrl)};
+    try {
+      await scanChangedUiFiles(process.argv.at(-1), [{
+        status: 'M',
+        paths: ['src/Web/ReactApp/src/page.html'],
+        currentPath: 'src/Web/ReactApp/src/page.html',
+      }]);
+      process.exitCode = 1;
+    } catch (error) {
+      console.error(error.message);
+      process.exitCode = 2;
+    }
+  `;
+  const result = spawnSync(process.execPath, [
+    '--no-warnings', '--experimental-loader', pathToFileURL(loaderPath).href, '--input-type=module', '-e', script, root,
+  ], { cwd: root, encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, expectedError);
+}
+
 test('parses changed, deleted, and renamed filenames without shell-style splitting', () => {
   const changes = parseNameStatus([
     'M', 'src/Web/ReactApp/src/with space.tsx',
@@ -101,37 +131,36 @@ test('strictly reads shared config and rejects malformed JSON', () => {
   assert.throws(() => readSharedConfig(malformedRoot), /Cannot parse/);
 });
 
-test('rejects unreasoned, unscoped, and broad suppression config', async () => {
+test('rejects unreasoned, unscoped, and broad suppression config', async (t) => {
   const unreasoned = structuredClone(readSharedConfig(configuredRoot));
   assert.equal(unreasoned.detector.ignoreValues[0].reason.length > 0, true);
 
   const rules = parseNameStatus('M\0src/Web/ReactApp/src/new-ui.tsx\0');
-  const configPath = path.join(configuredRoot, '.impeccable', 'config.json');
-  const original = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  try {
-    fs.writeFileSync(configPath, JSON.stringify({
-      detector: { ignoreRules: ['side-tab'] },
-    }));
-    await assert.rejects(() => scanChangedUiFiles(configuredRoot, rules), /Broad detector\.ignoreRules/);
-    fs.writeFileSync(configPath, JSON.stringify({
-      detector: { ignoreValues: [{ rule: 'side-tab', value: 'border-l-4', files: ['src/Web/ReactApp/src/ignored.tsx'] }] },
-    }));
-    await assert.rejects(() => scanChangedUiFiles(configuredRoot, rules), /requires a non-empty reason/);
-    fs.writeFileSync(configPath, JSON.stringify({
-      detector: { ignoreValues: [{ rule: 'side-tab', value: 'border-l-4', reason: 'Too broad' }] },
-    }));
-    await assert.rejects(() => scanChangedUiFiles(configuredRoot, rules), /requires one or more file globs/);
-    fs.writeFileSync(configPath, JSON.stringify({
-      hook: { limits: { maxFindings: 1, maxChars: 128 } },
-    }));
-    assert.deepEqual(readSharedConfig(configuredRoot).hook.limits, { maxFindings: 1, maxChars: 128 });
-    fs.writeFileSync(configPath, JSON.stringify({
-      hook: { limits: { maxFindings: 1, unknown: 2 } },
-    }));
-    assert.throws(() => readSharedConfig(configuredRoot), /not a supported limit/);
-  } finally {
-    fs.writeFileSync(configPath, JSON.stringify(original, null, 2) + '\n');
-  }
+  const { root } = makeBoundaryFixture(t);
+  const configPath = path.join(root, '.impeccable', 'config.json');
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.copyFileSync(path.join(configuredRoot, '.impeccable', 'config.json'), configPath);
+
+  fs.writeFileSync(configPath, JSON.stringify({
+    detector: { ignoreRules: ['side-tab'] },
+  }));
+  await assert.rejects(() => scanChangedUiFiles(root, rules), /Broad detector\.ignoreRules/);
+  fs.writeFileSync(configPath, JSON.stringify({
+    detector: { ignoreValues: [{ rule: 'side-tab', value: 'border-l-4', files: ['src/Web/ReactApp/src/ignored.tsx'] }] },
+  }));
+  await assert.rejects(() => scanChangedUiFiles(root, rules), /requires a non-empty reason/);
+  fs.writeFileSync(configPath, JSON.stringify({
+    detector: { ignoreValues: [{ rule: 'side-tab', value: 'border-l-4', reason: 'Too broad' }] },
+  }));
+  await assert.rejects(() => scanChangedUiFiles(root, rules), /requires one or more file globs/);
+  fs.writeFileSync(configPath, JSON.stringify({
+    hook: { limits: { maxFindings: 1, maxChars: 128 } },
+  }));
+  assert.deepEqual(readSharedConfig(root).hook.limits, { maxFindings: 1, maxChars: 128 });
+  fs.writeFileSync(configPath, JSON.stringify({
+    hook: { limits: { maxFindings: 1, unknown: 2 } },
+  }));
+  assert.throws(() => readSharedConfig(root), /not a supported limit/);
 });
 
 test('scans full changed React files and applies narrow justified ignores', async () => {
@@ -308,6 +337,28 @@ test('rejects parser-enabled linked stylesheets whose symlink target is outside 
     () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
     /linked stylesheet outside the checkout/,
   );
+});
+
+test('fails closed when the static HTML parser is unavailable or has an invalid API', (t) => {
+  runHtmlParserFailureFixture(t, `
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier === 'htmlparser2') {
+        const error = new Error('injected missing htmlparser2');
+        error.code = 'ERR_MODULE_NOT_FOUND';
+        throw error;
+      }
+      return nextResolve(specifier, context);
+    }
+  `, /Cannot load static HTML parser modules for filesystem-boundary validation: injected missing htmlparser2/);
+
+  runHtmlParserFailureFixture(t, `
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier === 'htmlparser2') {
+        return { url: new URL('./htmlparser2-invalid.mjs', import.meta.url).href, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    }
+  `, /Static HTML parser modules do not expose the expected APIs/);
 });
 
 test('accepts parser-enabled linked stylesheets with local imports and remote references', async (t) => {

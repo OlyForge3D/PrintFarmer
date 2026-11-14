@@ -26,6 +26,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up Node
+        uses: actions/setup-node@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install design detector dependencies
+        run: npm ci --ignore-scripts
+
       - name: Run changed UI design checks
         env:
           DESIGN_BASE_SHA: ${{ github.event.pull_request.base.sha }}

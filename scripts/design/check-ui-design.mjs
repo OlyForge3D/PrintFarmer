@@ -506,29 +506,32 @@ function assertDesignSystemPathsContained(root, targetPath) {
 }
 
 async function loadStaticHtmlPathModules() {
+  let htmlparser2;
+  let cssSelect;
+  let cssTree;
+  let domutils;
   try {
-    const [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
+    [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
       import('htmlparser2'),
       import('css-select'),
       import('css-tree'),
       import('domutils'),
     ]);
-    if (typeof htmlparser2.parseDocument !== 'function' ||
-      typeof cssSelect.selectAll !== 'function' ||
-      typeof cssTree.parse !== 'function' ||
-      typeof cssTree.walk !== 'function' ||
-      typeof domutils.textContent !== 'function') {
-      fail('Static HTML parser modules do not expose the expected APIs.');
-    }
-    return {
-      parseDocument: htmlparser2.parseDocument,
-      selectAll: cssSelect.selectAll,
-      cssTree,
-    };
   } catch (error) {
-    if (error?.code === 'ERR_MODULE_NOT_FOUND') return undefined;
-    fail('Cannot load static HTML parser modules for filesystem-boundary validation.');
+    fail(`Cannot load static HTML parser modules for filesystem-boundary validation: ${error.message}`);
   }
+  if (typeof htmlparser2.parseDocument !== 'function' ||
+    typeof cssSelect.selectAll !== 'function' ||
+    typeof cssTree.parse !== 'function' ||
+    typeof cssTree.walk !== 'function' ||
+    typeof domutils.textContent !== 'function') {
+    fail('Static HTML parser modules do not expose the expected APIs.');
+  }
+  return {
+    parseDocument: htmlparser2.parseDocument,
+    selectAll: cssSelect.selectAll,
+    cssTree,
+  };
 }
 
 function readStylesheetImportPaths(css, cssTree) {
@@ -554,8 +557,6 @@ function readStylesheetImportPaths(css, cssTree) {
 
 async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
   const modules = await loadStaticHtmlPathModules();
-  if (!modules) return;
-
   const document = modules.parseDocument(html, {
     lowerCaseAttributeNames: false,
     lowerCaseTags: true,
