@@ -120,7 +120,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ci/publish-release.mjs build
       - name: Upload immutable unsigned release evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: release-build-${{ github.run_id }}
           path: release-assets/
@@ -177,7 +177,7 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
       - name: Upload immutable signature evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: release-signature-${{ github.run_id }}
           path: signed-release/
@@ -254,7 +254,7 @@ jobs:
         run: node scripts/ci/publish-release.mjs publish
       - name: Retain build results for diagnosis
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: release-publish-${{ github.run_id }}
           path: release-assets/

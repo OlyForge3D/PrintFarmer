@@ -171,7 +171,7 @@ jobs:
           docker image inspect --format '{{.Id}}' "$IMAGE" > validated-image/image-id.txt
           docker save --output validated-image/image.tar "$IMAGE"
       - name: Upload validated image archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: daily-validated-${{ matrix.image }}-attempt-${{ needs.source.outputs.artifact_attempt }}
           path: validated-image/
@@ -242,7 +242,7 @@ jobs:
           done
           echo "publication_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Upload digest records
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: daily-digest-records-attempt-${{ github.run_attempt }}
           path: daily-image/*.json
@@ -309,7 +309,7 @@ jobs:
           ' daily-image-set/image-set.json >/dev/null
           printf '%s\n' "$COMMIT_SHA" > daily-image-set/commit-sha.txt
       - name: Upload coherent image set
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: daily-development-image-set
           path: daily-image-set/
