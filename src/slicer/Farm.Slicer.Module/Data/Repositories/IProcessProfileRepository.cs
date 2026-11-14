@@ -15,6 +15,9 @@ public interface IProcessProfileRepository
     /// <summary>Gets process profiles accessible to a specific user.</summary>
     Task<IReadOnlyList<ProcessProfile>> GetByUserAsync(Guid userId, CancellationToken ct = default);
 
+    /// <summary>Gets non-system process profiles owned by a specific user.</summary>
+    Task<IReadOnlyList<ProcessProfile>> GetOwnedNonSystemAsync(Guid userId, CancellationToken ct = default);
+
     /// <summary>Gets all public process profiles.</summary>
     Task<IReadOnlyList<ProcessProfile>> GetPublicAsync(CancellationToken ct = default);
 

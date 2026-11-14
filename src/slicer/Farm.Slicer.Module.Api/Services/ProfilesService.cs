@@ -4469,7 +4469,7 @@ public class ProfilesService(
         List<CustomProfileDto> profiles = [];
 
         // Get custom process profiles
-        IReadOnlyList<ProcessProfile> processProfiles = await _processProfileRepo.GetByUserAsync(userId, ct);
+        IReadOnlyList<ProcessProfile> processProfiles = await _processProfileRepo.GetOwnedNonSystemAsync(userId, ct);
         foreach (ProcessProfile p in processProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
             string[]? compatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters);
@@ -4493,7 +4493,7 @@ public class ProfilesService(
         }
 
         // Get custom filament profiles
-        IReadOnlyList<FilamentProfile> filamentProfiles = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
+        IReadOnlyList<FilamentProfile> filamentProfiles = await _filamentProfileRepo.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, userId, ct);
         foreach (FilamentProfile p in filamentProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
             string[]? compatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters);
@@ -4518,7 +4518,7 @@ public class ProfilesService(
 
         // Get custom machine profiles. Never filtered by machineNames — a machine profile IS a
         // printer, not something that can be "compatible with" one.
-        IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: userId, ct: ct);
+        IReadOnlyList<MachineProfile> machineProfiles = await _machineProfileRepo.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, userId, ct);
         foreach (MachineProfile p in machineProfiles.Where(p => !p.IsSystem && p.CreatedByUserId == userId))
         {
             profiles.Add(new CustomProfileDto

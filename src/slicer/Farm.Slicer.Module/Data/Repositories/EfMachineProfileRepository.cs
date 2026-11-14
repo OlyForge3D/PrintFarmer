@@ -29,6 +29,14 @@ public class EfMachineProfileRepository(SlicerDbContext db) : IMachineProfileRep
         await _db.MachineProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<MachineProfile>> GetOwnedNonSystemAsync(SlicerType engine, Guid userId, CancellationToken ct = default) =>
+        await _db.MachineProfiles.AsNoTracking()
+            .Where(p => p.SlicerType == engine && !p.IsSystem && p.CreatedByUserId == userId)
+            .OrderBy(p => p.Manufacturer)
+            .ThenBy(p => p.Name)
+            .ToListAsync(ct);
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<MachineProfile>> GetByEngineAsync(SlicerType engine, bool includeSystem = true, Guid? userId = null, CancellationToken ct = default)
     {
         IQueryable<MachineProfile> query = _db.MachineProfiles.AsNoTracking().Where(p => p.SlicerType == engine);
