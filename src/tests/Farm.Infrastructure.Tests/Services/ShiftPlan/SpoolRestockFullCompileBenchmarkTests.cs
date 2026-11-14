@@ -19,7 +19,7 @@ using Farm.Infrastructure.Settings;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 using Xunit.Abstractions;
@@ -83,9 +83,11 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
             .UseSqlite(connection)
             .AddInterceptors(commandCounter)
             .Options;
-        await using AppDbContext db = new(options);
-        await db.Database.EnsureCreatedAsync();
-        await SeedWorkloadAsync(db, workload);
+        await using (AppDbContext seedContext = new(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            await SeedWorkloadAsync(seedContext, workload);
+        }
 
         Mock<ISettingsService> settingsService = new();
         settingsService.Setup(service => service.Get<ShiftPlanSettings>())
@@ -143,35 +145,22 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
-        TimeProvider clock = TimeProvider.System;
-        DbMutationWatermarkReader watermarkReader = new(db);
-        FilamentCoverageSpoolResolver resolver = new(
-            spoolman.Object,
-            backendFactory.Object,
-            NullLogger<FilamentCoverageSpoolResolver>.Instance,
-            db,
-            watermarkReader,
-            settingsService: settingsService.Object);
-        SpoolBurnRateProjectionService projection = new(
-            db,
-            resolver,
-            settingsService.Object,
-            clock);
-        SpoolRestockShiftPlanTaskSource source = new(
-            db,
-            projection,
-            resolver,
-            spoolman.Object,
-            settingsService.Object,
-            featureGate.Object,
-            NullLogger<SpoolRestockShiftPlanTaskSource>.Instance,
-            watermarkReader,
-            clock);
-        ShiftPlanCompiler compiler = new(
-            [source],
-            new EfUserTaskRepository(db),
-            NullLogger<ShiftPlanCompiler>.Instance,
-            clock);
+        ServiceCollection services = new();
+        _ = services.AddLogging();
+        _ = services.AddDbContext<AppDbContext>(dbOptions =>
+            dbOptions.UseSqlite(connection).AddInterceptors(commandCounter));
+        _ = services.AddSingleton(settingsService.Object);
+        _ = services.AddSingleton(spoolman.Object);
+        _ = services.AddSingleton(backendFactory.Object);
+        _ = services.AddSingleton(featureGate.Object);
+        _ = services.AddSingleton<TimeProvider>(TimeProvider.System);
+        _ = services.AddScoped<IMutationWatermarkReader, DbMutationWatermarkReader>();
+        _ = services.AddScoped<IFilamentCoverageSpoolResolver, FilamentCoverageSpoolResolver>();
+        _ = services.AddScoped<ISpoolBurnRateProjectionService, SpoolBurnRateProjectionService>();
+        _ = services.AddScoped<IShiftPlanTaskSource, SpoolRestockShiftPlanTaskSource>();
+        _ = services.AddScoped<IUserTaskRepository, EfUserTaskRepository>();
+        _ = services.AddScoped<IShiftPlanCompiler, ShiftPlanCompiler>();
+        await using ServiceProvider provider = services.BuildServiceProvider(validateScopes: true);
 
         List<double> materializationTimes = [];
         List<double> taskFreshnessTimes = [];
@@ -182,20 +171,27 @@ public sealed class SpoolRestockFullCompileBenchmarkTests(ITestOutputHelper outp
 
         for (int run = 0; run < WarmupRuns + MeasurementRuns; run++)
         {
-            await db.UserTasks.ExecuteDeleteAsync();
-            db.ChangeTracker.Clear();
+            await using (AsyncServiceScope resetScope = provider.CreateAsyncScope())
+            {
+                AppDbContext resetDb = resetScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                await resetDb.UserTasks.ExecuteDeleteAsync();
+            }
+
             commandCounter.Reset();
             inventoryProbe.Reset();
 
             long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
             Stopwatch stopwatch = Stopwatch.StartNew();
+            await using AsyncServiceScope compileScope = provider.CreateAsyncScope();
+            IShiftPlanCompiler compiler = compileScope.ServiceProvider.GetRequiredService<IShiftPlanCompiler>();
             ShiftPlanCompileResult compileResult = await compiler.CompileAsync(
                 ct: CancellationToken.None);
             int currentSqlStatementCount = commandCounter.Commands.Length;
             int currentAggregateQueryCount = commandCounter.Commands.Count(command =>
                 command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase));
+            AppDbContext db = compileScope.ServiceProvider.GetRequiredService<AppDbContext>();
             List<UserTask> tasks = await db.UserTasks.AsNoTracking().ToListAsync();
-            DateTime materializedAtUtc = clock.GetUtcNow().UtcDateTime;
+            DateTime materializedAtUtc = TimeProvider.System.GetUtcNow().UtcDateTime;
             stopwatch.Stop();
             long currentAllocatedBytes =
                 GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
