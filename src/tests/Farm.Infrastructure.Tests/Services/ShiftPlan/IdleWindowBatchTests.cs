@@ -77,6 +77,8 @@ public sealed class IdleWindowBatchTests
         cancelled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             fixture.Repository.GetIdleWindowJobInputsAsync([], cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            fixture.Repository.GetIdleWindowJobInputsAsync([Guid.NewGuid()], cancelled.Token));
         Assert.Empty(fixture.Commands.Sql);
     }
 
@@ -127,6 +129,8 @@ public sealed class IdleWindowBatchTests
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Repository.GetIdleWindowJobInputsAsync(ids, default));
         }
+
+        Assert.Equal(2, fixture.Commands.Sql.Count);
     }
 
     [Fact]
