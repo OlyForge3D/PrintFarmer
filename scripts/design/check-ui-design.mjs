@@ -421,6 +421,8 @@ function readContainedFile(root, filePath, description, maxBytes) {
     fail(`Cannot open ${description} while validating filesystem boundaries.`);
   }
 
+  let result;
+  let validationError;
   try {
     let openedStats;
     try {
@@ -428,29 +430,48 @@ function readContainedFile(root, filePath, description, maxBytes) {
     } catch {
       fail(`Cannot inspect ${description} while validating filesystem boundaries.`);
     }
-    if (!openedStats.isFile()) return { path: resolvedPath, content: undefined };
+    if (!openedStats.isFile()) {
+      result = { path: resolvedPath, content: undefined };
+    } else {
+      const currentPath = realPathWithinRoot(root, resolvedPath, description);
+      if (!currentPath) {
+        fail(`Cannot resolve ${description} inside the checkout after opening it.`);
+      }
+      let currentStats;
+      try {
+        currentStats = fs.statSync(currentPath);
+      } catch {
+        fail(`Cannot verify ${description} after opening it.`);
+      }
+      if (openedStats.dev !== currentStats.dev || openedStats.ino !== currentStats.ino) {
+        fail(`Refusing ${description} changed during containment validation.`);
+      }
 
-    const currentPath = realPathWithinRoot(root, resolvedPath, description);
-    if (!currentPath) {
-      fail(`Cannot resolve ${description} inside the checkout after opening it.`);
+      result = {
+        path: resolvedPath,
+        content: readFileDescriptor(fd, maxBytes, description),
+      };
     }
-    let currentStats;
-    try {
-      currentStats = fs.statSync(currentPath);
-    } catch {
-      fail(`Cannot verify ${description} after opening it.`);
-    }
-    if (openedStats.dev !== currentStats.dev || openedStats.ino !== currentStats.ino) {
-      fail(`Refusing ${description} changed during containment validation.`);
-    }
-
-    return {
-      path: resolvedPath,
-      content: readFileDescriptor(fd, maxBytes, description),
-    };
-  } finally {
-    fs.closeSync(fd);
+  } catch (error) {
+    validationError = error;
   }
+
+  let closeError;
+  try {
+    fs.closeSync(fd);
+  } catch (error) {
+    closeError = error;
+  }
+
+  if (validationError && closeError) {
+    throw new Error(
+      `${validationError.message} Also failed to close ${description}: ${closeError.message}`,
+      { cause: validationError },
+    );
+  }
+  if (validationError) throw validationError;
+  if (closeError) fail(`Cannot close ${description} after filesystem-boundary validation: ${closeError.message}`);
+  return result;
 }
 
 function assertDesignSystemPathsContained(root, targetPath) {

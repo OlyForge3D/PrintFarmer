@@ -473,6 +473,47 @@ test('fails closed when a directly linked stylesheet exceeds its byte limit', as
   );
 });
 
+test('reports stylesheet descriptor close failures without masking validation errors', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesheetPath = path.join(sourceRoot, 'theme.css');
+  fs.writeFileSync(stylesheetPath, 'body { color: red; }');
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="theme.css"></head><body></body></html>',
+  );
+
+  const originalReadSync = fs.readSync;
+  const originalCloseSync = fs.closeSync;
+  try {
+    fs.readSync = () => {
+      throw new Error('injected read failure');
+    };
+    fs.closeSync = (fd) => {
+      originalCloseSync(fd);
+      throw new Error('injected close failure');
+    };
+    await assert.rejects(
+      () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+      (error) => {
+        assert.match(error.message, /Cannot read linked stylesheet while validating filesystem boundaries/);
+        assert.match(error.message, /Also failed to close linked stylesheet: injected close failure/);
+        return true;
+      },
+    );
+
+    fs.readSync = originalReadSync;
+    await assert.rejects(
+      () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+      /Cannot close linked stylesheet after filesystem-boundary validation: injected close failure/,
+    );
+  } finally {
+    fs.readSync = originalReadSync;
+    fs.closeSync = originalCloseSync;
+  }
+});
+
 test('ignores comments, string examples, and padded-after-frame SwiftUI examples', () => {
   const findings = detectSmallSwiftUiTargets([
     '// Button("sample") {}.frame(width: 20, height: 20)',
