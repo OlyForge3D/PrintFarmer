@@ -79,6 +79,8 @@ builder.Services
                 return Task.CompletedTask;
             },
 
+            // Checks persisted account eligibility before cached token revocation so deactivation
+            // takes effect on future requests and handshakes, just as it does in the main API.
             // Checks whether the caller's token has been force-revoked (e.g. admin "revoke all
             // tokens"). Resolved with GetRequiredService (never GetService) so that if the
             // dependency chain registered by AddTokenRevocationServices below is ever broken, this
@@ -88,20 +90,38 @@ builder.Services
             // downloads and /hubs/slicer SignalR traffic.
             OnTokenValidated = async context =>
             {
+                string? accountFailure = await JwtAccountEligibility.GetFailureAsync(context.HttpContext, context.Principal);
+                if (accountFailure is not null)
+                {
+                    context.Fail(accountFailure);
+                    return;
+                }
+
                 string? token = context.SecurityToken is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt
                     ? jwt.EncodedToken
                     : null;
                 if (string.IsNullOrEmpty(token))
                 {
+                    context.Fail("Token revocation status could not be verified.");
                     return;
                 }
 
-                ITokenRevocationService tokenRevocationService =
-                    context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
-                bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token, context.HttpContext.RequestAborted);
-                if (isRevoked)
+                try
                 {
-                    context.Fail("This token has been revoked.");
+                    ITokenRevocationService tokenRevocationService =
+                        context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+                    bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token, context.HttpContext.RequestAborted);
+                    if (isRevoked)
+                    {
+                        context.Fail("This token has been revoked.");
+                    }
+                }
+                catch (Exception exception) when (!context.HttpContext.RequestAborted.IsCancellationRequested)
+                {
+                    context.Fail("Token revocation status could not be verified.");
+                    ILogger logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("Farm.Slicer.Host.JwtBearer");
+                    logger.LogError(exception, "[JWT][OnTokenValidated] Token revocation status could not be verified");
                 }
             },
         };

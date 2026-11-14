@@ -46,6 +46,15 @@ client refreshes access tokens proactively and retries one authenticated request
 after a 401; refresh tokens are stored separately from access tokens in local
 storage.
 
+Both the main API and standalone slicer host check persisted account eligibility
+on authenticated requests and new SignalR handshakes. Deactivating an account
+therefore rejects its existing JWT on future requests and reconnects without
+waiting for the slicer host's five-second revocation cache. The user-management
+deactivation workflow also revokes access and refresh sessions; deleting a user
+removes its refresh sessions and its missing account invalidates existing JWTs.
+Account-store or revocation-store failures deny authentication and are logged;
+established WebSockets are not force-closed.
+
 ### BarcodeScanLogDto
 Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields include
 `id`, `timestamp`, `barcode`, `action`, `outcome`, `httpStatus`,

@@ -408,6 +408,10 @@ public class UsersServiceTests
         var updatedUser = new UserDto { Id = userId, IsActive = false };
         _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
             .ReturnsAsync(updatedUser);
+        _revocationServiceMock.Setup(x => x.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(userId)),
+                _actorUserId, "User account deactivated", null, _cancellationToken))
+            .ReturnsAsync(1);
 
         // Act
         UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
@@ -415,6 +419,30 @@ public class UsersServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.False(result.IsActive);
+        _revocationServiceMock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_DeactivationRevocationFails_PropagatesWithoutReturningSuccess()
+    {
+        Guid userId = Guid.NewGuid();
+        User user = new() { Id = userId, IsActive = true };
+        InvalidOperationException failure = new("Revocation persistence failed.");
+        _usersRepositoryMock.Setup(repository => repository.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(user);
+        _usersRepositoryMock.Setup(repository => repository.SaveChangesAsync(_cancellationToken))
+            .Returns(Task.CompletedTask);
+        _revocationServiceMock.Setup(service => service.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(userId)),
+                _actorUserId, "User account deactivated", null, _cancellationToken))
+            .ThrowsAsync(failure);
+
+        InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _usersService.UpdateUserAsync(userId, new UpdateUserRequest { IsActive = false }, _actorUserId, null, _cancellationToken));
+
+        Assert.Same(failure, actual);
+        Assert.False(user.IsActive);
+        _authenticationServiceMock.Verify(service => service.GetUserWithRolesAndPermissionsAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

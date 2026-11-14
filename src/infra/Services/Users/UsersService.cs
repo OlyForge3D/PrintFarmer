@@ -128,6 +128,9 @@ public class UsersService(
     /// role's own permission grants change (#1471) -- and records a <see cref="AuthEventType.RoleAssignmentChanged"/>
     /// audit event (#1454). Revocation happens only after the role change has committed, so a failed
     /// save cannot leave a role change applied without its corresponding fan-out.
+    /// An explicit deactivation also revokes access and refresh sessions after persistence.
+    /// Uncached account eligibility checks deny requests immediately, even while a split host has
+    /// a negative revocation-cache entry. Revocation failures propagate rather than reporting success.
     /// </remarks>
     public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid actorUserId, string? ipAddress, CancellationToken ct)
     {
@@ -170,6 +173,13 @@ public class UsersService(
             await _users.SaveChangesAsync(ct);
         }
 
+        int? deactivationRevokedCount = null;
+        if (request.IsActive is false)
+        {
+            deactivationRevokedCount = await _revocationService.RevokeUsersAsync(
+                [id], actorUserId, "User account deactivated", ipAddress, ct).ConfigureAwait(false);
+        }
+
         if (roleDiff is not null)
         {
             var beforeRoleIds = new HashSet<Guid>(roleDiff.BeforeRoleIds);
@@ -188,7 +198,7 @@ public class UsersService(
                     .Select(roleId => roleNameById.TryGetValue(roleId, out string? name) ? name : roleId.ToString())
                     .ToList();
 
-                int revokedSessionCount = await _revocationService.RevokeUsersAsync(
+                int revokedSessionCount = deactivationRevokedCount ?? await _revocationService.RevokeUsersAsync(
                     [id],
                     actorUserId,
                     "User's role assignment changed",

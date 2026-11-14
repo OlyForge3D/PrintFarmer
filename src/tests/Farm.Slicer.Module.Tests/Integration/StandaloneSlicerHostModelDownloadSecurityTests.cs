@@ -1,22 +1,36 @@
 ﻿extern alias SlicerHost;
 
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Infrastructure.Services.Email;
+using Farm.Infrastructure.Services.Users;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicers.OrcaSlicer.v2_4_0;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
+using Moq;
 using SlicerHostProgram = SlicerHost::Program;
 
 namespace Farm.Slicer.Module.Tests.Integration;
@@ -28,6 +42,142 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
     StandaloneSlicerHostApplicationFactory factory)
     : IClassFixture<StandaloneSlicerHostApplicationFactory>
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Authenticate_DeactivatedOrDeletedAccount_RejectsApiAndHubReconnect(bool deleteAccount)
+    {
+        string fileName = $"account-{Guid.NewGuid():N}.stl";
+        string filePath = Path.Join(factory.ModelStoragePath, fileName);
+        await File.WriteAllTextAsync(filePath, "active-account model");
+        try
+        {
+            using HttpClient client = factory.CreateAuthenticatedClient(out Guid userId, allowHub: true);
+            string token = client.DefaultRequestHeaders.Authorization!.Parameter!;
+            await using HubConnection connection = new HubConnectionBuilder()
+                .WithUrl(new Uri(factory.Server.BaseAddress, "/hubs/slicers"), options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                    options.HttpMessageHandlerFactory = _ => factory.Server.CreateHandler();
+                    options.Transports = HttpTransportType.WebSockets;
+                    options.WebSocketFactory = async (context, cancellationToken) =>
+                        await factory.Server.CreateWebSocketClient().ConnectAsync(
+                            new Uri(QueryHelpers.AddQueryString(context.Uri.ToString(), "access_token", token)),
+                            cancellationToken);
+                })
+                .Build();
+
+            using HttpResponseMessage activeResponse = await client.GetAsync(BuildViewerDownloadUrl(fileName));
+            activeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            await connection.StartAsync();
+            await connection.StopAsync();
+
+            await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+            {
+                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.RefreshTokens.Add(new RefreshToken
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    Token = $"{Guid.NewGuid():N}{Guid.NewGuid():N}",
+                    CreatedAt = DateTime.UtcNow,
+                    ExpiresAt = DateTime.UtcNow.AddDays(1)
+                });
+                await db.SaveChangesAsync();
+                UsersService users = CreateUserManagementService(scope.ServiceProvider, db);
+                if (deleteAccount)
+                {
+                    (await users.DeleteUserAsync(userId, CancellationToken.None)).Should().BeTrue();
+                    (await db.Users.AnyAsync(user => user.Id == userId)).Should().BeFalse();
+                    (await db.RefreshTokens.AnyAsync(refresh => refresh.UserId == userId)).Should().BeFalse();
+                }
+                else
+                {
+                    UserDto? updated = await users.UpdateUserAsync(
+                        userId, new UpdateUserRequest { IsActive = false }, userId, null, CancellationToken.None);
+                    updated!.IsActive.Should().BeFalse();
+                    (await db.RevokedTokens.AnyAsync(revocation => revocation.UserId == userId)).Should().BeTrue();
+                    (await db.RefreshTokens.SingleAsync(refresh => refresh.UserId == userId)).IsRevoked.Should().BeTrue();
+                }
+            }
+
+            using HttpResponseMessage disabledResponse = await client.GetAsync(BuildViewerDownloadUrl(fileName));
+            disabledResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            HttpRequestException reconnectFailure = await Assert.ThrowsAsync<HttpRequestException>(() => connection.StartAsync());
+            reconnectFailure.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            using HttpClient anonymousClient = factory.CreateClient();
+            using HttpResponseMessage handshake = await anonymousClient.PostAsync(
+                $"/hubs/slicers/negotiate?negotiateVersion=1&access_token={Uri.EscapeDataString(token)}", null);
+            handshake.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        finally
+        {
+            File.Delete(filePath);
+        }
+    }
+
+    private static UsersService CreateUserManagementService(IServiceProvider services, AppDbContext db)
+    {
+        EfUsersRepository repository = new(db);
+        PasswordHashingService hasher = new();
+        ITokenRevocationService revocation = services.GetRequiredService<ITokenRevocationService>();
+        IAuthAuditService audit = services.GetRequiredService<IAuthAuditService>();
+        AuthenticationService authentication = new(
+            repository, hasher,
+            services.GetRequiredService<IConfiguration>(),
+            services.GetRequiredService<ILogger<AuthenticationService>>(),
+            Mock.Of<IEmailService>(MockBehavior.Strict),
+            Mock.Of<Farm.Infrastructure.Services.RateLimiting.IRateLimitService>(MockBehavior.Strict),
+            Mock.Of<IAccountLockoutService>(MockBehavior.Strict),
+            audit, revocation);
+        return new UsersService(repository, authentication, hasher, new EffectivePermissionsRevocationService(revocation), audit);
+    }
+
+    [Theory]
+    [InlineData("Users", "Unable to validate user account.")]
+    [InlineData("RevokedTokens", "Token revocation status could not be verified")]
+    public async Task Authenticate_StoreFailure_RejectsApiAndHubAndLogsError(string table, string expectedLog)
+    {
+        await using StandaloneSlicerHostApplicationFactory isolatedFactory = new();
+        using HttpClient client = isolatedFactory.CreateAuthenticatedClient();
+        await using (AsyncServiceScope scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            if (table == "Users")
+            {
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE Users");
+            }
+            else
+            {
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE RevokedTokens");
+            }
+        }
+
+        using HttpResponseMessage apiResponse = await client.GetAsync(BuildViewerDownloadUrl("missing.stl"));
+        apiResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using HttpResponseMessage hubResponse = await client.PostAsync("/hubs/slicers/negotiate?negotiateVersion=1", null);
+        hubResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        isolatedFactory.AuthenticationErrors.Should().Contain(message => message.Contains(expectedLog, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Authenticate_RevokedJwt_RejectsApiAndNewHubHandshake()
+    {
+        using HttpClient client = factory.CreateAuthenticatedClient(out Guid userId);
+        string token = client.DefaultRequestHeaders.Authorization!.Parameter!;
+        await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            ITokenRevocationService revocation = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
+            (await revocation.RevokeTokenAsync(token, userId, userId, "Test revocation")).Should().BeTrue();
+        }
+
+        using HttpResponseMessage apiResponse = await client.GetAsync(BuildViewerDownloadUrl("missing.stl"));
+        apiResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using HttpResponseMessage hubResponse = await client.PostAsync("/hubs/slicers/negotiate?negotiateVersion=1", null);
+        hubResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     [Theory]
     [InlineData("/api/3d-models/file/00000000-0000-0000-0000-000000000000")]
     [InlineData("/api/3d-models/download-for-viewer?path=missing.stl")]
@@ -193,6 +343,7 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
 
     private readonly string _testRoot;
     private readonly string _databasePath;
+    private readonly AuthenticationErrorLoggerProvider _authenticationLogger = new();
 
     public StandaloneSlicerHostApplicationFactory()
     {
@@ -214,15 +365,25 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
 
     public string OutsideStoragePath { get; }
 
-    public HttpClient CreateAuthenticatedClient()
+    public IEnumerable<string> AuthenticationErrors => _authenticationLogger.Errors;
+
+    public HttpClient CreateAuthenticatedClient() => CreateAuthenticatedClient(out _);
+
+    public HttpClient CreateAuthenticatedClient(out Guid userId, bool allowHub = false)
     {
+        userId = Guid.NewGuid();
+        List<Claim> claims =
+        [
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Name, "split-host-test-user"),
+        ];
+        if (allowHub)
+        {
+            claims.Add(new Claim(PrintFarmerPermissions.ClaimType, PrintFarmerPermissions.Queue.Read));
+        }
         var descriptor = new SecurityTokenDescriptor
         {
-            Subject = new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.Name, "split-host-test-user"),
-            ]),
+            Subject = new ClaimsIdentity(claims),
             Expires = DateTime.UtcNow.AddMinutes(5),
             Issuer = JwtIssuer,
             Audience = JwtAudience,
@@ -232,6 +393,19 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
         };
 
         HttpClient client = CreateClient();
+        using (IServiceScope scope = Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = $"split-host-{userId:N}",
+                Email = $"split-host-{userId:N}@example.com",
+                PasswordHash = "unused",
+                IsActive = true
+            });
+            db.SaveChanges();
+        }
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer",
             new JsonWebTokenHandler().CreateToken(descriptor));
@@ -240,6 +414,7 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        _ = builder.ConfigureLogging(logging => logging.AddProvider(_authenticationLogger));
         _ = builder.UseEnvironment("Testing");
         _ = builder.UseSetting("Jwt:Key", JwtKey);
         _ = builder.UseSetting("Jwt:Issuer", JwtIssuer);
@@ -280,6 +455,30 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
         if (Directory.Exists(OutsideStoragePath))
         {
             Directory.Delete(OutsideStoragePath, recursive: true);
+        }
+    }
+
+    private sealed class AuthenticationErrorLoggerProvider : ILoggerProvider
+    {
+        public ConcurrentQueue<string> Errors { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new AuthenticationErrorLogger(Errors);
+
+        public void Dispose() { }
+
+        private sealed class AuthenticationErrorLogger(ConcurrentQueue<string> errors) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (IsEnabled(logLevel))
+                {
+                    errors.Enqueue(formatter(state, exception));
+                }
+            }
         }
     }
 }
