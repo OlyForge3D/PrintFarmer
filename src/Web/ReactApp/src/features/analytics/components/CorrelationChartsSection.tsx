@@ -30,8 +30,8 @@ const EMPTY_FAILURE_REASONS: FailureReason[] = [];
 
 export const CorrelationChartsSection = React.memo(function CorrelationChartsSection({ days }: Props) {
   return (
-    <Tabs defaultTab="material">
-      <Tabs.List>
+    <Tabs defaultTab="material" className="min-w-0">
+      <Tabs.List className="max-w-full overflow-x-auto overscroll-x-contain">
         <Tabs.Tab id="material">Material Success</Tabs.Tab>
         <Tabs.Tab id="printer-material">Printer × Material</Tabs.Tab>
         <Tabs.Tab id="temperature">Temperature</Tabs.Tab>

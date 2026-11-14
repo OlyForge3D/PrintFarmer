@@ -73,5 +73,10 @@ describe('CorrelationChartsSection', () => {
     expect(next).toHaveFocus();
     expect(next).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => expect(get).toHaveBeenLastCalledWith('/correlation-analytics/printer-material-performance?days=30'));
+    fireEvent.keyDown(next, { key: 'End' });
+    const last = screen.getByRole('tab', { name: 'Failure Reasons' });
+    expect(last).toHaveFocus();
+    expect(last).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/correlation-analytics/failure-reasons?days=30'));
   });
 });
