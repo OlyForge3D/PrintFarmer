@@ -46,8 +46,9 @@ const detectorExtensions = new Set([
 const designFileNames = ['DESIGN.md', 'Design.md', 'design.md'];
 const designFallbackDirectories = ['.agents/context', 'docs'];
 const remoteStylesheetPattern = /^(https?:)?\/\//i;
-const maxImportedStylesheets = 256;
+const maxStylesheets = 256;
 const maxStylesheetBytes = 1024 * 1024;
+const maxAggregateStylesheetBytes = 1024 * 1024;
 
 function fail(message) {
   throw new Error(message);
@@ -402,7 +403,7 @@ function readFileDescriptor(fd, maxBytes, description) {
     }
     chunks.push(buffer.subarray(0, bytesRead));
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
 }
 
 function readContainedFile(root, filePath, description, maxBytes) {
@@ -526,8 +527,7 @@ async function loadStaticHtmlPathModules() {
       cssTree,
     };
   } catch (error) {
-    if (error?.code === 'ERR_MODULE_NOT_FOUND') return undefined;
-    fail('Cannot load static HTML parser modules for filesystem-boundary validation.');
+    fail(`Cannot load static HTML parser modules for filesystem-boundary validation: ${error.message}`);
   }
 }
 
@@ -554,17 +554,16 @@ function readStylesheetImportPaths(css, cssTree) {
 
 async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
   const modules = await loadStaticHtmlPathModules();
-  if (!modules) return;
-
   const document = modules.parseDocument(html, {
     lowerCaseAttributeNames: false,
     lowerCaseTags: true,
   });
   const links = modules.selectAll('link', document.children || []);
   const inspected = new Set();
-  let importedStylesheets = 0;
+  let stylesheetCount = 0;
+  let aggregateStylesheetBytes = 0;
 
-  function inspectStylesheet(href, baseDirectory, description, isImport = false) {
+  function inspectStylesheet(href, baseDirectory, description) {
     if (!href || remoteStylesheetPattern.test(href)) return;
     const stylesheetPath = path.resolve(baseDirectory, href);
     if (!isWithinRoot(path.resolve(root), stylesheetPath)) {
@@ -572,10 +571,10 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
     }
     const resolvedPath = realPathWithinRoot(root, stylesheetPath, description);
     if (!resolvedPath || inspected.has(resolvedPath)) return;
-    if (isImport && importedStylesheets >= maxImportedStylesheets) {
+    if (stylesheetCount >= maxStylesheets) {
       fail('Too many local stylesheets to validate filesystem boundaries safely.');
     }
-    if (isImport) importedStylesheets++;
+    stylesheetCount++;
     inspected.add(resolvedPath);
 
     const stylesheet = readContainedFile(
@@ -585,9 +584,13 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
       maxStylesheetBytes,
     );
     if (!stylesheet || stylesheet.content === undefined) return;
-    const css = stylesheet.content;
+    aggregateStylesheetBytes += stylesheet.content.byteLength;
+    if (aggregateStylesheetBytes > maxAggregateStylesheetBytes) {
+      fail('Local stylesheets exceed the aggregate filesystem-boundary validation size limit.');
+    }
+    const css = stylesheet.content.toString('utf8');
     for (const importedPath of readStylesheetImportPaths(css, modules.cssTree)) {
-      inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import', true);
+      inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import');
     }
   }
 

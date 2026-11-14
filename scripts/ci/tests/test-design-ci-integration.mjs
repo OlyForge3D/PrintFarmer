@@ -48,8 +48,14 @@ test('required CI tooling job runs the detector, not only an optional workflow',
   const job = workflow.jobs['ci-tools'];
   assert.equal(job.name, 'CI tooling tests');
   assert.equal(job.if, undefined);
+  const setupNode = job.steps.findIndex((step) => step.name === 'Setup Node');
+  const installDependencies = job.steps.findIndex((step) => step.name === 'Install design detector dependencies');
   const detection = job.steps.find((step) => step.run?.includes('scripts/design/check-ui-design.mjs'));
   assert.ok(detection, 'Existing required job must execute UI detection');
+  assert.ok(setupNode >= 0 && installDependencies > setupNode,
+    'Node and design detector dependencies must be set up before UI detection');
+  assert.equal(job.steps[installDependencies].run, 'npm ci --ignore-scripts');
+  assert.ok(installDependencies < job.steps.indexOf(detection));
   assert.equal(detection['continue-on-error'], undefined);
   assert.ok(detection.env.DESIGN_BASE_SHA, 'Base SHA must be passed as data');
   assert.ok(detection.env.DESIGN_HEAD_SHA, 'Head SHA must be passed as data');
@@ -70,6 +76,20 @@ test('required CI tooling job runs the detector, not only an optional workflow',
     assert.ok(job.steps.findIndex((step) => step.name === name) > restoreIndex,
       `${name} must validate the integration source, not the unmerged PR head`);
   }
+
+  const detectorWorkflow = yaml.load(read('.github/workflows/design-detector.yml'));
+  const detectorSteps = detectorWorkflow.jobs['design-detector'].steps;
+  const detectorSetupNode = detectorSteps.findIndex((step) => step.name === 'Set up Node');
+  const detectorInstallDependencies = detectorSteps.findIndex((step) => step.name === 'Install design detector dependencies');
+  const detectorScan = detectorSteps.findIndex((step) => step.name === 'Run changed UI design checks');
+  assert.ok(detectorSetupNode >= 0 && detectorInstallDependencies > detectorSetupNode,
+    'Standalone detector must set up Node and install dependencies');
+  assert.equal(detectorSteps[detectorSetupNode].uses,
+    'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+    'Standalone detector must use the verified immutable setup-node action pin');
+  assert.equal(detectorSteps[detectorInstallDependencies].run, 'npm ci --ignore-scripts');
+  assert.ok(detectorInstallDependencies < detectorScan,
+    'Standalone detector must install parser dependencies before scanning');
 });
 
 test('automatic design ceremony and Ralph shaping are wired to the reviewer', () => {
