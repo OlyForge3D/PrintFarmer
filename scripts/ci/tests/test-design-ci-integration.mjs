@@ -11,6 +11,8 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 test('CodeQL analyzes the pinned upstream vendor folder', () => {
   const source = read('.github/codeql/codeql-config.yml');
   const config = yaml.load(source);
+  assert.deepEqual(Object.keys(config).sort(), ['name', 'paths-ignore', 'queries']);
+  assert.equal(config.name, 'PrintFarmer CodeQL Config');
   assert.deepEqual(config.queries, [{ uses: 'security-and-quality' }]);
   assert.deepEqual(config['paths-ignore'], [
     '**/__tests__/**',
