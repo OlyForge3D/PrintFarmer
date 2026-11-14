@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Domain;
+﻿namespace Farm.Infrastructure.Domain;
 
 /// <summary>Read-only queue facts needed to evaluate an idle window and select scorer job IDs.</summary>
 public sealed record IdleWindowJobInput(
