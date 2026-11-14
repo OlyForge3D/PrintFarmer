@@ -1461,6 +1461,38 @@ jobs:
           print("Catalog populated PostgreSQL and SQL Server upgrades: 2 passed, 0 skipped")
           PY
 
+      - name: Verify project-list aggregation on PostgreSQL and SQL Server
+        if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
+        working-directory: src
+        env:
+          PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
+          PFARM_TEST_SQLSERVER_CONN: ${{ env.PFARM_TEST_SQLSERVER_CONN }}
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults
+          assembly=tests/Farm.Infrastructure.Tests/bin/Debug/net10.0/
+          assembly+=Farm.Infrastructure.Tests.dll
+          test -f "$assembly"
+          dotnet test "$assembly" \
+            --filter "FullyQualifiedName~PrintProjectServiceProviderTests&Category=DbHeavy" \
+            --settings ./vstest.runsettings \
+            --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini \
+            --logger "console;verbosity=detailed" \
+            --logger "trx;LogFileName=project-list-provider-tests.trx" \
+            --results-directory TestResults
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("TestResults/project-list-provider-tests.trx").getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          results = root.findall(f"{ns}Results/{ns}UnitTestResult")
+          if len(results) != 2 or any(r.get("outcome") != "Passed" for r in results):
+              raise SystemExit("Expected two passing project-list provider cases, with no skips")
+          for provider in ("postgres", "sqlserver"):
+              if not any(provider in r.get("testName", "").lower() for r in results):
+                  raise SystemExit(f"Missing project-list provider case: {provider}")
+          print("Project-list PostgreSQL and SQL Server parity/plan cases: 2 passed, 0 skipped")
+          PY
+
       - name: Run maintenance analytics on both production providers
         if: contains(needs.select.outputs.matrix, 'Farm.Infrastructure.Tests.csproj')
         working-directory: src

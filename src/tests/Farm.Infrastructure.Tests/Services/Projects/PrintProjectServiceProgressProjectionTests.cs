@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
@@ -154,6 +154,19 @@ public sealed class PrintProjectServiceProgressProjectionTests
         {
             _output.WriteLine($"SQLite plan: {plan.GetString(3)}");
         }
+
+        PrintProject totalOverflow = CreateProject("Total overflow", PrintProjectStatus.Open, createdAt);
+        PrintProject completedOverflow = CreateProject("Completed overflow", PrintProjectStatus.Open, createdAt);
+        db.PrintProjects.AddRange(totalOverflow, completedOverflow);
+        db.PrintProjectFiles.AddRange(
+            CreateProjectFile(totalOverflow, gcodeFile.Id, createdAt, 0, int.MaxValue, 0),
+            CreateProjectFile(totalOverflow, gcodeFile.Id, createdAt, 1, 1, 0),
+            CreateProjectFile(completedOverflow, gcodeFile.Id, createdAt, 0, 1, int.MaxValue),
+            CreateProjectFile(completedOverflow, gcodeFile.Id, createdAt, 1, 1, 1));
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<OverflowException>(() => service.GetProjectsAsync(search: "Total overflow"));
+        await Assert.ThrowsAsync<OverflowException>(() => service.GetProjectsAsync(search: "Completed overflow"));
     }
 
     private static PrintProject CreateProject(string name, PrintProjectStatus status, DateTime createdAt) => new()
@@ -172,16 +185,16 @@ public sealed class PrintProjectServiceProgressProjectionTests
         int plateIndex,
         int printCount,
         int printedCount) => new()
-    {
-        Id = Guid.NewGuid(),
-        PrintProjectId = project.Id,
-        GcodeFileId = gcodeFileId,
-        PrintCount = printCount,
-        PrintedCount = printedCount,
-        PlateIndex = plateIndex,
-        CreatedAt = createdAt,
-        UpdatedAt = createdAt
-    };
+        {
+            Id = Guid.NewGuid(),
+            PrintProjectId = project.Id,
+            GcodeFileId = gcodeFileId,
+            PrintCount = printCount,
+            PrintedCount = printedCount,
+            PlateIndex = plateIndex,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt
+        };
 
     private sealed class ProjectListCapture : DbCommandInterceptor, IMaterializationInterceptor
     {
