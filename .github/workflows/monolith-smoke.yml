@@ -93,14 +93,14 @@ jobs:
       EVIDENCE_DRIVER_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           ref: ${{ matrix.capture == 'before' && inputs.evidence_baseline_sha || github.sha }}
 
       - name: Checkout current evidence driver for baseline application
         if: matrix.capture == 'before'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.sha }}

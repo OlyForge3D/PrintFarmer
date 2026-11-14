@@ -25,7 +25,7 @@ jobs:
       build_version: ${{ steps.source.outputs.build_version }}
       artifact_attempt: ${{ steps.source.outputs.artifact_attempt }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: refs/heads/development
           persist-credentials: false
@@ -61,7 +61,7 @@ jobs:
           - image: moonraker-emulator
             target: moonraker-emulator-runtime
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.source.outputs.commit_sha }}
           persist-credentials: false
