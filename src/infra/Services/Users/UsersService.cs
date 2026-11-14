@@ -128,6 +128,9 @@ public class UsersService(
     /// role's own permission grants change (#1471) -- and records a <see cref="AuthEventType.RoleAssignmentChanged"/>
     /// audit event (#1454). Revocation happens only after the role change has committed, so a failed
     /// save cannot leave a role change applied without its corresponding fan-out.
+    /// An explicit deactivation also revokes access and refresh sessions after persistence.
+    /// Uncached account eligibility checks deny requests immediately, even while a split host has
+    /// a negative revocation-cache entry. Revocation failures propagate rather than reporting success.
     /// </remarks>
     public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid actorUserId, string? ipAddress, CancellationToken ct)
     {
@@ -170,6 +173,13 @@ public class UsersService(
             await _users.SaveChangesAsync(ct);
         }
 
+        int? deactivationRevokedCount = null;
+        if (request.IsActive is false)
+        {
+            deactivationRevokedCount = await _revocationService.RevokeUsersAsync(
+                [id], actorUserId, "User account deactivated", ipAddress, ct).ConfigureAwait(false);
+        }
+
         if (roleDiff is not null)
         {
             var beforeRoleIds = new HashSet<Guid>(roleDiff.BeforeRoleIds);
@@ -188,7 +198,7 @@ public class UsersService(
                     .Select(roleId => roleNameById.TryGetValue(roleId, out string? name) ? name : roleId.ToString())
                     .ToList();
 
-                int revokedSessionCount = await _revocationService.RevokeUsersAsync(
+                int revokedSessionCount = deactivationRevokedCount ?? await _revocationService.RevokeUsersAsync(
                     [id],
                     actorUserId,
                     "User's role assignment changed",
@@ -292,7 +302,8 @@ public class UsersService(
     /// <param name="userId">Target user identifier.</param>
     /// <param name="newPassword">The new plaintext password (hashed before save).</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>True when target user exists and was updated.</returns>
+    /// <returns>True when the target user exists and its tracked password hash was updated.
+    /// The caller persists this change together with session revocation.</returns>
     public async Task<bool> ChangeUserPasswordAsync(Guid userId, string newPassword, CancellationToken ct)
     {
         User? user = await _users.GetUserEntityAsync(userId, ct);
@@ -303,7 +314,6 @@ public class UsersService(
 
         user.PasswordHash = _passwordHashingService.HashPassword(newPassword);
         user.UpdatedAt = DateTime.UtcNow;
-        await _users.SaveChangesAsync(ct);
         return true;
     }
 }
