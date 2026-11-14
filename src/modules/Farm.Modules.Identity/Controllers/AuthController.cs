@@ -327,6 +327,7 @@ public class AuthController(
     [AllowAnonymous] // Public because the single-use reset token is the credential for this recovery operation.
     [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<ResetPasswordResponse>> ResetPasswordAsync([FromBody] ResetPasswordRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -374,7 +375,7 @@ public class AuthController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error resetting password");
-            return BadRequest(new ResetPasswordResponse
+            return StatusCode(StatusCodes.Status500InternalServerError, new ResetPasswordResponse
             {
                 Success = false,
                 Message = "An error occurred while resetting your password"

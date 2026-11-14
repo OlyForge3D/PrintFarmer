@@ -26,6 +26,12 @@ public interface ITokenRevocationService
     /// <param name="reason">The reason for revocation</param>
     /// <param name="ipAddress">Optional IP address of the request</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
+    /// <remarks>
+    /// The revocation marker, active refresh-token updates, and any pending changes tracked
+    /// by the same scoped <see cref="Farm.Infrastructure.Data.AppDbContext"/> are saved in
+    /// one operation. Password-change and password-recovery callers rely on this to persist
+    /// the credential update and revocation atomically.
+    /// </remarks>
     Task<int> RevokeAllUserTokensAsync(Guid userId, Guid revokedByUserId, string reason, string? ipAddress = null, CancellationToken cancellationToken = default);
 
     /// <summary>

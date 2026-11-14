@@ -37,7 +37,13 @@ public interface IUsersService
     /// <summary>Checks if a username and/or email are available for registration.</summary>
     Task<UserAvailabilityDto> CheckAvailabilityAsync(string? username, string? email, CancellationToken ct);
 
-    /// <summary>Changes password for a target user (admin operation).</summary>
-    /// <returns>True when target user exists and password was changed.</returns>
+    /// <summary>
+    /// Stages a password change for a target user (admin operation). The change is not
+    /// persisted by this method; the caller must immediately invoke
+    /// <see cref="Farm.Infrastructure.Services.Authentication.ITokenRevocationService.RevokeAllUserTokensAsync"/>
+    /// using the same scoped <see cref="Farm.Infrastructure.Data.AppDbContext"/> so the
+    /// password and session revocation are persisted together.
+    /// </summary>
+    /// <returns>True when the target user exists and its tracked password hash was staged.</returns>
     Task<bool> ChangeUserPasswordAsync(Guid userId, string newPassword, CancellationToken ct);
 }
