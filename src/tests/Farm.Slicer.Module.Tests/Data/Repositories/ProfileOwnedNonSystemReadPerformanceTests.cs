@@ -60,6 +60,8 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "DbHeavy")]
+    [Trait("Category", "Performance")]
     public async Task ListCustomProfilesAsync_ReportsSyntheticLegacyAndOwnedReadMeasurements()
     {
         foreach (int publicCount in new[] { 0, 1_000, 10_000 })
@@ -74,10 +76,10 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
             CustomProfilesListResponseDto expected = await legacyService.ListCustomProfilesAsync(_ownerId, CancellationToken.None);
             CustomProfilesListResponseDto actual = await currentService.ListCustomProfilesAsync(_ownerId, CancellationToken.None);
             Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(actual));
-            Assert.Equal(OwnedCountPerType * 3, actual.TotalCount);
-            Assert.Equal(OwnedCountPerType, actual.ProcessProfileCount);
-            Assert.Equal(OwnedCountPerType, actual.FilamentProfileCount);
-            Assert.Equal(OwnedCountPerType, actual.MachineProfileCount);
+            Assert.Equal((OwnedCountPerType + 1) * 3, actual.TotalCount);
+            Assert.Equal(OwnedCountPerType + 1, actual.ProcessProfileCount);
+            Assert.Equal(OwnedCountPerType + 1, actual.FilamentProfileCount);
+            Assert.Equal(OwnedCountPerType + 1, actual.MachineProfileCount);
             AssertOwnedResponseFields(actual);
 
             _diagnostics.Reset();
@@ -92,23 +94,23 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
             int currentFilamentMaterialized = _diagnostics.Materialized<FilamentProfile>();
             int currentMachineMaterialized = _diagnostics.Materialized<MachineProfile>();
 
-            Assert.Equal(OwnedCountPerType + publicCount + 1, legacyProcessMaterialized);
-            Assert.Equal(OwnedCountPerType + publicCount, legacyFilamentMaterialized);
-            Assert.Equal(OwnedCountPerType + publicCount, legacyMachineMaterialized);
-            Assert.Equal(OwnedCountPerType, currentProcessMaterialized);
-            Assert.Equal(OwnedCountPerType, currentFilamentMaterialized);
-            Assert.Equal(OwnedCountPerType, currentMachineMaterialized);
+            Assert.Equal(OwnedCountPerType + publicCount + 2, legacyProcessMaterialized);
+            Assert.Equal(OwnedCountPerType + publicCount + 1, legacyFilamentMaterialized);
+            Assert.Equal(OwnedCountPerType + publicCount + 1, legacyMachineMaterialized);
+            Assert.Equal(OwnedCountPerType + 1, currentProcessMaterialized);
+            Assert.Equal(OwnedCountPerType + 1, currentFilamentMaterialized);
+            Assert.Equal(OwnedCountPerType + 1, currentMachineMaterialized);
 
             ServiceSamples legacySamples = await MeasureServiceAsync(legacyService);
             ServiceSamples currentSamples = await MeasureServiceAsync(currentService);
             _output.WriteLine(
                 "Synthetic DB-backed service proxy (ListCustomProfilesAsync; excludes HTTP/auth/serialization), " +
-                "other-user public rows per type={0}; owned per type={1}; " +
+                "other-user public rows per type={0}; owned non-system rows per type={1}; " +
                 "materialized legacy P/F/M={2}/{3}/{4}, owned-read P/F/M={5}/{6}/{7}; " +
                 "p50/p95 ms legacy={8:F3}/{9:F3}, owned-read={10:F3}/{11:F3}; " +
                 "mean process allocated bytes/call (GC total) legacy={12}, owned-read={13}",
                 publicCount,
-                OwnedCountPerType,
+                OwnedCountPerType + 1,
                 legacyProcessMaterialized,
                 legacyFilamentMaterialized,
                 legacyMachineMaterialized,
@@ -176,6 +178,47 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
                 UpdatedAt = now
             });
         }
+
+        processes.Add(new ProcessProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Process",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = _ownerId,
+            IsPublic = true,
+            RawJson = Json("owned-public-process", 0),
+            SettingsJson = Json("owned-public-settings", 0),
+            CompatiblePrinters = "Synthetic Printer",
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        filaments.Add(new FilamentProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Filament",
+            Material = "Public Material",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = _ownerId,
+            IsPublic = true,
+            RawJson = Json("owned-public-filament", 0),
+            SettingsJson = Json("owned-public-settings", 0),
+            CompatiblePrinters = "Synthetic Printer",
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        machines.Add(new MachineProfile
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Machine",
+            Manufacturer = "ZZZ Owned Public",
+            SlicerType = SlicerType.OrcaSlicer,
+            CreatedByUserId = _ownerId,
+            IsPublic = true,
+            RawJson = Json("owned-public-machine", 0),
+            SettingsJson = Json("owned-public-settings", 0),
+            CreatedAt = now,
+            UpdatedAt = now
+        });
 
         processes.Add(new ProcessProfile
         {
@@ -282,12 +325,18 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
         Assert.Equal("process", profiles[0].ProfileType);
         Assert.Equal(Json("owned-process", 0), profiles[0].RawJson);
         Assert.Equal(new[] { "Synthetic Printer" }, profiles[0].CompatiblePrinters);
-        Assert.Equal("filament", profiles[OwnedCountPerType].ProfileType);
-        Assert.Equal(Json("owned-filament", 0), profiles[OwnedCountPerType].RawJson);
-        Assert.Equal(new[] { "Synthetic Printer" }, profiles[OwnedCountPerType].CompatiblePrinters);
-        Assert.Equal("machine", profiles[OwnedCountPerType * 2].ProfileType);
-        Assert.Equal(Json("owned-machine", 0), profiles[OwnedCountPerType * 2].RawJson);
-        Assert.Null(profiles[OwnedCountPerType * 2].CompatiblePrinters);
+        Assert.Equal("filament", profiles[OwnedCountPerType + 1].ProfileType);
+        Assert.Equal(Json("owned-filament", 0), profiles[OwnedCountPerType + 1].RawJson);
+        Assert.Equal(new[] { "Synthetic Printer" }, profiles[OwnedCountPerType + 1].CompatiblePrinters);
+        Assert.Equal("machine", profiles[(OwnedCountPerType + 1) * 2].ProfileType);
+        Assert.Equal(Json("owned-machine", 0), profiles[(OwnedCountPerType + 1) * 2].RawJson);
+        Assert.Null(profiles[(OwnedCountPerType + 1) * 2].CompatiblePrinters);
+        Assert.Contains(response.Profiles, profile =>
+            profile.Name == "Owned Public Process" && profile.RawJson == Json("owned-public-process", 0));
+        Assert.Contains(response.Profiles, profile =>
+            profile.Name == "Owned Public Filament" && profile.RawJson == Json("owned-public-filament", 0));
+        Assert.Contains(response.Profiles, profile =>
+            profile.Name == "Owned Public Machine" && profile.RawJson == Json("owned-public-machine", 0));
     }
 
     private async Task<ServiceSamples> MeasureServiceAsync(ProfilesService service)

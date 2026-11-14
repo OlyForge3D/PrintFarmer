@@ -128,6 +128,78 @@ public class ProfilesServiceListCustomProfilesTests
     }
 
     [Fact]
+    public async Task ListCustomProfilesAsync_ReturnsOwnedPublicNonSystemProfiles_AndExcludesOwnedSystemProfiles()
+    {
+        Guid userId = Guid.NewGuid();
+        ProcessProfile publicProcess = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Process",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId,
+            SlicerType = SlicerType.PrusaSlicer
+        };
+        ProcessProfile systemProcess = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Process",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+        FilamentProfile publicFilament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Filament",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId
+        };
+        FilamentProfile systemFilament = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Filament",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+        MachineProfile publicMachine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned Public Machine",
+            IsPublic = true,
+            IsSystem = false,
+            CreatedByUserId = userId
+        };
+        MachineProfile systemMachine = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Owned System Machine",
+            IsPublic = true,
+            IsSystem = true,
+            CreatedByUserId = userId
+        };
+
+        ProfilesService svc = CreateService(
+            MockProcessRepo(userId, publicProcess, systemProcess).Object,
+            MockFilamentRepo(userId, publicFilament, systemFilament).Object,
+            MockMachineRepo(userId, publicMachine, systemMachine).Object);
+
+        CustomProfilesListResponseDto result = await svc.ListCustomProfilesAsync(userId, CancellationToken.None);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal(1, result.ProcessProfileCount);
+        Assert.Equal(1, result.FilamentProfileCount);
+        Assert.Equal(1, result.MachineProfileCount);
+        Assert.Equal(
+            new[] { publicProcess.Id, publicFilament.Id, publicMachine.Id },
+            result.Profiles.Select(profile => profile.Id));
+        Assert.DoesNotContain(result.Profiles, profile =>
+            profile.Id == systemProcess.Id || profile.Id == systemFilament.Id || profile.Id == systemMachine.Id);
+    }
+
+    [Fact]
     public async Task ListCustomProfilesAsync_PreservesOwnedRawJsonAndCompatibilityFields()
     {
         Guid userId = Guid.NewGuid();

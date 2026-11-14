@@ -49,6 +49,10 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
         IReadOnlyList<ProcessProfile> ownedProcesses =
             await processRepo.GetOwnedNonSystemAsync(_ownerId, CancellationToken.None);
         Assert.Equal(new[] { "Owned Process A", "Owned Process B" }, ownedProcesses.Select(profile => profile.Name));
+        Assert.False(ownedProcesses[0].IsPublic);
+        Assert.True(ownedProcesses[1].IsPublic);
+        Assert.Equal(SlicerType.PrusaSlicer, ownedProcesses[1].SlicerType);
+        Assert.DoesNotContain(ownedProcesses, profile => profile.Name == "Owned System Process");
         AssertQueryMaterializedOnly<ProcessProfile>(2);
         AssertOwnedNonSystemSql();
 
@@ -56,6 +60,9 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
         IReadOnlyList<FilamentProfile> ownedFilaments =
             await filamentRepo.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, _ownerId, CancellationToken.None);
         Assert.Equal(new[] { "Owned Filament A", "Owned Filament B" }, ownedFilaments.Select(profile => profile.Name));
+        Assert.True(ownedFilaments[1].IsPublic);
+        Assert.DoesNotContain(ownedFilaments, profile => profile.Name == "Owned System Filament");
+        Assert.DoesNotContain(ownedFilaments, profile => profile.Name == "Owned Wrong-Engine Filament");
         AssertQueryMaterializedOnly<FilamentProfile>(2);
         AssertOwnedNonSystemSql();
 
@@ -63,6 +70,9 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
         IReadOnlyList<MachineProfile> ownedMachines =
             await machineRepo.GetOwnedNonSystemAsync(SlicerType.OrcaSlicer, _ownerId, CancellationToken.None);
         Assert.Equal(new[] { "Owned Machine A", "Owned Machine B" }, ownedMachines.Select(profile => profile.Name));
+        Assert.True(ownedMachines[1].IsPublic);
+        Assert.DoesNotContain(ownedMachines, profile => profile.Name == "Owned System Machine");
+        Assert.DoesNotContain(ownedMachines, profile => profile.Name == "Owned Wrong-Engine Machine");
         AssertQueryMaterializedOnly<MachineProfile>(2);
         AssertOwnedNonSystemSql();
 
@@ -89,19 +99,21 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
     {
         _db.ProcessProfiles.AddRange(
             Process("Owned Process A", _ownerId, isPublic: false),
-            Process("Owned Process B", _ownerId, isPublic: false, slicerType: SlicerType.PrusaSlicer),
+            Process("Owned Process B", _ownerId, isPublic: true, slicerType: SlicerType.PrusaSlicer),
             Process("Owned System Process", _ownerId, isSystem: true),
             Process("Other Public Process", _otherUserId, isPublic: true),
             Process("Other Private Process", _otherUserId, isPublic: false));
         _db.FilamentProfiles.AddRange(
             Filament("Owned Filament A", _ownerId, "A", isPublic: false),
-            Filament("Owned Filament B", _ownerId, "B", isPublic: false),
+            Filament("Owned Filament B", _ownerId, "B", isPublic: true),
+            Filament("Owned Wrong-Engine Filament", _ownerId, "0", isPublic: false, slicerType: SlicerType.PrusaSlicer),
             Filament("Owned System Filament", _ownerId, "C", isSystem: true),
             Filament("Other Public Filament", _otherUserId, "D", isPublic: true),
             Filament("Other Private Filament", _otherUserId, "E", isPublic: false));
         _db.MachineProfiles.AddRange(
             Machine("Owned Machine A", _ownerId, "A", isPublic: false),
-            Machine("Owned Machine B", _ownerId, "B", isPublic: false),
+            Machine("Owned Machine B", _ownerId, "B", isPublic: true),
+            Machine("Owned Wrong-Engine Machine", _ownerId, "0", isPublic: false, slicerType: SlicerType.PrusaSlicer),
             Machine("Owned System Machine", _ownerId, "C", isSystem: true),
             Machine("Other Public Machine", _otherUserId, "D", isPublic: true),
             Machine("Other Private Machine", _otherUserId, "E", isPublic: false));
@@ -161,7 +173,13 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
             SettingsJson = $"{{\"payload\":\"{name}\"}}"
         };
 
-    private FilamentProfile Filament(string name, Guid ownerId, string material, bool isSystem = false, bool isPublic = true) =>
+    private FilamentProfile Filament(
+        string name,
+        Guid ownerId,
+        string material,
+        bool isSystem = false,
+        bool isPublic = true,
+        SlicerType slicerType = SlicerType.OrcaSlicer) =>
         new()
         {
             Id = Id(name),
@@ -170,12 +188,18 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
             CreatedByUserId = ownerId,
             IsSystem = isSystem,
             IsPublic = isPublic,
-            SlicerType = SlicerType.OrcaSlicer,
+            SlicerType = slicerType,
             RawJson = $"{{\"name\":\"{name}\"}}",
             SettingsJson = $"{{\"payload\":\"{name}\"}}"
         };
 
-    private MachineProfile Machine(string name, Guid ownerId, string manufacturer, bool isSystem = false, bool isPublic = true) =>
+    private MachineProfile Machine(
+        string name,
+        Guid ownerId,
+        string manufacturer,
+        bool isSystem = false,
+        bool isPublic = true,
+        SlicerType slicerType = SlicerType.OrcaSlicer) =>
         new()
         {
             Id = Id(name),
@@ -184,7 +208,7 @@ public sealed class ProfileOwnedNonSystemReadTests : IDisposable
             CreatedByUserId = ownerId,
             IsSystem = isSystem,
             IsPublic = isPublic,
-            SlicerType = SlicerType.OrcaSlicer,
+            SlicerType = slicerType,
             RawJson = $"{{\"name\":\"{name}\"}}",
             SettingsJson = $"{{\"payload\":\"{name}\"}}"
         };
