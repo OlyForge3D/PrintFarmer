@@ -46,8 +46,9 @@ const detectorExtensions = new Set([
 const designFileNames = ['DESIGN.md', 'Design.md', 'design.md'];
 const designFallbackDirectories = ['.agents/context', 'docs'];
 const remoteStylesheetPattern = /^(https?:)?\/\//i;
-const maxImportedStylesheets = 256;
+const maxStylesheets = 256;
 const maxStylesheetBytes = 1024 * 1024;
+const maxAggregateStylesheetBytes = 1024 * 1024;
 
 function fail(message) {
   throw new Error(message);
@@ -402,7 +403,7 @@ function readFileDescriptor(fd, maxBytes, description) {
     }
     chunks.push(buffer.subarray(0, bytesRead));
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
 }
 
 function readContainedFile(root, filePath, description, maxBytes) {
@@ -506,32 +507,28 @@ function assertDesignSystemPathsContained(root, targetPath) {
 }
 
 async function loadStaticHtmlPathModules() {
-  let htmlparser2;
-  let cssSelect;
-  let cssTree;
-  let domutils;
   try {
-    [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
+    const [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
       import('htmlparser2'),
       import('css-select'),
       import('css-tree'),
       import('domutils'),
     ]);
+    if (typeof htmlparser2.parseDocument !== 'function' ||
+      typeof cssSelect.selectAll !== 'function' ||
+      typeof cssTree.parse !== 'function' ||
+      typeof cssTree.walk !== 'function' ||
+      typeof domutils.textContent !== 'function') {
+      fail('Static HTML parser modules do not expose the expected APIs.');
+    }
+    return {
+      parseDocument: htmlparser2.parseDocument,
+      selectAll: cssSelect.selectAll,
+      cssTree,
+    };
   } catch (error) {
     fail(`Cannot load static HTML parser modules for filesystem-boundary validation: ${error.message}`);
   }
-  if (typeof htmlparser2.parseDocument !== 'function' ||
-    typeof cssSelect.selectAll !== 'function' ||
-    typeof cssTree.parse !== 'function' ||
-    typeof cssTree.walk !== 'function' ||
-    typeof domutils.textContent !== 'function') {
-    fail('Static HTML parser modules do not expose the expected APIs.');
-  }
-  return {
-    parseDocument: htmlparser2.parseDocument,
-    selectAll: cssSelect.selectAll,
-    cssTree,
-  };
 }
 
 function readStylesheetImportPaths(css, cssTree) {
@@ -563,9 +560,10 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
   });
   const links = modules.selectAll('link', document.children || []);
   const inspected = new Set();
-  let importedStylesheets = 0;
+  let stylesheetCount = 0;
+  let aggregateStylesheetBytes = 0;
 
-  function inspectStylesheet(href, baseDirectory, description, isImport = false) {
+  function inspectStylesheet(href, baseDirectory, description) {
     if (!href || remoteStylesheetPattern.test(href)) return;
     const stylesheetPath = path.resolve(baseDirectory, href);
     if (!isWithinRoot(path.resolve(root), stylesheetPath)) {
@@ -573,10 +571,10 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
     }
     const resolvedPath = realPathWithinRoot(root, stylesheetPath, description);
     if (!resolvedPath || inspected.has(resolvedPath)) return;
-    if (isImport && importedStylesheets >= maxImportedStylesheets) {
+    if (stylesheetCount >= maxStylesheets) {
       fail('Too many local stylesheets to validate filesystem boundaries safely.');
     }
-    if (isImport) importedStylesheets++;
+    stylesheetCount++;
     inspected.add(resolvedPath);
 
     const stylesheet = readContainedFile(
@@ -586,9 +584,13 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
       maxStylesheetBytes,
     );
     if (!stylesheet || stylesheet.content === undefined) return;
-    const css = stylesheet.content;
+    aggregateStylesheetBytes += stylesheet.content.byteLength;
+    if (aggregateStylesheetBytes > maxAggregateStylesheetBytes) {
+      fail('Local stylesheets exceed the aggregate filesystem-boundary validation size limit.');
+    }
+    const css = stylesheet.content.toString('utf8');
     for (const importedPath of readStylesheetImportPaths(css, modules.cssTree)) {
-      inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import', true);
+      inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import');
     }
   }
 

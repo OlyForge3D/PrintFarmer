@@ -481,6 +481,62 @@ test('fails closed when the local stylesheet import graph exceeds its file limit
   );
 });
 
+test('fails closed when directly linked stylesheets exceed the total file limit', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  fs.mkdirSync(stylesDirectory, { recursive: true });
+  const links = Array.from({ length: 257 }, (_, index) => {
+    const name = `style-${index}.css`;
+    fs.writeFileSync(path.join(stylesDirectory, name), 'body { color: red; }');
+    return `<link rel="stylesheet" href="styles/${name}">`;
+  });
+  fs.writeFileSync(htmlPath, `<html><head>${links.join('')}</head><body></body></html>`);
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /Too many local stylesheets to validate filesystem boundaries safely/,
+  );
+});
+
+test('counts and accounts for each unique stylesheet only once', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  fs.writeFileSync(path.join(sourceRoot, 'theme.css'), 'body { color: red; }');
+  const links = Array.from(
+    { length: 257 },
+    () => '<link rel="stylesheet" href="theme.css">',
+  );
+  fs.writeFileSync(htmlPath, `<html><head>${links.join('')}</head><body></body></html>`);
+
+  const result = await scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html'));
+  assert.deepEqual(result.scannedFiles, ['src/Web/ReactApp/src/page.html']);
+});
+
+test('fails closed when linked and imported stylesheet bytes exceed the aggregate limit', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  fs.mkdirSync(stylesDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(stylesDirectory, 'theme.css'),
+    `/*${'x'.repeat(600 * 1024)}*/\n@import "tokens.css";`,
+  );
+  fs.writeFileSync(path.join(stylesDirectory, 'tokens.css'), `/*${'y'.repeat(500 * 1024)}*/`);
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body></body></html>',
+  );
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /Local stylesheets exceed the aggregate filesystem-boundary validation size limit/,
+  );
+});
+
 test('fails closed when an imported stylesheet exceeds its byte limit', async (t) => {
   await assertStaticHtmlParserAvailable();
   const { root, sourceRoot } = makeBoundaryFixture(t);
