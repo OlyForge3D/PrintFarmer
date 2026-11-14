@@ -275,28 +275,27 @@ internal static class ProgramHelpers
                     token ??= context.SecurityToken?.ToString();
                     if (!string.IsNullOrEmpty(token))
                     {
-                        ITokenRevocationService? tokenRevocationService = context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
-                        if (tokenRevocationService != null)
+                        ITokenRevocationService tokenRevocationService = context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+                        bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);
+                        if (isRevoked)
                         {
-                            bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token);
-                            if (isRevoked)
+                            if (startupUls != null)
                             {
-                                if (startupUls != null)
-                                {
-                                    startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
-                                }
-                                else
-                                {
-                                    startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
-                                }
-
-                                context.Fail("This token has been revoked.");
+                                startupUls.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {Sub}", sub);
                             }
+                            else
+                            {
+                                startupLogger?.LogWarning("[JWT][OnTokenValidated] Token revoked for user: {User}", sub);
+                            }
+
+                            context.Fail("This token has been revoked.");
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    startupLogger?.LogError(ex, "[JWT][OnTokenValidated] Token revocation status could not be verified");
+                    context.Fail("Token revocation status could not be verified.");
                 }
             },
             OnChallenge = context =>

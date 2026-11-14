@@ -28,6 +28,7 @@ public class AuthenticationServiceTests
     private readonly Mock<IRateLimitService> _mockRateLimitService;
     private readonly Mock<IAccountLockoutService> _mockAccountLockoutService;
     private readonly Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService> _mockAuthAuditService;
+    private readonly Mock<ITokenRevocationService> _mockTokenRevocationService;
     private readonly AuthenticationService _service;
 
     public AuthenticationServiceTests()
@@ -40,6 +41,7 @@ public class AuthenticationServiceTests
         _mockRateLimitService = new Mock<IRateLimitService>();
         _mockAccountLockoutService = new Mock<IAccountLockoutService>();
         _mockAuthAuditService = new Mock<Farm.Infrastructure.Services.Authentication.IAuthAuditService>();
+        _mockTokenRevocationService = new Mock<ITokenRevocationService>();
 
         // Setup configuration defaults for JWT
         _mockConfiguration.Setup(c => c["Jwt:Key"]).Returns("ThisIsASuperSecureKeyForTestingPurposesOnly12345678");
@@ -54,7 +56,8 @@ public class AuthenticationServiceTests
             _mockEmailService.Object,
             _mockRateLimitService.Object,
             _mockAccountLockoutService.Object,
-            _mockAuthAuditService.Object
+            _mockAuthAuditService.Object,
+            _mockTokenRevocationService.Object
         );
     }
 
@@ -743,9 +746,14 @@ public class AuthenticationServiceTests
             .Returns(true);
         _mockPasswordHashing.Setup(p => p.HashPassword(It.IsAny<string>()))
             .Returns("$new$hashed$password$");
-        _mockUsersRepository.Setup(r => r.UpdatePasswordAsync(
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        _mockTokenRevocationService
+            .Setup(service => service.RevokeAllUserTokensAsync(
+                user.Id,
+                user.Id,
+                "Password changed by user",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
         _mockAuthAuditService.Setup(s => s.LogPasswordChangeAsync(
                 It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -755,6 +763,15 @@ public class AuthenticationServiceTests
 
         // Assert
         result.Should().BeTrue();
+        user.PasswordHash.Should().Be("$new$hashed$password$");
+        _mockTokenRevocationService.Verify(
+            service => service.RevokeAllUserTokensAsync(
+                user.Id,
+                user.Id,
+                "Password changed by user",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     #endregion

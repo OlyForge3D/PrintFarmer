@@ -323,12 +323,14 @@ public sealed class RefreshTokenIntegrationTests : IClassFixture<RefreshTokenTes
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReplacePassword_WithValidCredentials_RevokesRefreshSessionsButPreservesAccessTokens(bool reset)
+    public async Task ReplacePassword_WithValidCredentials_RevokesOldSessionsAndPreservesOtherUsers(bool reset)
     {
         User user = await CreateUserAsync("refresh-password", "refresh-password@test.com");
+        User otherUser = await CreateUserAsync("refresh-password-other", "refresh-password-other@test.com");
         using HttpClient client = _factory.CreateClient();
         AuthenticationResult login = await LoginAsync(client, user);
         AuthenticationResult secondLogin = await LoginAsync(client, user);
+        AuthenticationResult otherLogin = await LoginAsync(client, otherUser);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login.Token);
 
         if (reset)
@@ -364,8 +366,17 @@ public sealed class RefreshTokenIntegrationTests : IClassFixture<RefreshTokenTes
             response.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
-        me.StatusCode.Should().Be(HttpStatusCode.OK);
+        foreach (string? accessToken in new[] { login.Token, secondLogin.Token })
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
+            me.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", otherLogin.Token);
+        using HttpResponseMessage otherMe = await client.GetAsync("/api/auth/me");
+        otherMe.StatusCode.Should().Be(HttpStatusCode.OK);
+
         client.DefaultRequestHeaders.Authorization = null;
         foreach (string? refreshToken in new[] { login.RefreshToken, secondLogin.RefreshToken })
         {
@@ -380,6 +391,16 @@ public sealed class RefreshTokenIntegrationTests : IClassFixture<RefreshTokenTes
         });
         freshLogin.StatusCode.Should().Be(HttpStatusCode.OK);
         AuthenticationResult fresh = (await freshLogin.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", fresh.Token);
+        using HttpResponseMessage freshMe = await client.GetAsync("/api/auth/me");
+        freshMe.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using IServiceScope verifyScope = _factory.Services.CreateScope();
+        AppDbContext verifyContext = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        RevokedToken marker = await verifyContext.RevokedTokens.SingleAsync(
+            revokedToken => revokedToken.UserId == user.Id && revokedToken.TokenHash.StartsWith("ALL_TOKENS_"));
+        marker.TokenHash.Length.Should().BeLessThanOrEqualTo(64);
+
         using HttpResponseMessage freshRefresh = await client.PostAsJsonAsync(
             "/api/auth/refresh", new { refreshToken = fresh.RefreshToken });
         freshRefresh.StatusCode.Should().Be(HttpStatusCode.OK);

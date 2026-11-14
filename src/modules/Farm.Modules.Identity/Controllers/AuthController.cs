@@ -374,7 +374,7 @@ public class AuthController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error resetting password");
-            return BadRequest(new ResetPasswordResponse
+            return StatusCode(StatusCodes.Status500InternalServerError, new ResetPasswordResponse
             {
                 Success = false,
                 Message = "An error occurred while resetting your password"

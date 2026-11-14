@@ -1,4 +1,6 @@
-﻿using Farm.Web.Api;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Services.Authentication;
+using Farm.Web.Api;
 using Farm.Web.Api.Startup;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -104,5 +106,39 @@ public class JwtEventsAccessTokenQueryTests
         await options.Events.OnMessageReceived(context);
 
         Assert.Equal("prod-query-token", context.Token);
+    }
+
+    [Fact]
+    public async Task TokenValidation_RevocationLookupFailure_FailsAuthentication()
+    {
+        Mock<ITokenRevocationService> revocationService = new(MockBehavior.Strict);
+        revocationService
+            .Setup(service => service.IsTokenRevokedAsync("access-token", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Revocation store unavailable."));
+        using ServiceProvider provider = new ServiceCollection()
+            .AddSingleton(revocationService.Object)
+            .BuildServiceProvider();
+
+        DefaultHttpContext httpContext = new()
+        {
+            RequestServices = provider
+        };
+        httpContext.Request.Headers.Authorization = "Bearer access-token";
+        AuthenticationScheme scheme = new(
+            JwtBearerDefaults.AuthenticationScheme,
+            displayName: null,
+            handlerType: typeof(JwtBearerHandler));
+        TokenValidatedContext context = new(httpContext, scheme, new JwtBearerOptions())
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
+                JwtBearerDefaults.AuthenticationScheme))
+        };
+
+        JwtBearerEvents events = ProgramHelpers.CreateJwtEvents(null, null);
+        await events.OnTokenValidated(context);
+
+        Assert.False(context.Result!.Succeeded);
+        Assert.Equal("Token revocation status could not be verified.", context.Result.Failure!.Message);
     }
 }

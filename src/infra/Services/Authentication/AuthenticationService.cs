@@ -22,7 +22,8 @@ public class AuthenticationService(
     IEmailService emailService,
     IRateLimitService rateLimitService,
     IAccountLockoutService accountLockoutService,
-    IAuthAuditService authAuditService) : IAuthenticationService
+    IAuthAuditService authAuditService,
+    ITokenRevocationService tokenRevocationService) : IAuthenticationService
 {
     private const string PasswordResetPath = "/reset-password";
     private const string EmailConfirmationPath = "/confirm-email";
@@ -35,6 +36,7 @@ public class AuthenticationService(
     private readonly IRateLimitService _rateLimitService = rateLimitService;
     private readonly IAccountLockoutService _accountLockoutService = accountLockoutService;
     private readonly IAuthAuditService _authAuditService = authAuditService;
+    private readonly ITokenRevocationService _tokenRevocationService = tokenRevocationService;
 
     public async Task<AuthenticationResult> AuthenticateAsync(string username, string password)
     {
@@ -328,16 +330,15 @@ public class AuthenticationService(
             return false;
         }
 
-        string newHash = _passwordHashing.HashPassword(newPassword);
-        bool success = await _usersRepository.UpdatePasswordAsync(userId, currentPassword, newHash);
+        user.PasswordHash = _passwordHashing.HashPassword(newPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        _ = await _tokenRevocationService.RevokeAllUserTokensAsync(
+            userId,
+            userId,
+            "Password changed by user");
 
-        if (success)
-        {
-            // Audit log password change
-            await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
-        }
-
-        return success;
+        await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
+        return true;
     }
 
     public Task<bool> SendEmailConfirmationAsync(User user) => SendEmailConfirmationInternalAsync(user);
@@ -515,64 +516,45 @@ public class AuthenticationService(
 
     public async Task<bool> ResetPasswordAsync(string token, string email, string newPassword, string? ipAddress)
     {
-        try
+        // Find user by email
+        User? user = await _usersRepository.GetByEmailAsync(email);
+        if (user == null)
         {
-            // Find user by email
-            User? user = await _usersRepository.GetByEmailAsync(email);
-            if (user == null)
-            {
-                _logger.LogWarning("Password reset attempted with invalid email");
-                return false;
-            }
-
-            // Find and validate token
-            PasswordResetToken? resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
-            if (resetToken == null || resetToken.UserId != user.Id)
-            {
-                _logger.LogWarning("Invalid password reset token");
-                return false;
-            }
-
-            // Check if token is expired
-            if (resetToken.ExpiresAt < DateTime.UtcNow)
-            {
-                _logger.LogWarning("Expired password reset token");
-                return false;
-            }
-
-            // Check if token has already been used
-            if (resetToken.IsUsed)
-            {
-                _logger.LogWarning("Already used password reset token");
-                return false;
-            }
-
-            // Hash new password
-            string newHash = _passwordHashing.HashPassword(newPassword);
-
-            // Update user password
-            user.PasswordHash = newHash;
-            user.UpdatedAt = DateTime.UtcNow;
-
-            // Mark token as used
-            resetToken.IsUsed = true;
-            resetToken.UsedAt = DateTime.UtcNow;
-            resetToken.UsedByIp = ipAddress;
-
-            // Persist the password replacement, reset-token consumption, and session revocation together.
-            await _usersRepository.RevokeUserRefreshTokensAsync(user.Id, ipAddress);
-
-            // Audit log successful password reset
-            await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
-
-            _logger.LogInformation("Password successfully reset for user {UserId}", user.Id);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error resetting password");
+            _logger.LogWarning("Password reset attempted with invalid email");
             return false;
         }
+
+        // Find and validate token
+        PasswordResetToken? resetToken = await _usersRepository.GetPasswordResetTokenAsync(token);
+        if (resetToken == null || resetToken.UserId != user.Id)
+        {
+            _logger.LogWarning("Invalid password reset token");
+            return false;
+        }
+
+        if (resetToken.ExpiresAt < DateTime.UtcNow || resetToken.IsUsed)
+        {
+            _logger.LogWarning("Expired or already used password reset token");
+            return false;
+        }
+
+        user.PasswordHash = _passwordHashing.HashPassword(newPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+        resetToken.IsUsed = true;
+        resetToken.UsedAt = DateTime.UtcNow;
+        resetToken.UsedByIp = ipAddress;
+
+        // RevokeAllUserTokensAsync saves the password, consumed reset token, refresh
+        // tokens, and JWT marker together through the scoped AppDbContext.
+        _ = await _tokenRevocationService.RevokeAllUserTokensAsync(
+            user.Id,
+            user.Id,
+            "Password reset",
+            ipAddress);
+
+        await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
+        _logger.LogInformation("Password successfully reset for user {UserId}", user.Id);
+        return true;
     }
 
     private async Task<UserDto?> BuildUserDtoAsync(Guid userId)

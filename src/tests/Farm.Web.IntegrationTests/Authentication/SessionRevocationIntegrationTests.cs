@@ -64,6 +64,53 @@ public class SessionRevocationIntegrationTests : IClassFixture<CustomWebApplicat
     }
 
     [Fact]
+    public async Task AdminPasswordChange_RevokesAccessAndRefreshTokens()
+    {
+        using HttpClient client = CreateClient();
+        (string? adminToken, _) = await CreateAdminUserAsync();
+        string username = $"admin-password-{Guid.NewGuid():N}";
+        (string? userToken, Guid userId) = await CreateRegularUserAsync(
+            username,
+            $"{username}@example.com",
+            "TestPassword123!");
+
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { usernameOrEmail = username, password = "TestPassword123!" });
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult userLogin = (await loginResponse.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        using HttpResponseMessage changeResponse = await client.PostAsJsonAsync(
+            $"/api/users/{userId}/change-password",
+            new { newPassword = "ChangedPassword123!", confirmNewPassword = "ChangedPassword123!" });
+        string changeResponseBody = await changeResponse.Content.ReadAsStringAsync();
+        changeResponse.StatusCode.Should().Be(HttpStatusCode.OK, because: changeResponseBody);
+
+        foreach (string? token in new[] { userToken, userLogin.Token })
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using HttpResponseMessage me = await client.GetAsync("/api/auth/me");
+            me.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        client.DefaultRequestHeaders.Authorization = null;
+        using HttpResponseMessage oldRefresh = await client.PostAsJsonAsync(
+            "/api/auth/refresh",
+            new { refreshToken = userLogin.RefreshToken });
+        oldRefresh.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        using HttpResponseMessage freshLogin = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { usernameOrEmail = username, password = "ChangedPassword123!" });
+        freshLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+        AuthenticationResult fresh = (await freshLogin.Content.ReadFromJsonAsync<AuthenticationResult>())!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", fresh.Token);
+        using HttpResponseMessage freshMe = await client.GetAsync("/api/auth/me");
+        freshMe.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task RevokeAllUserSessions_AdminCannotRevokeSelf_ShouldReturn400()
     {
         // Arrange
