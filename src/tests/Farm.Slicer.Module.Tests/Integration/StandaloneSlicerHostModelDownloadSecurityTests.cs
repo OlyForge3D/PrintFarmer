@@ -17,7 +17,9 @@ using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicers.OrcaSlicer.v2_4_0;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -28,6 +30,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
@@ -42,6 +45,90 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
     StandaloneSlicerHostApplicationFactory factory)
     : IClassFixture<StandaloneSlicerHostApplicationFactory>
 {
+    [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
+    [InlineData("internal-cancellation")]
+    [InlineData("invalid-operation")]
+    [InlineData("missing-service")]
+    [InlineData("disposed")]
+    [InlineData("unexpected")]
+    [InlineData("caller-cancellation")]
+    public async Task TokenValidation_StoreFault_RecoversOnlyIdentifiedProviderFailures(string scenario)
+    {
+        using CancellationTokenSource cancellation = new();
+        using HttpClient client = factory.CreateAuthenticatedClient(out Guid userId);
+        string token = client.DefaultRequestHeaders.Authorization!.Parameter!;
+        Exception failure = scenario switch
+        {
+            "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Store unavailable.", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Store timeout.")),
+            "internal-cancellation" => new OperationCanceledException("Store cancelled internally."),
+            "disposed" => new ObjectDisposedException("revocation-store"),
+            "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+            "unexpected" => new ArgumentException("Revocation implementation fault."),
+            _ => new InvalidOperationException("Invalid revocation service/tracker state.")
+        };
+        Mock<ITokenRevocationService> revocation = new(MockBehavior.Strict);
+        revocation.Setup(service => service.IsTokenRevokedAsync(token, cancellation.Token))
+            .Returns(async () =>
+            {
+                if (scenario == "caller-cancellation")
+                {
+                    await cancellation.CancelAsync();
+                }
+                return await Task.FromException<bool>(failure);
+            });
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServiceCollection services = new();
+        services.AddSingleton(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+        services.AddSingleton(scope.ServiceProvider.GetRequiredService<ILoggerFactory>());
+        if (scenario != "missing-service")
+        {
+            services.AddSingleton(revocation.Object);
+        }
+        using ServiceProvider provider = services.BuildServiceProvider();
+        DefaultHttpContext httpContext = new()
+        {
+            RequestServices = provider,
+            RequestAborted = cancellation.Token
+        };
+        Microsoft.AspNetCore.Authentication.AuthenticationScheme scheme = new(JwtBearerDefaults.AuthenticationScheme, null, typeof(JwtBearerHandler));
+        JwtBearerOptions options = factory.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+        TokenValidatedContext context = new(httpContext, scheme, options)
+        {
+            SecurityToken = new JsonWebToken(token),
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], JwtBearerDefaults.AuthenticationScheme))
+        };
+        int errorsBefore = factory.AuthenticationErrors.Count();
+
+        Exception? propagated = await Record.ExceptionAsync(() => options.Events.OnTokenValidated(context));
+
+        if (scenario is "wrapped-database" or "wrapped-timeout" or "internal-cancellation")
+        {
+            Assert.Null(propagated);
+            Assert.False(context.Result!.Succeeded);
+            Assert.Equal("Token revocation status could not be verified.", context.Result.Failure!.Message);
+            Assert.Equal(errorsBefore + 1, factory.AuthenticationErrors.Count());
+        }
+        else
+        {
+            if (scenario == "missing-service")
+            {
+                InvalidOperationException missingService = Assert.IsType<InvalidOperationException>(propagated);
+                Assert.Contains(nameof(ITokenRevocationService), missingService.Message, StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.Same(failure, propagated);
+            }
+            Assert.Null(context.Result);
+            Assert.Equal(errorsBefore, factory.AuthenticationErrors.Count());
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

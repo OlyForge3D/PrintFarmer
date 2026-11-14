@@ -1,5 +1,4 @@
-﻿using System.Data.Common;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Farm.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -29,16 +28,8 @@ public static class JwtAccountEligibility
                 return "User account is disabled or no longer exists.";
             }
         }
-        catch (DbException exception) when (!context.RequestAborted.IsCancellationRequested)
+        catch (Exception exception) when (AuthenticationStoreFailure.IsRecoverable(exception, context.RequestAborted))
         {
-            LogStoreFailure(context, logger, exception);
-            return "Unable to validate user account.";
-        }
-        catch (InvalidOperationException exception) when (
-            !context.RequestAborted.IsCancellationRequested
-            && exception.InnerException is (DbException or TimeoutException))
-        {
-            // EF's PostgreSQL/SQL Server execution strategies wrap transient store failures.
             LogStoreFailure(context, logger, exception);
             return "Unable to validate user account.";
         }

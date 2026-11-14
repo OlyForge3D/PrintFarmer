@@ -9,7 +9,8 @@ namespace Farm.Web.Api.Tests.Services.Authentication;
 public sealed class EffectivePermissionsRevocationServiceTests
 {
     [Theory]
-    [InlineData("invalid-operation")]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
     [InlineData("database")]
     [InlineData("update")]
     [InlineData("timeout")]
@@ -21,11 +22,13 @@ public sealed class EffectivePermissionsRevocationServiceTests
         Guid lastUserId = Guid.NewGuid();
         Exception failure = scenario switch
         {
+            "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Store unavailable.", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Store timeout.")),
             "database" => new SqliteException("Revocation persistence failed.", 14),
             "update" => new DbUpdateException("Revocation persistence failed."),
             "timeout" => new TimeoutException("Revocation persistence failed."),
             "internal-cancellation" => new OperationCanceledException("Revocation store cancelled."),
-            _ => new InvalidOperationException("Revocation persistence failed.")
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario))
         };
         Mock<ITokenRevocationService> tokenRevocationService = new(MockBehavior.Strict);
         tokenRevocationService
@@ -76,17 +79,24 @@ public sealed class EffectivePermissionsRevocationServiceTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RevokeUsersAsync_UnexpectedFailureOrCallerCancellation_StopsBatchAndPropagates(bool cancelCaller)
+    [InlineData("unexpected")]
+    [InlineData("invalid-operation")]
+    [InlineData("disposed")]
+    [InlineData("caller-cancellation")]
+    public async Task RevokeUsersAsync_UnexpectedFailureOrCallerCancellation_StopsBatchAndPropagates(string scenario)
     {
+        bool cancelCaller = scenario == "caller-cancellation";
         using CancellationTokenSource cancellation = new();
         Guid completedUserId = Guid.NewGuid();
         Guid failedUserId = Guid.NewGuid();
         Guid unprocessedUserId = Guid.NewGuid();
-        Exception failure = cancelCaller
-            ? new OperationCanceledException(cancellation.Token)
-            : new ArgumentException("Revocation implementation fault.");
+        Exception failure = scenario switch
+        {
+            "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+            "disposed" => new ObjectDisposedException("revocation-store"),
+            "invalid-operation" => new InvalidOperationException("Invalid tracker state."),
+            _ => new ArgumentException("Revocation implementation fault.")
+        };
         Mock<ITokenRevocationService> revocation = new(MockBehavior.Strict);
         revocation.Setup(service => service.RevokeAllUserTokensAsync(
                 completedUserId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), cancellation.Token))

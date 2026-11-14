@@ -1,5 +1,4 @@
-﻿using System.Data.Common;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
@@ -8,7 +7,6 @@ using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -343,7 +341,7 @@ public class AuthenticationService(
         {
             await _authAuditService.LogPasswordChangeAsync(userId, "unknown", null);
         }
-        catch (Exception ex) when (ex is DbException or DbUpdateException or TimeoutException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (AuthenticationStoreFailure.IsRecoverable(ex))
         {
             _logger.LogError(ex, "Failed to write password-change audit for user {UserId}", userId);
         }
@@ -566,7 +564,7 @@ public class AuthenticationService(
         {
             await _authAuditService.LogPasswordResetAsync(user.Id, ipAddress, null);
         }
-        catch (Exception ex) when (ex is DbException or DbUpdateException or TimeoutException or InvalidOperationException or OperationCanceledException)
+        catch (Exception ex) when (AuthenticationStoreFailure.IsRecoverable(ex))
         {
             _logger.LogError(ex, "Failed to write password-reset audit for user {UserId}", user.Id);
         }

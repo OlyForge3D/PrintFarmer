@@ -129,18 +129,25 @@ public class TokenRevocationServiceTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RevokeAllUserTokensAsync_PostCommitUnexpectedFaultOrCallerCancellation_Propagates(bool cancelCaller)
+    [InlineData("unexpected")]
+    [InlineData("invalid-operation")]
+    [InlineData("disposed")]
+    [InlineData("caller-cancellation")]
+    public async Task RevokeAllUserTokensAsync_PostCommitUnexpectedFaultOrCallerCancellation_Propagates(string scenario)
     {
+        bool cancelCaller = scenario == "caller-cancellation";
         using CancellationTokenSource cancellation = new();
         Guid userId = Guid.NewGuid();
         var (_, db) = await CreateServiceAsync(userId);
         using (db)
         {
-            Exception failure = cancelCaller
-                ? new OperationCanceledException(cancellation.Token)
-                : new ArgumentException("Audit implementation fault.");
+            Exception failure = scenario switch
+            {
+                "caller-cancellation" => new OperationCanceledException(cancellation.Token),
+                "disposed" => new ObjectDisposedException("audit-store"),
+                "invalid-operation" => new InvalidOperationException("Invalid audit tracker state."),
+                _ => new ArgumentException("Audit implementation fault.")
+            };
             Mock<IAuthAuditService> audit = new(MockBehavior.Strict);
             audit.Setup(service => service.LogTokenRevokedAsync(
                     userId, userId, It.IsAny<string>(), null, null, It.IsAny<CancellationToken>()))

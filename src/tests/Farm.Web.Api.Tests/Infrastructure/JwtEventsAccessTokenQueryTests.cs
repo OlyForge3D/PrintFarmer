@@ -114,7 +114,11 @@ public class JwtEventsAccessTokenQueryTests
     }
 
     [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
     [InlineData("invalid-operation")]
+    [InlineData("missing-service")]
+    [InlineData("disposed")]
     [InlineData("database")]
     [InlineData("update")]
     [InlineData("timeout")]
@@ -126,6 +130,9 @@ public class JwtEventsAccessTokenQueryTests
         using CancellationTokenSource cancellation = new();
         Exception failure = scenario switch
         {
+            "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Store unavailable.", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Store timeout.")),
+            "disposed" => new ObjectDisposedException("revocation-store"),
             "database" => new SqliteException("Revocation store unavailable.", 14),
             "update" => new DbUpdateException("Revocation store unavailable."),
             "timeout" => new TimeoutException("Revocation store unavailable."),
@@ -147,11 +154,15 @@ public class JwtEventsAccessTokenQueryTests
             });
         List<string> logs = [];
         Guid userId = Guid.NewGuid();
-        using ServiceProvider provider = new ServiceCollection()
+        ServiceCollection services = new();
+        services
             .AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase($"revocation-failure-{Guid.NewGuid()}"))
-            .AddSingleton(revocationService.Object)
-            .AddSingleton<ILoggerFactory>(new CapturingLoggerFactory(logs))
-            .BuildServiceProvider();
+            .AddSingleton<ILoggerFactory>(new CapturingLoggerFactory(logs));
+        if (scenario != "missing-service")
+        {
+            services.AddSingleton(revocationService.Object);
+        }
+        using ServiceProvider provider = services.BuildServiceProvider();
         AppDbContext db = provider.GetRequiredService<AppDbContext>();
         db.Users.Add(new User { Id = userId, Username = "active-user", Email = "active@example.com", PasswordHash = "unused", IsActive = true });
         await db.SaveChangesAsync();
@@ -175,8 +186,15 @@ public class JwtEventsAccessTokenQueryTests
 
         JwtBearerEvents events = ProgramHelpers.CreateJwtEvents(null, null);
         Exception? propagated = await Record.ExceptionAsync(() => events.OnTokenValidated(context));
+        if (scenario == "missing-service")
+        {
+            InvalidOperationException missingService = Assert.IsType<InvalidOperationException>(propagated);
+            Assert.Contains(nameof(ITokenRevocationService), missingService.Message, StringComparison.Ordinal);
+            Assert.Null(context.Result);
+            return;
+        }
         revocationService.Verify(service => service.IsTokenRevokedAsync("access-token", cancellation.Token), Times.Once);
-        if (scenario is "caller-cancellation" or "unexpected")
+        if (scenario is "caller-cancellation" or "unexpected" or "invalid-operation" or "disposed")
         {
             Assert.Same(failure, propagated);
             Assert.Null(context.Result);

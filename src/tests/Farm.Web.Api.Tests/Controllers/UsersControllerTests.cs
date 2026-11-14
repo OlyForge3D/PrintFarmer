@@ -16,7 +16,10 @@ namespace Farm.Web.Api.Tests.Controllers;
 public sealed class UsersControllerTests
 {
     [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
     [InlineData("invalid-operation")]
+    [InlineData("disposed")]
     [InlineData("database")]
     [InlineData("update")]
     [InlineData("timeout")]
@@ -28,6 +31,9 @@ public sealed class UsersControllerTests
         using CancellationTokenSource cancellation = new();
         Exception failure = scenario switch
         {
+            "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Audit store unavailable.", 14)),
+            "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Audit store timeout.")),
+            "disposed" => new ObjectDisposedException("audit-store"),
             "database" => new SqliteException("Audit store unavailable.", 14),
             "update" => new DbUpdateException("Audit store unavailable."),
             "timeout" => new TimeoutException("Audit store unavailable."),
@@ -95,7 +101,7 @@ public sealed class UsersControllerTests
             ConfirmNewPassword = "new-password",
         };
 
-        if (scenario is "caller-cancellation" or "unexpected")
+        if (scenario is "caller-cancellation" or "unexpected" or "invalid-operation" or "disposed")
         {
             Assert.Same(failure, await Record.ExceptionAsync(() =>
                 controller.AdminChangeUserPasswordAsync(targetUserId, request, cancellation.Token)));

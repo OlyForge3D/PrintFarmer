@@ -223,7 +223,10 @@ public class AuthenticationServiceTests
     }
 
     [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
     [InlineData("invalid-operation")]
+    [InlineData("disposed")]
     [InlineData("database")]
     [InlineData("update")]
     [InlineData("timeout")]
@@ -247,7 +250,7 @@ public class AuthenticationServiceTests
             user.Id, "unknown", null, null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        if (scenario == "unexpected")
+        if (scenario is "unexpected" or "invalid-operation" or "disposed")
         {
             Exception? propagated = await Record.ExceptionAsync(() => _service.ChangePasswordAsync(user.Id, "currentpass", "newpass"));
             Assert.Same(failure, propagated);
@@ -395,7 +398,10 @@ public class AuthenticationServiceTests
     }
 
     [Theory]
+    [InlineData("wrapped-database")]
+    [InlineData("wrapped-timeout")]
     [InlineData("invalid-operation")]
+    [InlineData("disposed")]
     [InlineData("database")]
     [InlineData("update")]
     [InlineData("timeout")]
@@ -426,7 +432,7 @@ public class AuthenticationServiceTests
                 user.Id, "127.0.0.1", null, null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        if (scenario == "unexpected")
+        if (scenario is "unexpected" or "invalid-operation" or "disposed")
         {
             Exception? propagated = await Record.ExceptionAsync(() => _service.ResetPasswordAsync(token.Token, user.Email, "newPass", "127.0.0.1"));
             Assert.Same(failure, propagated);
@@ -442,6 +448,9 @@ public class AuthenticationServiceTests
 
     private static Exception CreateAuditFailure(string scenario) => scenario switch
     {
+        "wrapped-database" => new InvalidOperationException("Provider wrapper.", new SqliteException("Audit store unavailable.", 14)),
+        "wrapped-timeout" => new InvalidOperationException("Provider wrapper.", new TimeoutException("Audit store timeout.")),
+        "disposed" => new ObjectDisposedException("audit-store"),
         "database" => new SqliteException("Audit store unavailable.", 14),
         "update" => new DbUpdateException("Audit store unavailable."),
         "timeout" => new TimeoutException("Audit store unavailable."),

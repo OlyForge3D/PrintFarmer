@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -19,7 +18,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
@@ -303,9 +301,7 @@ internal static class ProgramHelpers
                         }
                     }
                 }
-                catch (Exception ex) when (
-                    !context.HttpContext.RequestAborted.IsCancellationRequested &&
-                    ex is (DbException or DbUpdateException or TimeoutException or InvalidOperationException or OperationCanceledException))
+                catch (Exception ex) when (AuthenticationStoreFailure.IsRecoverable(ex, context.HttpContext.RequestAborted))
                 {
                     context.Fail("Token revocation status could not be verified.");
                     ILogger? errorLogger = startupLogger

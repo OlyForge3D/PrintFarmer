@@ -215,16 +215,20 @@ public class JwtAccountEligibilityTests
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
     }
 
-    [Fact]
-    public async Task OnTokenValidated_UnexpectedFailure_PropagatesOriginalException()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnTokenValidated_InvalidOrDisposedAccountStore_PropagatesOriginalException(bool disposed)
     {
-        InvalidOperationException failure = new("Invalid account-store registration");
+        InvalidOperationException failure = disposed
+            ? new ObjectDisposedException("account-store")
+            : new InvalidOperationException("Invalid account-store registration");
         using ServiceProvider services = new ServiceCollection()
             .AddScoped<AppDbContext>(_ => throw failure)
             .BuildServiceProvider();
         TokenValidatedContext context = CreateTokenValidatedContext(services);
 
-        InvalidOperationException propagated = await Assert.ThrowsAsync<InvalidOperationException>(
+        Exception? propagated = await Record.ExceptionAsync(
             () => ProgramHelpers.CreateJwtEvents(null, null).OnTokenValidated(context));
 
         Assert.Same(failure, propagated);
@@ -278,7 +282,7 @@ public class JwtAccountEligibilityTests
         {
             Mock<ITokenRevocationService> revocation = new(MockBehavior.Strict);
             revocation.Setup(service => service.IsTokenRevokedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new InvalidOperationException("Revocation store unavailable."));
+                .ThrowsAsync(new DbUpdateException("Revocation store unavailable."));
             builder.Services.AddSingleton(revocation.Object);
         }
         else
