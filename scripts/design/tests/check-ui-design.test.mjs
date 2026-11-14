@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -18,6 +19,44 @@ import { detectSmallSwiftUiTargets } from '../swiftui-targets.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const configuredRoot = path.join(here, 'fixtures', 'configured-repo');
 const malformedRoot = path.join(here, 'fixtures', 'malformed-config-repo');
+
+function makeBoundaryFixture(t) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'printfarmer-design-boundary-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const root = path.join(tempRoot, 'repo');
+  const sourceRoot = path.join(root, 'src', 'Web', 'ReactApp', 'src');
+  const outsideRoot = path.join(tempRoot, 'outside');
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.mkdirSync(outsideRoot, { recursive: true });
+  return { tempRoot, root, sourceRoot, outsideRoot };
+}
+
+function makeDirectoryLink(target, linkPath) {
+  fs.symlinkSync(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
+function uiChange(relativePath) {
+  return [{
+    status: 'M',
+    paths: [relativePath],
+    currentPath: relativePath,
+  }];
+}
+
+async function assertStaticHtmlParserAvailable() {
+  const [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
+    import('htmlparser2'),
+    import('css-select'),
+    import('css-tree'),
+    import('domutils'),
+  ]);
+  assert.equal(typeof htmlparser2.parseDocument, 'function');
+  assert.equal(typeof cssSelect.selectAll, 'function');
+  assert.equal(typeof cssTree.parse, 'function');
+  assert.equal(typeof cssTree.walk, 'function');
+  assert.equal(typeof domutils.textContent, 'function');
+}
 
 test('parses changed, deleted, and renamed filenames without shell-style splitting', () => {
   const changes = parseNameStatus([
@@ -197,6 +236,117 @@ test('fails when an enumerated changed UI file is unavailable at the requested h
     paths: ['src/Web/ReactApp/src/missing.tsx'],
     currentPath: 'src/Web/ReactApp/src/missing.tsx',
   }]), /missing at the requested head/);
+});
+
+test('rejects changed source files whose symlink target is outside the checkout', async (t) => {
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  fs.writeFileSync(path.join(outsideRoot, 'page.tsx'), 'export const page = true;');
+  makeDirectoryLink(outsideRoot, path.join(sourceRoot, 'linked'));
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/linked/page.tsx')),
+    /changed UI source outside the checkout/,
+  );
+});
+
+test('accepts a checkout root passed through a directory symlink', async (t) => {
+  const { tempRoot, root, sourceRoot } = makeBoundaryFixture(t);
+  const rootAlias = path.join(tempRoot, 'repo-alias');
+  fs.writeFileSync(path.join(sourceRoot, 'page.tsx'), 'export const page = true;');
+  makeDirectoryLink(root, rootAlias);
+
+  const result = await scanChangedUiFiles(rootAlias, uiChange('src/Web/ReactApp/src/page.tsx'));
+  assert.deepEqual(result.scannedFiles, ['src/Web/ReactApp/src/page.tsx']);
+});
+
+test('rejects DESIGN.md discovered through an out-of-checkout fallback directory symlink', async (t) => {
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  fs.writeFileSync(path.join(sourceRoot, 'page.tsx'), 'export const page = true;');
+  fs.writeFileSync(path.join(outsideRoot, 'DESIGN.md'), '---\ncolors: {}\n---\n');
+  makeDirectoryLink(outsideRoot, path.join(root, 'docs'));
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.tsx')),
+    /design metadata outside the checkout/,
+  );
+});
+
+test('rejects a sidecar resolved through an out-of-checkout directory symlink', async (t) => {
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  fs.writeFileSync(path.join(sourceRoot, 'page.tsx'), 'export const page = true;');
+  fs.writeFileSync(path.join(root, 'DESIGN.md'), '---\ncolors: {}\n---\n');
+  fs.writeFileSync(path.join(outsideRoot, 'design.json'), '{"colors":{}}');
+  makeDirectoryLink(outsideRoot, path.join(root, '.impeccable'));
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.tsx')),
+    /design sidecar outside the checkout/,
+  );
+});
+
+test('rejects an Impeccable config whose symlink target is outside the checkout', async (t) => {
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  fs.writeFileSync(path.join(sourceRoot, 'page.tsx'), 'export const page = true;');
+  fs.writeFileSync(path.join(outsideRoot, 'config.json'), '{"detector":{}}');
+  makeDirectoryLink(outsideRoot, path.join(root, '.impeccable'));
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.tsx')),
+    /Impeccable config outside the checkout/,
+  );
+});
+
+test('rejects parser-enabled linked stylesheets whose symlink target is outside the checkout', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  fs.writeFileSync(path.join(outsideRoot, 'theme.css'), 'body { color: red; }');
+  makeDirectoryLink(outsideRoot, path.join(sourceRoot, 'assets'));
+  fs.writeFileSync(htmlPath, '<html><head><link rel="stylesheet" href="assets/theme.css"></head><body></body></html>');
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /linked stylesheet outside the checkout/,
+  );
+});
+
+test('rejects parser-enabled stylesheet href traversal outside the checkout', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const outsideStylesheetPath = path.join(outsideRoot, 'private.css');
+  const href = path.relative(sourceRoot, outsideStylesheetPath).replaceAll(path.sep, '/');
+  fs.writeFileSync(outsideStylesheetPath, 'body { color: red; }');
+  fs.writeFileSync(htmlPath, `<html><head><link rel="stylesheet" href="${href}"></head><body></body></html>`);
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /linked stylesheet outside the checkout/,
+  );
+});
+
+test('rejects parser-enabled local stylesheet imports that resolve outside the checkout', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot, outsideRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  const nestedStylesDirectory = path.join(stylesDirectory, 'parts');
+  const stylesheetPath = path.join(stylesDirectory, 'theme.css');
+  const nestedStylesheetPath = path.join(nestedStylesDirectory, 'tokens.css');
+  const outsideStylesheetPath = path.join(outsideRoot, 'private.css');
+  fs.mkdirSync(nestedStylesDirectory, { recursive: true });
+  fs.writeFileSync(outsideStylesheetPath, 'body { color: red; }');
+  fs.writeFileSync(stylesheetPath, '@import "parts/tokens.css";');
+  fs.writeFileSync(
+    nestedStylesheetPath,
+    `@import url("${path.relative(nestedStylesDirectory, outsideStylesheetPath).replaceAll(path.sep, '/')}");`,
+  );
+  fs.writeFileSync(htmlPath, '<html><head><link rel="stylesheet" href="styles/theme.css"></head><body></body></html>');
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /stylesheet @import outside the checkout/,
+  );
 });
 
 test('ignores comments, string examples, and padded-after-frame SwiftUI examples', () => {

@@ -12,7 +12,10 @@ import {
 import { applyInlineIgnores } from './vendor/impeccable/scripts/detector/shared/inline-ignores.mjs';
 import { detectHtml } from './vendor/impeccable/scripts/detector/engines/static-html/detect-html.mjs';
 import { detectUiText } from './source-adapter.mjs';
-import { loadDesignSystemForTarget } from './vendor/impeccable/scripts/detector/design-system.mjs';
+import {
+  findDesignRoot,
+  loadDesignSystemForTarget,
+} from './vendor/impeccable/scripts/detector/design-system.mjs';
 import { detectSmallSwiftUiTargets } from './swiftui-targets.mjs';
 import { isUiPath } from './ui-paths.mjs';
 
@@ -40,6 +43,11 @@ const detectorExtensions = new Set([
   '.tsx',
   '.vue',
 ]);
+const designFileNames = ['DESIGN.md', 'Design.md', 'design.md'];
+const designFallbackDirectories = ['.agents/context', 'docs'];
+const remoteStylesheetPattern = /^(https?:)?\/\//i;
+const maxImportedStylesheets = 256;
+const maxImportedStylesheetBytes = 1024 * 1024;
 
 function fail(message) {
   throw new Error(message);
@@ -56,12 +64,16 @@ function assertStringArray(value, name) {
 }
 
 export function readSharedConfig(root) {
-  const configPath = path.join(root, '.impeccable', 'config.json');
+  const configPath = path.resolve(root, '.impeccable', 'config.json');
   if (!fs.existsSync(configPath)) {
     return {
       hook: { enabled: true, quiet: false, limits: { maxFindings: 5, maxChars: 8000 } },
       detector: { ignoreRules: [], ignoreFiles: [], ignoreValues: [], designSystem: { enabled: true } },
     };
+  }
+
+  if (!realPathWithinRoot(root, configPath, 'Impeccable config')) {
+    fail('Cannot resolve Impeccable config inside the checkout.');
   }
 
   let raw;
@@ -330,6 +342,169 @@ function isInsideRoot(root, filePath) {
     relativePath !== '..' && !path.isAbsolute(relativePath);
 }
 
+function isWithinRoot(root, absolutePath) {
+  const relativePath = path.relative(root, absolutePath);
+  return relativePath === '' || (!relativePath.startsWith(`..${path.sep}`) &&
+    relativePath !== '..' && !path.isAbsolute(relativePath));
+}
+
+function realPathWithinRoot(root, filePath, description) {
+  const lexicalRoot = path.resolve(root);
+  let realRoot;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    fail(`Cannot resolve the checkout root while validating ${description}.`);
+  }
+
+  const absolutePath = path.resolve(lexicalRoot, filePath);
+  if (!isWithinRoot(lexicalRoot, absolutePath)) {
+    fail(`Refusing ${description} outside the checkout.`);
+  }
+
+  let resolvedPath;
+  try {
+    resolvedPath = fs.realpathSync(absolutePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined;
+    fail(`Cannot resolve ${description} for containment validation.`);
+  }
+
+  if (!isWithinRoot(realRoot, resolvedPath)) {
+    fail(`Refusing ${description} outside the checkout.`);
+  }
+  return resolvedPath;
+}
+
+function assertDesignSystemPathsContained(root, targetPath) {
+  const found = findDesignRoot(path.dirname(targetPath));
+  if (!found?.hasDesign) return;
+
+  if (!realPathWithinRoot(root, found.dir, 'design system root')) {
+    fail('Cannot resolve the design system root inside the checkout.');
+  }
+
+  const metadataCandidates = [
+    ...designFileNames.map(name => ({ path: path.join(found.dir, name), contextDir: found.dir })),
+    ...designFallbackDirectories.flatMap(relativeDirectory => {
+      const contextDir = path.join(found.dir, relativeDirectory);
+      return designFileNames.map(name => ({ path: path.join(contextDir, name), contextDir }));
+    }),
+  ];
+  const metadata = metadataCandidates.find(candidate => fs.existsSync(candidate.path));
+  if (!metadata || !realPathWithinRoot(root, metadata.path, 'design metadata')) {
+    fail('Cannot resolve design metadata inside the checkout.');
+  }
+
+  const sidecarCandidates = [
+    path.join(found.dir, '.impeccable', 'design.json'),
+    path.join(found.dir, 'DESIGN.json'),
+    path.join(metadata.contextDir, 'DESIGN.json'),
+  ];
+  const sidecar = sidecarCandidates.find(candidate => fs.existsSync(candidate));
+  if (sidecar && !realPathWithinRoot(root, sidecar, 'design sidecar')) {
+    fail('Cannot resolve design sidecar inside the checkout.');
+  }
+}
+
+async function loadStaticHtmlPathModules() {
+  try {
+    const [htmlparser2, cssSelect, cssTree, domutils] = await Promise.all([
+      import('htmlparser2'),
+      import('css-select'),
+      import('css-tree'),
+      import('domutils'),
+    ]);
+    if (typeof htmlparser2.parseDocument !== 'function' ||
+      typeof cssSelect.selectAll !== 'function' ||
+      typeof cssTree.parse !== 'function' ||
+      typeof cssTree.walk !== 'function' ||
+      typeof domutils.textContent !== 'function') {
+      fail('Static HTML parser modules do not expose the expected APIs.');
+    }
+    return {
+      parseDocument: htmlparser2.parseDocument,
+      selectAll: cssSelect.selectAll,
+      cssTree,
+    };
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND') return undefined;
+    fail('Cannot load static HTML parser modules for filesystem-boundary validation.');
+  }
+}
+
+function readStylesheetImportPaths(css, cssTree) {
+  let ast;
+  try {
+    ast = cssTree.parse(css);
+  } catch {
+    fail('Cannot parse a stylesheet while validating @import boundaries.');
+  }
+
+  const imports = [];
+  cssTree.walk(ast, node => {
+    if (node.type !== 'Atrule' || node.name.toLowerCase() !== 'import') return;
+    const source = node.prelude?.children?.first;
+    if ((source?.type !== 'String' && source?.type !== 'Url') ||
+      typeof source.value !== 'string') {
+      fail('Cannot determine a stylesheet @import path safely.');
+    }
+    imports.push(source.value);
+  });
+  return imports;
+}
+
+async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
+  const modules = await loadStaticHtmlPathModules();
+  if (!modules) return;
+
+  const document = modules.parseDocument(html, {
+    lowerCaseAttributeNames: false,
+    lowerCaseTags: true,
+  });
+  const links = modules.selectAll('link', document.children || []);
+  const inspected = new Set();
+  let importedStylesheets = 0;
+
+  function inspectStylesheet(href, baseDirectory, description, isImport = false) {
+    if (!href || remoteStylesheetPattern.test(href)) return;
+    const stylesheetPath = path.resolve(baseDirectory, href);
+    if (!isWithinRoot(path.resolve(root), stylesheetPath)) {
+      fail(`Refusing ${description} outside the checkout.`);
+    }
+    const resolvedPath = realPathWithinRoot(root, stylesheetPath, description);
+    if (!resolvedPath || inspected.has(resolvedPath)) return;
+    if (isImport && importedStylesheets >= maxImportedStylesheets) {
+      fail('Too many local stylesheets to validate filesystem boundaries safely.');
+    }
+    if (isImport) importedStylesheets++;
+    inspected.add(resolvedPath);
+
+    const stats = fs.statSync(resolvedPath);
+    if (!stats.isFile()) return;
+    if (isImport && stats.size > maxImportedStylesheetBytes) {
+      fail('A local stylesheet exceeds the filesystem-boundary validation size limit.');
+    }
+
+    let css;
+    try {
+      css = fs.readFileSync(resolvedPath, 'utf8');
+    } catch {
+      fail('Cannot read a local stylesheet while validating filesystem boundaries.');
+    }
+    for (const importedPath of readStylesheetImportPaths(css, modules.cssTree)) {
+      inspectStylesheet(importedPath, path.dirname(stylesheetPath), 'stylesheet @import', true);
+    }
+  }
+
+  for (const link of links) {
+    const rel = link.attribs?.rel || '';
+    const href = link.attribs?.href || '';
+    if (!/\bstylesheet\b/i.test(rel) || !href) continue;
+    inspectStylesheet(href, path.dirname(path.resolve(htmlPath)), 'linked stylesheet');
+  }
+}
+
 function waiverSummaries(config) {
   return config.detector.ignoreValues.map(({ rule, value, files, reason }) => ({
     rule,
@@ -363,25 +538,31 @@ export async function scanChangedUiFiles(root, changes) {
   const findings = [];
   for (const [filePath, { kind, status }] of [...candidates.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const absolutePath = path.resolve(root, filePath);
-    if (!fs.existsSync(absolutePath)) {
+    const resolvedPath = realPathWithinRoot(root, absolutePath, 'changed UI source');
+    if (!resolvedPath) {
       fail(`Changed UI source file ${filePath} (${status}) is missing at the requested head.`);
     }
-    const content = fs.readFileSync(absolutePath, 'utf8');
+    const content = fs.readFileSync(resolvedPath, 'utf8');
     let fileFindings;
     if (kind === 'swiftui') {
       fileFindings = applyInlineIgnores(detectSmallSwiftUiTargets(content, filePath), content);
     } else {
-      const designSystem = config.detector.designSystem.enabled
-        ? loadDesignSystemForTarget(absolutePath)
-        : undefined;
+      let designSystem;
+      if (config.detector.designSystem.enabled) {
+        assertDesignSystemPathsContained(root, absolutePath);
+        designSystem = loadDesignSystemForTarget(absolutePath);
+      }
       const scanOptions = {
         inlineIgnores: true,
         ...(designSystem ? { designSystem } : {}),
       };
-      fileFindings = path.posix.extname(filePath).toLowerCase() === '.html' ||
-        path.posix.extname(filePath).toLowerCase() === '.htm'
-        ? await detectHtml(absolutePath, scanOptions)
-        : detectUiText(content, absolutePath, scanOptions);
+      if (path.posix.extname(filePath).toLowerCase() === '.html' ||
+        path.posix.extname(filePath).toLowerCase() === '.htm') {
+        await assertLinkedStylesheetPathsContained(root, absolutePath, content);
+        fileFindings = await detectHtml(absolutePath, scanOptions);
+      } else {
+        fileFindings = detectUiText(content, absolutePath, scanOptions);
+      }
     }
     scannedFiles.push(filePath);
     findings.push(...filterDetectionFindings(fileFindings, config.detector));

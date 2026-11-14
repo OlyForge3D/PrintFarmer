@@ -116,6 +116,15 @@ Pass immutable commits, not filenames interpolated into a shell command.
 Check the requested head out before scanning; changed-file enumeration compares
 the feature contribution against its merge base.
 
+The wrapper resolves changed source, shared config, discovered `DESIGN.md` and
+sidecar files, linked stylesheets, and nested local CSS `@import` paths before
+vendor reads; real paths must remain inside the checkout. Excessive or oversized
+stylesheet import graphs fail explicitly. The root tooling lockfile includes the
+static parser modules used by parser-enabled boundary regressions. CI installs
+them after the changed-file scan and before the test suite, preserving the scan's
+existing optional-parser behavior while ensuring these tests do not pass through
+the regex fallback.
+
 The vendored Impeccable detector is integrity-pinned and retains its upstream
 license and notice. Its web rules are deterministic source checks, not a browser
 render or an accessibility certification. Upstream does not understand SwiftUI:
