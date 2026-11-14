@@ -106,7 +106,7 @@ public sealed class ProfileOwnedNonSystemReadPerformanceTests : IDisposable
                 "other-user public rows per type={0}; owned per type={1}; " +
                 "materialized legacy P/F/M={2}/{3}/{4}, owned-read P/F/M={5}/{6}/{7}; " +
                 "p50/p95 ms legacy={8:F3}/{9:F3}, owned-read={10:F3}/{11:F3}; " +
-                "mean allocated bytes/call legacy={12}, owned-read={13}",
+                "mean process allocated bytes/call (GC total) legacy={12}, owned-read={13}",
                 publicCount,
                 OwnedCountPerType,
                 legacyProcessMaterialized,
