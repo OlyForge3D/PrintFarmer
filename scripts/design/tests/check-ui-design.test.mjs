@@ -452,6 +452,27 @@ test('fails closed when an imported stylesheet exceeds its byte limit', async (t
   );
 });
 
+test('fails closed when a directly linked stylesheet exceeds its byte limit', async (t) => {
+  await assertStaticHtmlParserAvailable();
+  const { root, sourceRoot } = makeBoundaryFixture(t);
+  const htmlPath = path.join(sourceRoot, 'page.html');
+  const stylesDirectory = path.join(sourceRoot, 'styles');
+  fs.mkdirSync(stylesDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(stylesDirectory, 'oversized.css'),
+    `/*${'x'.repeat(1024 * 1024)}*/`,
+  );
+  fs.writeFileSync(
+    htmlPath,
+    '<html><head><link rel="stylesheet" href="styles/oversized.css"></head><body></body></html>',
+  );
+
+  await assert.rejects(
+    () => scanChangedUiFiles(root, uiChange('src/Web/ReactApp/src/page.html')),
+    /A local stylesheet exceeds the filesystem-boundary validation size limit/,
+  );
+});
+
 test('ignores comments, string examples, and padded-after-frame SwiftUI examples', () => {
   const findings = detectSmallSwiftUiTargets([
     '// Button("sample") {}.frame(width: 20, height: 20)',

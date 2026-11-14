@@ -47,7 +47,7 @@ const designFileNames = ['DESIGN.md', 'Design.md', 'design.md'];
 const designFallbackDirectories = ['.agents/context', 'docs'];
 const remoteStylesheetPattern = /^(https?:)?\/\//i;
 const maxImportedStylesheets = 256;
-const maxImportedStylesheetBytes = 1024 * 1024;
+const maxStylesheetBytes = 1024 * 1024;
 
 function fail(message) {
   throw new Error(message);
@@ -561,7 +561,7 @@ async function assertLinkedStylesheetPathsContained(root, htmlPath, html) {
       root,
       resolvedPath,
       description,
-      isImport ? maxImportedStylesheetBytes : undefined,
+      maxStylesheetBytes,
     );
     if (!stylesheet || stylesheet.content === undefined) return;
     const css = stylesheet.content;
