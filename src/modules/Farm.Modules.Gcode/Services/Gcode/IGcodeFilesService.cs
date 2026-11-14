@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Modules.Gcode.DTOs;
@@ -123,14 +124,14 @@ public interface IGcodeFilesService
     /// <param name="originalFileName">Original filename from the client (used if not already in metadata).</param>
     /// <param name="thumbnailPath">Path to an optional thumbnail image file generated during upload.</param>
     /// <param name="virtualDirectory">Virtual directory where file will be stored.</param>
-    /// <param name="chunkedUploadService">Service managing chunked upload state.</param>
+    /// <param name="metadata">Metadata extracted while finalizing the chunked upload.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Persisted GcodeFile domain model with database ID and relationships.</returns>
     /// <remarks>
     /// Called after all chunks have been uploaded and validated. Moves the temporary file to final storage,
     /// handles thumbnail organization, creates database record, and cleans up temporary upload state.
     /// </remarks>
-    Task<GcodeFile?> FinalizeChunkedUploadAsync(string filePath, string? originalFileName, string? thumbnailPath, string? virtualDirectory, IChunkedUploadService chunkedUploadService, CancellationToken ct);
+    Task<GcodeFile?> FinalizeChunkedUploadAsync(string filePath, string? originalFileName, string? thumbnailPath, string? virtualDirectory, GcodeMetadataExtracted? metadata, CancellationToken ct);
 
     /// <summary>
     /// Streams already-verified G-code bytes into the library and stamps immutable promotion lineage.

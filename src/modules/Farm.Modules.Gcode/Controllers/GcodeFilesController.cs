@@ -324,7 +324,8 @@ public class GcodeFilesController(
             string userId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
 
             // Delegate to service - it handles all the validation, quota checking, hashing, and finalization
-            ChunkedUploadStatus result = await chunkedUploadService.AppendChunkAsync(uploadId, offset, chunkBytes, userId, quotaService);
+            ChunkedUploadAppendResult appendResult = await chunkedUploadService.AppendChunkWithMetadataAsync(uploadId, offset, chunkBytes, userId, quotaService);
+            ChunkedUploadStatus result = appendResult.Status;
 
             // If upload is complete, finalize it to the database
             Guid? gcodeFileId = null;
@@ -342,7 +343,7 @@ public class GcodeFilesController(
                         result.SafeFileName,
                         result.ThumbnailPath,
                         virtualDir,
-                        chunkedUploadService,
+                        appendResult.ExtractedMetadata,
                         CancellationToken.None);
 
                     if (gcodeFile != null)

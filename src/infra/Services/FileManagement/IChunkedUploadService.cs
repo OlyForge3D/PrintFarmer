@@ -55,6 +55,16 @@ public interface IChunkedUploadService
         IGcodeUploadQuotaService quotaService);
 
     /// <summary>
+    /// Appends a chunk and returns metadata extracted during finalization when this chunk completes the upload.
+    /// </summary>
+    Task<ChunkedUploadAppendResult> AppendChunkWithMetadataAsync(
+        string uploadId,
+        long offset,
+        byte[] chunkData,
+        string userId,
+        IGcodeUploadQuotaService quotaService);
+
+    /// <summary>
     /// Retrieves current status of an upload session.
     /// If session not in memory but metadata file exists (service restart scenario),
     /// rehydrates state to enable resume capability.
@@ -126,3 +136,11 @@ public sealed record ChunkedUploadStatus(
     bool IsPaused,
     string? ThumbnailPath = null,
     string? FinalFilePath = null);
+
+/// <summary>
+/// Append status and the optional metadata result from the same completion extraction.
+/// The metadata is an internal handoff and is not included in the HTTP response.
+/// </summary>
+public sealed record ChunkedUploadAppendResult(
+    ChunkedUploadStatus Status,
+    GcodeMetadataExtracted? ExtractedMetadata);

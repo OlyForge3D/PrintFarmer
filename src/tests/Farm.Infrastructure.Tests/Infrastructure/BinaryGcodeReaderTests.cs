@@ -324,6 +324,15 @@ public class BinaryGcodeReaderTests
             Assert.NotNull(metadata);
             Assert.Equal("PETG", metadata.Material);
             Assert.Equal(image, metadata.ThumbnailData);
+
+            await using (FileStream fileStream = File.OpenRead(path))
+            {
+                GcodeMetadataExtracted? streamedMetadata = await Extractor().ExtractMetadataFromStreamAsync(fileStream);
+                Assert.NotNull(streamedMetadata);
+                Assert.Equal("PETG", streamedMetadata.Material);
+                Assert.Equal(image, streamedMetadata.ThumbnailData);
+            }
+
             Assert.Equal(await BinaryGcodeReader.ReadBytesAsTextAsync(file), await BinaryGcodeReader.ReadFileAsTextAsync(path));
             using var stream = new MemoryStream(file);
             string? thumbnailPath = await thumbnailService.ExtractAndSaveThumbnailAsync(stream);

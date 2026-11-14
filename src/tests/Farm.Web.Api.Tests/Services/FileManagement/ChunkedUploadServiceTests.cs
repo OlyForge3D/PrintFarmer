@@ -236,6 +236,42 @@ public class ChunkedUploadServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AppendChunkWithMetadataAsync_CompletedGcode_ReusesExtractionForThumbnailAndResult()
+    {
+        const string userId = "user123";
+        byte[] chunk = [0x3B, 0x20, 0x67, 0x63, 0x6F, 0x64, 0x65];
+        GcodeMetadataExtracted metadata = new() { ThumbnailData = [1, 2, 3] };
+        string thumbnailPath = Path.Join(_testDirectory, "saved-thumbnail.png");
+        Mock<IGcodeUploadQuotaService> quotaService = CreateMockQuotaService(allow: true);
+
+        _mockMetadataExtractor
+            .Setup(extractor => extractor.ExtractMetadataFromStreamAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(metadata);
+        _mockThumbnailExtractor
+            .Setup(extractor => extractor.SaveThumbnailAsync(metadata, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thumbnailPath);
+
+        ChunkedUploadInitResult initResult = _service.InitializeUpload(
+            userId, "test.gcode", chunk.Length, _testDirectory, [".gcode"]);
+
+        ChunkedUploadAppendResult result = await _service.AppendChunkWithMetadataAsync(
+            initResult.UploadId, 0, chunk, userId, quotaService.Object);
+
+        Assert.True(result.Status.IsCompleted);
+        Assert.Equal(thumbnailPath, result.Status.ThumbnailPath);
+        Assert.Same(metadata, result.ExtractedMetadata);
+        _mockMetadataExtractor.Verify(
+            extractor => extractor.ExtractMetadataFromStreamAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockThumbnailExtractor.Verify(
+            extractor => extractor.SaveThumbnailAsync(metadata, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockThumbnailExtractor.Verify(
+            extractor => extractor.ExtractAndSaveThumbnailAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task AppendChunkAsync_WithInvalidUploadId_ThrowsInvalidOperationException()
     {
         // Arrange

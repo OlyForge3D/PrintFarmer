@@ -27,6 +27,10 @@ public sealed class ChunkedUploadService(
 {
     private const int DefaultRecommendedChunkSize = 1 * 1024 * 1024; // 1 MB
 
+    private sealed record ChunkedUploadFinalizationResult(
+        string? ThumbnailPath,
+        GcodeMetadataExtracted? ExtractedMetadata);
+
     private readonly ConcurrentDictionary<string, InternalUploadState> _uploadStates = new();
     private readonly IFileManagementService _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
     private readonly IGcodeThumbnailExtractorService _thumbnailExtractor = thumbnailExtractor ?? throw new ArgumentNullException(nameof(thumbnailExtractor));
@@ -189,6 +193,18 @@ public sealed class ChunkedUploadService(
         string userId,
         IGcodeUploadQuotaService quotaService)
     {
+        ChunkedUploadAppendResult result = await AppendChunkWithMetadataAsync(uploadId, offset, chunkData, userId, quotaService);
+        return result.Status;
+    }
+
+    /// <inheritdoc />
+    public async Task<ChunkedUploadAppendResult> AppendChunkWithMetadataAsync(
+        string uploadId,
+        long offset,
+        byte[] chunkData,
+        string userId,
+        IGcodeUploadQuotaService quotaService)
+    {
         if (string.IsNullOrWhiteSpace(uploadId))
         {
             throw new ArgumentException("uploadId required", nameof(uploadId));
@@ -251,11 +267,14 @@ public sealed class ChunkedUploadService(
             state.Hasher?.AppendData(chunkData);
 
             bool completed = state.UploadedBytes == state.TotalSize;
+            GcodeMetadataExtracted? extractedMetadata = null;
 
             if (completed)
             {
                 // Finalize upload asynchronously - must complete before returning response
-                state.ThumbnailPath = await FinalizeUploadAsync(state);
+                ChunkedUploadFinalizationResult finalization = await FinalizeUploadAsync(state);
+                state.ThumbnailPath = finalization.ThumbnailPath;
+                extractedMetadata = finalization.ExtractedMetadata;
                 _ = _uploadStates.TryRemove(uploadId, out _);
             }
             else
@@ -263,7 +282,7 @@ public sealed class ChunkedUploadService(
                 PersistState(state);
             }
 
-            return new ChunkedUploadStatus(
+            ChunkedUploadStatus status = new(
                 state.Id,
                 state.FinalSafeName,
                 state.UploadedBytes,
@@ -273,6 +292,7 @@ public sealed class ChunkedUploadService(
                 state.Paused,
                 state.ThumbnailPath,
                 completed ? Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
+            return new ChunkedUploadAppendResult(status, extractedMetadata);
         }
         catch
         {
@@ -530,10 +550,11 @@ public sealed class ChunkedUploadService(
     /// 5. Cleans up temporary .meta.json file
     /// Thumbnail and metadata extraction failures do not prevent upload completion.
     /// </remarks>
-    private async Task<string?> FinalizeUploadAsync(InternalUploadState state)
+    private async Task<ChunkedUploadFinalizationResult> FinalizeUploadAsync(InternalUploadState state)
     {
         string finalPath = Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName);
         string? thumbnailPath = null;
+        GcodeMetadataExtracted? extractedMetadata = null;
 
         // Check for collision again (rare but possible)
         if (File.Exists(finalPath))
@@ -597,9 +618,10 @@ public sealed class ChunkedUploadService(
             _logger.LogInformation("FinalizeUploadAsync: File is GCODE, attempting thumbnail extraction for {StateFinalSafeName}", LogSanitizer.Sanitize(state.FinalSafeName));
             try
             {
-                using (var fileStream = new FileStream(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                await using (FileStream fileStream = new(finalPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan))
                 {
-                    thumbnailPath = await _thumbnailExtractor.ExtractAndSaveThumbnailAsync(fileStream, CancellationToken.None);
+                    extractedMetadata = await _metadataExtractor.ExtractMetadataFromStreamAsync(fileStream, CancellationToken.None);
+                    thumbnailPath = await _thumbnailExtractor.SaveThumbnailAsync(extractedMetadata, CancellationToken.None);
                     if (thumbnailPath != null)
                     {
                         _logger.LogInformation("Extracted thumbnail for {StateFinalSafeName}: {ThumbnailPath}", LogSanitizer.Sanitize(state.FinalSafeName), LogSanitizer.Sanitize(thumbnailPath));
@@ -634,7 +656,7 @@ public sealed class ChunkedUploadService(
             }
         }
 
-        return thumbnailPath;
+        return new ChunkedUploadFinalizationResult(thumbnailPath, extractedMetadata);
     }
 
     /// <summary>

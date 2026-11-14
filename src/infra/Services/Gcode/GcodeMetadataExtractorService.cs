@@ -58,7 +58,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         }
 
         GcodeMetadataExtracted metadata = new();
-        ExtractAllProperties(comments, metadata, completeContent: false, ct);
+        ExtractAllProperties(comments, metadata, completeContent: false, ct: ct);
         var image = captureThumbnail
             ? ExtractThumbnail(lines, metadata, bounded: true, ct)
             : (PrinterFileEnrichmentState.Deferred, "capture-disabled");
@@ -105,6 +105,95 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                 return metadata;
             }
         });
+    }
+
+    /// <inheritdoc />
+    public async Task<GcodeMetadataExtracted?> ExtractMetadataFromStreamAsync(Stream gcodeStream, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(gcodeStream);
+        if (!gcodeStream.CanRead || !gcodeStream.CanSeek)
+        {
+            throw new ArgumentException("G-code stream must be readable and seekable.", nameof(gcodeStream));
+        }
+
+        long startPosition = gcodeStream.Position;
+        if (await BinaryGcodeReader.IsBinaryGcodeAsync(gcodeStream, ct))
+        {
+            string binaryCommentText = await BinaryGcodeReader.ReadAsTextAsync(gcodeStream, ct);
+            return string.IsNullOrWhiteSpace(binaryCommentText)
+                ? null
+                : await ExtractMetadataAsync(binaryCommentText);
+        }
+
+        return await Task.Run(() => ExtractMetadataFromTextStream(gcodeStream, startPosition, ct), ct);
+    }
+
+    private GcodeMetadataExtracted? ExtractMetadataFromTextStream(Stream gcodeStream, long startPosition, CancellationToken ct)
+    {
+        GcodeMetadataExtracted metadata = new();
+        bool hasContent = false;
+        gcodeStream.Position = startPosition;
+
+        using (StreamReader reader = new(gcodeStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 81920, leaveOpen: true))
+        {
+            try
+            {
+                ExtractAllProperties(
+                    ReadLines(reader),
+                    metadata,
+                    ct: ct,
+                    lineObserved: line => hasContent |= !string.IsNullOrWhiteSpace(line));
+            }
+            catch (IOException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error extracting G-code metadata");
+                return metadata;
+            }
+        }
+
+        if (!hasContent)
+        {
+            return null;
+        }
+
+        gcodeStream.Position = startPosition;
+        using (StreamReader reader = new(gcodeStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 81920, leaveOpen: true))
+        {
+            try
+            {
+                _ = ExtractThumbnail(ReadLines(reader), metadata, ct: ct);
+            }
+            catch (IOException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error extracting G-code thumbnail");
+            }
+        }
+
+        return metadata;
+    }
+
+    private static IEnumerable<string> ReadLines(TextReader reader)
+    {
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
     }
 
     // Pre-compiled regex patterns for efficient single-pass extraction
@@ -155,8 +244,8 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
     /// Replaces 11 separate Extract* methods that each iterated the full line set.
     /// </summary>
     private void ExtractAllProperties(
-        IReadOnlyList<string> lines, GcodeMetadataExtracted metadata,
-        bool completeContent = true, CancellationToken ct = default)
+        IEnumerable<string> lines, GcodeMetadataExtracted metadata,
+        bool completeContent = true, Action<string>? lineObserved = null, CancellationToken ct = default)
     {
         // Print time uses priority: normal mode (3) > TIME: seconds (2) > generic estimated (1)
         int printTimePriority = 0;
@@ -172,6 +261,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         foreach (string line in lines)
         {
             ct.ThrowIfCancellationRequested();
+            lineObserved?.Invoke(line);
             if (string.IsNullOrEmpty(line))
             {
                 continue;
@@ -751,7 +841,7 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
         @"^thumbnail(?:_[A-Za-z]+)?\s+end\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private (PrinterFileEnrichmentState State, string? Reason) ExtractThumbnail(
-        IReadOnlyList<string> lines, GcodeMetadataExtracted metadata,
+        IEnumerable<string> lines, GcodeMetadataExtracted metadata,
         bool bounded = false, CancellationToken ct = default)
     {
         StringBuilder data = new();
