@@ -215,6 +215,9 @@ function getProcessLayerHeight(profile: OrcaProcessProfile): number {
 }
 
 const MODELS_LIST_BASIC_QUERY_KEY = ['modelsListBasic'];
+// Stable fallback for pending profile queries; an inline `= []` is a new array
+// each render and re-triggers the profile selection effects (#3833).
+const EMPTY_PROFILES: never[] = [];
 
 interface ProfileSelection {
   name: string;
@@ -1059,7 +1062,7 @@ export const NewSliceJobPage: React.FC = () => {
 
   // Fetch machine profiles for the selected printer's model
   const {
-    data: machineProfilesData = [],
+    data: machineProfilesData = EMPTY_PROFILES,
     error: machineProfilesError,
     isLoading: isMachineProfilesLoading,
   } = useQuery<OrcaMachineProfile[], MachineProfilesQueryError>({
@@ -1142,11 +1145,11 @@ export const NewSliceJobPage: React.FC = () => {
 
   const {
     filamentProfilesQuery: {
-      data: filamentProfilesData = [],
+      data: filamentProfilesData = EMPTY_PROFILES,
       isLoading: isFilamentProfilesLoading,
     },
     processProfilesQuery: {
-      data: processProfilesData = [],
+      data: processProfilesData = EMPTY_PROFILES,
       isLoading: isProcessProfilesLoading,
     },
   } = useMachineCompatibleProfiles(selectedMachineNames, {
