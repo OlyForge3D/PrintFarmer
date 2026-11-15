@@ -14,7 +14,11 @@ import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { PlateBedOverlay } from './PlateBedOverlay';
 import { STUDIO_HDRI_URL } from '../../../../common/constants/environmentAssets';
-import { ModelViewerErrorBoundary, ModelLoadFailedAlert } from './ModelViewerErrorBoundary';
+import {
+  ModelViewerErrorBoundary,
+  ModelLoadFailedAlert,
+  ViewerInitializationFailedAlert,
+} from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
 import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
 import {
@@ -2501,7 +2505,13 @@ export const SlicerBedVisualization: React.FC<SlicerBedVisualizationProps> = ({
 
   return (
     <div className={`w-full h-full ${className}`}>
-      <ModelViewerErrorBoundary className="h-full" resetKey={resetKey}>
+      <ModelViewerErrorBoundary
+        className="h-full"
+        resetKey={resetKey}
+        fallback={(error, retry) => (
+          <ViewerInitializationFailedAlert error={error} onRetry={retry} />
+        )}
+      >
         <Canvas
           frameloop="demand"
           style={{ background: backgroundColor }}
